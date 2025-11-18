@@ -282,7 +282,6 @@ function onSend() {
 				selectedConversation.value = data;
 				// 似乎有一点复制
 
-				// TODO cant unwatch?
 				const listener = () => {
 					if (data.ready) {
 						$unwatch(selectedConversation, listener);
