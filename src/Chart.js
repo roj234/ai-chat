@@ -1,8 +1,10 @@
 // Chart.js 图表工具前端实现
 import "./chart.css";
-import {loadChartJS} from "./async-loader.js";
 
 export const ChartCreator = {
+	/**
+	 * @type {Map<string, Promise<Chart>>}
+	 */
 	charts: new Map(),
 
 	// 预定义颜色数组
@@ -25,17 +27,14 @@ export const ChartCreator = {
 		// 构建Chart.js配置
 		const chartConfig = this.buildChartConfig(config);
 
-		loadChartJS().then(Chart => {
-			// 创建图表
-			const chart = new Chart(canvas, chartConfig);
+		// 销毁已存在的图表
+		const existing = this.charts.get(config.chartId);
+		if (existing) existing.then(t => t.destroy());
 
-			// 销毁已存在的图表
-			if (this.charts.has(config.chartId)) {
-				this.charts.get(config.chartId).destroy();
-			}
-			// 存储图表实例
-			this.charts.set(config.chartId, chart);
-		});
+		console.log(chartConfig);
+		this.charts.set(config.chartId, import('./ChartJS.async.js').then(Chart => {
+			return new Chart.default(canvas, chartConfig);
+		}));
 	},
 
 	/**
@@ -218,9 +217,7 @@ export const ChartCreator = {
 	 * 销毁所有图表
 	 */
 	destroyAllCharts() {
-		this.charts.forEach((chart, chartId) => {
-			chart.destroy();
-		});
+		this.charts.forEach(chart => chart.then(t => t.destroy()));
 		this.charts.clear();
 	},
 

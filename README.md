@@ -74,7 +74,7 @@ npm run preview
 ## 性能
 - markdown渲染经过优化，见`markdown-stream.js`，实现了增量修改和DOM Diff算法（青春版）
 - Chart.js 和 Mermaid 按需加载
-- 主页有炫（fu）酷（za）动画，可能会消耗资源
+- 有炫（fu）酷（za）动画，可能会消耗GPU
 
 ## 依赖
 - [Unconscious](https://github.com/Roj234/unconscious) - 轻量级 JSX 框架
@@ -93,12 +93,11 @@ npm run preview
    - 否则你会收获一个200MB的node_modules
    - 另外Mermaid.js占据本项目打包体积的80%
    - 要不是AI会画我才不用你
-2. highlight.js那么大，好像也没有支持很多种语言，换Google家的prettier.js ?
 
 ## 已知问题
 - [ ] 图片base64放IndexDB里可能太大
-- [ ] 失败的新对话会在点击时重试，这不是预期行为（貌似是框架事件监听的bug）
 - [ ] 没有多提供商支持，很快会加
 - [ ] 没有在对话内容中搜索的功能
 - [ ] 暂不支持多模态输出
+- [ ] 使用 https://www.npmjs.com/package/morphdom 进一步优化markdown渲染性能
 - 你说不适合RP（Role Playing）？左转SillyTavern，右转等我NaN年内再开一个坑（

@@ -5,11 +5,13 @@ import {listConversations, newConversation} from "./idb.js";
 import {SETTING_CONFIG} from "./Setting.js";
 import {copyCodeEventHandler} from "./markdown-stream.js";
 import {copy, Elements, jsHide, prettyError} from "./utils.js";
-import {copyMessageHandler, MessageList, messagesToText, textToMessages} from "./MessageList.jsx";
+import {copyMessageHandler, MessageList} from "./MessageList.jsx";
 import {config, conversations, messages, selectedConversation, state} from "./states.js";
 import {abortCompletion, sendMessage} from "./api-request.js";
-import '../assets/iconfont.css';
+import {importConversationData, messagesToText, textToMessages} from './data-exchange.js';
+import './iconfont.css';
 import {showToast} from "./Toast.js";
+import {handleCommand} from "./commands.js";
 
 const $ = sel => document.querySelector(sel);
 
@@ -35,6 +37,12 @@ const rootStyle = document.querySelector(":root").style;
  * @type {OpenAI.ContentPart[]}
  */
 const attachments = $state([]);
+
+// /**
+//  *
+//  * @type {Reactive<string>}
+//  */
+// const presetName = $state("");
 
 const openSidebar = () => jsHide(sidebar);
 const beginConversation = () => {
@@ -64,7 +72,7 @@ const App = (<>
 		<ConversationList></ConversationList>
 		<div className="spacer"></div>
 		<div className="sidebar-header">
-			<h4>&copy; 2025 Roj234 | AiChat</h4>
+			<h4>&copy; 2026 Roj234 | AiChat</h4>
 			<button className="btn ghost" title="设置" onClick={() => {
 				jsHide(settingWrapper);
 			}}><i className="i settings"></i>
@@ -86,12 +94,11 @@ const App = (<>
 					DeepSleep
 				</div>
 				<div className="controls">
-					<div className="badge" ref={statusBadge}>v2.5-251117-Final</div>
+					<div className="badge" ref={statusBadge}>v1.5.0</div>
 					<div className="hint">提示：Shift+Enter 换行</div>
 					<div className="spacer"></div>
 				</div>
 				<div className="query">
-					<div className="beam" style="border-radius: var(--border-radius-md)"></div>
 					<textarea placeholder="今天有什么可以帮到你？"
 							  id="userInput" ref={userInput}
 							  onInput={() => {
@@ -99,7 +106,7 @@ const App = (<>
 								  userInput.style.height = '';
 								  userInput.style.height = (userInput.scrollHeight) + 'px';
 
-								  sendBtn.disabled = !allowSendMessage() && !userInput.value.trim();
+								  sendBtn.disabled = !allowClickSendBtn() && !userInput.value.trim();
 							  }}
 							  onKeyDown={(e) => {
 								  if (e.key === 'Enter' && !e.shiftKey) {
@@ -189,7 +196,11 @@ function onSettingChanged(id, newValue, oldValues) {
 		const oldEdit = config.edit;
 		if (oldEdit && !newValue && rawTextChanged) {
 			try {
-				messages.value = textToMessages(rawText.value || '');
+				const msg = textToMessages(rawText.value || '');
+				messages.value = msg;
+				if (!selectedConversation.value) {
+					importConversationData({messages: msg});
+				}
 				showToast('解析成功', 'ok');
 			} catch (e) {
 				showToast(e);
@@ -210,6 +221,16 @@ function onSettingChanged(id, newValue, oldValues) {
 			showToast("无法加载提示词模板: " + prettyError(e));
 		}
 	}
+
+	if (id === 'customBody') {
+		try {
+			state.customBody = newValue ? JSON.parse(newValue) : null;
+		} catch (e) {
+			if (oldValues) return e;
+			showToast("无法加载自定义请求体: " + prettyError(e));
+		}
+	}
+
 	if (id === 'mode') {
 		const displayTemplate = newValue === 'completion';
 		SettingUI.querySelector("[data-id='template']").style.display = displayTemplate ? '' : 'none';
@@ -220,7 +241,7 @@ function onSettingChanged(id, newValue, oldValues) {
 	}
 }
 
-function allowSendMessage() {
+function allowClickSendBtn() {
 	sendBtn.innerText = abortCompletion ? "中止" : "发送";
 	if (abortCompletion) return true;
 
@@ -271,8 +292,10 @@ function onSend() {
 		return;
 	}
 
+	if (handleCommand(userInput)) return;
+
 	const text = userInput.value.trim();
-	if (!allowSendMessage() && !text) return;
+	if (!allowClickSendBtn() && !text) return;
 
 	if (!selectedConversation.ready) {
 		if (null == selectedConversation.value) {
@@ -282,7 +305,6 @@ function onSend() {
 				selectedConversation.value = data;
 				// 似乎有一点复制
 
-				// TODO cant unwatch?
 				const listener = () => {
 					if (data.ready) {
 						$unwatch(selectedConversation, listener);
@@ -320,7 +342,7 @@ for (const key in config.value) {
 
 $watch(messages, () => {
 	if (config.edit) updateRawText();
-	sendBtn.disabled = !allowSendMessage() && !userInput.value.trim();
+	sendBtn.disabled = !allowClickSendBtn() && !userInput.value.trim();
 	messagesPanel.classList.toggle("no-messages", messages.length === 0);
 });
 

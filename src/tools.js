@@ -12,7 +12,7 @@ const _runJavaScript = {
 	"type": "function",
 	"function": {
 		"name": "runJavaScript",
-		"description": "Run a javascript function in sandbox. Useful for computations or simple scripts.",
+		"description": "Run javascript function in sandbox. Supports console.log. Require explict `return` on multi-line expression.",
 		"parameters": {
 			"type": "object",
 			"properties": {
@@ -20,7 +20,7 @@ const _runJavaScript = {
 				"timeout": {
 					"type": "number",
 					"default": 1000,
-					"description": "timeout milliseconds."
+					"description": "timeout ms."
 				},
 			},
 			"required": ["code"]

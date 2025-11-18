@@ -1,9 +1,11 @@
 import {
 	BarController,
 	BarElement,
+	CategoryScale,
 	Chart,
 	DoughnutController,
 	Filler,
+	LinearScale,
 	LineController,
 	LineElement,
 	LogarithmicScale,
@@ -17,7 +19,7 @@ import {
 
 Chart.register([
 	LineController, BarController, RadarController, PolarAreaController, PieController, DoughnutController, ScatterController,
-	RadialLinearScale, LogarithmicScale,
+	LinearScale, RadialLinearScale, LogarithmicScale, CategoryScale,
 	PointElement, LineElement, BarElement,
 	Filler
 ]);

@@ -1,11 +1,11 @@
-import {exportConversation, importConversation} from "./data-exchange.js";
+import {clearDatabase, duplicateConversation, exportConversation, importConversation} from "./data-exchange.js";
 
 export const SETTING_CONFIG = [
 	{
 		id: "endpoint",
 		name: "API端点",
 		type: "input",
-		pattern: /^https?:\/\//,
+		pattern: /^https?:\/\/.+\/v1/,
 		warning: "请输入合法的API端点",
 		placeholder: "https://api.example.com/v1"
 	},
@@ -66,20 +66,32 @@ export const SETTING_CONFIG = [
 		id: "systemPrompt",
 		name: "System Prompt",
 		type: "textbox",
-		placeholder: "You are a helpful assistant."
+		placeholder: "Response in query's language."
+	},
+	{
+		id: "thinkPrompt",
+		name: "手动CoT提示词 (以 {{think}} 引用)",
+		type: "textbox",
+		placeholder: "Suppose you're a highly capable reasoning model..."
 	},
 	{
 		id: "reasoning",
 		name: "思考深度",
 		type: "radio",
 		choices: {
-			"关闭": false,
+			"手动": false,
 			"最低": "minimal",
 			"低": "low",
 			"中": "medium",
 			"高": "high",
 		},
 		required: true
+	},
+	{
+		id: "customBody",
+		name: "自定义JSON请求体",
+		type: "textbox",
+		placeholder: "{\"chat_template_kwargs\": { ... }}"
 	},
 	{
 		id: "titleModel",
@@ -100,10 +112,12 @@ export const SETTING_CONFIG = [
 	{
 		type: "element",
 		element: <>
-			<button id="exportBtn" className="btn ghost" title="导出当前会话" onClick={exportConversation}>导出</button>
-			<label className="btn ghost" title="导入会话JSON">导入
-				<input id="importFile" type="file" accept="application/json" style="display:none;" onChange={importConversation}/>
+			<button className="btn ghost" onClick={exportConversation}>导出</button>
+			<label className="btn ghost">导入
+				<input type="file" accept="application/json" style="display:none;" onChange={importConversation}/>
 			</label>
+			<button className="btn ghost" onClick={duplicateConversation}>另存为</button>
+			<button className="btn ghost" onClick={clearDatabase}>清除数据</button>
 		</>
 	},
 	{

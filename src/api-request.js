@@ -4,7 +4,9 @@ import {Elements, getTextContent, prettyError, readSSEStream, throttle} from "./
 import {config, messages, selectedConversation, state} from "./states.js";
 import {toolImpl, tools} from "./tools.js";
 import {forceRenderMessage} from "./MessageList.jsx";
-import {$update} from "unconscious";
+import {$state, $update} from "unconscious";
+import {showToast} from "./Toast.js";
+import {mergeReasoningDetails} from "./ThinkBlock.jsx";
 
 function setStatus(text, tone = '') {
 	Elements.statusBadge.textContent = text;
@@ -26,8 +28,8 @@ export let abortCompletion;
 function requestProvider(msg, useTools) {
 	// Prepare request body
 	const headers = {
-		//'HTTP-Referer': '<YOUR_SITE_URL>',
-		'X-Title': 'Fast-AI-Chat',
+		//'HTTP-Referer': location.origin,
+		//'X-Title': 'AIChat',
 		'Content-Type': 'application/json',
 		'Authorization': `Bearer ${config.accessToken}`
 	};
@@ -69,6 +71,9 @@ function requestProvider(msg, useTools) {
 	if (config.enforceParam) {
 		body.provider = {require_parameters: true};
 	}
+	if (state.customBody) {
+		Object.assign(body, state.customBody);
+	}
 
 	const url = config.endpoint.replace(/\/+$/, '') + path;
 	return fetch(url, {
@@ -77,6 +82,32 @@ function requestProvider(msg, useTools) {
 		body: JSON.stringify(body),
 		signal: abortCompletion.signal
 	});
+}
+
+function applyTemplate(message) {
+	return message.replaceAll(/\{\{(.+?)}}/g, (text, match) => {
+		switch (match) {
+			case "time":
+				return ""+new Date();
+			case "think":
+				return config.think && config.reasoning === false ? config.thinkPrompt : "";
+		}
+		return text;
+	});
+}
+
+function applyDelta(chunk, delta) {
+	for (const item in delta) {
+		if (typeof(delta[item]) === "object") {
+			if (!chunk[item])
+				chunk[item] = Array.isArray(delta[item]) ? [] : {};
+			applyDelta(chunk[item], delta[item]);
+		} else if (null == chunk[item]) {
+			chunk[item] = delta[item];
+		} else {
+			chunk[item] += delta[item];
+		}
+	}
 }
 
 /**
@@ -89,10 +120,11 @@ export async function sendMessage(userText) {
 	abortCompletion = new AbortController();
 
 	let md = markdownStreamParser();
+	let elementSelector = '.content';
 	const updateAssistantMessage = throttle(() => {
 		if (md) {
-			const last = Elements.messages.lastElementChild?.querySelector('.content');
-			if (last) md.render(llmResponse.content, last);
+			const last = Elements.messages.lastElementChild.querySelector(elementSelector);
+			md.render(elementSelector === '.content' ? llmResponse.content : llmResponse.think.content, last);
 
 			const scroller = Elements.scroller;
 			if (scroller.scrollHeight - scroller.scrollTop - scroller.offsetHeight < 150) {
@@ -104,8 +136,9 @@ export async function sendMessage(userText) {
 	// Compose messages (include system prompt only once at the beginning)
 	const msg = [];
 
-	if (messages[0]?.role !== 'system' && config.systemPrompt?.trim()) {
-		msg.push({role: 'system', content: config.systemPrompt.trim()});
+	const system_message = applyTemplate(config.systemPrompt).trim();
+	if (messages[0]?.role !== 'system' && system_message) {
+		msg.push({role: 'system', content: system_message});
 	}
 
 	let useTools = config.tools;
@@ -131,7 +164,7 @@ export async function sendMessage(userText) {
 		if (m.tool_call_id) req_msg.tool_call_id = m.tool_call_id;
 		if ((m.think||m.reasoning_details) && config.keepReasoning) {
 			if (m.reasoning_details) req_msg.reasoning_details = m.reasoning_details;
-			// fallback
+			else if (m.think.oai) req_msg.reasoning_content = m.think.content;
 			else req_msg.content = m.think.content + req_msg.content;
 		}
 	}
@@ -189,6 +222,11 @@ export async function sendMessage(userText) {
 	// Request
 	let finishReason;
 	let genImages = [];
+	let thinkStartTime;
+	if (llmResponse.think) {
+		llmResponse.think = $state(llmResponse.think);
+		thinkStartTime = Date.now();
+	}
 	try {
 		const resp = await requestProvider(msg, useTools);
 
@@ -201,47 +239,57 @@ export async function sendMessage(userText) {
 			throw new Error(`HTTP ${resp.status}: ${errText}`);
 		}
 
-		if (llmResponse.think?.start) {
-			llmResponse.think.start = Date.now();
-		}
-
 		setStatus('生成中');
-		let isReasoning = false;
+		let isReasoning;
 		await readSSEStream(resp, json => {
 			if (config.debug) console.log("SSE response", json);
 
 			if (json.usage) {
-				let {completion_tokens, prompt_tokens} = json.usage;
+				let {completion_tokens, prompt_tokens, cost} = json.usage;
 				const reasoning_tokens = json.usage.completion_tokens_details?.reasoning_tokens;
 
 				let usage = prompt_tokens + ' => ' + completion_tokens;
-				if (reasoning_tokens) usage += ` (${reasoning_tokens} reasoning)`;
+				if (reasoning_tokens) usage += ` (${reasoning_tokens} think)`;
+				if (cost) usage += " / $"+parseFloat(cost).toFixed(3);
 
 				llmResponse.usage = usage;
 				return;
 			}
 
+			if (json.timings) {
+				let {cache_n, prompt_n, predicted_n, predicted_per_second} = json.timings;
+				let usage = (cache_n+prompt_n) + ' => ' + predicted_n + " / "+predicted_per_second.toFixed(2)+"TPS";
+				llmResponse.usage = usage;
+				return;
+			}
+
+			if (!finishReason) finishReason = json.choices[0]?.finish_reason;
+
+			let reasoning_content;
 			let text;
 			if (config.mode === 'chat') {
-				const chunk = json.choices[0].delta;
+				const chunk = json.choices[0]?.delta;
 				if (!chunk) return;
 
-				finishReason = json.choices[0].finish_reason;
 				if (chunk.role) llmResponse.role = chunk.role;
 				text = chunk.content;
 
 				if (chunk.images) genImages.push(...chunk.images);
 
-				if (chunk.reasoning) {
-					text = chunk.reasoning + text;
-					if (!isReasoning) {
-						isReasoning = true;
-						text = "<think>\n" + text;
+				if (!text) {
+					reasoning_content = chunk.reasoning_content;
+					if ((text = reasoning_content ?? chunk.reasoning)) {
+						if (!isReasoning) {
+							if (!llmResponse.think) {
+								isReasoning = true;
+							} else {
+								llmResponse.think.content += text;
+								text = "";
+							}
+						}
 					}
-				} else if (isReasoning) {
+				} else {
 					isReasoning = false;
-					if (!finishReason || text)
-						text = "</think>\n" + text;
 				}
 
 				if (chunk.reasoning_details) {
@@ -258,7 +306,13 @@ export async function sendMessage(userText) {
 					}
 
 					for (const call of chunk.tool_calls) {
-						if (!call.id) continue;
+						if (!call.id) {
+							const last = llmResponse.tool_calls[llmResponse.tool_calls.length-1];
+							if (last) {
+								applyDelta(last, call);
+								continue;
+							}
+						}
 						llmResponse.tool_calls.push(call);
 					}
 				}
@@ -269,26 +323,81 @@ export async function sendMessage(userText) {
 			if (!text) return;
 
 			llmResponse.model = json.model;
-			if (!llmResponse.content && !llmResponse.think && text.startsWith("<think>")) {
-				llmResponse.think = { start: Date.now() };
+			let forceUpdate;
+			let content = llmResponse.content + text, thinkContent;
+
+			// 为了 O(n)
+			if (!llmResponse.think && isReasoning || text.startsWith("<think>")) {
+				thinkStartTime = Date.now();
+				llmResponse.think = $state({ partial: 0, content, oai: !!reasoning_content });
+				forceUpdate = '.think-content';
+				text = "";
 			}
-			if (llmResponse.think?.start && text.includes("</think>")) {
-				const i = text.indexOf("</think>") + 8;
-				const before = text.substring(0, i);
 
-				llmResponse.think = {
-					duration: Date.now() - llmResponse.think.start,
-					content: llmResponse.content + before
-				};
+			const think = llmResponse.think;
+			thinkEnded:
+			if (thinkStartTime) {
+				think.duration = Date.now() - thinkStartTime;
 
-				llmResponse.content = "";
-				text = text.substring(i);
+				// 还是为了 O(n)
+				thinkContent = think.content + text;
 
+				let next;
+				function thinkEnded() {
+					llmResponse.think = {
+						oai: think.oai,
+						duration: think.duration,
+						content: thinkContent.substring(0, next)
+					};
+
+					content = thinkContent.substring(next);
+					forceUpdate = '.content';
+					thinkStartTime = null;
+				}
+
+				if (config.reasoning === false) {
+					let j = think.partial;
+					while (true) {
+						next = thinkContent.indexOf("<", j);
+						if (next < 0) {
+							think.partial = thinkContent.length;
+							break;
+						}
+						if (thinkContent.length < next + 9/* '</think>'.length */) {
+							think.partial = j;
+							break;
+						}
+
+						if (thinkContent.startsWith("</think>\n", next)) {
+							next += 9;
+							thinkEnded();
+							break thinkEnded;
+						}
+
+						j = next + 1;
+					}
+				} else {
+					if (!isReasoning) {
+						next = think.content.length;
+						thinkEnded();
+						break thinkEnded;
+					}
+				}
+
+				think.content = thinkContent;
+				content = "";
+			}
+
+			if (forceUpdate) {
+				elementSelector = forceUpdate;
 				forceRenderMessage(llmResponse);
+				//md.skip(elementSelector === '.content' ? "" : llmResponse.think.content);
+			} else {
+				updateAssistantMessage();
 			}
 
-			llmResponse.content += text;
-			updateAssistantMessage();
+			// 故意放在forceRenderMessage之后
+			llmResponse.content = content;
 		});
 
 		setStatus('完成：' + finishReason, 'ok');
@@ -303,10 +412,12 @@ export async function sendMessage(userText) {
 		}
 	} finally {
 		abortCompletion = null;
-		if (llmResponse.think?.start) {
-			llmResponse.think.duration += Date.now() - llmResponse.think.start;
-			llmResponse.think.content += llmResponse.content;
-			llmResponse.content = "";
+		if (llmResponse.reasoning_details) {
+			llmResponse.reasoning_details = mergeReasoningDetails(llmResponse.reasoning_details);
+			delete llmResponse.think?.content;
+		}
+		if (llmResponse.think) {
+			llmResponse.think = { ... llmResponse.think };
 		}
 		if (genImages.length) {
 			llmResponse.content = [
@@ -369,7 +480,7 @@ function generateDescription(conversation) {
 		}],
 		max_tokens: 30,
 		reasoning: {enabled: false},
-		provider: {require_parameters: true},
+		//provider: {require_parameters: true},
 		stream: false
 	};
 
@@ -385,10 +496,11 @@ function generateDescription(conversation) {
 
 		return {choices: [{message: {content: ""}, finish_reason: "error"}]};
 	}).then(json => {
-		let title;
+		let title = json.choices?.[0].message?.content;
 
-		if (json.choices[0].finish_reason === "stop") {
-			title = json.choices[0]?.message?.content;
+		if (json.choices?.[0].finish_reason !== "stop") {
+			console.error(json);
+			showToast("标题生成失败", 'error');
 		}
 
 		if (!title) title = generateFallbackTitle();

@@ -111,9 +111,15 @@ export async function readSSEStream(response, onToken) {
 					if (data === '[DONE]') return;
 
 					const json = JSON.parse(data);
-					onToken(json);
+					let error = json.error?.message;
+					try {
+						onToken(json);
+					} catch (e) {
+						if (!error)
+							error = e;
+					}
 
-					if (json.error) throw json.error.message;
+					if (error) throw error;
 				}
 			}
 		}

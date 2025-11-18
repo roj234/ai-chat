@@ -171,34 +171,6 @@ button.i:hover { background: rgba(255,255,255,0.1); }
     top: 30%;
     background: transparent;
 }
-.panel.no-messages .query {
-    position: relative;
-}
-.panel.no-messages .query .beam:after { content: ''; }
-
-/* Beam 动画 */
-.beam {
-    position: absolute;
-    inset: 0;
-    border: 2px solid transparent;
-    pointer-events: none;
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: clear;
-    mask-composite: exclude;
-}
-.beam:after {
-    position: absolute;
-    aspect-ratio: 1/1;
-    width: 100px;
-    background: linear-gradient(to left, #ffaa40, #9c40ff, transparent);
-    animation: beam 12s infinite linear;
-    offset-anchor: 75% 75%;
-    offset-path: rect(0 auto auto 0 round calc(100px));
-}
-@keyframes beam {
-    100% { offset-distance: 100%; }
-}
 
 /* 消息卡片 */
 .msg {
@@ -348,12 +320,14 @@ button.i:hover { background: rgba(255,255,255,0.1); }
     display: flex; gap: var(--spacing-md); flex-wrap: wrap; align-items: center;
 }
 .query {
+    position: relative;
     display: flex;
     flex-direction: column;
     background: var(--panel-2);
     border: 1px solid var(--border);
     border-radius: var(--border-radius-lg);
     transition: border 0.1s linear;
+    overflow: hidden;
 }
 .query > .controls {
     width: 100%;
@@ -420,10 +394,11 @@ code {
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 }
 code:not(pre > code) {
-    border: 1px solid var(--border);
+    border: 1px solid #4a5568;
     padding: 2px;
     border-radius: var(--border-radius-sm);
     color: oklch(0.6 0.18 18deg);
+    margin: 0 var(--spacing-xs);
 }
 
 /* 统一表格 */
@@ -435,6 +410,7 @@ code:not(pre > code) {
     border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0;
     overflow: hidden;
     margin: var(--spacing-md) 0;
+    table-layout: fixed;
 }
 .content table thead {
     background: linear-gradient(135deg, var(--chip-active) 0%, rgba(0,0,0,0.02) 100%);

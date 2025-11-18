@@ -159,15 +159,22 @@ const SAFE_SET = new Set([
 ]);
 
 self.console = {
-	log: (s) => {
-		postMessage.call(self, {log: s});
+	log: function() {
+		postMessage.call(self, {log: Array.from(arguments).join("")});
 	}
 };
 
 const postMessage = self.postMessage;
 self.onmessage = function(e) {
 	try {
-		const fn = new Function(e.data);
+		let fn;
+		if (!e.data.includes("\n")) {
+			try {
+				fn = new Function("return "+e.data);
+			} catch (e) {}
+		}
+		if (!fn) fn = new Function(e.data);
+
 		const result = fn();
 		postMessage.call(self, {result});
 	} catch (e) {

@@ -1,85 +1,14 @@
 import {ThinkBlock} from "./ThinkBlock.jsx";
 import {ToolCallCard} from "./ToolCallCard.jsx";
-import {$foreach, debugSymbol} from "unconscious";
+import {$foreach, AS_IS, debugSymbol} from "unconscious";
 import {formatDate} from "unconscious/ext/Utils.js";
 import {markdown} from "./markdown-stream.js";
-import {config, messages} from "./states.js";
-import {AS_IS} from "unconscious@shared";
+import {messages} from "./states.js";
 import {ChartCreator} from "./Chart.js";
 import {abortCompletion, sendMessage} from "./api-request.js";
 import markdownIt from "markdown-it";
 import {loadMermaid} from "./async-loader.js";
 import {getTextContent} from "./utils.js";
-
-/**
- *
- * @param {AiChat.Message[]} messages
- * @return {string}
- */
-export function messagesToText(messages) {
-	const lines = [];
-	for (const m of messages) {
-		let header = `[${m.role}]`;
-
-		// 构建 metadata JSON（只包含非 role/content 的属性）
-		const metadata = {};
-		if (m.time) metadata.time = m.time;
-		if (m.model) metadata.model = m.model;
-		if (m.think) metadata.think = m.think;
-		if (m.tool_calls) metadata.tool_calls = m.tool_calls;
-		if (m.tool_call_id) metadata.tool_call_id = m.tool_call_id;
-
-		if (Object.keys(metadata).length) {
-			header += " "+JSON.stringify(metadata);
-		}
-
-		lines.push(header+'\n'+m.content+'\n');
-	}
-	return lines.join('\n').trim();
-}
-
-/**
- *
- * @param {string} text
- * @return {AiChat.Message[]}
- */
-export function textToMessages(text) {
-	const out = [];
-	if (!text) return out;
-
-	let cur = null;
-
-	const pushCur = () => {
-		if (cur && (cur.content = cur.content.trim() || cur.tool_calls)) {
-			out.push(cur);
-		}
-		cur = null;
-	};
-
-	for (const line of text.split('\n')) {
-		// role, metadata
-		const roleMatch = line.match(/^\[(system|user|assistant|tool)]\s?(\{.*})?/i);
-		if (roleMatch) {
-			pushCur();
-
-			cur = roleMatch[2] ? JSON.parse(roleMatch[2]) : {};
-			cur.role = roleMatch[1].toLowerCase();
-			cur.content = "";
-		} else {
-			cur.content += line + '\n';
-		}
-	}
-
-	pushCur();
-
-	// 处理 systemPrompt
-	const sp = config.systemPrompt?.trim();
-	if (sp && out[0]?.role === 'system' && out[0].content === sp) {
-		out.shift();
-	}
-
-	return out;
-}
 
 /**
  *
@@ -146,13 +75,19 @@ const listItemRenderer = (m, i) => {
 		for (const el of content.querySelectorAll("div.chart-loading")) {
 			// 确保隔壁工具的更新能赶上（
 			const chart = ChartCreator.getChart(el.dataset.id);
-			if (chart) {
-				el.replaceWith(chart.canvas);
-				chart.resize();
-			} else {
+			if (!chart) {
 				el.replaceWith(<div className="error-block">
 					<pre className="error-text">图表 {el.dataset.id} 不存在</pre>
 				</div>);
+			} else {
+				chart.then((chart) => {
+					if (!content.isConnected) return;
+
+					requestIdleCallback(() => {
+						el.replaceWith(chart.canvas);
+						chart.resize();
+					});
+				})
 			}
 		}
 	});
@@ -172,14 +107,14 @@ const listItemRenderer = (m, i) => {
 			{AS_IS(m.usage) ? <span className="my-chip">{m.usage}</span> : null}
 			<span className='spacer'></span>
 			<span className='buttons'>
-				{AS_IS(m.role === "assistant" && m.finish_reason && i === messages.length - 1 && abortCompletion == null)
+				{AS_IS(m.role === "assistant" && i === messages.length - 1 && abortCompletion == null)
 					? <button data-action="regen" title="重新生成" className="i dice"></button> : null}
 				{AS_IS(i !== messages.length - 1 || abortCompletion == null) ? <button data-action="del" title="删除消息" className="i delete"></button> : null}
-				{AS_IS(m.role !== "assistant" || m.finish_reason && !m.error) ? <button data-action="copy" title="复制消息"  className="i copy"></button> : null}
+				{AS_IS((m.role !== "assistant" || (m.finish_reason && !m.error)) && m.content) ? <button data-action="copy" title="复制消息"  className="i copy"></button> : null}
 			</span>
 		</div>
 		<section className="body">
-			<ThinkBlock think={m.think}/>
+			<ThinkBlock message={m}/>
 			{content}
 			{AS_IS(images.length) ? <div className="gallery">{images}</div> : null}
 
@@ -228,7 +163,7 @@ export const copyMessageHandler = (e) => {
 				article = article.nextElementSibling;
 				if (!article) break;
 				article.dataset.id--;
-				console.log(article);
+				//console.log(article);
 			}
 		}
 		break;
@@ -248,7 +183,6 @@ export function forceRenderMessage(message) {
 	oldNode?.replaceWith(node);
 }
 
-// TODO use VirtualList
 export function MessageList(/*{messages}*/) {
 	return $foreach(messages, listItemRenderer, keyFunc, renderedMessages);
 }

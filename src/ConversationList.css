@@ -61,7 +61,7 @@
     padding: 0 var(--spacing-md);
     height: 2.25rem;
     background: var(--chip-bg);
-    border-radius: var(--radius);
+    border-radius: var(--border-radius-md);
     border: 1px solid transparent;
     transition: var(--transition);
     gap: var(--spacing-sm);
