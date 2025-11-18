@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <title>爱聊天</title>
+  <meta name="viewport" content="initial-scale=1.0,maximum-scale=1,width=device-width,viewport-fit=cover">
+  <meta name="description" content="AiChat – your personal assistant.">
+  <meta name="keywords" content="AI,chat,assistant">
+  <link rel="stylesheet" href="src/style.css" />
+  <script type="module" src="src/app.js" async></script>
+</head>
+<body class="app" id="app">
+<div id="loading" style="
+position: fixed;
+inset: 0;
+display: flex;
+flex-direction: column;
+justify-content: center;
+align-items: center;
+background: #8886;
+z-index: 99;
+transition: opacity 2s ease;
+">
+  <style>
+    .spinner {
+      stroke-dasharray: 0 75;
+      stroke-linecap: round;
+      stroke-width: 2;
+      fill: none;
+      transform-origin: center;
+      animation:
+              dash 1.5s ease-in-out infinite,
+              spin1 2s linear infinite;
+    }
+    @keyframes spin1 {
+      to { transform: rotate(360deg); }
+    }
+    @keyframes dash {
+      50% { stroke-dasharray: 55 75; stroke-dashoffset: -15; }
+      100% { stroke-dashoffset: -75; }
+    }
+  </style>
+  <noscript><h1>AiChat requires JavaScript to be enabled.</h1></noscript>
+  <svg width="20vw" height="20vh" viewBox="0 0 32 32">
+    <circle stroke="currentColor" cx="16" cy="16" r="12" class="spinner" />
+  </svg>
+</div>
+</body>
+</html>

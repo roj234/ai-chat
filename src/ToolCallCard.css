@@ -1,0 +1,28 @@
+
+/* Tool calls */
+.tool-calls { display: grid; gap: 8px; }
+.tool-call {
+    border: 1px dashed var(--chip-active-border);
+    border-left: 4px solid var(--accent);
+    background: linear-gradient(0deg, rgba(76,141,255,0.08), rgba(76,141,255,0.08));
+    border-radius: 10px;
+}
+.tool-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; color: var(--text);
+}
+.tool-badge {
+    display: inline-flex; align-items: center; height: 18px; padding: 0 8px;
+    font-size: 12px; border-radius: 999px; background: var(--chip-active); color: var(--accent);
+    border: 1px solid var(--chip-active-border);
+}
+.tool-name { font-weight: 600; }
+.tool-id { color: var(--muted); }
+.tool-body { padding: 0 10px 10px 10px; }
+.args-title { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+.args {
+    max-height: 250px;
+    margin: 0; padding: 8px 10px;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); overflow: auto; font-size: 12px;
+}

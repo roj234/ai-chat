@@ -1,0 +1,84 @@
+.chart-loading {
+    width: 100%;
+    height: 400px;
+    background-color: var(--panel-2);
+    border-radius: var(--border-radius-lg);
+    display: flex;
+    align-items: end;
+    justify-content: center;
+    position: relative;
+}
+
+/* 模拟图表坐标轴和简单元素 */
+.chart-loading::before {
+    content: '';
+    position: absolute;
+    bottom: 20%;
+    left: 10%;
+    width: 80%;
+    height: 1px;
+    background-color: var(--text-lighter);
+}
+
+.chart-loading::after {
+    content: '';
+    position: absolute;
+    bottom: 10%;
+    left: 15%;
+    width: 1px;
+    height: 80%;
+    background-color: var(--text-lighter);
+}
+
+.chart-loading > div {
+    position: absolute;
+    bottom: calc(20% + 1px);
+    width: 4%;
+    border-radius: var(--border-radius-sm) var(--border-radius-sm) 0 0;
+    transform-origin: bottom;
+}
+
+/* 4CAF50 */
+.chart-loading > .bar1 {
+    left: 30%;
+    height: 10%;
+    background-color: #FF6384; /* 绿色柱子，更生动 */
+}
+
+.chart-loading > .bar2 {
+    left: 40%;
+    height: 40%;
+    background-color: #36A2EB;
+}
+.chart-loading > .bar3 {
+    left: 50%;
+    height: 60%;
+    background-color: #FFCE56;
+}
+.chart-loading > .bar4 {
+    left: 60%;
+    height: 20%;
+    background-color: #4BC0C0;
+}
+.chart-loading > .bar5 {
+    left: 70%;
+    height: 50%;
+    background-color: #9966FF;
+}
+
+.chart-loading > div > div {
+    height: 100%;
+    background-color: var(--border);
+    animation: growBar 1s ease-out forwards;
+}
+
+.chart-loading > span {
+    font-size: 16px;
+    color: var(--text);
+    margin-bottom: 4%;
+}
+
+@keyframes growBar {
+    0% { height: 100%; }
+    100% { height: 0; }
+}

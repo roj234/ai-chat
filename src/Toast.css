@@ -1,0 +1,61 @@
+
+.toasts {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    z-index: 20;
+    max-width: 350px;
+}
+
+.toast {
+    padding: var(--spacing-sm) var(--spacing-md); border-radius: var(--border-radius-sm);
+    white-space: pre-wrap;
+
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 1);
+    animation: slideIn 0.3s ease-out forwards;
+    transition: opacity 0.3s ease-out;
+}
+
+.toast:hover {
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+
+@keyframes slideIn {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+}
+@keyframes slideOut {
+    from { transform: translateX(0); }
+    to { transform: translateX(100%); }
+}
+
+/* 关闭动画：点击后滑出 */
+.toast.closing {
+    animation: slideOut 0.3s ease-out forwards;
+    opacity: 0;
+}
+
+.toast .content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.toast .close {
+    color: white;
+    font-size: 20px;
+    font-weight: bold;
+    padding: 0 4px;
+    margin-left: 10px;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+
+.toast .close:hover {
+    opacity: 1;
+}

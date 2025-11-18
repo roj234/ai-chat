@@ -1,0 +1,74 @@
+
+@font-face {
+  font-family: "Iconify Explorer Font";
+  src: url("./iconfont.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+}
+
+.i {
+  font-family: "Iconify Explorer Font" !important;
+  font-size: 1rem;
+  font-style: normal;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  vertical-align: bottom;
+}
+
+
+.i.arrow-left:before {
+content: "\e001";
+}
+
+.i.arrow-right:before {
+content: "\e002";
+}
+
+.i.arrows-up:before {
+content: "\e003";
+}
+
+.i.checked:before {
+content: "\e004";
+}
+
+.i.edit:before {
+content: "\e005";
+}
+
+.i.alert:before {
+content: "\e006";
+}
+
+.i.close:before {
+content: "\e007";
+}
+
+.i.plus:before {
+content: "\e008";
+}
+
+.i.attach:before {
+content: "\e009";
+}
+
+.i.copy:before {
+content: "\e00a";
+}
+
+.i.delete:before {
+content: "\e00b";
+}
+
+.i.download:before {
+content: "\e00c";
+}
+
+.i.dice:before {
+content: "\e00d";
+}
+
+.i.settings:before {
+content: "\e00e";
+}
+

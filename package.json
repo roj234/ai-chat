@@ -1,0 +1,20 @@
+{
+	"name": "ai-chat",
+	"private": true,
+	"version": "1.0.0",
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build",
+		"preview": "vite preview"
+	},
+	"devDependencies": {
+		"chart.js": "^4.5.1",
+		"markdown-it": "^14.1.0",
+		"markdown-it-katex": "^2.0.3",
+		"postcss": "^8.5.6",
+		"unconscious": "^1.6.0",
+		"postcss-value-parser": "^4.2.0"
+	},
+	"packageManager": "npm@11.6.1+sha512.ee20d21c3a2ea7ab8c409dfbc96ae17ea71b3211745047c645aa7a36ff9a29072b2095e50a2d9c29b8fbe5606688795cc2c402cbf534cc4c0365d031e87fd56b"
+}

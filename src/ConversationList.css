@@ -1,0 +1,110 @@
+
+.floatbar {
+    position: fixed;
+    top: var(--spacing-lg);
+    left: var(--spacing-lg);
+    display: flex;
+    gap: 8px;
+    z-index: 15;
+    padding: var(--spacing-xs);
+    border-radius: var(--border-radius-md);
+    background: var(--bg);
+}
+
+/* 侧边栏样式 */
+.sidebar {
+    position: fixed;
+    height: 100%;
+    width: 300px;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 15;
+}
+
+.sidebar-header {
+    padding: var(--spacing-md);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.sidebar-header h4 { margin: 0; }
+
+.sidebar-list > ._vl {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--spacing-md);
+    gap: var(--spacing-sm);
+    display: flex;
+    flex-direction: column;
+}
+
+/* 聊天分组样式 */
+.chat-group-header {
+    font-size: 0.85em;
+    color: var(--muted);
+    font-weight: 600;
+    margin: var(--spacing-lg) 0 var(--spacing-xs) 0;
+    padding-left: var(--spacing-sm);
+    border-left: 2px solid var(--accent);
+}
+
+/* 聊天项 */
+.chat-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 var(--spacing-md);
+    height: 2.25rem;
+    background: var(--chip-bg);
+    border-radius: var(--radius);
+    border: 1px solid transparent;
+    transition: var(--transition);
+    gap: var(--spacing-sm);
+}
+
+.chat-item:hover {
+    background: var(--chip-hover);
+    border-color: var(--border);
+}
+
+.chat-item.active {
+    background: var(--chip-active);
+    border-color: var(--chip-active-border);
+}
+
+.chat-title {
+    flex: 1;
+    font-size: 0.9em;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.chat-title input {
+    width: 100%;
+    color: var(--text);
+    padding: var(--spacing-xs);
+}
+
+.chat-actions {
+    display: none;
+    gap: var(--spacing-xs);
+}
+
+.chat-item:hover .chat-actions { display: flex; }
+
+.edit-btn, .delete-btn { font-size: 0.8em; }
+
+.edit-btn { background: var(--focus); }
+
+.delete-btn {
+    background: var(--error-bg);
+    color: var(--error);
+    border: 1px solid var(--error);
+}
+
