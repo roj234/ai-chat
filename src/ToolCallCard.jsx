@@ -1,5 +1,5 @@
 import './ToolCallCard.css';
-import {hljs} from "../assets/highlight.min.js";
+import hljs from 'highlight.js/lib/core';
 
 const safeJsonStringify = (obj, space = 2) => {
     try {

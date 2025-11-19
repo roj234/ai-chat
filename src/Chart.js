@@ -1,6 +1,5 @@
 // Chart.js 图表工具前端实现
 import "./chart.css";
-import {loadChartJS} from "./async-loader.js";
 
 export const ChartCreator = {
 	charts: new Map(),
@@ -25,9 +24,9 @@ export const ChartCreator = {
 		// 构建Chart.js配置
 		const chartConfig = this.buildChartConfig(config);
 
-		loadChartJS().then(Chart => {
+		import('./ChartJS.async.js').then(Chart => {
 			// 创建图表
-			const chart = new Chart(canvas, chartConfig);
+			const chart = new Chart.default(canvas, chartConfig);
 
 			// 销毁已存在的图表
 			if (this.charts.has(config.chartId)) {

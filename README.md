@@ -97,8 +97,8 @@ npm run preview
 
 ## 已知问题
 - [ ] 图片base64放IndexDB里可能太大
-- [ ] 失败的新对话会在点击时重试，这不是预期行为（貌似是框架事件监听的bug）
 - [ ] 没有多提供商支持，很快会加
 - [ ] 没有在对话内容中搜索的功能
 - [ ] 暂不支持多模态输出
+- [ ] 使用 https://www.npmjs.com/package/morphdom 进一步优化markdown渲染性能
 - 你说不适合RP（Role Playing）？左转SillyTavern，右转等我NaN年内再开一个坑（

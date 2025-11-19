@@ -86,7 +86,7 @@ const App = (<>
 					DeepSleep
 				</div>
 				<div className="controls">
-					<div className="badge" ref={statusBadge}>v2.5-251117-Final</div>
+					<div className="badge" ref={statusBadge}>v2.6-251119-Final</div>
 					<div className="hint">提示：Shift+Enter 换行</div>
 					<div className="spacer"></div>
 				</div>

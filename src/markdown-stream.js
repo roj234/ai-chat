@@ -2,10 +2,36 @@
 import markdownIt from 'markdown-it';
 import mk from 'markdown-it-katex';
 import 'katex/dist/katex.min.css';
-import {hljs} from '../assets/highlight.min.js';
-import '../assets/github-dark.min.css'; // 选择合适的样式
+import hljs from 'highlight.js/lib/core';
+import './highlight-theme.css';
 import {copy} from "./utils.js";
 import {formatDate} from "unconscious/ext/Utils.js";
+
+
+// 导入常用？语言模块 HTML(XML)依赖JS/CSS
+import xml from 'highlight.js/lib/languages/xml';
+import bash from 'highlight.js/lib/languages/bash';
+import css from 'highlight.js/lib/languages/css';
+import javascript from 'highlight.js/lib/languages/javascript';
+import json from 'highlight.js/lib/languages/json';
+import php from 'highlight.js/lib/languages/php';
+import shell from 'highlight.js/lib/languages/shell';
+import yaml from 'highlight.js/lib/languages/yaml';
+import typescript from 'highlight.js/lib/languages/typescript';
+import {loadLanguage} from './highlight-languages.js';
+
+hljs.registerLanguage('xml', xml);
+hljs.registerAliases('vue', {languageName: 'xml'});
+hljs.registerLanguage('php', php);
+hljs.registerLanguage('css', css);
+hljs.registerLanguage('javascript', javascript);
+hljs.registerLanguage('typescript', typescript);
+// 配置
+hljs.registerLanguage('json', json);
+hljs.registerLanguage('yaml', yaml);
+// 命令
+hljs.registerLanguage('bash', bash);
+hljs.registerLanguage('shell', shell);
 
 const LANGUAGE_TO_EXT = {
 	javascript: 'js',
@@ -23,8 +49,8 @@ const LANGUAGE_TO_EXT = {
 	text: 'txt'
 };
 
-function getHighlightHtml(str, lang) {
-	return `<pre class="code-block language-${lang}"><div class="code-header sticky"><span>${lang || 'text'}</span><span><button class="i download" data-action="download" title="下载代码"></button><button class="i copy" data-action="copy" title="复制代码"></button></span></div><code class="hljs">${str}</code></pre>`;
+function getHighlightHtml(str, lang, n = '') {
+	return `<pre class="code-block language-${lang}"><div class="code-header sticky"><span>${lang || 'text'}</span><span><button class="i download" data-action="download" title="下载代码"></button><button class="i copy" data-action="copy" title="复制代码"></button></span></div><code class="hljs"${n}>${str}</code></pre>`;
 }
 
 export function getElementToCopy(el) {
@@ -58,11 +84,28 @@ export const markdown = /*#__PURE__*/ markdownIt({
 			return `<div class="chart-loading" data-id="${str.trim()}"><div class="bar1"><div></div></div><div class="bar2"><div></div></div><div class="bar3"><div></div></div><div class="bar4"><div></div></div><div class="bar5"><div></div></div><span>图表加载中...</span></div></div>`;
 		}
 
-		try {
-			if (lang && hljs.getLanguage(lang)) {
-				const highlighted = hljs.highlight(str, {language: lang, ignoreIllegals: true}).value;
-				return getHighlightHtml(highlighted, lang);
+		noSuchLang:
+		if (lang) try {
+			if (!hljs.getLanguage(lang)) {
+				const [langName, asyncRegister] = loadLanguage(lang);
+				if (asyncRegister == null) break noSuchLang;
+
+				const htmlId = 'hl-'+(parseInt(Math.random() * 10000) * Date.now()).toString(36);
+				const html = getHighlightHtml(str, lang, ` id='${htmlId}'`)
+
+				asyncRegister().then(m => {
+					hljs.registerLanguage(langName, m.default);
+					const el = document.getElementById(htmlId);
+					if (el) {
+						el.innerHTML = hljs.highlight(str, {language: langName, ignoreIllegals: true}).value;
+					}
+				});
+
+				return html;
 			}
+
+			const highlighted = hljs.highlight(str, {language: lang, ignoreIllegals: true}).value;
+			return getHighlightHtml(highlighted, lang);
 		} catch {}
 
 		return getHighlightHtml(markdown.utils.escapeHtml(str), lang);
