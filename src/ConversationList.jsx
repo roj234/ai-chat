@@ -146,11 +146,22 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 		selectedConversation.value = conv;
 	}
 
+	function getChatListItemHeight(element) {
+		const style = window.getComputedStyle(element);
+
+		const offsetHeight = element.offsetHeight;
+		const marginTop = parseFloat(style.marginTop) || 0;
+		const marginBottom = parseFloat(style.marginBottom) || 0;
+
+		return offsetHeight + marginTop + marginBottom + 8;
+	}
+
 	const list = <div className="sidebar-list scroll" id="chatList" onClick={eventHandler}></div>;
 	const groupAndConvArr = [];
 	const vl = new VirtualList({
 		element: list,
-		itemHeight: 45,
+		itemHeight: 36+8,
+		heightOf: getChatListItemHeight,
 		data: groupAndConvArr,
 		keyFunc,
 		renderer: (conv) => {

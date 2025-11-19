@@ -177,7 +177,6 @@ export function forceRenderMessage(message) {
 	oldNode?.replaceWith(node);
 }
 
-// TODO use VirtualList
 export function MessageList(/*{messages}*/) {
 	return $foreach(messages, listItemRenderer, keyFunc, renderedMessages);
 }

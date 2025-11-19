@@ -420,10 +420,11 @@ code {
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 }
 code:not(pre > code) {
-    border: 1px solid var(--muted);
+    border: 1px solid #4a5568;
     padding: 2px;
     border-radius: var(--border-radius-sm);
     color: oklch(0.6 0.18 18deg);
+    margin: 0 var(--spacing-xs);
 }
 
 /* 统一表格 */
@@ -435,6 +436,7 @@ code:not(pre > code) {
     border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0;
     overflow: hidden;
     margin: var(--spacing-md) 0;
+    table-layout: fixed;
 }
 .content table thead {
     background: linear-gradient(135deg, var(--chip-active) 0%, rgba(0,0,0,0.02) 100%);
