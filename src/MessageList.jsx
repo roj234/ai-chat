@@ -1,85 +1,14 @@
 import {ThinkBlock} from "./ThinkBlock.jsx";
 import {ToolCallCard} from "./ToolCallCard.jsx";
-import {$foreach, debugSymbol} from "unconscious";
+import {$foreach, AS_IS, debugSymbol} from "unconscious";
 import {formatDate} from "unconscious/ext/Utils.js";
 import {markdown} from "./markdown-stream.js";
-import {config, messages} from "./states.js";
-import {AS_IS} from "unconscious@shared";
+import {messages} from "./states.js";
 import {ChartCreator} from "./Chart.js";
 import {abortCompletion, sendMessage} from "./api-request.js";
 import markdownIt from "markdown-it";
 import {loadMermaid} from "./async-loader.js";
 import {getTextContent} from "./utils.js";
-
-/**
- *
- * @param {AiChat.Message[]} messages
- * @return {string}
- */
-export function messagesToText(messages) {
-	const lines = [];
-	for (const m of messages) {
-		let header = `[${m.role}]`;
-
-		// 构建 metadata JSON（只包含非 role/content 的属性）
-		const metadata = {};
-		if (m.time) metadata.time = m.time;
-		if (m.model) metadata.model = m.model;
-		if (m.think) metadata.think = m.think;
-		if (m.tool_calls) metadata.tool_calls = m.tool_calls;
-		if (m.tool_call_id) metadata.tool_call_id = m.tool_call_id;
-
-		if (Object.keys(metadata).length) {
-			header += " "+JSON.stringify(metadata);
-		}
-
-		lines.push(header+'\n'+m.content+'\n');
-	}
-	return lines.join('\n').trim();
-}
-
-/**
- *
- * @param {string} text
- * @return {AiChat.Message[]}
- */
-export function textToMessages(text) {
-	const out = [];
-	if (!text) return out;
-
-	let cur = null;
-
-	const pushCur = () => {
-		if (cur && (cur.content = cur.content.trim() || cur.tool_calls)) {
-			out.push(cur);
-		}
-		cur = null;
-	};
-
-	for (const line of text.split('\n')) {
-		// role, metadata
-		const roleMatch = line.match(/^\[(system|user|assistant|tool)]\s?(\{.*})?/i);
-		if (roleMatch) {
-			pushCur();
-
-			cur = roleMatch[2] ? JSON.parse(roleMatch[2]) : {};
-			cur.role = roleMatch[1].toLowerCase();
-			cur.content = "";
-		} else {
-			cur.content += line + '\n';
-		}
-	}
-
-	pushCur();
-
-	// 处理 systemPrompt
-	const sp = config.systemPrompt?.trim();
-	if (sp && out[0]?.role === 'system' && out[0].content === sp) {
-		out.shift();
-	}
-
-	return out;
-}
 
 /**
  *

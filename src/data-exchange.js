@@ -1,7 +1,22 @@
-import {conversations, messages, selectedConversation} from "./states.js";
+import {config, conversations, messages, selectedConversation} from "./states.js";
 import {showToast} from "./Toast.js";
 import {getMessages, newConversation, setConversation} from "./idb.js";
 import {prettyError} from "./utils.js";
+
+/**
+ *
+ * @param {Partial<AiChat.Conversation> & {messages: AiChat.Message[]}} convData
+ * @return {Promise<void>}
+ */
+export async function importConversationData(convData) {
+	const newConv = await newConversation();
+	newConv.title = convData.title || '';
+	newConv.time = convData.time || Date.now();
+	await setConversation(newConv, convData.messages || []);
+	conversations.unshift(newConv);
+	selectedConversation.value = newConv;
+	showToast('对话已导入', 'ok');
+}
 
 export async function importConversation(e) {
 	const f = e.target.files?.[0];
@@ -11,7 +26,7 @@ export async function importConversation(e) {
 		const text = await f.text();
 		/**
 		 * @type {{
-		 *     conversation: AiChat.Conversation | {messages: AiChat.Message[]}
+		 *     conversation: AiChat.Conversation & {messages: AiChat.Message[]}
 		 * }}
 		 */
 		const data = JSON.parse(text);
@@ -20,14 +35,9 @@ export async function importConversation(e) {
 			showToast('配置已导入');
 		}*/
 
-		if (data.conversation) {
-			const convData = data.conversation;
-			const newConv = await newConversation();
-			newConv.title = convData.title || '';
-			newConv.time = convData.time || Date.now();
-			await setConversation(newConv, convData.messages || []);
-			conversations.value.unshift(newConv);
-			selectedConversation.value = newConv;
+		const convData = data.conversation;
+		if (convData) {
+			await importConversationData(convData);
 			showToast('对话已导入', 'ok');
 		} else {
 			showToast('无对话数据');
@@ -69,4 +79,74 @@ export async function exportConversation() {
 		console.error(e);
 		showToast('导出失败: ' + prettyError(e), 'error');
 	}
+}
+
+/**
+ *
+ * @param {AiChat.Message[]} messages
+ * @return {string}
+ */
+export function messagesToText(messages) {
+	const lines = [];
+	for (const m of messages) {
+		let header = `[${m.role}]`;
+
+		// 构建 metadata JSON（只包含非 role/content 的属性）
+		const metadata = {};
+		if (m.time) metadata.time = m.time;
+		if (m.model) metadata.model = m.model;
+		if (m.think) metadata.think = m.think;
+		if (m.tool_calls) metadata.tool_calls = m.tool_calls;
+		if (m.tool_call_id) metadata.tool_call_id = m.tool_call_id;
+
+		if (Object.keys(metadata).length) {
+			header += " "+JSON.stringify(metadata);
+		}
+
+		lines.push(header+'\n'+m.content+'\n');
+	}
+	return lines.join('\n').trim();
+}
+
+/**
+ *
+ * @param {string} text
+ * @return {AiChat.Message[]}
+ */
+export function textToMessages(text) {
+	const out = [];
+	if (!text) return out;
+
+	let cur = null;
+
+	const pushCur = () => {
+		if (cur && (cur.content = cur.content.trim() || cur.tool_calls)) {
+			out.push(cur);
+		}
+		cur = null;
+	};
+
+	for (const line of text.split('\n')) {
+		// role, metadata
+		const roleMatch = line.match(/^\[(system|user|assistant|tool)]\s?(\{.*})?/i);
+		if (roleMatch) {
+			pushCur();
+
+			cur = roleMatch[2] ? JSON.parse(roleMatch[2]) : {};
+			cur.role = roleMatch[1].toLowerCase();
+			cur.content = "";
+		} else {
+			cur.content += line + '\n';
+		}
+	}
+
+	pushCur();
+
+	// 处理 systemPrompt
+	const sp = config.systemPrompt?.trim();
+	if (sp && out[0]?.role === 'system' && out[0].content === sp) {
+		out.shift();
+	}
+
+	return out;
 }

@@ -5,9 +5,10 @@ import {listConversations, newConversation} from "./idb.js";
 import {SETTING_CONFIG} from "./Setting.js";
 import {copyCodeEventHandler} from "./markdown-stream.js";
 import {copy, Elements, jsHide, prettyError} from "./utils.js";
-import {copyMessageHandler, MessageList, messagesToText, textToMessages} from "./MessageList.jsx";
+import {copyMessageHandler, MessageList} from "./MessageList.jsx";
 import {config, conversations, messages, selectedConversation, state} from "./states.js";
 import {abortCompletion, sendMessage} from "./api-request.js";
+import {importConversationData, messagesToText, textToMessages} from './data-exchange.js';
 import '../assets/iconfont.css';
 import {showToast} from "./Toast.js";
 
@@ -189,7 +190,11 @@ function onSettingChanged(id, newValue, oldValues) {
 		const oldEdit = config.edit;
 		if (oldEdit && !newValue && rawTextChanged) {
 			try {
-				messages.value = textToMessages(rawText.value || '');
+				const msg = textToMessages(rawText.value || '');
+				messages.value = msg;
+				if (!selectedConversation.value) {
+					importConversationData({messages: msg});
+				}
 				showToast('解析成功', 'ok');
 			} catch (e) {
 				showToast(e);
