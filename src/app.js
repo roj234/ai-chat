@@ -9,7 +9,7 @@ import {copyMessageHandler, MessageList} from "./MessageList.jsx";
 import {config, conversations, messages, selectedConversation, state} from "./states.js";
 import {abortCompletion, sendMessage} from "./api-request.js";
 import {importConversationData, messagesToText, textToMessages} from './data-exchange.js';
-import '../assets/iconfont.css';
+import './iconfont.css';
 import {showToast} from "./Toast.js";
 
 const $ = sel => document.querySelector(sel);

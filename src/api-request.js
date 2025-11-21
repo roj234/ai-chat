@@ -4,7 +4,7 @@ import {Elements, getTextContent, prettyError, readSSEStream, throttle} from "./
 import {config, messages, selectedConversation, state} from "./states.js";
 import {toolImpl, tools} from "./tools.js";
 import {forceRenderMessage} from "./MessageList.jsx";
-import {$update} from "unconscious";
+import {$state, $update} from "unconscious";
 
 function setStatus(text, tone = '') {
 	Elements.statusBadge.textContent = text;
@@ -79,6 +79,16 @@ function requestProvider(msg, useTools) {
 	});
 }
 
+function applyTemplate(message) {
+	return message.replaceAll(/\{\{(.+?)}}/g, (text, match) => {
+		switch (match) {
+			case "time":
+				return ""+new Date();
+		}
+		return text;
+	});
+}
+
 /**
  *
  * @param {string | OpenAI.ContentPart[]} userText
@@ -89,10 +99,11 @@ export async function sendMessage(userText) {
 	abortCompletion = new AbortController();
 
 	let md = markdownStreamParser();
+	let elementSelector = '.content';
 	const updateAssistantMessage = throttle(() => {
 		if (md) {
-			const last = Elements.messages.lastElementChild?.querySelector('.content');
-			if (last) md.render(llmResponse.content, last);
+			const last = Elements.messages.lastElementChild.querySelector(elementSelector);
+			md.render(elementSelector === '.content' ? llmResponse.content : llmResponse.think.content, last);
 
 			const scroller = Elements.scroller;
 			if (scroller.scrollHeight - scroller.scrollTop - scroller.offsetHeight < 150) {
@@ -105,7 +116,7 @@ export async function sendMessage(userText) {
 	const msg = [];
 
 	if (messages[0]?.role !== 'system' && config.systemPrompt?.trim()) {
-		msg.push({role: 'system', content: config.systemPrompt.trim()});
+		msg.push({role: 'system', content: applyTemplate(config.systemPrompt.trim())});
 	}
 
 	let useTools = config.tools;
@@ -189,6 +200,11 @@ export async function sendMessage(userText) {
 	// Request
 	let finishReason;
 	let genImages = [];
+	let thinkStartTime;
+	if (llmResponse.think) {
+		llmResponse.think = $state(llmResponse.think);
+		thinkStartTime = Date.now();
+	}
 	try {
 		const resp = await requestProvider(msg, useTools);
 
@@ -199,10 +215,6 @@ export async function sendMessage(userText) {
 			} catch {}
 			let errText = prettyError(je);
 			throw new Error(`HTTP ${resp.status}: ${errText}`);
-		}
-
-		if (llmResponse.think?.start) {
-			llmResponse.think.start = Date.now();
 		}
 
 		setStatus('生成中');
@@ -269,26 +281,64 @@ export async function sendMessage(userText) {
 			if (!text) return;
 
 			llmResponse.model = json.model;
-			if (!llmResponse.content && !llmResponse.think && text.startsWith("<think>")) {
-				llmResponse.think = { start: Date.now() };
+			let forceUpdate;
+			let content = llmResponse.content + text, thinkContent;
+
+			// 为了 O(n)
+			if (!llmResponse.think && content.startsWith("<think>")) {
+				thinkStartTime = Date.now();
+				llmResponse.think = $state({ partial: 0, content });
+				forceUpdate = '.think-content';
 			}
-			if (llmResponse.think?.start && text.includes("</think>")) {
-				const i = text.indexOf("</think>") + 8;
-				const before = text.substring(0, i);
 
-				llmResponse.think = {
-					duration: Date.now() - llmResponse.think.start,
-					content: llmResponse.content + before
-				};
+			const think = llmResponse.think;
+			thinkEnded:
+			if (thinkStartTime) {
+				think.duration = Date.now() - thinkStartTime;
 
-				llmResponse.content = "";
-				text = text.substring(i);
+				// 还是为了 O(n)
+				thinkContent = think.content + text;
+				let j = think.partial;
+				while (true) {
+					let next = thinkContent.indexOf("<", j);
+					if (next < 0) {
+						think.partial = thinkContent.length;
+						break;
+					}
+					if (thinkContent.length < next + 9/* '</think>'.length */) {
+						think.partial = j;
+						break;
+					}
 
+					if (thinkContent.startsWith("</think>\n", next)) {
+						next += 9;
+
+						llmResponse.think = {
+							duration: think.duration,
+							content: thinkContent.substring(0, next)
+						};
+
+						content = thinkContent.substring(next);
+						forceUpdate = '.content';
+						thinkStartTime = null;
+
+						break thinkEnded;
+					}
+
+					j = next + 1;
+				}
+
+				think.content = thinkContent;
+				content = "";
+			}
+			llmResponse.content = content;
+
+			if (forceUpdate) {
+				elementSelector = forceUpdate;
 				forceRenderMessage(llmResponse);
+			} else {
+				updateAssistantMessage();
 			}
-
-			llmResponse.content += text;
-			updateAssistantMessage();
 		});
 
 		setStatus('完成：' + finishReason, 'ok');
@@ -303,10 +353,8 @@ export async function sendMessage(userText) {
 		}
 	} finally {
 		abortCompletion = null;
-		if (llmResponse.think?.start) {
-			llmResponse.think.duration += Date.now() - llmResponse.think.start;
-			llmResponse.think.content += llmResponse.content;
-			llmResponse.content = "";
+		if (llmResponse.think) {
+			llmResponse.think = { ... llmResponse.think };
 		}
 		if (genImages.length) {
 			llmResponse.content = [

@@ -1,6 +1,6 @@
 
 export let loadMermaid = async () => {
-	const obj = (await import('../assets/mermaid/mermaid.esm.min.mjs')).default;
+	const obj = (await import('./mermaid.esm.min.mjs')).default;
 	obj.initialize({
 		startOnLoad: false,
 		securityLevel: "antiscript"

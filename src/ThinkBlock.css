@@ -14,12 +14,10 @@
 }
 .think > summary:hover { background: var(--chip-hover); }
 
-.think .think-content { margin-top: var(--spacing-sm); }
-.think pre {
-    margin: 0;
-    padding: var(--spacing-sm) var(--spacing-md);
+.think .think-content {
+    margin-top: var(--spacing-sm);
+    padding: 0 var(--spacing-md);
     background: var(--panel-2);
-    color: var(--text);
     border: 1px solid var(--border);
     border-radius: var(--border-radius-md);
     font-size: 12px;

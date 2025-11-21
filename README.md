@@ -93,7 +93,6 @@ npm run preview
    - 否则你会收获一个200MB的node_modules
    - 另外Mermaid.js占据本项目打包体积的80%
    - 要不是AI会画我才不用你
-2. highlight.js那么大，好像也没有支持很多种语言，换Google家的prettier.js ?
 
 ## 已知问题
 - [ ] 图片base64放IndexDB里可能太大

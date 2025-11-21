@@ -85,8 +85,8 @@ declare namespace AiChat {
     }
 
     export type Thinking = {
-        start?: number;
         content?: string;
         duration?: number;
+        partial?: number;
     };
 }
