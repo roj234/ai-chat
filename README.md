@@ -74,7 +74,7 @@ npm run preview
 ## 性能
 - markdown渲染经过优化，见`markdown-stream.js`，实现了增量修改和DOM Diff算法（青春版）
 - Chart.js 和 Mermaid 按需加载
-- 主页有炫（fu）酷（za）动画，可能会消耗资源
+- 有炫（fu）酷（za）动画，可能会消耗GPU
 
 ## 依赖
 - [Unconscious](https://github.com/Roj234/unconscious) - 轻量级 JSX 框架

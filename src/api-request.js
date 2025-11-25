@@ -84,6 +84,8 @@ function applyTemplate(message) {
 		switch (match) {
 			case "time":
 				return ""+new Date();
+			case "think":
+				return config.think && config.reasoning === false ? config.thinkPrompt : "";
 		}
 		return text;
 	});
@@ -116,7 +118,7 @@ export async function sendMessage(userText) {
 	const msg = [];
 
 	if (messages[0]?.role !== 'system' && config.systemPrompt?.trim()) {
-		msg.push({role: 'system', content: applyTemplate(config.systemPrompt.trim())});
+		msg.push({role: 'system', content: applyTemplate(config.systemPrompt).trim()});
 	}
 
 	let useTools = config.tools;

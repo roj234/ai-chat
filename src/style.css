@@ -171,12 +171,8 @@ button.i:hover { background: rgba(255,255,255,0.1); }
     top: 30%;
     background: transparent;
 }
-.panel.no-messages .query {
-    position: relative;
-}
-.panel.no-messages .query .beam:after { content: ''; }
 
-/* Beam 动画 */
+/* 生成时动画 */
 .beam {
     position: absolute;
     inset: 0;
@@ -188,6 +184,7 @@ button.i:hover { background: rgba(255,255,255,0.1); }
     mask-composite: exclude;
 }
 .beam:after {
+    content: '';
     position: absolute;
     aspect-ratio: 1/1;
     width: 100px;
@@ -348,6 +345,7 @@ button.i:hover { background: rgba(255,255,255,0.1); }
     display: flex; gap: var(--spacing-md); flex-wrap: wrap; align-items: center;
 }
 .query {
+    position: relative;
     display: flex;
     flex-direction: column;
     background: var(--panel-2);

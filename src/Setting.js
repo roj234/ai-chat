@@ -66,14 +66,20 @@ export const SETTING_CONFIG = [
 		id: "systemPrompt",
 		name: "System Prompt",
 		type: "textbox",
-		placeholder: "You are a helpful assistant."
+		placeholder: "Response in query's language."
+	},
+	{
+		id: "thinkPrompt",
+		name: "手动CoT提示词 (以 {{think}} 引用)",
+		type: "textbox",
+		placeholder: "Suppose you're a highly capable reasoning model..."
 	},
 	{
 		id: "reasoning",
 		name: "思考深度",
 		type: "radio",
 		choices: {
-			"关闭": false,
+			"手动": false,
 			"最低": "minimal",
 			"低": "low",
 			"中": "medium",

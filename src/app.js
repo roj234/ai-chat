@@ -87,12 +87,15 @@ const App = (<>
 					DeepSleep
 				</div>
 				<div className="controls">
-					<div className="badge" ref={statusBadge}>v2.6-251119-Final</div>
+					<div className="badge" ref={statusBadge}>v1.2-251125</div>
 					<div className="hint">提示：Shift+Enter 换行</div>
 					<div className="spacer"></div>
 				</div>
 				<div className="query">
-					<div className="beam" style="border-radius: var(--border-radius-md)"></div>
+					<div className="beam" style:reactive={{
+						"border-radius": "var(--border-radius-md)",
+						"display": $computed(() => abortCompletion ? '' : 'none', [messages])
+					}}></div>
 					<textarea placeholder="今天有什么可以帮到你？"
 							  id="userInput" ref={userInput}
 							  onInput={() => {
