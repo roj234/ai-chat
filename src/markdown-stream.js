@@ -187,6 +187,7 @@ export function markdownStreamParser() {
 
 	function skip(buffer) {
 		stableMarkdownBlock = buffer.length;
+		prevShrink = 0;
 	}
 
 	/**
@@ -194,16 +195,11 @@ export function markdownStreamParser() {
 	 * @param {HTMLElement} output
 	 */
 	function render(buffer, output) {
-		if (buffer.length < stableMarkdownBlock) {
-			stableMarkdownBlock = 0;
-			prevShrink = 0;
-		}
-
 		let unstableWrapper = output.querySelector('.unstableWrapper');
 		if (!unstableWrapper) {
-			if (lastElement && lastElement !== output) {
+			if (lastElement !== output) {
 				lastElement = output;
-				output.insertAdjacentHTML("afterbegin", markdown.render(buffer.substring(0, stableMarkdownBlock)));
+				skip(output.innerHTML = "");
 			}
 
 			unstableWrapper = <div className='unstableWrapper'></div>;

@@ -15,7 +15,6 @@ export async function importConversationData(convData) {
 	await setConversation(newConv, convData.messages || []);
 	conversations.unshift(newConv);
 	selectedConversation.value = newConv;
-	showToast('对话已导入', 'ok');
 }
 
 export async function importConversation(e) {
@@ -35,7 +34,7 @@ export async function importConversation(e) {
 			showToast('配置已导入');
 		}*/
 
-		const convData = data.conversation;
+		const convData = data;//.conversation;
 		if (convData) {
 			await importConversationData(convData);
 			showToast('对话已导入', 'ok');
@@ -48,6 +47,23 @@ export async function importConversation(e) {
 	} finally {
 		e.target.value = '';
 	}
+}
+
+export async function duplicateConversation() {
+	const conv = selectedConversation.value;
+	if (!conv) {
+		showToast('无对话选中', 'error');
+		return;
+	}
+
+	const data = {
+		title: conv.title,
+		time: conv.time,
+		messages: messages.value || await getMessages(conv.messageId)
+	};
+
+	await importConversationData(data);
+	showToast('已将当前对话另存为新会话', 'ok');
 }
 
 export async function exportConversation() {
@@ -92,12 +108,9 @@ export function messagesToText(messages) {
 		let header = `[${m.role}]`;
 
 		// 构建 metadata JSON（只包含非 role/content 的属性）
-		const metadata = {};
-		if (m.time) metadata.time = m.time;
-		if (m.model) metadata.model = m.model;
-		if (m.think) metadata.think = m.think;
-		if (m.tool_calls) metadata.tool_calls = m.tool_calls;
-		if (m.tool_call_id) metadata.tool_call_id = m.tool_call_id;
+		const metadata = {...m};
+		delete metadata.role;
+		delete metadata.content;
 
 		if (Object.keys(metadata).length) {
 			header += " "+JSON.stringify(metadata);

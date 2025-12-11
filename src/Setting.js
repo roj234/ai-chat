@@ -1,4 +1,4 @@
-import {exportConversation, importConversation} from "./data-exchange.js";
+import {duplicateConversation, exportConversation, importConversation} from "./data-exchange.js";
 
 export const SETTING_CONFIG = [
 	{
@@ -106,10 +106,11 @@ export const SETTING_CONFIG = [
 	{
 		type: "element",
 		element: <>
-			<button id="exportBtn" className="btn ghost" title="导出当前会话" onClick={exportConversation}>导出</button>
-			<label className="btn ghost" title="导入会话JSON">导入
-				<input id="importFile" type="file" accept="application/json" style="display:none;" onChange={importConversation}/>
+			<button className="btn ghost" onClick={exportConversation}>导出</button>
+			<label className="btn ghost">导入
+				<input type="file" accept="application/json" style="display:none;" onChange={importConversation}/>
 			</label>
+			<button className="btn ghost" onClick={duplicateConversation}>另存为新对话</button>
 		</>
 	},
 	{

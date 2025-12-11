@@ -225,11 +225,12 @@ export async function sendMessage(userText) {
 			if (config.debug) console.log("SSE response", json);
 
 			if (json.usage) {
-				let {completion_tokens, prompt_tokens} = json.usage;
+				let {completion_tokens, prompt_tokens, cost} = json.usage;
 				const reasoning_tokens = json.usage.completion_tokens_details?.reasoning_tokens;
 
 				let usage = prompt_tokens + ' => ' + completion_tokens;
-				if (reasoning_tokens) usage += ` (${reasoning_tokens} reasoning)`;
+				if (reasoning_tokens) usage += ` (${reasoning_tokens} think)`;
+				if (cost) usage += " / $"+parseFloat(cost).toFixed(3);
 
 				llmResponse.usage = usage;
 				return;
@@ -246,16 +247,23 @@ export async function sendMessage(userText) {
 
 				if (chunk.images) genImages.push(...chunk.images);
 
-				if (chunk.reasoning) {
-					text = chunk.reasoning + text;
-					if (!isReasoning) {
-						isReasoning = true;
-						text = "<think>\n" + text;
+				if (!text) {
+					if ((text = chunk.reasoning)) {
+						if (!isReasoning) {
+							if (!llmResponse.think) {
+								isReasoning = true;
+								text = "<think>\n" + text;
+							} else {
+								llmResponse.think.content += text;
+								text = "";
+							}
+						}
 					}
-				} else if (isReasoning) {
-					isReasoning = false;
-					if (!finishReason || text)
+				} else {
+					if (isReasoning) {
+						isReasoning = false;
 						text = "</think>\n" + text;
+					}
 				}
 
 				if (chunk.reasoning_details) {
@@ -291,6 +299,7 @@ export async function sendMessage(userText) {
 				thinkStartTime = Date.now();
 				llmResponse.think = $state({ partial: 0, content });
 				forceUpdate = '.think-content';
+				text = "";
 			}
 
 			const think = llmResponse.think;
@@ -333,14 +342,17 @@ export async function sendMessage(userText) {
 				think.content = thinkContent;
 				content = "";
 			}
-			llmResponse.content = content;
 
 			if (forceUpdate) {
 				elementSelector = forceUpdate;
 				forceRenderMessage(llmResponse);
+				//md.skip(elementSelector === '.content' ? "" : llmResponse.think.content);
 			} else {
 				updateAssistantMessage();
 			}
+
+			// 故意放在forceRenderMessage之后
+			llmResponse.content = content;
 		});
 
 		setStatus('完成：' + finishReason, 'ok');
@@ -419,7 +431,7 @@ function generateDescription(conversation) {
 		}],
 		max_tokens: 30,
 		reasoning: {enabled: false},
-		provider: {require_parameters: true},
+		//provider: {require_parameters: true},
 		stream: false
 	};
 

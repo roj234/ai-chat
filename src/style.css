@@ -352,6 +352,7 @@ button.i:hover { background: rgba(255,255,255,0.1); }
     border: 1px solid var(--border);
     border-radius: var(--border-radius-lg);
     transition: border 0.1s linear;
+    overflow: hidden;
 }
 .query > .controls {
     width: 100%;

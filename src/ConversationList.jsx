@@ -193,7 +193,7 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 			groupAndConvArr.push(...groups[groupName]);
 		}
 		vl.repaint();
-	});
+	}, false);
 
 	$watchWithCleanup(selectedConversation, () => {
 		const conv = selectedConversation.value;
@@ -213,7 +213,7 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 		if (!conv) {
 			vl.dom.querySelector(".active")?.classList.remove("active");
 		}
-	});
+	}, false);
 
 	// autosave
 	$watchWithCleanup(messages, () => {
@@ -224,7 +224,7 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 
 			setConversation(conv, messages.value);
 		}
-	});
+	}, false);
 
 	return list;
 }
