@@ -45,7 +45,7 @@ export default {
         assetsInlineLimit: 512,
         rollupOptions: {
             external: (id) => {
-                return id.startsWith('./mermaid'); // 动态匹配你的预构建
+                return id.startsWith('../mermaid'); // 动态匹配你的预构建
             },
             output: {
                 entryFileNames: `[name].[hash].js`,
