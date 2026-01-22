@@ -5,6 +5,7 @@ import {config, messages, selectedConversation, state} from "./states.js";
 import {toolImpl, tools} from "./tools.js";
 import {forceRenderMessage} from "./MessageList.jsx";
 import {$state, $update} from "unconscious";
+import {showToast} from "./Toast.js";
 
 function setStatus(text, tone = '') {
 	Elements.statusBadge.textContent = text;
@@ -447,10 +448,11 @@ function generateDescription(conversation) {
 
 		return {choices: [{message: {content: ""}, finish_reason: "error"}]};
 	}).then(json => {
-		let title;
+		let title = json.choices?.[0].message?.content;
 
-		if (json.choices[0].finish_reason === "stop") {
-			title = json.choices[0]?.message?.content;
+		if (json.choices?.[0].finish_reason !== "stop") {
+			console.error(json);
+			showToast("标题生成失败", 'error');
 		}
 
 		if (!title) title = generateFallbackTitle();

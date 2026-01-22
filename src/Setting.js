@@ -5,7 +5,7 @@ export const SETTING_CONFIG = [
 		id: "endpoint",
 		name: "API端点",
 		type: "input",
-		pattern: /^https?:\/\//,
+		pattern: /^https?:\/\/.+\/v1/,
 		warning: "请输入合法的API端点",
 		placeholder: "https://api.example.com/v1"
 	},

@@ -212,6 +212,9 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 		}
 		if (!conv) {
 			vl.dom.querySelector(".active")?.classList.remove("active");
+		} else {
+			const id = vl.findIndex(conv);
+			if (id >= 0) vl.setItem(id, conv);
 		}
 	}, false);
 

@@ -11,6 +11,7 @@ import {abortCompletion, sendMessage} from "./api-request.js";
 import {importConversationData, messagesToText, textToMessages} from './data-exchange.js';
 import './iconfont.css';
 import {showToast} from "./Toast.js";
+import {handleCommand} from "./commands.js";
 
 const $ = sel => document.querySelector(sel);
 
@@ -36,6 +37,12 @@ const rootStyle = document.querySelector(":root").style;
  * @type {OpenAI.ContentPart[]}
  */
 const attachments = $state([]);
+
+// /**
+//  *
+//  * @type {Reactive<string>}
+//  */
+// const presetName = $state("");
 
 const openSidebar = () => jsHide(sidebar);
 const beginConversation = () => {
@@ -103,7 +110,7 @@ const App = (<>
 								  userInput.style.height = '';
 								  userInput.style.height = (userInput.scrollHeight) + 'px';
 
-								  sendBtn.disabled = !allowSendMessage() && !userInput.value.trim();
+								  sendBtn.disabled = !allowClickSendBtn() && !userInput.value.trim();
 							  }}
 							  onKeyDown={(e) => {
 								  if (e.key === 'Enter' && !e.shiftKey) {
@@ -228,7 +235,7 @@ function onSettingChanged(id, newValue, oldValues) {
 	}
 }
 
-function allowSendMessage() {
+function allowClickSendBtn() {
 	sendBtn.innerText = abortCompletion ? "中止" : "发送";
 	if (abortCompletion) return true;
 
@@ -279,8 +286,10 @@ function onSend() {
 		return;
 	}
 
+	if (handleCommand(userInput)) return;
+
 	const text = userInput.value.trim();
-	if (!allowSendMessage() && !text) return;
+	if (!allowClickSendBtn() && !text) return;
 
 	if (!selectedConversation.ready) {
 		if (null == selectedConversation.value) {
@@ -327,7 +336,7 @@ for (const key in config.value) {
 
 $watch(messages, () => {
 	if (config.edit) updateRawText();
-	sendBtn.disabled = !allowSendMessage() && !userInput.value.trim();
+	sendBtn.disabled = !allowClickSendBtn() && !userInput.value.trim();
 	messagesPanel.classList.toggle("no-messages", messages.length === 0);
 });
 

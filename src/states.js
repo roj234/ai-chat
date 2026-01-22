@@ -10,22 +10,8 @@ export const state = {
 	completionTemplate: null
 };
 
-/**
- * @type {Reactive<AiChat.CompletionRequest & AiChat.Provider & {
- * thinkPrompt: string,
- * think: boolean,
- * tools: boolean,
- * edit: boolean,
- *
- * keepReasoning: boolean,
- * enforceParam: boolean,
- * debug: boolean,
- *
- * titleModel: string,
- * generateTitle: boolean
- * }>}
- */
-export const config = $store("config", {
+export const defaultConfig = {
+	_presetName: "default",
 	endpoint: 'http://localhost:5001/v1',
 	accessToken: '',
 	mode: 'chat',
@@ -82,7 +68,24 @@ For example, if asked a question, your response should look like:
 
 	titleModel: 'deepseek/deepseek-v3.2-exp',
 	generateTitle: false,
-}, {persist: true});
+};
+
+/**
+ * @type {Reactive<AiChat.CompletionRequest & AiChat.Provider & {
+ * thinkPrompt: string,
+ * think: boolean,
+ * tools: boolean,
+ * edit: boolean,
+ *
+ * keepReasoning: boolean,
+ * enforceParam: boolean,
+ * debug: boolean,
+ *
+ * titleModel: string,
+ * generateTitle: boolean
+ * }>}
+ */
+export const config = $store("config", defaultConfig, {persist: true});
 
 /**
  * @type {Reactive<AiChat.Message[]>}
