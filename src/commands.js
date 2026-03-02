@@ -1,7 +1,7 @@
 import {showToast} from "./Toast.js";
 import {config, defaultConfig, selectedConversation} from "./states.js";
 import {duplicateConversation} from "./data-exchange.js";
-import {setConversation} from "./idb.js";
+import {updateConversation} from "./idb.js";
 
 /**
  *
@@ -65,7 +65,7 @@ export function handleCommand(element) {
 				}
 
 				selectedConversation.title = parameters.title;
-				setConversation(selectedConversation.value);
+				updateConversation(selectedConversation.value);
 				break;
 			case "help":
 				element.value = `/# => 帮助菜单

@@ -6,6 +6,7 @@ import {toolImpl, tools} from "./tools.js";
 import {forceRenderMessage} from "./MessageList.jsx";
 import {$state, $update} from "unconscious";
 import {showToast} from "./Toast.js";
+import {mergeReasoningDetails} from "./ThinkBlock.jsx";
 
 function setStatus(text, tone = '') {
 	Elements.statusBadge.textContent = text;
@@ -147,6 +148,7 @@ export async function sendMessage(userText) {
 			if (m.reasoning_details) req_msg.reasoning_details = m.reasoning_details;
 			// fallback
 			else req_msg.content = m.think.content + req_msg.content;
+			//else req_msg.reasoning_content = m.think.content;
 		}
 	}
 
@@ -249,7 +251,8 @@ export async function sendMessage(userText) {
 				if (chunk.images) genImages.push(...chunk.images);
 
 				if (!text) {
-					if ((text = chunk.reasoning)) {
+					// support llama-server?
+					if ((text = chunk.reasoning ?? chunk.reasoning_content)) {
 						if (!isReasoning) {
 							if (!llmResponse.think) {
 								isReasoning = true;
@@ -368,6 +371,10 @@ export async function sendMessage(userText) {
 		}
 	} finally {
 		abortCompletion = null;
+		if (llmResponse.reasoning_details) {
+			llmResponse.reasoning_details = mergeReasoningDetails(llmResponse.reasoning_details);
+			delete llmResponse.think.content;
+		}
 		if (llmResponse.think) {
 			llmResponse.think = { ... llmResponse.think };
 		}

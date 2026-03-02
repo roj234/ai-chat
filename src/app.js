@@ -72,7 +72,7 @@ const App = (<>
 		<ConversationList></ConversationList>
 		<div className="spacer"></div>
 		<div className="sidebar-header">
-			<h4>&copy; 2025 Roj234 | AiChat</h4>
+			<h4>&copy; 2026 Roj234 | AiChat</h4>
 			<button className="btn ghost" title="设置" onClick={() => {
 				jsHide(settingWrapper);
 			}}><i className="i settings"></i>
@@ -94,7 +94,7 @@ const App = (<>
 					DeepSleep
 				</div>
 				<div className="controls">
-					<div className="badge" ref={statusBadge}>v1.2-251125</div>
+					<div className="badge" ref={statusBadge}>v1.4.1</div>
 					<div className="hint">提示：Shift+Enter 换行</div>
 					<div className="spacer"></div>
 				</div>

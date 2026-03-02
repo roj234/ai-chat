@@ -2,7 +2,7 @@ import './ConversationList.css';
 import {VirtualList} from 'unconscious/ext/VirtualList.js';
 import {formatDate} from 'unconscious/ext/Utils.js';
 import {$update, $watchWithCleanup} from 'unconscious';
-import {deleteConversation, getMessages, setConversation} from "./idb.js";
+import {deleteConversation, getMessages, updateConversation} from "./idb.js";
 import {conversations, messages, selectedConversation} from "./states.js";
 import {abortCompletion} from "./api-request.js";
 import {showToast} from "./Toast.js";
@@ -62,7 +62,7 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 				conv.title = val;
 				// 重新计算时间
 				$update(conversations);
-				setConversation(conv, false);
+				updateConversation(conv, false);
 			}
 		} else {
 			const oldEditingNow = editingNow;
@@ -198,9 +198,9 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 	$watchWithCleanup(selectedConversation, () => {
 		const conv = selectedConversation.value;
 		if (conv && !conv.ready) {
-			getMessages(conv.messageId).then(data => {
+			getMessages(conv).then(data => {
 				if (selectedConversation.value === conv) {
-					messages.value = data.messages;
+					messages.value = data;
 				}
 
 				// wait for messages to update
@@ -225,7 +225,7 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 			conv.time = Date.now();
 			conversations.sort((a, b) => b.time - a.time);
 
-			setConversation(conv, messages.value);
+			updateConversation(conv, messages.value);
 		}
 	}, false);
 

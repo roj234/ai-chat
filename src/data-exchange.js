@@ -1,6 +1,6 @@
 import {config, conversations, messages, selectedConversation} from "./states.js";
 import {showToast} from "./Toast.js";
-import {getMessages, newConversation, setConversation} from "./idb.js";
+import {getMessages, newConversation, updateConversation} from "./idb.js";
 import {prettyError} from "./utils.js";
 
 /**
@@ -12,7 +12,7 @@ export async function importConversationData(convData) {
 	const newConv = await newConversation();
 	newConv.title = convData.title || '';
 	newConv.time = convData.time || Date.now();
-	await setConversation(newConv, convData.messages || []);
+	await updateConversation(newConv, convData.messages || []);
 	conversations.unshift(newConv);
 	selectedConversation.value = newConv;
 }
@@ -59,7 +59,7 @@ export async function duplicateConversation() {
 	const data = {
 		title: conv.title,
 		time: conv.time,
-		messages: messages.value || await getMessages(conv.messageId)
+		messages: messages.value || await getMessages(conv)
 	};
 
 	await importConversationData(data);
@@ -79,7 +79,7 @@ export async function exportConversation() {
 			//config: config.value,
 			title: conv.title,
 			time: conv.time,
-			messages: messages.value || await getMessages(conv.messageId)
+			messages: messages.value || await getMessages(conv)
 		};
 
 		const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});

@@ -108,7 +108,7 @@ const listItemRenderer = (m, i) => {
 			</span>
 		</div>
 		<section className="body">
-			<ThinkBlock think={m.think}/>
+			<ThinkBlock message={m}/>
 			{content}
 			{AS_IS(images.length) ? <div className="gallery">{images}</div> : null}
 

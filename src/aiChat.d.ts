@@ -39,7 +39,6 @@ declare namespace AiChat {
          * 消息是否从DB加载完成
          */
         ready?: boolean,
-        messageId: number,
         /**
          * 与消息分开储存在DB中
          */
@@ -53,6 +52,7 @@ declare namespace AiChat {
         | ToolCallMessage;
 
     interface BaseMessage {
+        id: number,
         content: string | OpenAI.ContentPart[];
         time: number;
         error?: string;

@@ -1,8 +1,12 @@
 
 const DB_NAME = 'AiChat';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise;
+
+import {debugSymbol} from 'unconscious';
+
+const CURRENT_IN_IDB = debugSymbol("Current_In_IDB");
 
 /**
  * 打开并返回数据库实例（单例）
@@ -16,15 +20,74 @@ function openDb() {
 
 		request.onupgradeneeded = (event) => {
 			const db = event.target.result;
+			const oldVersion = event.oldVersion;
+			const transaction = event.target.transaction;
 
-			const indexStore = db.createObjectStore('index', {
-				keyPath: 'id',
-				autoIncrement: true,
-			});
-			indexStore.createIndex('time', 'time', { unique: false });
+			const newConvStore = db.createObjectStore('conversations', { keyPath: 'id', autoIncrement: true });
+			newConvStore.createIndex('time', 'time', { unique: false });
 
-			// 消息表：主键为自增 id
-			db.createObjectStore('messages', { keyPath: 'id', autoIncrement: true });
+			const newMsgStore = db.createObjectStore('messages_v2', { keyPath: 'id', autoIncrement: true });
+			newMsgStore.createIndex('owner', 'owner');
+			newMsgStore.createIndex('parent', 'parent');
+
+			if (oldVersion === 1) {
+				try {
+					// 2. 获取旧数据源
+					const oldIndexStore = transaction.objectStore('index');
+					const oldMessagesStore = transaction.objectStore('messages');
+
+					let migrateIndex = 0;
+
+					// 3. 开始迁移逻辑
+					oldIndexStore.openCursor().onsuccess = (e) => {
+						const cursor = e.target.result;
+						if (cursor) {
+							/**
+							 * 辅助函数：将线性数组转为链式存储
+							 * @type {AiChat.Conversation}
+							 */
+							const oldConv = cursor.value;
+							const oldMsgId = oldConv.messageId;
+
+							// 读取旧的大数组
+							oldMessagesStore.get(oldMsgId).onsuccess = (msgEv) => {
+								/**
+								 * @type {{
+								 *     messages: AiChat.Message[]
+								 * }}
+								 */
+								const msgData = msgEv.target.result;
+								if (msgData && msgData.messages) {
+									// 顺序插入消息，建立 parentId 关系
+									msgData.messages.forEach((msg, index) => {
+										const newMsg = {
+											...msg,
+											owner: oldConv.id,
+											id: migrateIndex,
+										};
+										if (index > 0) newMsg.parent = migrateIndex - 1;
+
+										migrateIndex++;
+										newMsgStore.add(newMsg);
+									});
+									newConvStore.add({
+										...(oldConv),
+										lastMessage: migrateIndex - 1
+									});
+								}
+							};
+							cursor.continue();
+						} else {
+							db.deleteObjectStore('index');
+							db.deleteObjectStore('messages');
+						}
+					};
+				} catch (e) {
+					transaction.abort();
+					alert("数据库升级失败！");
+					throw e;
+				}
+			}
 		};
 
 		request.onsuccess = (event) => {
@@ -45,114 +108,142 @@ function openDb() {
 	return dbPromise;
 }
 
-/**
- * 事务的安全创建（带权重的 onupgradeneeded 中也可用）
- * @param {IDBDatabase} db
- * @param {string|string[]} storeNames
- * @param {"readonly"|"readwrite"} mode
- * @returns {IDBTransaction}
- */
-function transactionSafe(db, storeNames, mode = 'readonly') {
-	return db.transaction(storeNames, mode);
+function serializeMessage(message) {
+	return JSON.stringify(message, function(key, value) {
+		if (key === "id") return;
+		return value;
+	});
 }
 
 /**
- * 获取一个会话（包含 title/time/最新消息 id）
- * @param {number} id 消息 id（自增主键）
- * @returns {Promise<{id: number, messages: AiChat.Message[]}>}
+ * 获取一个会话的消息
+ * @param {AiChat.Conversation} conversation 对话
+ * @returns {Promise<AiChat.Message[]>}
  */
-export function getMessages(id) {
-	return openDb().then((db) => {
+export function getMessages(conversation) {
+	return openDb().then(db => {
 		return new Promise((resolve, reject) => {
-			const tx = transactionSafe(db, 'messages', 'readonly');
-			const store = tx.objectStore('messages');
-			const request = store.get(Number(id));
+			const tx = db.transaction('messages_v2', 'readonly');
+			tx.onerror = (event) => reject(new Error(tx.error?.message || 'transaction failed'));
 
-			request.onsuccess = (event) => resolve(event.target.result);
-			request.onerror = (event) => reject(new Error(event.target.error?.message || 'getMessages failed'));
+			const store = tx.objectStore('messages_v2');
+			// 也可使用 IDBKeyRange.only()
+			const request = store.index('owner').getAll(conversation.id);
+
+			request.onsuccess = (event) => {
+				const messages = event.target.result;
+
+				/**
+				 * @type {Map<number, string>}
+				 */
+				const m = new Map();
+				conversation[CURRENT_IN_IDB] = m;
+
+				for (let message of messages) {
+					delete message.owner;
+					m.set(message.id, serializeMessage(message));
+				}
+
+				// 如果需要按时间排序，这里可以再 sort 一下，或者存的时候按顺序存
+				// messages.sort((a, b) => a.time - b.time);
+				resolve(messages);
+			}
 		});
 	});
 }
 
 /**
- * 新建一个会话及其首条消息
+ * 新建一个会话
  * @returns {Promise<AiChat.Conversation>}
  */
 export function newConversation() {
 	return openDb().then((db) => {
 		return new Promise((resolve, reject) => {
-			const tx = transactionSafe(db, ['index', 'messages'], 'readwrite');
-			const indexStore = tx.objectStore('index');
-			const messageStore = tx.objectStore('messages');
+			const tx = db.transaction(['conversations'], 'readwrite');
+			tx.onerror = () => reject(new Error(tx.error?.message || 'transaction failed'));
 
-			// 1) 先写入消息
-			const addMsgReq = messageStore.add({ messages: [] });
-
-			addMsgReq.onsuccess = (event) => {
-				const messageId = event.target.result; // 自增消息主键
-
-				// 2) 再写入会话并关联最新消息 id
-				const conversationData = {
-					title: "",
-					time: Date.now(),
-					messageId: messageId
-				};
-				const addConvReq = indexStore.add(conversationData);
-
-				addConvReq.onsuccess = (e) => {
-					conversationData.id = e.target.result;
-					resolve(conversationData);
-				};
-
-				addConvReq.onerror = (e) => reject(new Error(e.target.error?.message || 'add conversation failed'));
+			const conversation = {
+				title: "",
+				time: Date.now(),
+				[CURRENT_IN_IDB]: new Map
 			};
 
-			addMsgReq.onerror = (event) => reject(new Error(event.target.error?.message || 'add message failed'));
-			tx.onerror = (event) => reject(new Error(tx.error?.message || 'transaction failed'));
+			const addConvReq = tx.objectStore('conversations').add(conversation);
+			addConvReq.onsuccess = (e) => {
+				conversation.id = e.target.result;
+				resolve(conversation);
+			};
 		});
 	});
 }
 
 /**
- * 更新会话（若传了 id 则更新现有会话；未传 id 则作为新会话创建）
+ * 更新会话
  * @param {AiChat.Conversation} data
- * @param {AiChat.Message[]} messages=
+ * @param {AiChat.Message[]|false} messages=
  * @returns {Promise<boolean>}
  */
-export function setConversation(data, messages) {
-	if (!data || typeof data.title !== 'string' || typeof data.time !== 'number'  || typeof data.messageId !== 'number') {
+export function updateConversation(data, messages) {
+	if (!data || typeof data.title !== 'string' || typeof data.time !== 'number' || typeof data.id !== 'number') {
 		return Promise.reject(new Error('setConversation: invalid data'));
 	}
 
 	return openDb().then(db => {
 		return new Promise((resolve, reject) => {
-			const tx = transactionSafe(db, ['index', 'messages'], 'readwrite');
-			tx.onerror = (event) => reject(new Error(tx.error?.message || 'transaction failed'));
+			const tx = db.transaction(['conversations', 'messages_v2'], 'readwrite');
+			tx.onerror = () => reject(new Error(tx.error?.message || 'transaction failed'));
+			tx.oncomplete = () => resolve(true);
 
-			const indexStore = tx.objectStore('index');
-			const messageStore = tx.objectStore('messages');
-
-			const updateReq = indexStore.put({
-				id: Number(data.id),
+			tx.objectStore('conversations').put({
+				id: data.id,
 				title: data.title,
-				time: data.time,
-				messageId: data.messageId,
+				time: data.time
 			});
 
-			updateReq.onsuccess = () => {
-				if (!messages) {
-					resolve(true);
-					return;
+			if (!messages) return;
+
+			const messageStore = tx.objectStore('messages_v2');
+
+			/**
+			 * @type {Map<number, string>}
+			 */
+			const messagesInDB = data[CURRENT_IN_IDB];
+			/**
+			 * @type {Map<number, string>}
+			 */
+			const messagesInMemory = new Map();
+
+			for (let i = 0; i < messages.length; i++){
+				const message = messages[i];
+
+				const newMessageKey = serializeMessage(message);
+				if (message.id) {
+					messagesInMemory.set(message.id, newMessageKey);
+
+					const existingKey = messagesInDB.get(message.id);
+					messagesInDB.delete(message.id);
+
+					if (existingKey === newMessageKey) continue;
 				}
 
-				// 写入新消息
-				const addMsgReq = messageStore.put({ messages: messages, id: data.messageId });
-				addMsgReq.onsuccess = (event) => {
-					resolve(true);
+				const value = {
+					...message,
+					owner: data.id
 				};
-				addMsgReq.onerror = (event) => reject(new Error(event.target.error?.message || 'add message failed'));
-			};
-			updateReq.onerror = (e) => reject(new Error(e.target.error?.message || 'put conversation failed'));
+
+				if (i) value.parent = messages[i-1].id;
+
+				messageStore.put(value).onsuccess = (e) => {
+					message.id = e.target.result;
+					messagesInMemory.set(message.id, newMessageKey);
+					console.log("ADD", message);
+				}
+			}
+
+			if (messagesInDB.size) console.log("DEL", messagesInDB);
+			messagesInDB.forEach((value, id) => messageStore.delete(id));
+
+			data[CURRENT_IN_IDB] = messagesInMemory;
 		});
 	});
 }
@@ -165,20 +256,24 @@ export function setConversation(data, messages) {
 export function deleteConversation(data) {
 	return openDb().then(db => {
 		return new Promise((resolve, reject) => {
-			const tx = transactionSafe(db, ['index', 'messages'], 'readwrite');
-			tx.onerror = (event) => reject(new Error(tx.error?.message || 'transaction failed'));
+			const tx = db.transaction(['conversations', 'messages_v2'], 'readwrite');
+			tx.onerror = () => reject(new Error(tx.error?.message || 'transaction failed'));
 
-			const indexStore = tx.objectStore('index');
-			const messageStore = tx.objectStore('messages');
+			const conversationId = data.id;
 
-			const delMsgReq = messageStore.delete(Number(data.messageId));
-			delMsgReq.onsuccess = () => {
-				const delConvReq = indexStore.delete(Number(data.id));
-				delConvReq.onsuccess = () => resolve();
-				delConvReq.onerror = (e) => reject(new Error(e.target.error?.message || 'delete conversation failed'));
+			tx.objectStore('conversations').delete(conversationId);
+
+			const msgStore = tx.objectStore('messages_v2');
+			const cursorRequest = msgStore.index('owner').openKeyCursor(conversationId);
+			cursorRequest.onsuccess = (event) => {
+				const cursor = event.target.result;
+				if (cursor) {
+					msgStore.delete(cursor.primaryKey);
+					cursor.continue();
+				}
 			};
-			delMsgReq.onerror = (e) => reject(new Error(e.target.error?.message || 'delete message failed'));
 
+			tx.oncomplete = resolve;
 		});
 	});
 }
@@ -190,11 +285,10 @@ export function deleteConversation(data) {
 export function listConversations() {
 	return openDb().then((db) => {
 		return new Promise((resolve, reject) => {
-			const tx = transactionSafe(db, 'index', 'readonly');
-			tx.onerror = (event) => reject(new Error(tx.error?.message || 'listConversations failed'));
+			const tx = db.transaction('conversations', 'readonly');
+			tx.onerror = () => reject(new Error(tx.error?.message || 'listConversations failed'));
 
-			const indexStore = tx.objectStore('index');
-			const idx = indexStore.index('time');
+			const idx = tx.objectStore('conversations').index('time');
 
 			const result = [];
 			idx.openCursor(null, 'prev').onsuccess = (event) => {
@@ -206,7 +300,6 @@ export function listConversations() {
 					resolve(result);
 				}
 			};
-
 		});
 	});
 }
@@ -224,12 +317,10 @@ export function searchMessages(keyword) {
 
 	return listConversations().then(conversations => {
 		const promises = conversations.map(conv =>
-			getMessages(conv.messageId).then(messagesObj => {
-				if (!messagesObj || !messagesObj.messages) return null;
+			getMessages(conv).then(messages => {
+				if (!messages) return null;
 
-				const messages = messagesObj.messages.filter(msg =>
-					msg.content?.toLowerCase().includes(lowerKeyword)
-				);
+				messages = messages.filter(msg => msg.content?.toLowerCase().includes(lowerKeyword));
 
 				if (messages.length > 0) {
 					return {
