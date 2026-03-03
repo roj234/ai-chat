@@ -1,6 +1,6 @@
 import {config, conversations, messages, selectedConversation} from "./states.js";
 import {showToast} from "./Toast.js";
-import {getMessages, newConversation, updateConversation} from "./idb.js";
+import {getMessages, newConversation, serializeMessage, updateConversation} from "./idb.js";
 import {prettyError} from "./utils.js";
 
 /**
@@ -12,7 +12,7 @@ export async function importConversationData(convData) {
 	const newConv = await newConversation();
 	newConv.title = convData.title || '';
 	newConv.time = convData.time || Date.now();
-	await updateConversation(newConv, convData.messages || []);
+	await updateConversation(newConv, JSON.parse(serializeMessage(convData.messages)) || []);
 	conversations.unshift(newConv);
 	selectedConversation.value = newConv;
 }

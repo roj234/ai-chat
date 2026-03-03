@@ -1,10 +1,10 @@
+import {mergeReasoningDetails} from "./ThinkBlock.jsx";
+import {debugSymbol} from 'unconscious';
 
 const DB_NAME = 'AiChat';
 const DB_VERSION = 2;
 
 let dbPromise;
-
-import {debugSymbol} from 'unconscious';
 
 const CURRENT_IN_IDB = debugSymbol("Current_In_IDB");
 
@@ -65,6 +65,12 @@ function openDb() {
 											owner: oldConv.id,
 											id: migrateIndex,
 										};
+
+										if (newMsg.reasoning_details) {
+											delete newMsg.think?.content;
+											newMsg.reasoning_details = mergeReasoningDetails(newMsg.reasoning_details);
+										}
+
 										if (index > 0) newMsg.parent = migrateIndex - 1;
 
 										migrateIndex++;
@@ -108,7 +114,7 @@ function openDb() {
 	return dbPromise;
 }
 
-function serializeMessage(message) {
+export function serializeMessage(message) {
 	return JSON.stringify(message, function(key, value) {
 		if (key === "id") return;
 		return value;
@@ -236,11 +242,11 @@ export function updateConversation(data, messages) {
 				messageStore.put(value).onsuccess = (e) => {
 					message.id = e.target.result;
 					messagesInMemory.set(message.id, newMessageKey);
-					console.log("ADD", message);
+					//console.log("ADD", message);
 				}
 			}
 
-			if (messagesInDB.size) console.log("DEL", messagesInDB);
+			//if (messagesInDB.size) console.log("DEL", messagesInDB);
 			messagesInDB.forEach((value, id) => messageStore.delete(id));
 
 			data[CURRENT_IN_IDB] = messagesInMemory;
