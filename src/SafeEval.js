@@ -43,7 +43,6 @@ export function safeEval(code, timeout = 1000) {
 					trimmedChars += len;
 					log = "Trimmed "+trimmedChars+" characters.\n\n"+log.substring(len);
 				}
-				return;
 			}
 
 			clearTimeout(timer);

@@ -75,13 +75,19 @@ const listItemRenderer = (m, i) => {
 		for (const el of content.querySelectorAll("div.chart-loading")) {
 			// 确保隔壁工具的更新能赶上（
 			const chart = ChartCreator.getChart(el.dataset.id);
-			if (chart) {
-				el.replaceWith(chart.canvas);
-				chart.resize();
-			} else {
+			if (!chart) {
 				el.replaceWith(<div className="error-block">
 					<pre className="error-text">图表 {el.dataset.id} 不存在</pre>
 				</div>);
+			} else {
+				chart.then((chart) => {
+					if (!content.isConnected) return;
+
+					requestIdleCallback(() => {
+						el.replaceWith(chart.canvas);
+						chart.resize();
+					});
+				})
 			}
 		}
 	});
@@ -157,7 +163,7 @@ export const copyMessageHandler = (e) => {
 				article = article.nextElementSibling;
 				if (!article) break;
 				article.dataset.id--;
-				console.log(article);
+				//console.log(article);
 			}
 		}
 		break;

@@ -93,6 +93,20 @@ function applyTemplate(message) {
 	});
 }
 
+function applyDelta(chunk, delta) {
+	for (const item in delta) {
+		if (typeof(delta[item]) === "object") {
+			if (!chunk[item])
+				chunk[item] = Array.isArray(delta[item]) ? [] : {};
+			applyDelta(chunk[item], delta[item]);
+		} else if (null == chunk[item]) {
+			chunk[item] = delta[item];
+		} else {
+			chunk[item] += delta[item];
+		}
+	}
+}
+
 /**
  *
  * @param {string | OpenAI.ContentPart[]} userText
@@ -284,7 +298,13 @@ export async function sendMessage(userText) {
 					}
 
 					for (const call of chunk.tool_calls) {
-						if (!call.id) continue;
+						if (!call.id) {
+							const last = llmResponse.tool_calls[llmResponse.tool_calls.length-1];
+							if (last) {
+								applyDelta(last, call);
+								continue;
+							}
+						}
 						llmResponse.tool_calls.push(call);
 					}
 				}
