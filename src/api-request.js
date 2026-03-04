@@ -28,8 +28,8 @@ export let abortCompletion;
 function requestProvider(msg, useTools) {
 	// Prepare request body
 	const headers = {
-		//'HTTP-Referer': '<YOUR_SITE_URL>',
-		'X-Title': 'Fast-AI-Chat',
+		//'HTTP-Referer': location.origin,
+		//'X-Title': 'AIChat',
 		'Content-Type': 'application/json',
 		'Authorization': `Bearer ${config.accessToken}`
 	};
@@ -133,8 +133,9 @@ export async function sendMessage(userText) {
 	// Compose messages (include system prompt only once at the beginning)
 	const msg = [];
 
-	if (messages[0]?.role !== 'system' && config.systemPrompt?.trim()) {
-		msg.push({role: 'system', content: applyTemplate(config.systemPrompt).trim()});
+	const system_message = applyTemplate(config.systemPrompt).trim();
+	if (messages[0]?.role !== 'system' && system_message) {
+		msg.push({role: 'system', content: system_message});
 	}
 
 	let useTools = config.tools;
@@ -160,9 +161,8 @@ export async function sendMessage(userText) {
 		if (m.tool_call_id) req_msg.tool_call_id = m.tool_call_id;
 		if ((m.think||m.reasoning_details) && config.keepReasoning) {
 			if (m.reasoning_details) req_msg.reasoning_details = m.reasoning_details;
-			// fallback
+			else if (m.think.oai) req_msg.reasoning_content = m.think.content;
 			else req_msg.content = m.think.content + req_msg.content;
-			//else req_msg.reasoning_content = m.think.content;
 		}
 	}
 
@@ -237,7 +237,7 @@ export async function sendMessage(userText) {
 		}
 
 		setStatus('生成中');
-		let isReasoning = false;
+		let isReasoning;
 		await readSSEStream(resp, json => {
 			if (config.debug) console.log("SSE response", json);
 
@@ -253,6 +253,7 @@ export async function sendMessage(userText) {
 				return;
 			}
 
+			let reasoning_content;
 			let text;
 			if (config.mode === 'chat') {
 				const chunk = json.choices[0].delta;
@@ -265,12 +266,11 @@ export async function sendMessage(userText) {
 				if (chunk.images) genImages.push(...chunk.images);
 
 				if (!text) {
-					// support llama-server?
-					if ((text = chunk.reasoning ?? chunk.reasoning_content)) {
+					reasoning_content = chunk.reasoning_content;
+					if ((text = reasoning_content ?? chunk.reasoning)) {
 						if (!isReasoning) {
 							if (!llmResponse.think) {
 								isReasoning = true;
-								text = "<think>\n" + text;
 							} else {
 								llmResponse.think.content += text;
 								text = "";
@@ -278,10 +278,7 @@ export async function sendMessage(userText) {
 						}
 					}
 				} else {
-					if (isReasoning) {
-						isReasoning = false;
-						text = "</think>\n" + text;
-					}
+					isReasoning = false;
 				}
 
 				if (chunk.reasoning_details) {
@@ -319,9 +316,9 @@ export async function sendMessage(userText) {
 			let content = llmResponse.content + text, thinkContent;
 
 			// 为了 O(n)
-			if (!llmResponse.think && content.startsWith("<think>")) {
+			if (!llmResponse.think && isReasoning || text.startsWith("<think>")) {
 				thinkStartTime = Date.now();
-				llmResponse.think = $state({ partial: 0, content });
+				llmResponse.think = $state({ partial: 0, content, oai: !!reasoning_content });
 				forceUpdate = '.think-content';
 				text = "";
 			}
@@ -333,34 +330,47 @@ export async function sendMessage(userText) {
 
 				// 还是为了 O(n)
 				thinkContent = think.content + text;
-				let j = think.partial;
-				while (true) {
-					let next = thinkContent.indexOf("<", j);
-					if (next < 0) {
-						think.partial = thinkContent.length;
-						break;
+
+				let next;
+				function thinkEnded() {
+					llmResponse.think = {
+						oai: think.oai,
+						duration: think.duration,
+						content: thinkContent.substring(0, next)
+					};
+
+					content = thinkContent.substring(next);
+					forceUpdate = '.content';
+					thinkStartTime = null;
+				}
+
+				if (config.reasoning === false) {
+					let j = think.partial;
+					while (true) {
+						next = thinkContent.indexOf("<", j);
+						if (next < 0) {
+							think.partial = thinkContent.length;
+							break;
+						}
+						if (thinkContent.length < next + 9/* '</think>'.length */) {
+							think.partial = j;
+							break;
+						}
+
+						if (thinkContent.startsWith("</think>\n", next)) {
+							next += 9;
+							thinkEnded();
+							break thinkEnded;
+						}
+
+						j = next + 1;
 					}
-					if (thinkContent.length < next + 9/* '</think>'.length */) {
-						think.partial = j;
-						break;
-					}
-
-					if (thinkContent.startsWith("</think>\n", next)) {
-						next += 9;
-
-						llmResponse.think = {
-							duration: think.duration,
-							content: thinkContent.substring(0, next)
-						};
-
-						content = thinkContent.substring(next);
-						forceUpdate = '.content';
-						thinkStartTime = null;
-
+				} else {
+					if (!isReasoning) {
+						next = think.content.length;
+						thinkEnded();
 						break thinkEnded;
 					}
-
-					j = next + 1;
 				}
 
 				think.content = thinkContent;

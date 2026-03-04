@@ -85,6 +85,7 @@ declare namespace AiChat {
     }
 
     export type Thinking = {
+        oai: boolean;
         content?: string;
         duration?: number;
         partial?: number;
