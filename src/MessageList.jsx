@@ -107,10 +107,10 @@ const listItemRenderer = (m, i) => {
 			{AS_IS(m.usage) ? <span className="my-chip">{m.usage}</span> : null}
 			<span className='spacer'></span>
 			<span className='buttons'>
-				{AS_IS(m.role === "assistant" && m.finish_reason && i === messages.length - 1 && abortCompletion == null)
+				{AS_IS(m.role === "assistant" && i === messages.length - 1 && abortCompletion == null)
 					? <button data-action="regen" title="重新生成" className="i dice"></button> : null}
 				{AS_IS(i !== messages.length - 1 || abortCompletion == null) ? <button data-action="del" title="删除消息" className="i delete"></button> : null}
-				{AS_IS(m.role !== "assistant" || m.finish_reason && !m.error) ? <button data-action="copy" title="复制消息"  className="i copy"></button> : null}
+				{AS_IS((m.role !== "assistant" || (m.finish_reason && !m.error)) && m.content) ? <button data-action="copy" title="复制消息"  className="i copy"></button> : null}
 			</span>
 		</div>
 		<section className="body">

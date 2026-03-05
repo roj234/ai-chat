@@ -172,31 +172,6 @@ button.i:hover { background: rgba(255,255,255,0.1); }
     background: transparent;
 }
 
-/* 生成时动画 */
-.beam {
-    position: absolute;
-    inset: 0;
-    border: 2px solid transparent;
-    pointer-events: none;
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: clear;
-    mask-composite: exclude;
-}
-.beam:after {
-    content: '';
-    position: absolute;
-    aspect-ratio: 1/1;
-    width: 100px;
-    background: linear-gradient(to left, #ffaa40, #9c40ff, transparent);
-    animation: beam 12s infinite linear;
-    offset-anchor: 75% 75%;
-    offset-path: rect(0 auto auto 0 round calc(100px));
-}
-@keyframes beam {
-    100% { offset-distance: 100%; }
-}
-
 /* 消息卡片 */
 .msg {
     background: var(--card);

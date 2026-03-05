@@ -75,9 +75,9 @@ export function ThinkBlock({message}) {
 	}
 
 	return (
-		<details className='think'>
-			<summary className="think-summary" title='思考过程' onClick.once={renderContentAtFirstOpen}>
-				<span className="think-title">⏱ 已思考 {durationSec} 秒</span>
+		<details className={'think'+(isReactive(think)?" thinking":"")}>
+			<summary title='思考过程' onClick.once={renderContentAtFirstOpen}>
+				<span>&nbsp;⏱ 已思考 {durationSec} 秒</span>
 				<span className="chevron" aria-hidden>▾</span>
 			</summary>
 			<div ref={content} className="think-content"></div>

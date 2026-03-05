@@ -1,4 +1,4 @@
-import {duplicateConversation, exportConversation, importConversation} from "./data-exchange.js";
+import {clearDatabase, duplicateConversation, exportConversation, importConversation} from "./data-exchange.js";
 
 export const SETTING_CONFIG = [
 	{
@@ -88,6 +88,12 @@ export const SETTING_CONFIG = [
 		required: true
 	},
 	{
+		id: "customBody",
+		name: "自定义JSON请求体",
+		type: "textbox",
+		placeholder: "{\"chat_template_kwargs\": { ... }}"
+	},
+	{
 		id: "titleModel",
 		name: "标题总结模型",
 		type: "input"
@@ -110,7 +116,8 @@ export const SETTING_CONFIG = [
 			<label className="btn ghost">导入
 				<input type="file" accept="application/json" style="display:none;" onChange={importConversation}/>
 			</label>
-			<button className="btn ghost" onClick={duplicateConversation}>另存为新对话</button>
+			<button className="btn ghost" onClick={duplicateConversation}>另存为</button>
+			<button className="btn ghost" onClick={clearDatabase}>清除数据</button>
 		</>
 	},
 	{

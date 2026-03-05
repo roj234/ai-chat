@@ -1,20 +1,24 @@
 import {config, conversations, messages, selectedConversation} from "./states.js";
 import {showToast} from "./Toast.js";
-import {getMessages, newConversation, serializeMessage, updateConversation} from "./idb.js";
+import {deleteDatabase, getMessages, newConversation, serializeMessage, updateConversation} from "./idb.js";
 import {prettyError} from "./utils.js";
 
 /**
  *
  * @param {Partial<AiChat.Conversation> & {messages: AiChat.Message[]}} convData
- * @return {Promise<void>}
+ * @param {boolean=false} batch
+ * @return {Promise<AiChat.Conversation>}
  */
-export async function importConversationData(convData) {
+export async function importConversationData(convData, batch) {
 	const newConv = await newConversation();
 	newConv.title = convData.title || '';
 	newConv.time = convData.time || Date.now();
 	await updateConversation(newConv, JSON.parse(serializeMessage(convData.messages)) || []);
-	conversations.unshift(newConv);
-	selectedConversation.value = newConv;
+	if (!batch) {
+		conversations.unshift(newConv);
+		selectedConversation.value = newConv;
+	}
+	return newConv;
 }
 
 export async function importConversation(e) {
@@ -29,17 +33,31 @@ export async function importConversation(e) {
 		 * }}
 		 */
 		const data = JSON.parse(text);
-		/*if (data.config) {
+		if (UC_PERSIST_STORE !== data.meta?.app) {
+			if (!confirm("导入的文件格式可能有误，继续？")) {
+				return;
+			}
+		}
+
+		if (data.config) {
 			Object.assign(config.value, data.config);
 			showToast('配置已导入');
-		}*/
+		}
 
-		const convData = data;//.conversation;
-		if (convData) {
-			await importConversationData(convData);
+		if (Array.isArray(data.messages)) {
+			await importConversationData(data);
+		} else if (Array.isArray(data.conversations)) {
+			data.conversations.sort((a, b) => a.time - b.time);
+			const all = [];
+			for (const conv of data.conversations) {
+				all.push(importConversationData(conv, true));
+			}
+			const my_conversations = await Promise.all(all);
+			conversations.unshift(...my_conversations);
+			conversations.sort((a, b) => b.time - a.time);
 			showToast('对话已导入', 'ok');
 		} else {
-			showToast('无对话数据');
+			showToast('无对话数据', 'error');
 		}
 	} catch (e) {
 		console.error(e);
@@ -57,31 +75,46 @@ export async function duplicateConversation() {
 	}
 
 	const data = {
-		title: conv.title,
-		time: conv.time,
+		...conv,
 		messages: messages.value || await getMessages(conv)
 	};
 
 	await importConversationData(data);
-	showToast('已将当前对话另存为新会话', 'ok');
+	showToast('已将当前对话另存为', 'ok');
 }
 
 export async function exportConversation() {
-	const conv = selectedConversation.value;
-	if (!conv) {
-		showToast('无对话选中', 'error');
-		return;
-	}
+	let data;
 
-	try {
-		const data = {
+	const conv = selectedConversation.value;
+	if (conv) {
+		data = {
 			meta: {app: UC_PERSIST_STORE, version: 2},
-			//config: config.value,
 			title: conv.title,
 			time: conv.time,
 			messages: messages.value || await getMessages(conv)
 		};
+	} else {
+		showToast('正在导出'+conversations.length+'条数据，请稍候！');
+		const callbacks = [];
+		const my_conversations = [];
+		for (const conv of conversations) {
+			const index = callbacks.length;
+			callbacks.push(getMessages(conv).then(messages => my_conversations[index] = {
+				...conv,
+				messages
+			}));
+		}
 
+		await Promise.all(callbacks);
+		data = {
+			meta: {app: UC_PERSIST_STORE, version: 3},
+			config: config.value,
+			conversations: my_conversations,
+		};
+	}
+
+	try {
 		const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement('a');
@@ -94,6 +127,14 @@ export async function exportConversation() {
 	} catch (e) {
 		console.error(e);
 		showToast('导出失败: ' + prettyError(e), 'error');
+	}
+}
+
+export function clearDatabase() {
+	if (confirm("删除所有对话数据？")) {
+		deleteDatabase().then(() => {
+			location.reload();
+		})
 	}
 }
 

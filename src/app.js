@@ -94,15 +94,11 @@ const App = (<>
 					DeepSleep
 				</div>
 				<div className="controls">
-					<div className="badge" ref={statusBadge}>v1.4.1</div>
+					<div className="badge" ref={statusBadge}>v1.5.0</div>
 					<div className="hint">提示：Shift+Enter 换行</div>
 					<div className="spacer"></div>
 				</div>
 				<div className="query">
-					<div className="beam" style:reactive={{
-						"border-radius": "var(--border-radius-md)",
-						"display": $computed(() => abortCompletion ? '' : 'none', [messages])
-					}}></div>
 					<textarea placeholder="今天有什么可以帮到你？"
 							  id="userInput" ref={userInput}
 							  onInput={() => {
@@ -225,6 +221,16 @@ function onSettingChanged(id, newValue, oldValues) {
 			showToast("无法加载提示词模板: " + prettyError(e));
 		}
 	}
+
+	if (id === 'customBody') {
+		try {
+			state.customBody = newValue ? JSON.parse(newValue) : null;
+		} catch (e) {
+			if (oldValues) return e;
+			showToast("无法加载自定义请求体: " + prettyError(e));
+		}
+	}
+
 	if (id === 'mode') {
 		const displayTemplate = newValue === 'completion';
 		SettingUI.querySelector("[data-id='template']").style.display = displayTemplate ? '' : 'none';

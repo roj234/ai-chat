@@ -8,6 +8,23 @@ let dbPromise;
 
 const CURRENT_IN_IDB = debugSymbol("Current_In_IDB");
 
+export async function deleteDatabase() {
+	let promise = dbPromise;
+	if (!promise) promise = Promise.resolve();
+
+	return promise.then(db => {
+		if (db) db.close();
+		const req = indexedDB.deleteDatabase(DB_NAME);
+		req.onblocked = () => {
+			alert("请关闭其它页面");
+		};
+
+		return new Promise((resolve, reject) => {
+			req.onsuccess = resolve;
+			req.onerror = reject;
+		});
+	});
+}
 /**
  * 打开并返回数据库实例（单例）
  * @returns {Promise<IDBDatabase>}

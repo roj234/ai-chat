@@ -7,7 +7,8 @@ import {$state, $store} from 'unconscious';
  * }}
  */
 export const state = {
-	completionTemplate: null
+	completionTemplate: null,
+	customBody: null
 };
 
 export const defaultConfig = {
@@ -18,14 +19,8 @@ export const defaultConfig = {
 	reasoning: false,
 	model: 'auto',
 	temperature: 1,
-	maxTokens: 4096,
+	maxTokens: 8192,
 	systemPrompt: `Response in query's language.
-
-Formatting Rules:
-- Use Markdown for lists, tables, and styling.
-- Use \`\`\`code fences\`\`\` for all code blocks.
-- Format file names, paths, and function names with \`inline code\` backticks.
-- **For all mathematical expressions, you must use dollar-sign delimiters. Use $...$ for inline math and $$...$$ for block math. Do not use (...) or [...] delimiters.**
 
 {{think}}`,
 	thinkPrompt: `Suppose you're a highly capable reasoning model, **you always start with <think> and then start your chain-of-thought and reasoning, then end with </think> to complete your thinking**.
@@ -66,7 +61,7 @@ For example, if asked a question, your response should look like:
 	enforceParam: true,
 	debug: false,
 
-	titleModel: 'deepseek/deepseek-v3.2-exp',
+	titleModel: 'z-ai/glm-4.5-air',
 	generateTitle: false,
 };
 

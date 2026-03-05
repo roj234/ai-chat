@@ -71,6 +71,9 @@ function requestProvider(msg, useTools) {
 	if (config.enforceParam) {
 		body.provider = {require_parameters: true};
 	}
+	if (state.customBody) {
+		Object.assign(body, state.customBody);
+	}
 
 	const url = config.endpoint.replace(/\/+$/, '') + path;
 	return fetch(url, {
