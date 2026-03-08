@@ -256,13 +256,21 @@ export async function sendMessage(userText) {
 				return;
 			}
 
+			if (json.timings) {
+				let {cache_n, prompt_n, predicted_n, predicted_per_second} = json.timings;
+				let usage = (cache_n+prompt_n) + ' => ' + predicted_n + " / "+predicted_per_second.toFixed(2)+"TPS";
+				llmResponse.usage = usage;
+				return;
+			}
+
+			if (!finishReason) finishReason = json.choices[0]?.finish_reason;
+
 			let reasoning_content;
 			let text;
 			if (config.mode === 'chat') {
-				const chunk = json.choices[0].delta;
+				const chunk = json.choices[0]?.delta;
 				if (!chunk) return;
 
-				finishReason = json.choices[0].finish_reason;
 				if (chunk.role) llmResponse.role = chunk.role;
 				text = chunk.content;
 
@@ -406,7 +414,7 @@ export async function sendMessage(userText) {
 		abortCompletion = null;
 		if (llmResponse.reasoning_details) {
 			llmResponse.reasoning_details = mergeReasoningDetails(llmResponse.reasoning_details);
-			delete llmResponse.think.content;
+			delete llmResponse.think?.content;
 		}
 		if (llmResponse.think) {
 			llmResponse.think = { ... llmResponse.think };

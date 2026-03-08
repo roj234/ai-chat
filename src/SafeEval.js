@@ -43,19 +43,23 @@ export function safeEval(code, timeout = 1000) {
 					trimmedChars += len;
 					log = "Trimmed "+trimmedChars+" characters.\n\n"+log.substring(len);
 				}
+
+				return;
 			}
 
 			clearTimeout(timer);
 
+			const base = log ? { log } : {};
+
 			if ("result" in data) {
 				resolve({
 					result: data.result,
-					log
+					...base
 				});
 			} else {
 				reject({
 					...data,
-					log
+					...base
 				});
 			}
 		};

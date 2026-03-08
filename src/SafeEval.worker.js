@@ -159,8 +159,8 @@ const SAFE_SET = new Set([
 ]);
 
 self.console = {
-	log: (s) => {
-		postMessage.call(self, {log: s});
+	log: function() {
+		postMessage.call(self, {log: Array.from(arguments).join("")});
 	}
 };
 
