@@ -1,0 +1,10 @@
+.generated-image {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    & img {
+        border-radius: 8px;
+        max-width: 100%;
+    }
+}

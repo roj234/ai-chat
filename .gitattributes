@@ -1,0 +1,3 @@
+media/*.txt -text
+media/*.json -text
+media/*.md -text

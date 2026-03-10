@@ -1,0 +1,32 @@
+
+.my-box {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: var(--border-radius-md);
+    height: 40px;
+
+    &.loading {
+        border: 1px dashed transparent;
+        justify-content: flex-start;
+        gap: 8px;
+        color: var(--muted);
+        font-size: smaller;
+
+
+        & .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(0,0,0,0.1);
+            border-top-color: #1890ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+    }
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}

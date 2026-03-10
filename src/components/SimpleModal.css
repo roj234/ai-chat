@@ -1,0 +1,96 @@
+/* Modal.css - Uses provided CSS variables for theming */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0,0,0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+.modal {
+    background-color: var(--panel-2);
+    border-radius: var(--border-radius-md);
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 12px var(--bg);
+    max-width: 500px;
+    width: 90%;
+    max-height: 80vh;
+    animation: bounceIn 0.3s ease-out;
+    transform-origin: center;
+
+    & >div {
+        padding: 12px 20px;
+    }
+    & .header {
+        background-color: var(--panel);
+        border-bottom: 1px solid var(--border);
+        font-size: 1.2em;
+    }
+
+    & .body {
+        color: var(--muted);
+        overflow: auto;
+
+        /* For input mode, ensure the body has space for the input */
+        &:has(.modal-input) {
+            min-height: 60px;
+        }
+
+        & p {
+            margin: 0;
+            line-height: 1.5;
+            font-size: 16px;
+            white-space: pre-wrap;
+        }
+
+        & input, textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-size: 1em;
+            background-color: var(--bg);
+
+            &:focus {
+                border-color: var(--accent);
+                box-shadow: 0 0 0 2px rgba(52, 181, 250, 0.2); /* Using --color-focused with opacity */
+            }
+        }
+    }
+
+    & .btn {
+        border-radius: 4px;
+        transition: background-color 0.2s ease;
+    }
+
+    & .footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        padding-top: 0;
+    }
+}
+
+/* Simple CSS Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes bounceIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9) translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}

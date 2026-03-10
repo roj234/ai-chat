@@ -1,0 +1,5 @@
+.edit-widget {
+    overflow: hidden;
+    font-size: inherit !important;
+    transition-property: border !important;
+}

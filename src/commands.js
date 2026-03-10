@@ -1,7 +1,14 @@
-import {showToast} from "./Toast.js";
-import {config, defaultConfig, selectedConversation} from "./states.js";
+import {showToast} from "./components/Toast.js";
+import {beginConversation, messages, selectedConversation} from "./states.js";
 import {duplicateConversation} from "./data-exchange.js";
-import {updateConversation} from "./idb.js";
+import {updateConversation} from "./database.js";
+import {loadPreset} from "./components/PresetDropdown.jsx";
+
+/**
+ *
+ * @type {Record<string, function(string, Record<string, string>): void>}
+ */
+export const COMMANDS = {};
 
 /**
  *
@@ -32,31 +39,26 @@ export function handleCommand(element) {
 
 		switch (command) {
 			default:
-				showToast("未知的指令", 'error');
-				return true;
-			case "savepreset":
-				const preset = Object.assign({}, config);
-				preset._presetName = parameters.name;
-
-				for (const key in preset) {
-					if (preset[key] == defaultConfig[key]) {
-						delete preset[key];
-					}
+				const customHandler = COMMANDS[command];
+				if (customHandler) customHandler(command, parameters);
+				else {
+					showToast("未知的指令", 'error');
+					return true;
 				}
-
-				localStorage[UC_PERSIST_STORE+":preset:"+parameters.name] = JSON.stringify(preset);
-				showToast("已保存", 'success');
-				break;
-			case "loadpreset":
-				const oldData = localStorage[UC_PERSIST_STORE+":preset:"+parameters.name];
-				if (oldData) {
-					Object.assign(config, defaultConfig);
-					Object.assign(config, JSON.parse(oldData));
+			break;
+			case "preset":
+				if (loadPreset(parameters.name)) {
 					showToast("已加载", 'success');
 				}
-				break;
-			case "copy":
+			break;
+			case "clear":
+				messages.length = 0;
+			break;
+			case "dup":
 				duplicateConversation();
+			break;
+			case "new":
+				beginConversation();
 				break;
 			case "title":
 				if (!selectedConversation.value) {
@@ -66,14 +68,16 @@ export function handleCommand(element) {
 
 				selectedConversation.title = parameters.title;
 				updateConversation(selectedConversation.value);
-				break;
+			break;
+			case "":
 			case "help":
-				element.value = `/# => 帮助菜单
-/savepreset <name> 保存当前设定
-/loadpreset <name> 读取之前设定
-/listpreset 列出所有设定 (未实现)
-/copy 另存当前会话
-/title <title> 设置当前会话标题
+				element.value = `/# 指令速查
+/preset name=<name> 读取设定
+/prompt name=<name> 使用之前保存的系统提示词模板 (未实现)
+/dup 复制(备份)当前对话
+/new 开启新对话
+/clear 清空当前对话
+/title title=<title> 设置对话标题
 `;
 				element.dispatchEvent(new InputEvent("input"));
 				return true;

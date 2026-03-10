@@ -1,0 +1,22 @@
+{
+  "meta": { "name": "Modern-Tech-Done", "version": "1.0" },
+  "config": {
+    "oscType": "sine",
+    "pitchMod": 1.05,       // 结束时的频率倍数 (1.05 表示微升)
+    "adsr": {
+      "attack": 0.01,      // 快速攻击 (秒)
+      "decay": 0.1,       // 衰减 (秒)
+      "sustain": 0.3,     // 维持音数平 (0-1)
+      "release": 0.2      // 释放 (秒)
+    },
+    "filter": {
+      "type": "lowpass",   // 滤波器类型
+      "frequency": 2000,   // 截止频率
+      "q": 1               // 共振峰
+    }
+  },
+  "sequence": [
+    { "freq": 1318.51, "time": 0, "duration": 0.15, "velocity": 0.8 },
+    { "freq": 1760.00, "time": 0.08, "duration": 0.25, "velocity": 1.0 }
+  ]
+}

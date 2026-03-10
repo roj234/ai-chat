@@ -1,0 +1,220 @@
+/* 基础变量与重置 */
+.preset-panel {
+    --panel-width: 400px;
+    --accent: #8ab4f8;
+    --danger: #f28b82;
+
+    font-family: 'Segoe UI', Roboto, sans-serif;
+
+    position: fixed;
+    right: calc(-1 * var(--panel-width));
+    width: var(--panel-width);
+    max-width: 85vw; /* 移动端最大宽度 */
+    height: 100%;
+    background: var(--card);
+    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    transition: right 0.3s ease;
+
+    z-index: 20;
+
+    &.open {
+        right: 0;
+    }
+
+    & .filter {
+        border: none;
+    }
+
+    /* 头部 */
+    & .header {
+        padding: 1rem;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    & .title {
+        margin: 0;
+        font-size: 1.25rem;
+        color: var(--text);
+        font-weight: 600;
+    }
+
+    & .add-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4em;
+        background: var(--accent);
+        color: #1a1a2e;
+        border: none;
+        border-radius: 6px;
+        padding: 0.45em 0.9em;
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.2s, transform 0.1s;
+
+        &:hover {
+            background: #a5c7ff;
+        }
+
+        &:active {
+            transform: scale(0.97);
+        }
+    }
+
+    /* 列表 */
+    & ul {
+        flex: 1;
+        overflow-y: auto;
+        margin: 0;
+        padding: 0;
+
+        &::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        &::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        &::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 3px;
+        }
+    }
+
+    & .details {
+        margin: 0 0.5rem;
+    }
+
+    /* 单个列表项 */
+    & .summary {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        padding: var(--spacing-sm) var(--spacing-lg);
+        border-bottom: 1px solid var(--border);
+        transition: background 0.15s;
+
+        &:hover {
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        & .index {
+            color: var(--muted);
+            font-size: 0.8rem;
+            min-width: 1.5em;
+            text-align: right;
+        }
+
+        & .name {
+            flex: 1;
+            color: var(--text);
+            font-size: 0.95rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* 开关 */
+        & .switch {
+            position: relative;
+            display: inline-block;
+            width: 42px;
+            height: 24px;
+            flex-shrink: 0;
+        }
+
+        & .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        & .slider {
+            position: absolute;
+            cursor: pointer;
+            inset: 0;
+            background: #555;
+            border-radius: 24px;
+            transition: background 0.25s;
+        }
+
+        & .slider::before {
+            content: '';
+            position: absolute;
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background: #ddd;
+            border-radius: 50%;
+            transition: transform 0.25s;
+        }
+
+        & .switch input:checked + .slider {
+            background: var(--accent);
+        }
+
+        & .switch input:checked + .slider::before {
+            transform: translateX(18px);
+        }
+    }
+
+}
+
+/* 编辑/展开按钮 */
+.preset-panel__edit-btn,
+.preset-panel__delete-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1.1rem;
+    transition: background 0.15s, color 0.15s;
+    flex-shrink: 0;
+}
+
+.preset-panel__edit-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text);
+}
+
+.preset-panel__delete-btn {
+    color: var(--danger);
+}
+
+.preset-panel__delete-btn:hover {
+    background: rgba(242, 139, 130, 0.15);
+    color: #ffb3b3;
+}
+
+/* 响应式：移动端优化 */
+@media (max-width: 768px) {
+    .preset-panel {
+        width: 85vw;
+        max-width: 400px;
+
+        & .header {
+            padding: 0.75rem;
+        }
+
+        & .title {
+            font-size: 1.1rem;
+        }
+    }
+}
+
+.body.st\|char .think>summary {
+    font-size: 14px;
+}
