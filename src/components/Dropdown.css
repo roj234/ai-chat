@@ -1,0 +1,110 @@
+/* 容器 */
+.pretty-select {
+    position: relative;
+    width: 100%;
+    user-select: none;
+
+    --chip-bg: rgb(28, 30, 34);
+    --border-radius: 0px;
+
+    & .input {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 12px;
+        background-color: var(--bg);
+        border-top: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    & .input:hover {
+        color: var(--muted);
+        border-color: var(--chip-hover);
+        background-color: var(--chip-bg);
+    }
+}
+
+.filter { border-top: none; }
+
+/* 箭头旋转动画 */
+.arrow-icon {
+    transition: transform 0.2s ease;
+    opacity: 0.6;
+}
+
+.pretty-select.open .arrow-icon {
+    transform: rotate(180deg);
+}
+
+/* 下拉菜单面板 */
+.pretty-select > ul {
+    all: unset;
+    bottom: 100%;
+
+    position: absolute;
+    left: 0;
+    right: 0;
+    background-color: var(--chip-bg);
+    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    display: none;
+    z-index: 99;
+
+    max-height: 250px;
+    overflow-y: auto;
+
+    /* 显示菜单 */
+    .open & {
+        display: block;
+        animation: fadeIn 0.15s ease-out;
+    }
+}
+
+/* 选项样式 */
+.pretty-select li {
+    padding-left: 12px;
+    color: var(--muted);
+    font-size: 13px;
+    border: 1px solid transparent;
+
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    &:hover {
+        color: var(--text) !important;
+        border-color: var(--muted);
+    }
+
+    &.selected {
+        border-color: var(--chip-active-border);
+        color: #c9d1d9;
+    }
+
+    & > * {
+        padding: 10px 12px;
+    }
+    & i {
+        color: var(--muted);
+
+        cursor: pointer;
+        padding: 4px;
+        border: 1px solid transparent;
+
+        &:hover {
+            color: var(--text);
+            border-color: var(--border);
+        }
+
+        &.clicked {
+            color: red;
+        }
+    }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+}

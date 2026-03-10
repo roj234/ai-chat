@@ -3,26 +3,29 @@
 <head>
   <meta charset="UTF-8"/>
   <title>爱聊天</title>
-  <meta name="viewport" content="initial-scale=1.0,maximum-scale=1,width=device-width,viewport-fit=cover">
+  <meta name="viewport" content="initial-scale=1.0,width=device-width,viewport-fit=cover">
   <meta name="description" content="AiChat – your personal assistant.">
   <meta name="keywords" content="AI,chat,assistant">
+  <link rel="stylesheet" href="vendor/normalize.css" />
+  <link rel="stylesheet" href="vendor/remixicon/remixicon.css" />
   <link rel="stylesheet" href="src/style.css" />
-  <link rel="preload" as="font" crossorigin href="src/iconfont.woff2" />
+  <link rel="preload" as="font" crossorigin href="vendor/remixicon/remixicon.woff2" />
   <script type="module" src="src/app.js" async></script>
 </head>
 <body class="app" id="app">
-<div id="loading" style="
-position: fixed;
-inset: 0;
-display: flex;
-flex-direction: column;
-justify-content: center;
-align-items: center;
-background: #8886;
-z-index: 99;
-transition: opacity 2s ease;
-">
+<div id="loading">
   <style>
+    #loading {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background: #8886;
+      z-index: 99;
+      transition: opacity 0.6s ease;
+    }
     .spinner {
       stroke-dasharray: 0 75;
       stroke-linecap: round;
@@ -31,9 +34,9 @@ transition: opacity 2s ease;
       transform-origin: center;
       animation:
               dash 1.5s ease-in-out infinite,
-              spin1 2s linear infinite;
+              spin 2s linear infinite;
     }
-    @keyframes spin1 {
+    @keyframes spin {
       to { transform: rotate(360deg); }
     }
     @keyframes dash {

@@ -1,0 +1,67 @@
+.ntp {
+    display: flex;
+    height: 64dvh;
+    max-width: 768px;
+
+    & >div {
+        padding: 0;
+    }
+
+    & .sidebar-list {
+        padding: 1rem 0;
+        width: 200px;
+        flex-shrink: 0;
+    }
+
+    & .header {
+        padding: 8px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    & span.group {
+        display: flex;
+        gap: 8px;
+    }
+}
+
+#app.tr {
+    & .sidebar {
+        display: none;
+    }
+    & .ntp {
+        background: transparent;
+        & .filter {
+            background: transparent;
+        }
+    }
+}
+
+@media screen and (max-width: 768px) {
+    .ntp {
+        width: 100%;
+        min-height: 100%;
+
+        flex-direction: column;
+
+        & .sidebar-list {
+            width: 100%;
+            padding: 0;
+            scrollbar-gutter: unset;
+            touch-action: pan-x;
+
+            & ._vl {
+                padding: 0;
+                flex-direction: row;
+                width: 100%;
+                overflow: auto;
+
+                &::-webkit-scrollbar {
+                    display: none;
+                }
+            }
+        }
+    }
+}
+

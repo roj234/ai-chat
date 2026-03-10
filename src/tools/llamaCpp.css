@@ -1,0 +1,23 @@
+.llama {
+    display: flex;
+    flex-direction: column;
+
+    height: 200px;
+    gap: 8px;
+
+    overflow-y: scroll;
+
+    & > .model {
+        background: var(--chip-bg);
+
+        padding: 0 10px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+
+        & > div {
+            display: flex;
+            flex-direction: column;
+        }
+    }
+}

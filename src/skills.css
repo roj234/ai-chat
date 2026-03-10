@@ -1,0 +1,96 @@
+
+/* 2026 科技风工具激活卡片样式 */
+.skills {
+    display: flex;
+    padding: 10px 16px;
+    border: 1px dashed rgba(255, 255, 255, 0.2);
+    border-radius: 12px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 激活状态下的微光效果 */
+.skills:not(.revoked) {
+    border-color: var(--chip-active-border);
+    box-shadow: 0 0 15px rgba(59, 130, 246, 0.1);
+}
+
+/* 撤销后的置灰处理 */
+.skills.revoked {
+    opacity: 0.6;
+    filter: grayscale(0.8);
+    border-style: dotted;
+}
+
+.tool-label-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
+.tool-tag {
+    background: rgba(59, 130, 246, 0.1);
+    color: #60a5fa;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 0.75rem;
+    border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.revoke-btn {
+    background: transparent;
+    color: #f43f5e;
+    border: 1px solid #f43f5e;
+    padding: 4px 12px;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.revoke-btn:hover {
+    background: #f43f5e;
+    color: white;
+    box-shadow: 0 0 10px rgba(244, 63, 94, 0.3);
+}
+
+.revoked-status {
+    color: #64748b;
+    padding: 5px 0;
+    font-size: 0.75rem;
+    font-style: italic;
+    gap: 4px;
+}
+
+/* Loading 样式 */
+.think {
+    & .my-loading {
+        display: flex;
+        gap: 10px;
+        padding: 8px 12px;
+        border-radius: 8px;
+        cursor: inherit;
+        font-size: 14px;
+        letter-spacing: 1px;
+    }
+
+    /* 闪烁的呼吸点 */
+    & .status-dot {
+        width: 8px;
+        height: 8px;
+        background-color: var(--accent);
+        border-radius: 50%;
+        position: relative;
+        box-shadow: 0 0 8px rgba(59, 130, 246, 0.6);
+        animation: pulse 1.5s infinite ease-in-out;
+    }
+}
+
+@keyframes pulse {
+    0% { transform: scale(0.95); opacity: 0.5; }
+    50% { transform: scale(1.2); opacity: 1; box-shadow: 0 0 12px rgba(59, 130, 246, 0.9); }
+    100% { transform: scale(0.95); opacity: 0.5; }
+}

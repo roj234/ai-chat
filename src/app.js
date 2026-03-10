@@ -1,31 +1,46 @@
-import {$computed, $foreach, $state, $unwatch, $watch, appendChildren} from 'unconscious';
+import {$foreach, $state, $unwatch, $watch, appendChildren} from 'unconscious';
 import Filter from 'unconscious/ext/components/Filter.jsx';
-import {ConversationList} from "./ConversationList.jsx";
-import {listConversations, newConversation} from "./idb.js";
-import {SETTING_CONFIG} from "./Setting.js";
-import {copyCodeEventHandler} from "./markdown-stream.js";
-import {copy, Elements, jsHide, prettyError} from "./utils.js";
-import {copyMessageHandler, MessageList} from "./MessageList.jsx";
-import {config, conversations, messages, selectedConversation, state} from "./states.js";
-import {abortCompletion, sendMessage} from "./api-request.js";
-import {importConversationData, messagesToText, textToMessages} from './data-exchange.js';
-import './iconfont.css';
-import {showToast} from "./Toast.js";
+import {ConversationList} from "./components/ConversationList.jsx";
+import {listConversations, newConversation} from "./database.js";
+import {SETTING_UI_CONFIG} from "./setting-ui.js";
+import {bind, jsHide, onWindowLoad, prettyError, throttled} from "./utils.js";
+import {MessageList} from "./components/MessageList.jsx";
+import {
+	config,
+	conversations,
+	updateModels,
+	messages,
+	selectedConversation,
+	state,
+	models,
+	Shared,
+	isMobile,
+	inputText,
+	beginConversation,
+	countTokens,
+	isLlamaCppBackend,
+	lastScrollDirection
+} from "./states.js";
+import {abortCompletion, sendUserChatMessage, setStatus} from "./api-request.js";
+import {showToast} from "./components/Toast.js";
 import {handleCommand} from "./commands.js";
+import {MobileTitleEdit} from "./components/MobileTitleEdit.jsx";
 
-const $ = sel => document.querySelector(sel);
+import "./tools/PluginRegistry.js";
+import {SettingDialog} from "./components/SettingDialog.jsx";
+
+const $ = sel => document.getElementById(sel);
 
 /**
  * @type {HTMLElement}
  */
-let rawText, messagesPanel, rawPanel,
-	userInput, messagesEl, sendBtn,
-	statusBadge, sidebar, settingWrapper,
-	thinkBtn, toolCallBtn, scroller, copyBtn;
-/**
- * @type {Filter}
- */
-let SettingUI;
+let messagesPanel,
+	userInput, sendBtn,
+	statusBadge, sidebar,
+	thinkBtn, toolCallBtn, scroller;
+
+const SettingUI = <Filter config={SETTING_UI_CONFIG} choices={config} onChange={onSettingChanged} isMobile={isMobile} />;
+const newSettingUI = <SettingDialog oldUI={SettingUI}/>;
 
 /**
  * @type CSSStyleDeclaration
@@ -38,92 +53,141 @@ const rootStyle = document.querySelector(":root").style;
  */
 const attachments = $state([]);
 
-// /**
-//  *
-//  * @type {Reactive<string>}
-//  */
-// const presetName = $state("");
-
-const openSidebar = () => jsHide(sidebar);
-const beginConversation = () => {
-	selectedConversation.value = null;
-	messages.value = [];
+const toggleSidebar = () => {
+	if (!newSettingUI.style.display) jsHide(newSettingUI);
+	jsHide(sidebar);
 };
 
-const fileInput = <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" />;
+
+const fileInput = <input type="file" accept="image/png,image/jpeg,image/bmp,image/gif,audio/wav,audio/mp3,audio/flac,text/plain" multiple />;
+
+const delayedCountTokens = throttled(() => {
+	if (!config.countTokens) return;
+
+	const value = userInput.value;
+	if (!value) {
+		setStatus("");
+		return
+	}
+
+	if (isLlamaCppBackend) {
+		countTokens(value).then(token_count => {
+			setStatus(token_count+" Tokens");
+		});
+	}
+}, 200);
+
+
+let touchStartY = 0;
+const markdownTableScrollHandler = (event) => {
+	const target = event.target.closest("table");
+	if (!target) return;
+
+	const scrollLeft = target.scrollLeft;
+	if (event.deltaY > 0 ? scrollLeft < target.scrollWidth - target.clientWidth : scrollLeft > 0) {
+		// 阻止浏览器默认的垂直滚动行为
+		event.preventDefault();
+
+		// noinspection JSSuspiciousNameCombination
+		target.scrollLeft += event.deltaY;
+	}
+};
+
+const scrollActionHandler = (side) => {
+	const top = scroller.scrollTop;
+	requestAnimationFrame(() => {
+		if (scroller.scrollTop !== top) {
+			lastScrollDirection.value = side;
+		}
+	});
+};
 
 const App = (<>
-	<div className="floatbar">
-		<button className="btn sm ghost" title="展开侧边栏" onClick={openSidebar}><i className="i arrow-right"></i>
-		</button>
-		<button className="btn sm ghost" title="开启新对话" onClick={beginConversation}><i className="i plus"></i>
-		</button>
-	</div>
-	<div ref={sidebar} className="sidebar hide">
-		<div className="setting hide" style="display: none; left: -100%" ref={settingWrapper}>
-			<Filter ref={SettingUI} config={SETTING_CONFIG} choices={config} onChange={onSettingChanged}></Filter>
+	<header className={"header"} class:closed={() => !selectedConversation.value}>
+		<div className="bar">
+			<div style={"justify-self: start"}>
+				<button className="ri-menu-line btn ghost" title="展开侧边栏" onClick={toggleSidebar}></button>
+			</div>
+			<MobileTitleEdit/>
+			<div style={"justify-self: end"}>
+				<button className="ri-add-line btn ghost" title="开启新对话" onClick={beginConversation}></button>
+			</div>
 		</div>
+	</header>
+	{newSettingUI}
+	<aside ref={sidebar} className="sidebar hide" style={isMobile?"display:none;left:-100%":undefined}>
 		<div className="sidebar-header">
-			<button className="btn secondary" style="flex: 1" onClick={beginConversation}><i className="i plus"></i>开启新对话
+			<button className="btn secondary" style="flex: 1" onClick={beginConversation}><i
+				className="ri-add-line"></i>开启新对话
 			</button>
-			<button className="btn sm ghost" title="收起侧边栏" onClick={openSidebar}><i className="i arrow-left"></i>
-			</button>
+			<button className="ri-arrow-left-s-line btn ghost" title="收起侧边栏" onClick={toggleSidebar}></button>
 		</div>
-		<ConversationList></ConversationList>
+		<ConversationList/>
 		<div className="spacer"></div>
 		<div className="sidebar-header">
-			<h4>&copy; 2026 Roj234 | AiChat</h4>
-			<button className="btn ghost" title="设置" onClick={() => {
-				jsHide(settingWrapper);
-			}}><i className="i settings"></i>
-			</button>
+			<a style={{fontSize: "14px", userSelect: "none", fontWeight: 700, color: "var(--text)"}}
+			   href={"https://github.com/roj234/ai-chat"} target={"_blank"} title={"检查更新"}>爱聊天 | v{APP_VERSION}</a>
+			<button className="ri-wrench-line btn ghost" title="设置" onClick={() => jsHide(newSettingUI)}></button>
 		</div>
-	</div>
-	<div ref={scroller} className="chat scroll">
+		<div className={"bg"} onClick={toggleSidebar}></div>
+	</aside>
+	<div ref={scroller} className="chat scroll"
+		 onWheel.noPassive={e => {
+			 lastScrollDirection.value = e.deltaY < 0;
+			 markdownTableScrollHandler(e);
+		 }}
+		 onTouchStart.passive={e => {
+			 touchStartY = e.touches[0].clientY;
+		 }}
+		 onTouchMove.passive={e => {
+			 const touchY = e.touches[0].clientY;
+			 scrollActionHandler(touchY > touchStartY)
+		 }}
+	>
 		<div ref={messagesPanel} className="panel no-messages">
-			<div ref={messagesEl}>
-				<MessageList></MessageList>
-			</div>
-
-			<div className="composer">
+			<MessageList/>
+			<div className="composer" class:hidden={() => isMobile && lastScrollDirection.value}>
 				<div className="logo">
-					<svg viewBox="0 0 35 26" style="width: 70px; height: 52px">
-						<path fill="var(--accent)"
-							  d="M33.615 2.598c-.36-.176-.515.16-.726.33-.072.055-.132.127-.193.193-.526.562-1.14.93-1.943.887-1.174-.067-2.176.302-3.062 1.2-.188-1.107-.814-1.767-1.766-2.191-.498-.22-1.002-.441-1.35-.92-.244-.341-.31-.721-.433-1.096-.077-.226-.154-.457-.415-.496-.282-.044-.393.193-.504.391-.443.81-.614 1.702-.598 2.605.04 2.033.898 3.652 2.603 4.803.193.132.243.264.182.457-.116.397-.254.782-.376 1.179-.078.253-.194.308-.465.198-.936-.391-1.744-.97-2.458-1.669-1.213-1.173-2.31-2.467-3.676-3.48a16.254 16.254 0 0 0-.975-.668c-1.395-1.354.183-2.467.548-2.599.382-.138.133-.612-1.102-.606-1.234.005-2.364.42-3.803.97a4.34 4.34 0 0 1-.66.193 13.577 13.577 0 0 0-4.08-.143c-2.667.297-4.799 1.558-6.365 3.712C.116 8.436-.327 11.378.215 14.444c.57 3.233 2.22 5.91 4.755 8.002 2.63 2.17 5.658 3.233 9.113 3.03 2.098-.122 4.434-.403 7.07-2.633.664.33 1.362.463 2.518.562.892.083 1.75-.044 2.414-.182 1.04-.22.97-1.184.593-1.36-3.05-1.421-2.38-.843-2.99-1.311 1.55-1.834 3.918-5.093 4.648-9.531.072-.49.164-1.18.153-1.577-.006-.242.05-.336.326-.364a5.903 5.903 0 0 0 2.187-.672c1.977-1.08 2.774-2.853 2.962-4.978.028-.325-.006-.661-.35-.832ZM16.39 21.73c-2.956-2.324-4.39-3.089-4.982-3.056-.554.033-.454.667-.332 1.08.127.407.293.688.526 1.046.16.237.271.59-.161.854-.952.589-2.607-.198-2.685-.237-1.927-1.134-3.537-2.632-4.673-4.68-1.096-1.972-1.733-4.087-1.838-6.345-.028-.545.133-.738.676-.837A6.643 6.643 0 0 1 5.086 9.5c3.017.441 5.586 1.79 7.74 3.927 1.229 1.217 2.159 2.671 3.116 4.092 1.02 1.509 2.115 2.946 3.51 4.125.494.413.887.727 1.263.958-1.135.127-3.028.154-4.324-.87v-.002Zm1.417-9.114a.434.434 0 0 1 .587-.408c.06.022.117.055.16.105a.426.426 0 0 1 .122.303.434.434 0 0 1-.437.435.43.43 0 0 1-.432-.435Zm4.402 2.257c-.283.116-.565.215-.836.226-.421.022-.88-.149-1.13-.358-.387-.325-.664-.506-.78-1.073-.05-.242-.022-.617.022-.832.1-.463-.011-.76-.338-1.03-.265-.22-.603-.28-.974-.28a.8.8 0 0 1-.36-.11c-.155-.078-.283-.27-.161-.508.039-.077.227-.264.271-.297.504-.286 1.085-.193 1.623.022.498.204.875.578 1.417 1.107.553.639.653.815.968 1.295.25.374.476.76.632 1.2.094.275-.028.5-.354.638Z"></path>
-					</svg>
-					DeepSleep
+					<span style={{
+						display: "flex",
+						alignItems: "flex-end",
+					}}
+						  dangerouslySetInnerHTML={() => config.name === "default" ? "<span class='ri-ai' style='font-size:40px'></span>Chat" : config.name}></span>
+
+					<span style={{
+						height: "80px",
+						color: "var(--accent)"
+					}} className="ri-chat-smile-ai-fill"></span>
 				</div>
-				<div className="controls">
-					<div className="badge" ref={statusBadge}>v1.5.0</div>
-					<div className="hint">提示：Shift+Enter 换行</div>
-					<div className="spacer"></div>
-				</div>
+				{/*我们可能很快不再需要这个了（或者仅用于调试？）*/}
+				<div className="controls"><span ref={statusBadge}></span></div>
 				<div className="query">
-					<textarea placeholder="今天有什么可以帮到你？"
+					<textarea placeholder="今天有什么能帮到你？"
 							  id="userInput" ref={userInput}
 							  onInput={() => {
+								  delayedCountTokens();
+
 								  // Auto resize when typing
 								  userInput.style.height = '';
 								  userInput.style.height = (userInput.scrollHeight) + 'px';
-
-								  sendBtn.disabled = !allowClickSendBtn() && !userInput.value.trim();
 							  }}
 							  onKeyDown={(e) => {
+								  if (isMobile) return;
 								  if (e.key === 'Enter' && !e.shiftKey) {
 									  e.preventDefault();
-									  if (!abortCompletion) onSend();
+									  if (!abortCompletion.value) onSend();
 								  }
 							  }}
 					></textarea>
 					<div className="controls">
-						<button className="chip" class:active={$computed(() => config.think)} ref={thinkBtn}
+						<button className="chip" class:active={() => config.think} ref={thinkBtn}
 								onClick={() => {
 									config.think ^= true;
 								}}>
 							<div className="tooltip">先思考后回答，解决复杂问题</div>
 							深度思考
 						</button>
-						<button className="chip" class:active={$computed(() => config.tools)} ref={toolCallBtn}
+						<button className="chip" class:active={() => config.tools} ref={toolCallBtn}
 								onClick={() => {
 									config.tools ^= true;
 								}}>
@@ -131,57 +195,68 @@ const App = (<>
 							工具调用
 						</button>
 						<div className="spacer"></div>
-						<button className="btn ghost i attach" title="上传图片" onClick={() => fileInput.click()}></button>
-						<button className="btn" ref={sendBtn} onClick={onSend}></button>
+						<button className="ri-attachment-2 btn ghost" title="上传附件"
+								onClick={() => fileInput.click()}></button>
+						<button ref={sendBtn} onClick={onSend}></button>
 					</div>
-					<div className="attachments" onClick.delegate(".attachment button")={(e) => {
+					<div className="attachments" onClick.delegate{".attachment button"}={(e) => {
 						const element = e.target.closest('.attachment');
 						const index = Array.prototype.indexOf.call(element.parentElement.children, element);
 						attachments.splice(index, 1);
 						element.remove();
 					}}>{
-						$foreach(attachments, (f, i) => {
-							return <div className="attachment">
-								<img src={f.image_url.url} alt="附件预览"/>
-								<button className="delete" type="button">×</button>
-							</div>
+						$foreach(attachments, (att) => {
+							const DeleteBtn = <button className="delete ri-close-line"></button>;
+
+							switch (att.type) {
+								case "image_url":
+									return (
+										<div className="attachment image-part">
+											<img
+												src={typeof att.image_url.url === 'string' ? att.image_url.url : att.image_url.url.toUrl()}
+												alt="预览"/>
+											{DeleteBtn}
+										</div>
+									);
+
+								case "text":
+									return (
+										<div className="attachment text-part" style={"--format: \"TXT\""}>
+											<div className="text-preview">
+												{att.text.length > 50 ? att.text.substring(0, 47) + "..." : att.text}
+											</div>
+											{DeleteBtn}
+										</div>
+									);
+
+								case "input_audio":
+									return (
+										<div className="attachment audio-part"
+											 style={`--format: "${att.input_audio.format}"`}>
+											<div className="ri-volume-up-fill"></div>
+											{DeleteBtn}
+										</div>
+									);
+							}
 						})
 					}</div>
 				</div>
-				<div className="hint" style="text-align: center">尽信LLM不如无LLM</div>
+				<div className="hint"
+					 style="text-align:center">{() => messages.length ? "内容由AI生成，可能包含错误，请仔细甄别" : isMobile ? "欢迎使用" : "Shift+Enter 换行"}</div>
 			</div>
-		</div>
-		<div id="rawPanel" ref={rawPanel} className="panel" style="display:none;">
-			<div className="row" style="justify-content: space-between">
-				<div className="badge">文本视图</div>
-				<button className="btn sm ghost i copy" title="复制" ref={copyBtn}
-						onClick={() => copy(rawText.value, copyBtn)}></button>
-			</div>
-			<textarea ref={rawText} className="raw-text" placeholder="[system] ...
-[user] ...
-[assistant] ...
-"
-					  onChange={() => rawTextChanged = true}></textarea>
 		</div>
 	</div>
 </>);
 
-messagesEl.addEventListener("click", copyCodeEventHandler);
-messagesEl.addEventListener("click", copyMessageHandler);
+bind(userInput, inputText);
 
-Elements.scroller = scroller;
-Elements.messages = messagesEl;
-Elements.statusBadge = statusBadge;
+Shared.scroller = scroller;
+Shared.statusBadge = statusBadge;
+Shared.SettingUI = SettingUI;
+Shared.toggleSidebar = toggleSidebar;
 
-// Mount
-appendChildren($("body"), App);
-
-
-let rawTextChanged;
-
-function updateRawText() {
-	rawText.value = messagesToText(messages);
-	rawTextChanged = false;
+function toggleSettingUI(id, display) {
+	newSettingUI.showHide(id, display);
 }
 
 /**
@@ -192,100 +267,210 @@ function updateRawText() {
  * @return {null|string}
  */
 function onSettingChanged(id, newValue, oldValues) {
-	if (id === 'edit') {
-		const oldEdit = config.edit;
-		if (oldEdit && !newValue && rawTextChanged) {
-			try {
-				const msg = textToMessages(rawText.value || '');
-				messages.value = msg;
-				if (!selectedConversation.value) {
-					importConversationData({messages: msg});
-				}
-				showToast('解析成功', 'ok');
-			} catch (e) {
-				showToast(e);
-				return 'fail';
-			}
+	/*if (oldValues) {
+		if (!config.name.startsWith("*")) {
+			config.name = "*"+config.name;
 		}
-
-		messagesPanel.style.display = newValue ? 'none' : '';
-		rawPanel.style.display = newValue ? '' : 'none';
-		if (newValue) updateRawText();
-	}
+	}*/
 
 	if (id === 'template') {
 		try {
-			state.completionTemplate = Function("messages", "return " + (newValue || "messages => messages.map(m => `${m.role}: ${m.content}`).join(\'\\n\\n\')"));
+			const fn = Function("messages", "return " + (newValue || "messages.map(m => `${m.role}: ${m.content}`).join(\'\\n\\n\')"));
+			fn([{role: "user",content:"a"}]).charAt(0);
+			state.completionTemplate = fn;
 		} catch (e) {
 			if (oldValues) return e;
 			showToast("无法加载提示词模板: " + prettyError(e));
 		}
 	}
 
-	if (id === 'customBody') {
+	function betterJsonParse(str) {
 		try {
-			state.customBody = newValue ? JSON.parse(newValue) : null;
+			return JSON.parse(str);
+		} catch (e) {
+			str = str.replaceAll(/[\r\n]+/g, ",").replaceAll(/,([{},\[\]]|$)/g, (match, args) => args);
+
+			try {
+				return JSON.parse("["+str+"]");
+			} catch {}
+
+			if (str.includes(":")) {
+				try {
+					return JSON.parse("{"+str+"}");
+				} catch {}
+			}
+
+			throw e;
+		}
+
+	}
+
+	if (id.endsWith("#")) {
+		id = id.replaceAll(/[^a-zA-Z0-9_]/g, "");
+		try {
+			let data;
+			if (newValue) {
+				data = betterJsonParse(newValue);
+				if (id === 'additionalBody') {
+					if (Object.prototype.toString.call(data) !== "[object Object]") return "只接受对象";
+				} else if (id === 'antiSlop') {
+					if (Array.isArray(data)) {
+						let obj = {};
+						for (const x of data) {
+							new RegExp(x);
+							obj[x] = 1;
+							if (typeof x !== "string")
+								return "只接受字符串数组";
+						}
+						data = obj;
+					} else {
+						if (Object.prototype.toString.call(data) !== "[object Object]") return "只接受数组或对象";
+
+						for (const k in data) {
+							const v = data[k];
+							new RegExp(k);
+							if (typeof v !== "number" || v <= 0 || v > 1)
+								return "概率必须是(0,1]之间的数字";
+						}
+					}
+				} else if (id === "stop") {
+					if (!Array.isArray(data)) return "只接受字符串数组";
+					for (const x of data)
+						if (typeof x !== "string")
+							return "只接受字符串数组";
+				} else if (id === "logit_bias") {
+					if (Object.prototype.toString.call(data) !== "[object Object]") return "只接受对象";
+					for (const k in data) {
+						const v = data[k];
+						if (typeof v !== "number")
+							return "概率必须是数字";
+					}
+				}
+			}
+			state[id] = data;
 		} catch (e) {
 			if (oldValues) return e;
-			showToast("无法加载自定义请求体: " + prettyError(e));
+			showToast(id+" 数据解析失败: " + prettyError(e));
 		}
 	}
 
 	if (id === 'mode') {
-		const displayTemplate = newValue === 'completion';
-		SettingUI.querySelector("[data-id='template']").style.display = displayTemplate ? '' : 'none';
+		const isTextCompletion = newValue === 'completions';
+		$("app").classList.toggle('tc', isTextCompletion);
+		toggleSettingUI('template', isTextCompletion);
+		toggleSettingUI('reasoning', !isTextCompletion);
+		toggleSettingUI('CoTPrompt', !isTextCompletion && config.reasoning === false);
 	}
+	if (id === 'reasoning') toggleSettingUI('CoTPrompt', newValue === false);
+	if (id === 'generateTitle') toggleSettingUI('titleModel', newValue === true);
 
-	if (id === 'width') {
-		rootStyle.setProperty("--panel-width", newValue + "px");
-	}
+	if (id === 'width') rootStyle.setProperty("--panel-width", newValue + "px");
 }
 
-function allowClickSendBtn() {
-	sendBtn.innerText = abortCompletion ? "中止" : "发送";
-	if (abortCompletion) return true;
+// Mount
+onWindowLoad(() => {
+	const APP = $("app");
+	appendChildren(APP, App);
 
-	if (!messages.length) return false;
+	APP.append(<datalist id="ac-models">{$foreach(models, model =>
+		<option value={model.id || model.model || model.name} label={model.name} title={model.description}/>)
+	}</datalist>);
+	const modelInput = SettingUI.querySelector('[data-id="model"] input');
+	modelInput.setAttribute("list", "ac-models");
+	modelInput.addEventListener("focus", () => updateModels());
+});
+
+/**
+ *
+ * @param {number} state
+ */
+function setSendBtnIcon(state) {
+	const x = ["发送", "中止", "继续", "重试", "执行工具"];
+	const y = ["ri-send-plane-fill", "ri-square-fill", "ri-play-large-fill", "ri-loop-right-line", "ri-function-ai-line"/* ri-check-double-line */];
+	sendBtn.className = y[state]+" btn primary";
+	sendBtn.title = x[state];
+}
+const button_state_map = {
+	stop: 0,
+	interrupt: 2,
+	length: 2,
+	error: 3,
+	tool_calls: 4
+};
+
+function hasOtherSendBtnAction() {
+	const value = abortCompletion.value;
+	setSendBtnIcon(value ? 1 : 0);
+	if (value) return true;
+
+	const length = messages.length;
+	if (!length) return false;
+
 	/**
 	 * @type {AiChat.Message}
 	 */
-	const last = messages[messages.length - 1];
-	if (last.role === 'assistant') {
-		if (last.finish_reason === "tool_calls") {
-			sendBtn.innerText = "执行调用";
+	const last = messages[length - 1];
+
+	if (last.role === "system") return false;
+
+	if (last.role === "tool") {
+		for (let i = length - 2; i >= 0; i--) {
+			const message = messages[i];
+			if (message.role === 'assistant' && message.tool_responses) {
+				for (let response of message.tool_responses) {
+					if (!(response.content || response.error))
+						return false;
+				}
+				break;
+			}
 		}
-		if (last.finish_reason === "length") {
-			sendBtn.innerText = "继续";
-		}
-		if (last.finish_reason === "error") {
-			sendBtn.innerText = "重试";
-		}
-		return last.finish_reason !== 'stop';
 	}
 
-	return true;
+	if (last.role === 'assistant') {
+		const state = button_state_map[last.finish_reason] ?? 3;
+		if (!state) return false;
+		setSendBtnIcon(state);
+		return true;
+	}
+
+	return last.role === "user";
 }
 
 fileInput.onchange = e => {
-	const file = e.target.files?.[0];
-	if (!file) return;
+	for (const file of e.target.files) {
+		if (file.type.startsWith('image')) {
+			attachments.push({
+				type: "image_url",
+				image_url: { url: file }
+			});
+		} else if (file.type.startsWith('audio')) {
+			attachments.push({
+				type: "input_audio",
+				input_audio: {
+					data: file,
+					format: file.type.substring(file.type.indexOf('/')+1)
+				}
+			});
+		} else if (file.type.startsWith('text')) {
+			const reader = new FileReader();
+			reader.onload = (e) => {
+				const text = e.target.result;
+				attachments.push({
+					type: "text",
+					text
+				});
+			};
+			reader.readAsText(file);
+		}
+	}
 
-	const reader = new FileReader();
-	reader.onload = (e) => {
-		const base64Url = e.target.result;
-		attachments.push({
-			type: "image_url",
-			image_url: { url: base64Url }
-		});
-	};
-	reader.readAsDataURL(file);
 
 	e.target.value = '';
 };
 
 function onSend() {
 	// Abort previous if any
-	if (abortCompletion) {
+	if (abortCompletion.value) {
 		try {
 			abortCompletion.abort();
 		} catch {}
@@ -294,8 +479,9 @@ function onSend() {
 
 	if (handleCommand(userInput)) return;
 
-	const text = userInput.value.trim();
-	if (!allowClickSendBtn() && !text) return;
+	const text = inputText.trim();
+	const hasOtherAction = hasOtherSendBtnAction();
+	if (!hasOtherAction && !text) return;
 
 	if (!selectedConversation.ready) {
 		if (null == selectedConversation.value) {
@@ -318,38 +504,58 @@ function onSend() {
 		return;
 	}
 
-	userInput.value = '';
+	inputText.value = '';
 	userInput.style.height = '';
 
+	let promise;
 	// in order to generate image:
 	// modalities: ['image', 'text'],
 	if (attachments.length) {
-		attachments.unshift({
-			type: "text",
-			text
-		});
-		sendMessage([...attachments]);
+		promise = sendUserChatMessage([
+			{
+				type: "text",
+				text
+			},
+			...attachments
+		]);
 		attachments.length = 0;
 	} else {
-		sendMessage(text);
+		promise = sendUserChatMessage(text || null);
 	}
+
+	const repeater = result => {
+		// 自动执行非交互式工具调用
+		if (result === 'tool_calls') sendUserChatMessage().then(repeater);
+		/*else if (result === 'stop' && isLlamaCppBackend && config.reasoning && config.prefillKVCache) {
+			jsonSchemaPrefixResponse([...messages.value], "", {
+				...state.additionalBody,
+				max_tokens: 0,
+				stream: false
+			}, null);
+		}*/
+	};
+	promise.then(repeater);
 }
 
+SettingUI.onSettingsUpdated(true);
 
-for (const key in config.value) {
-	onSettingChanged(key, config.value[key]);
-}
+$watch([messages, abortCompletion, attachments, inputText], () => {
+	sendBtn.disabled = !hasOtherSendBtnAction() && !inputText.trim() && !attachments.length;
+});
 
 $watch(messages, () => {
-	if (config.edit) updateRawText();
-	sendBtn.disabled = !allowClickSendBtn() && !userInput.value.trim();
 	messagesPanel.classList.toggle("no-messages", messages.length === 0);
 });
 
 listConversations().then(arr => {
-	const loading = $("#loading");
+	const loading = $("loading");
 	loading.style.opacity = 0;
-	setTimeout(() => loading.remove(), 1000);
+	setTimeout(() => {
+		loading.remove();
+
+		if (localStorage[APP_NAME+':tour-completed'] !== APP_VERSION)
+			import("./UserOnboard.js");
+	}, 500);
 
 	conversations.value = arr;
 
@@ -361,9 +567,19 @@ listConversations().then(arr => {
 		})
 	}
 
+	let prevId;
 	$watch(selectedConversation, () => {
 		const value = selectedConversation.value;
-		if (value) scroller.scrollTop = scroller.scrollHeight;
-		location.href = value ? "#!chat/" + value.id : "#";
+		history.replaceState(null, "", value ? "#!chat/" + value.id : "#");
+
+		if (value?.ready) {
+			if (prevId !== value.id)
+				scroller.scrollToBottom();
+			prevId = value.id;
+		} else {
+			prevId = null;
+		}
+
+		if (isMobile && !sidebar.style.display) Shared.toggleSidebar();
 	});
 });

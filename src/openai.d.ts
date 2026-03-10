@@ -1,35 +1,53 @@
 // openai.d.ts
 // OpenRouter OpenAI-compatible API TypeScript 类型定义
 
+import {AiChat} from "./aiChat";
+
 declare namespace OpenAI {
-    // 模型名称类型
+    // 模型名称
     type Model = string;
-
     // 消息角色
-    type Role = 'system' | 'user' | 'assistant' | 'tool';
+    type Role = 'developer' | 'system' | 'user' | 'assistant' | 'tool';
 
-    // 消息对象
-    interface Message {
-        role: Role;
-        content: string;
-        reasoning?: string;
-        reasoning_details?: ReasoningDetail[]
-        tool_calls?: ToolCall[];
-        images?: ImagePart[];
+    type BaseResponse = {
+        id: string;
+        //object: string;
+        //choices: (NonStreamingChoice | StreamingChoice | TextChoice)[];
+        created: number; // Unix timestamp
+        model: string;
+        system_fingerprint?: string; // Only present if the provider supports it
+        // Usage data is always returned for non-streaming.
+        // When streaming, usage is returned exactly once in the final chunk
+        // before the [DONE] message, with an empty choices array.
+        usage?: OpenRouter.ResponseUsage;
+        timings?: LlamaCpp.ResponseUsage;
+
+        provider?: string; // Model provider
+    };
+
+    type ChatCompletionResponse = BaseResponse & {
+        object: 'chat.completion';
+        choices: NonStreamingChoice[];
+    }
+    type ChatCompletionChunk = BaseResponse & {
+        object: 'chat.completion.chunk';
+        choices: ChatChoice[];
+    }
+    type TextCompletionChunk = BaseResponse & {
+        object: 'text_completion';
+        choices: TextChoice[];
     }
 
-    interface TextPart {
-        type: 'text';
-        text: string;
-    }
-    interface ImagePart {
-        type: 'image_url';
-        image_url: {
-            url: string;
+    type Response = ChatCompletionResponse | ChatCompletionChunk | TextCompletionChunk;
+
+    namespace LlamaCpp {
+        type ResponseUsage = {
+            cache_n: number,
+            prompt_n: number,
+            predicted_n: number,
+            predicted_per_second: number;
         };
     }
-
-    type ContentPart = TextPart | ImagePart;
 
     interface BaseReasoningDetail {
         id: string;
@@ -55,7 +73,100 @@ declare namespace OpenAI {
 
     type ReasoningDetail = ReasoningSummary | ReasoningText | ReasoningEncrypted;
 
-    interface ToolCall {
+    namespace OpenRouter {
+        // OpenRouter always returns detailed usage information.
+        // Token counts are calculated using the model's native tokenizer.
+        type ResponseUsage = {
+            /** Including images, input audio, and tools if any */
+            prompt_tokens: number;
+            /** The tokens generated */
+            completion_tokens: number;
+            /** Sum of the above two fields */
+            total_tokens: number;
+
+            /** Breakdown of prompt tokens (optional) */
+            prompt_tokens_details?: {
+                cached_tokens: number;        // Tokens cached by the endpoint
+                cache_write_tokens?: number;  // Tokens written to cache (models with explicit caching)
+                audio_tokens?: number;        // Tokens used for input audio
+                video_tokens?: number;        // Tokens used for input video
+            };
+
+            /** Breakdown of completion tokens (optional) */
+            completion_tokens_details?: {
+                reasoning_tokens?: number;    // Tokens generated for reasoning
+                audio_tokens?: number;        // Tokens generated for audio output
+                image_tokens?: number;        // Tokens generated for image output
+            };
+
+            /** Cost in credits (optional) */
+            cost?: number;
+            /** Whether request used Bring Your Own Key */
+            is_byok?: boolean;
+            /** Detailed cost breakdown (optional) */
+            cost_details?: {
+                upstream_inference_cost?: number;             // Only shown for BYOK requests
+                upstream_inference_prompt_cost: number;
+                upstream_inference_completions_cost: number;
+            };
+
+            /** Server-side tool usage (optional) */
+            server_tool_use?: {
+                web_search_requests?: number;
+            };
+        };
+    }
+
+    // 消息对象
+    type Message = {
+        role: Role;
+        content: string | ContentPart[];
+    }
+    type AssistantMessage = Message & {
+        role: 'assistant';
+        reasoning?: string; // OpenAI
+        reasoning_content?: string; // Llama.cpp
+        reasoning_details?: OpenAI.ReasoningDetail[]; // OpenRouter
+        tool_calls?: ToolCall[];
+        images?: ImagePart[]; // OpenRouter
+        audio?: AudioData[];
+    }
+
+    type AudioData = {
+        data: string; // Base64
+        expires_at: number;
+        id: string;
+        transcript: string;
+    }
+
+    type ToolCallMessage = Message & {
+        role: 'tool';
+        tool_call_id: string;
+    }
+
+    type TextPart = {
+        type: 'text';
+        text: string;
+    }
+    type ImagePart = {
+        type: 'image_url';
+        image_url: {
+            // file://, http:// or base64 encoded string
+            url: Blob | string;
+        };
+    }
+    type AudioPart = {
+        type: 'input_audio';
+        input_audio: {
+            data: Blob | string;
+            // llama.cpp only support them
+            format: "wav" | "mp3";// | "aiff" | "aac" | "ogg" | "flac" | "m4a"
+        };
+    }
+
+    type ContentPart = TextPart | ImagePart | AudioPart;
+
+    type ToolCall = {
         id: string;
         type: 'function';
         function: {
@@ -65,7 +176,7 @@ declare namespace OpenAI {
     }
 
     // 聊天完成请求
-    interface ChatCompletionRequest {
+    type ChatCompletionRequest = {
         model: Model;
         messages: Message[];
         frequency_penalty?: number; // -2.0 到 2.0，默认 0
@@ -77,73 +188,112 @@ declare namespace OpenAI {
         stop?: string | string[]; // 停止序列
         stream?: boolean; // 是否流式响应，默认 false
         tools?: Tool[]; // 工具定义（可选）
+        tool_choice?: 'none' | 'auto' | 'required' | {type: "function", function: {"name": string}};
     }
 
     // 工具定义
-    interface Tool {
+    type Tool = {
         type: 'function';
-        function: {
-            name: string;
-            description?: string;
-            parameters: {
-                type: 'object';
-                properties: Record<string, ParameterDefinition>;
-                required?: string[];
-            };
-        };
+        function: FunctionToolJSON;
     }
 
-    // 参数定义（简化版）
-    interface ParameterDefinition {
-        type: 'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array';
+    type FunctionToolJSON = {
+        name: string;
+        description: string;
+        parameters: ObjectSchema;
+    }
+
+    //region JSON Schemas
+    type ParameterType = 'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array';
+    type StringFormat = 'date' | 'time' | 'date-time' | 'uri' | 'email' | 'hostname' | 'ipv4' | 'ipv6' | 'uuid'/* | /^uuid[1-5]/*/;
+
+    type BaseSchema = {
+        type: ParameterType | ParameterType[] | 'value';
         description?: string;
-        enum?: (string | number)[];
         example?: string;
-        default?: string;
-        properties?: Record<string, ParameterDefinition>;
-        items?: ParameterDefinition;
-    }
+        default?: any;
 
-    interface BaseCompletion {
-        id: string;
-        created: number; // Unix 时间戳
-        model: Model;
-        provider?: string;
+        enum?: (string | number)[];
+        const?: string | number;
+
+        $ref?: string;
+        oneOf?: Schema[];
+        anyOf?: Schema[];
+        allOf?: Schema[];
     }
-    interface BaseChoice {
+    type ObjectSchema = BaseSchema & {
+        type: 'object';
+        properties?: Record<string, Schema>;
+        required?: string[];
+        additionalProperties?: boolean;
+    }
+    type ArraySchema = BaseSchema & {
+        type: 'array';
+        items?: Schema;
+        //prefixItems?: Schema;
+        minItems?: number;
+        maxItems?: number;
+    }
+    type StringSchema = BaseSchema & {
+        type: 'string';
+        pattern?: string;
+        format?: StringFormat;
+        minLength?: number;
+        maxLength?: number;
+    }
+    type IntegerSchema = BaseSchema & {
+        type: 'integer';
+        minimum?: number;
+        maximum?: number;
+        exclusiveMinimum?: number;
+        exclusiveMaximum?: number;
+    }
+    type Schema = BaseSchema | ObjectSchema | ArraySchema | StringSchema | IntegerSchema;
+    //endregion
+    // region Choice
+    type Choice = {
         index: number;
-        finish_reason?: 'stop' | 'length' | 'function_call' | 'content_filter' | 'tool_calls';
+        finish_reason?: 'stop' | 'length' | 'function_call' | 'content_filter' | 'tool_calls' | 'error';
         native_finish_reason?: string;
-        logprobs?: any;
-    }
+        error?: ErrorResponse;
 
-    interface ChatUsage {
-        prompt_tokens: number;
-        completion_tokens: number;
-        total_tokens: number;
-        completion_tokens_details?: {
-            reasoning_tokens: number;
+        logprobs?: {
+            content: ((LogprobItem | PostSampleProbItem) & {
+                top_logprobs?: LogprobItem[];
+                top_probs?: PostSampleProbItem[];
+            })[]
         }
     }
+    interface NonStreamingChoice extends Choice {
+        message: AssistantMessage;
+    }
+    interface ChatChoice extends Choice {
+        delta: Partial<AssistantMessage>;
+    }
+    interface TextChoice extends Choice {
+        text: string;
+    }
 
-    // 聊天完成响应（非流式）
-    interface ChatCompletionResponse extends BaseCompletion {
-        object: 'chat.completion';
-        choices: Choice[];
-        usage: ChatUsage;
-    }
-    interface Choice extends BaseChoice {
-        message: Message;
+    type ErrorResponse = {
+        code: number; // See "Error Handling" section
+        message: string;
+        metadata?: Record<string, unknown>; // Contains additional error information such as provider details, the raw error message, etc.
+    };
+
+    type LogprobItem = {
+        id: number;
+        logprob: number;
+        token: string;
+        bytes?: number[];
     }
 
-    interface ChatCompletionChunk extends BaseCompletion {
-        object: 'chat.completion.chunk';
-        choices: ChunkChoice[];
-        usage?: ChatUsage;
+    type PostSampleProbItem = {
+        id: number;
+        prob: number;
+        token: string;
+        bytes?: number[];
     }
-    interface ChunkChoice extends Choice {
-        delta: Partial<Message>;
-    }
+    //endregion
 }
 
 // 全局声明（如果不使用命名空间）

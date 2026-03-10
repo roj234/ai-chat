@@ -1,20 +1,93 @@
+import hljs from "highlight.js/lib/core";
+
 /**
  *
- * @param {string} id
- * @return {[string, null | (() => Promise<any>)]}
+ * @param {string} languageName
+ * @return {null | Promise<string>}
  */
-export function loadLanguage(id) {
-  let fn = id;
-  do {
-    id = fn;
-    fn = MAPPING[fn];
-  } while (typeof fn === 'string');
+export function loadLanguage(languageName) {
+  const initial_id = languageName;
+  let asyncLoader;
 
-  return [id, fn];
+  for(;;) {
+    if (hljs.getLanguage(languageName)) {
+      hljs.registerAliases([initial_id], {languageName});
+      return Promise.resolve(languageName);
+    }
+
+    asyncLoader = MAPPING[languageName];
+    if (typeof asyncLoader !== 'string') {
+      if (typeof asyncLoader !== 'function')
+        return asyncLoader;
+
+      let promise = asyncLoader().then(async m => {
+        hljs.registerLanguage(languageName, m.default);
+        return languageName;
+      });
+      MAPPING[languageName] = promise;
+
+      const dep = dependencies[languageName];
+      if (dep) promise = Promise.all([promise, ...dep.map(loadLanguage)]).then(() => languageName);
+
+      MAPPING[languageName] = promise;
+      return promise;
+    }
+    languageName = asyncLoader;
+  }
 }
 
+
+const dependencies = {
+  livescript: ['javascript'],
+  parser3: ['xml'],
+  asciidoc: ['xml'],
+  shell: ['bash'],
+  cos: ['sql', 'javascript', 'xml'],
+  mojolicious: ['xml', 'perl'],
+  "vbscript-html": ['xml', 'vbscript'],
+  twig: ['xml'],
+  handlebars: ['xml'],
+  dust: ['xml'],
+  javascript: ['xml', 'css', 'graphql'],
+  django: ['xml'],
+  perl: ['mojolicious'],
+  xquery: ['xml'],
+  qml: ['xml'],
+  pgsql: [
+    'pgsql',
+    'perl',
+    'python',
+    'tcl',
+    'r',
+    'lua',
+    'java',
+    'php',
+    'ruby',
+    'bash',
+    'scheme',
+    'xml',
+    //'json'
+  ],
+  dart: ['markdown'],
+  dockerfile: ['bash'],
+  xml: ['css', 'javascript'],
+  coffeescript: ['javascript'],
+  tap: ['yaml'],
+  markdown: ['xml'],
+  typescript: ['xml', 'css', 'graphql'],
+  nix: ['markdown'],
+  erb: ['xml'],
+  haml: ['ruby'],
+  yaml: ['ruby'],
+};
+
+
 const MAPPING = {
-  "1c": () => import('highlight.js/lib/languages/1c'),
+  "vue": "xml",
+  "asp": "vbscript-html",
+  "aspx": "asp",
+
+  //"1c": () => import('highlight.js/lib/languages/1c'),
   "abnf": () => import('highlight.js/lib/languages/abnf'),
   "accesslog": () => import('highlight.js/lib/languages/accesslog'),
   "actionscript": () => import('highlight.js/lib/languages/actionscript'),
@@ -57,7 +130,7 @@ const MAPPING = {
   "clean": () => import('highlight.js/lib/languages/clean'),
   "icl": "clean",
   "dcl": "clean",
-  "clojure-repl": () => import('highlight.js/lib/languages/clojure-repl'),
+  //"clojure-repl": () => import('highlight.js/lib/languages/clojure-repl'),
   "clojure": () => import('highlight.js/lib/languages/clojure'),
   "clj": "clojure",
   "edn": "clojure",
@@ -117,7 +190,6 @@ const MAPPING = {
   "exs": "elixir",
   "elm": () => import('highlight.js/lib/languages/elm'),
   "erb": () => import('highlight.js/lib/languages/erb'),
-  "erlang-repl": () => import('highlight.js/lib/languages/erlang-repl'),
   "erlang": () => import('highlight.js/lib/languages/erlang'),
   "erl": "erlang",
   "excel": () => import('highlight.js/lib/languages/excel'),
@@ -133,14 +205,14 @@ const MAPPING = {
   "f#": "fsharp",
   "gams": () => import('highlight.js/lib/languages/gams'),
   "gms": "gams",
-  "gauss": () => import('highlight.js/lib/languages/gauss'),
-  "gss": "gauss",
+  //"gauss": () => import('highlight.js/lib/languages/gauss'),
+  //"gss": "gauss",
   "gcode": () => import('highlight.js/lib/languages/gcode'),
   "nc": "gcode",
   "gherkin": () => import('highlight.js/lib/languages/gherkin'),
   "feature": "gherkin",
   "glsl": () => import('highlight.js/lib/languages/glsl'),
-  "gml": () => import('highlight.js/lib/languages/gml'),
+  //"gml": () => import('highlight.js/lib/languages/gml'),
   "go": () => import('highlight.js/lib/languages/go'),
   "golang": "go",
   "golo": () => import('highlight.js/lib/languages/golo'),
@@ -168,7 +240,7 @@ const MAPPING = {
   "ini": () => import('highlight.js/lib/languages/ini'),
   "toml": "ini",
   "irpf90": () => import('highlight.js/lib/languages/irpf90'),
-  "isbl": () => import('highlight.js/lib/languages/isbl'),
+  //"isbl": () => import('highlight.js/lib/languages/isbl'),
   "java": () => import('highlight.js/lib/languages/java'),
   "jsp": "java",
   "javascript": () => import('highlight.js/lib/languages/javascript'),
@@ -178,10 +250,10 @@ const MAPPING = {
   "cjs": "javascript",
   "jboss-cli": () => import('highlight.js/lib/languages/jboss-cli'),
   "wildfly-cli": "jboss-cli",
-  "json": () => import('highlight.js/lib/languages/json'),
+  //"json": () => import('highlight.js/lib/languages/json'),
   "jsonc": "json",
-  "julia-repl": () => import('highlight.js/lib/languages/julia-repl'),
-  "jldoctest": "julia-repl",
+  //"julia-repl": () => import('highlight.js/lib/languages/julia-repl'),
+  //"jldoctest": "julia-repl",
   "julia": () => import('highlight.js/lib/languages/julia'),
   "kotlin": () => import('highlight.js/lib/languages/kotlin'),
   "kt": "kotlin",
@@ -195,7 +267,7 @@ const MAPPING = {
   "leaf": () => import('highlight.js/lib/languages/leaf'),
   "less": () => import('highlight.js/lib/languages/less'),
   "lisp": () => import('highlight.js/lib/languages/lisp'),
-  "livecodeserver": () => import('highlight.js/lib/languages/livecodeserver'),
+  //"livecodeserver": () => import('highlight.js/lib/languages/livecodeserver'),
   "livescript": () => import('highlight.js/lib/languages/livescript'),
   "ls": "livescript",
   "llvm": () => import('highlight.js/lib/languages/llvm'),
@@ -210,11 +282,11 @@ const MAPPING = {
   "md": "markdown",
   "mkdown": "markdown",
   "mkd": "markdown",
-  "mathematica": () => import('highlight.js/lib/languages/mathematica'),
-  "mma": "mathematica",
-  "wl": "mathematica",
+  //"mathematica": () => import('highlight.js/lib/languages/mathematica'),
+  //"mma": "mathematica",
+  //"wl": "mathematica",
   "matlab": () => import('highlight.js/lib/languages/matlab'),
-  "maxima": () => import('highlight.js/lib/languages/maxima'),
+  //"maxima": () => import('highlight.js/lib/languages/maxima'),
   "mel": () => import('highlight.js/lib/languages/mel'),
   "mercury": () => import('highlight.js/lib/languages/mercury'),
   "m": "mercury",
@@ -234,7 +306,7 @@ const MAPPING = {
   "nim": () => import('highlight.js/lib/languages/nim'),
   "nix": () => import('highlight.js/lib/languages/nix'),
   "nixos": "nix",
-  "node-repl": () => import('highlight.js/lib/languages/node-repl'),
+  //"node-repl": () => import('highlight.js/lib/languages/node-repl'),
   "nsis": () => import('highlight.js/lib/languages/nsis'),
   "objectivec": () => import('highlight.js/lib/languages/objectivec'),
   "mm": "objectivec",
@@ -256,11 +328,11 @@ const MAPPING = {
   "pgsql": () => import('highlight.js/lib/languages/pgsql'),
   "postgres": "pgsql",
   "postgresql": "pgsql",
-  "php-template": () => import('highlight.js/lib/languages/php-template'),
+  //"php-template": () => import('highlight.js/lib/languages/php-template'),
   "php": () => import('highlight.js/lib/languages/php'),
-  "plaintext": () => import('highlight.js/lib/languages/plaintext'),
-  "text": "plaintext",
-  "txt": "plaintext",
+  //"plaintext": () => import('highlight.js/lib/languages/plaintext'),
+  //"text": "plaintext",
+  //"txt": "plaintext",
   "pony": () => import('highlight.js/lib/languages/pony'),
   "powershell": () => import('highlight.js/lib/languages/powershell'),
   "pwsh": "powershell",
@@ -278,8 +350,8 @@ const MAPPING = {
   "purebasic": () => import('highlight.js/lib/languages/purebasic'),
   "pb": "purebasic",
   "pbi": "purebasic",
-  "python-repl": () => import('highlight.js/lib/languages/python-repl'),
-  "pycon": "python-repl",
+  //"python-repl": () => import('highlight.js/lib/languages/python-repl'),
+  //"pycon": "python-repl",
   "python": () => import('highlight.js/lib/languages/python'),
   "py": "python",
   "gyp": "python",
@@ -321,15 +393,15 @@ const MAPPING = {
   "smali": () => import('highlight.js/lib/languages/smali'),
   "smalltalk": () => import('highlight.js/lib/languages/smalltalk'),
   "st": "smalltalk",
-  "sml": () => import('highlight.js/lib/languages/sml'),
-  "ml": "sml",
-  "sqf": () => import('highlight.js/lib/languages/sqf'),
+  //"sml": () => import('highlight.js/lib/languages/sml'),
+  //"ml": "sml",
+  //"sqf": () => import('highlight.js/lib/languages/sqf'),
   "sql": () => import('highlight.js/lib/languages/sql'),
   "stan": () => import('highlight.js/lib/languages/stan'),
   "stanfuncs": "stan",
-  "stata": () => import('highlight.js/lib/languages/stata'),
-  "do": "stata",
-  "ado": "stata",
+  //"stata": () => import('highlight.js/lib/languages/stata'),
+  //"do": "stata",
+  //"ado": "stata",
   "step21": () => import('highlight.js/lib/languages/step21'),
   "p21": "step21",
   "step": "step21",
