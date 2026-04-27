@@ -1,4 +1,4 @@
-import {getTextContent} from "./utils.js";
+import {getTextContent} from "./utils/utils.js";
 import {DONE} from "./database.js";
 
 const DB_NAME = 'AiChat';

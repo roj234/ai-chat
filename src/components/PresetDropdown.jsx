@@ -1,11 +1,10 @@
-
 import {$computed, $state, $update} from "unconscious";
-import {cloneNamed} from "../utils.js";
+import {cloneNamed} from "../utils/utils.js";
 import {config, Shared} from "../states.js";
 import SimpleModal from "./SimpleModal.jsx";
-import {PRESET_KEYS} from "../setting-ui.js";
+import {PRESET_KEYS} from "../settings.js";
 import {Dropdown} from "./Dropdown.jsx";
-import {kvListSet, kvListDel, kvListGet, kvListGetKeys} from "../database.js";
+import {kvListDel, kvListGet, kvListGetKeys, kvListSet} from "../database.js";
 
 /**
  * @type {import("unconscious").Reactive<AiChat.IDBKVList[]>}
@@ -58,7 +57,8 @@ export function loadPreset(name) {
  */
 export function PresetDropdown() {
 	const selectedPreset = $computed(() => config.name);
-	const element = <Dropdown items={presets} selection={selectedPreset} onChanged={(type, index) => {
+	const element = <Dropdown items={presets} selection={selectedPreset} dir={'up'}
+							  onChanged={(type, index) => {
 		if (type === 'd') {
 			const [key] = presets.splice(index, 1);
 			kvListDel(key.id);

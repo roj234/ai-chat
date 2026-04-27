@@ -66,9 +66,6 @@ export default {
 
         assetsInlineLimit: 512,
         rollupOptions: {
-            external: (id) => {
-                return id.includes('../mermaid'); // 动态匹配你的预构建
-            },
             output: {
                 experimentalMinChunkSize: 10240,
                 entryFileNames: `[name].[hash].js`,

@@ -1,51 +1,52 @@
 import {ThinkBlock} from "./ThinkBlock.jsx";
 import {ToolCallCard} from "./ToolCallCard.jsx";
-import {
-	$computed,
-	$foreach,
-	$state,
-	$update,
-	$watch, appendChildren,
-	AppendObserver,
-	debugSymbol, isReactive,
-	unconscious
-} from "unconscious";
+import {$computed, $foreach, $state, $update, $watch, AppendObserver, debugSymbol, unconscious} from "unconscious";
 import {formatDate} from "unconscious/ext/Utils.js";
-import {copyCodeEventHandler, renderMarkdownToElement, renderMarkdownToString} from "../md-wrapper.js";
-import {Shared, messages, selectedConversation, isMobile, MessageRoles} from "../states.js";
-import {abortCompletion, sendUserChatMessage} from "../api-request.js";
+import {copyCodeEventHandler, renderMarkdownToElement, renderMarkdownToString} from "../markdown/markdown.js";
+import {abortCompletion, isMobile, MessageRoles, messages, selectedConversation} from "../states.js";
+import {sendUserChatMessage} from "../api-request.js";
 import {
 	copyButtonAnimation,
 	errorBlock,
 	getTextContent,
-	IN_EDIT_MODE, loadingBlock,
-	MORPH_CHILD_HANDLER, prettyError
-} from "../utils.js";
+	IN_EDIT_MODE,
+	loadingBlock,
+	MORPH_CHILD_HANDLER,
+	prettyError
+} from "../utils/utils.js";
 import "./MessageList.css";
 import {toolScriptRegistry} from "../skills.js";
 import {getBillingLog} from "../database.js";
-import {MultiKeyMap} from "../MultiKeyMap.js";
-import {getBranchIndexCount, setBranchIndex} from "../BranchManager.js";
-import {VirtualList, PINNED, ITEM_KEY} from "unconscious/ext/VirtualList.js";
+import {MultiKeyMap} from "../utils/MultiKeyMap.js";
+import {getBranchIndexCount, setBranchIndex} from "../utils/BranchManager.js";
+import {ITEM_KEY, PINNED, VirtualList} from "unconscious/ext/VirtualList.js";
 import {EditWidget} from "./EditWidget.jsx";
 import {AudioPlayer} from "./AudioPlayer.jsx";
 
 import "./MyLoading.jsx";
 import morphdom from "morphdom";
 
-function contentRenderer(m) {
+// region AiChat.ResponseContentPart[] 的生成和渲染函数
+/**
+ *
+ * @param {AiChat.AssistantMessage} m
+ * @return {AppendObserver}
+ */
+function chunkRenderer(m) {
 	return $foreach(m.content, (item) => {
 		switch (item.type) {
 			default: {
-				let {error} = item;
+				let {error, title} = item;
 				if (!error) return errorBlock(item, "AssertError");
 				if (typeof error !== "string") error = prettyError(error);
+				if (title) return errorBlock(error, title);
 
 				const index = error.indexOf('\n');
 				return errorBlock(error.substring(index+1), error.substring(0, index));
 			}
 			case "html":
-				const element = item.html;
+				let element = item.html;
+				if (typeof element === "function") element = element();
 				return typeof element === "string" ? <div dangerouslySetInnerHTML={item.html} /> : element;
 			case "loading":
 				return loadingBlock(<my-loading text={item.text} />);
@@ -139,192 +140,10 @@ function contentRenderer(m) {
 										disabled={item.current === item.total-1}></button>
 							</div>);
 		}
-	}, (chunk) => {
-		const {type} = chunk;
-
-		let kf;
-		if ((kf = MessageRoles[chunk.key?.role]?.keyFunc)) {
-			const key = kf(chunk);
-			if (key) return key;
-		}
-
-		if (type === "tool") {
-			if ((kf = toolScriptRegistry[chunk.tool_name]?.keyFunc)) {
-				const has_successor = chunk.idx !== messages.length - 1;
-				const keys = [chunk];
-				kf(keys, chunk.response, has_successor);
-				return keys;
-			} else {
-				return [chunk, chunk.time];
-			}
-		}
-		if (type === "text" || type === "think") {
-			if (m.key[IN_EDIT_MODE]) return [chunk, 1];
-		}
-
-		return chunk;
-	}, {
+	}, chunkKeyFunc.bind(null,m), {
 		morphChild: MORPH_CHILD_HANDLER,
 		currentKeys: new MultiKeyMap()
 	});
-}
-
-function deleteMessage(start, end) {
-	const deleteCount = end - start;
-	const removed = messages.splice(start, deleteCount);
-	const globalStorage = selectedConversation.value;
-	for (let i = removed.length - 1; i >= 0; i--){
-		const {tool_responses} = removed[i];
-		if (tool_responses) {
-			for (let j = tool_responses.length - 1; j >= 0; j--){
-				let toolResponse = tool_responses[j];
-				try {
-					toolScriptRegistry[toolResponse.tool_name].removed?.(toolResponse, globalStorage);
-				} catch (e) {
-					console.error(e);
-				}
-			}
-		}
-	}
-
-	$update(updateMessageUI);
-}
-
-const regenBtn = <button data-action="regen" title="重新生成" className="ri-loop-right-line ghost"></button>;
-const deleteBtn = <button data-action="del" title="删除" className="ri-delete-bin-line ghost"></button>;
-const undoBtn = <button data-action="undo" title="步退" className="ri-arrow-go-back-line ghost"></button>;
-const copyBtn = <button data-action="copy" title="复制内容" className="ri-file-copy-line ghost"></button>;
-const editBtn = <button data-action="edit" title="编辑" className="ri-pencil-line ghost"></button>;
-const saveBtn = <button data-action="edit" title="保存" className="ri-check-line ghost"></button>;
-
-const KNOWN_ROLES = ["system", "user", "assistant"];
-const knownRoles = new Set(KNOWN_ROLES);
-
-let hoveringElement;
-let hoveringMessage;
-
-/**
- *
- * @param {AiChat.Message} m
- * @param {HTMLSpanElement} container
- */
-function updateButtons(m, container) {
-	const {index, end_index, content, role} = m;
-
-	if (hoveringElement && hoveringElement !== container) {
-		hoveringElement.replaceChildren();
-	}
-
-	hoveringMessage = m;
-	hoveringElement = container;
-
-	if (!container) return;
-
-	const buttons = new Set();
-	const notGenerating = abortCompletion.value == null;
-	const isEditing = m.key[IN_EDIT_MODE];
-	const mayChange = (index !== messages.length-1 || notGenerating) && knownRoles.has(role);
-	const isComposite = end_index > index + 1;
-	// 不支持编辑组合消息（工具调用）
-	if (mayChange && !isComposite) buttons.add(isEditing ? saveBtn : editBtn);
-	if (!isEditing) {
-		// 有内容才能复制
-		if (unconscious(content).find(item => item.text)) buttons.add(copyBtn);
-		if (end_index === messages.length && notGenerating) {
-			// TODO 之前也能regen，要加分叉功能
-			if (end_index !== 1) buttons.add(regenBtn);
-			if (isComposite) buttons.add(undoBtn);
-		}
-		if (mayChange) buttons.add(deleteBtn);
-	}
-
-	for (let child of container.children) {
-		if (!buttons.has(child)) child.remove();
-	}
-
-	let anchorNode = null;
-	for (const element of buttons) {
-		if (element.parentElement === container) {
-			anchorNode = element;
-			continue; // 未变化则跳过
-		}
-
-		if (!anchorNode) {
-			// 情况1：向上滚动
-			container.prepend(element);
-		} else {
-			// 情况2：向下滚动
-			anchorNode.after(element);
-		}
-		anchorNode = element;
-	}
-}
-
-const buttonHandler = (e) => {
-	const btn = e.target.closest(".line button[data-action]");
-	if (!btn) return;
-
-	/**
-	 * @type {AiChat.Message & {
-	 *     index: number,
-	 *     end_index: number,
-	 *     key: AiChat.Message
-	 * }}
-	 */
-	let self = e.target.closest(".msg")._identity;
-
-	switch (btn.dataset.action) {
-		case "copy": {
-			const m = getTextContent(self);
-			if (window.ClipboardItem) {
-				copyButtonAnimation([new ClipboardItem({
-					'text/html': new Blob([renderMarkdownToString(m)], {type: 'text/html'}),
-					'text/plain': new Blob([m], {type: 'text/plain'})
-				})], btn);
-			} else {
-				// FUCK HTTPS
-				copyButtonAnimation(m, btn);
-			}
-		}
-		break;
-		case "regen": {
-			deleteMessage(messages.length-1, messages.length);
-			sendUserChatMessage();
-		}
-		break;
-		case "undo": {
-			if (isMobile && !clickTwice(btn)) return;
-			const end = self.end_index;
-			deleteMessage(end - 1, end);
-		}
-		break;
-		case "del": {
-			if (isMobile && !clickTwice(btn)) return;
-			deleteMessage(self.index, self.end_index || (self.index + 1));
-		}
-		break;
-		case "edit": {
-			const inEdit = self.key[IN_EDIT_MODE];
-			self.key[IN_EDIT_MODE] = !inEdit;
-			// 从编辑模式退出时保存
-			if (inEdit) $update(messages);
-			// 爷不管了，什么层次都是放屁，更新才是正道
-			vl.setItem(vl.findIndex(self), self);
-		}
-	}
-};
-
-const TIMEOUT = debugSymbol("_btnTimeout");
-function clickTwice(btn) {
-	if (!btn.classList.toggle("danger")) {
-		clearTimeout(btn[TIMEOUT]);
-		return true;
-	}
-
-	btn[TIMEOUT] = setTimeout(() => {
-		btn.classList.remove("danger");
-	}, 2000);
-	return false;
 }
 
 /**
@@ -332,10 +151,20 @@ function clickTwice(btn) {
  * @param {AiChat.ResponseContentPart[]} chunks
  * @param {number} message_index
  */
-function gatherMessageChunks(message, chunks, message_index) {
-	const customHandler = MessageRoles[message.role];
+function chunkGather(message, chunks, message_index) {
+	const role = message.role;
+	const customHandler = MessageRoles[role];
 	if (customHandler) {
 		customHandler.getChunks(message, chunks, message_index);
+		return;
+	}
+
+	if (!editableRoles.has(role)) {
+		chunks.push({
+			type: "error",
+			title: "未知的消息角色，插件是否加载？",
+			error: message
+		})
 		return;
 	}
 
@@ -404,40 +233,250 @@ function gatherMessageChunks(message, chunks, message_index) {
 }
 
 /**
+ * @param {AiChat.AssistantMessage} message
  * @param {AiChat.ResponseContentPart} chunk
  */
-function getChunkKey(chunk) {
+function chunkKeyFunc(message, chunk) {
+	const {key, type} = chunk;
+
 	let kf;
-	if ((kf = MessageRoles[chunk.key?.role]?.keyFunc)) {
-		const key = kf(chunk);
-		if (key) return key;
+	if ((kf = MessageRoles[key?.role]?.keyFunc)) {
+		const kfKeys = kf(chunk);
+		if (kfKeys) return kfKeys;
 	}
 
-	switch (chunk.type) {
-		case "error": return [chunk.key, "error", chunk.error];
+	const keys = [];
+	const add = (el) => {
+		if (el) {
+			if (Array.isArray(el)) keys.push(...el);
+			else keys.push(el);
+		}
+	};
+
+	add(key);
+
+	switch (type) {
+		default: keys.push(type); break;
+		case "error": keys.push("error", chunk.error); break;
 		// stream markdown renderer would handle this now!
-		case "text": return [chunk.key, "text"];
-		case "think": return chunk.think.title ? [chunk.think.title, chunk.think.content] : chunk.think;
-		case "tool_call": return chunk.tool;
-		case "tool": return chunk.response;
-		case "images": return chunk.images;
-		default: return chunk.key || chunk.type;
+		case "text": keys.push("text"); break;
+		case "think": add(chunk.think.title ? [chunk.think.title, chunk.think.content] : chunk.think); break;
+		case "tool_call": keys.push(chunk.tool); break;
+		case "tool": {
+			// 这里到底需要哪些字段，重构的我都忘了
+			keys.push(chunk.response);
+			keys.push(chunk.time);
+
+			let kf;
+			if ((kf = toolScriptRegistry[chunk.tool_name]?.keyFunc)) {
+				const has_successor = chunk.idx !== messages.length - 1;
+				kf(keys, chunk.response, has_successor);
+				return keys;
+			}
+		}
+		break;
+		case "images": keys.push(chunk.images); break;
+		case "html": keys.push(chunk.html); break;
+	}
+
+	if (type === "text" || type === "think") {
+		if (message.key[IN_EDIT_MODE]) keys.push(1);
+	}
+
+	//console.log(chunk, " => ", keys);
+	return keys;
+}
+//endregion
+//region 悬浮按钮处理
+const EDITABLE_ROLES = ["system", "user", "assistant"];
+const editableRoles = new Set(EDITABLE_ROLES);
+
+let hoveringElement;
+let hoveringMessage;
+
+const regenBtn = <button data-action="regen" title="重新生成" className="ri-loop-right-line ghost"></button>;
+const deleteBtn = <button data-action="del" title="删除" className="ri-delete-bin-line ghost"></button>;
+const undoBtn = <button data-action="undo" title="步退" className="ri-arrow-go-back-line ghost"></button>;
+const copyBtn = <button data-action="copy" title="复制内容" className="ri-file-copy-line ghost"></button>;
+const editBtn = <button data-action="edit" title="编辑" className="ri-pencil-line ghost"></button>;
+const saveBtn = <button data-action="edit" title="保存" className="ri-check-line ghost"></button>;
+const insertThinkBtn = <button data-action="think" title="插入思考块" className="ri-ai-generate-text ghost"></button>;
+
+/**
+ * 更新悬浮按钮
+ * @param {AiChat.Message} m
+ * @param {HTMLSpanElement} container
+ */
+function updateButtons(m, container) {
+	if (hoveringElement && hoveringElement !== container) {
+		hoveringElement.replaceChildren();
+	}
+
+	hoveringMessage = m;
+	hoveringElement = container;
+
+	if (!container) return;
+
+	const {index, end_index, content, role} = m;
+
+	const buttons = new Set();
+	const notGenerating = abortCompletion.value == null;
+	const isEditing = m.key[IN_EDIT_MODE];
+	const mayChange = ((end_index ? end_index !== messages.length : index !== messages.length-1) || notGenerating) && editableRoles.has(role);
+	const isComposite = end_index > index + 1;
+	// 不支持编辑组合消息（工具调用）
+	if (mayChange && !isComposite) buttons.add(isEditing ? saveBtn : editBtn);
+	if (!isEditing) {
+		// 有内容才能复制
+		if (notGenerating && unconscious(content).find(item => item.text)) buttons.add(copyBtn);
+		if (end_index === messages.length && notGenerating) {
+			// TODO 之前也能regen，要加分叉功能
+			if (end_index !== 1) buttons.add(regenBtn);
+			if (isComposite) buttons.add(undoBtn);
+		}
+		if (mayChange) buttons.add(deleteBtn);
+	} else {
+		if (m.role === "assistant" && !m.key.think) {
+			buttons.add(insertThinkBtn);
+		}
+	}
+
+	for (let child of container.children) {
+		if (!buttons.has(child)) child.remove();
+	}
+
+	let anchorNode = null;
+	for (const element of buttons) {
+		if (element.parentElement === container) {
+			anchorNode = element;
+			continue; // 未变化则跳过
+		}
+
+		if (!anchorNode) {
+			// 情况1：向上滚动
+			container.prepend(element);
+		} else {
+			// 情况2：向下滚动
+			anchorNode.after(element);
+		}
+		anchorNode = element;
 	}
 }
+
+const buttonHandler = (e) => {
+	const btn = e.target.closest(".line button[data-action]");
+	if (!btn) return;
+
+	/**
+	 * @type {AiChat.Message & {
+	 *     index: number,
+	 *     end_index: number,
+	 *     key: AiChat.Message
+	 * }}
+	 */
+	let self = e.target.closest(".msg")._identity;
+
+	switch (btn.dataset.action) {
+		case "copy": {
+			const m = getTextContent(self);
+			if (window.ClipboardItem) {
+				copyButtonAnimation([new ClipboardItem({
+					'text/html': new Blob([renderMarkdownToString(m)], {type: 'text/html'}),
+					'text/plain': new Blob([m], {type: 'text/plain'})
+				})], btn);
+			} else {
+				// FUCK HTTPS
+				copyButtonAnimation(m, btn);
+			}
+		}
+		break;
+		case "regen": {
+			deleteMessage(messages.length-1, messages.length);
+			sendUserChatMessage();
+		}
+		break;
+		case "undo": {
+			if (isMobile && !clickTwice(btn)) return;
+			const end = self.end_index;
+			deleteMessage(end - 1, end);
+		}
+		break;
+		case "del": {
+			if (isMobile && !clickTwice(btn)) return;
+			deleteMessage(self.index, self.end_index || (self.index + 1));
+		}
+		break;
+		case "think": {
+			self.key.think = {
+				title: "手动插入的思考",
+				content: "a",
+				format: "rc"
+			};
+			$update(updateMessageUI);
+		}
+		break;
+		case "edit": {
+			const inEdit = self.key[IN_EDIT_MODE];
+			self.key[IN_EDIT_MODE] = !inEdit;
+			if (inEdit) {
+				if (self.key.think && !self.key.think.content) {
+					delete self.key.think;
+				}
+				$update(messages);
+			}
+
+			// 爷不管了，直接更新HTML
+			vl.setItem(vl.findIndex(self), self);
+		}
+	}
+};
+
+/**
+ * 删除消息并撤销他们对上下文的修改
+ * @param {number} start
+ * @param {number} end
+ */
+function deleteMessage(start, end) {
+	const deleteCount = end - start;
+	const removed = messages.splice(start, deleteCount);
+	const globalStorage = selectedConversation.value;
+	for (let i = removed.length - 1; i >= 0; i--){
+		const {tool_responses} = removed[i];
+		if (tool_responses) {
+			for (let j = tool_responses.length - 1; j >= 0; j--){
+				let toolResponse = tool_responses[j];
+				try {
+					toolScriptRegistry[toolResponse.tool_name].removed?.(toolResponse, globalStorage);
+				} catch (e) {
+					console.error(e);
+				}
+			}
+		}
+	}
+
+	$update(updateMessageUI);
+}
+
+const TIMEOUT = debugSymbol("_btnTimeout");
+// 移动端需要点两下
+function clickTwice(btn) {
+	if (!btn.classList.toggle("danger")) {
+		clearTimeout(btn[TIMEOUT]);
+		return true;
+	}
+
+	btn[TIMEOUT] = setTimeout(() => {
+		btn.classList.remove("danger");
+	}, 2000);
+	return false;
+}
+//endregion
 
 export const updateMessageUI = $state();
 /**
  * @type {VirtualList}
  */
 let vl;
-
-function regenerateHTML(i1, ref) {
-	const element = Shared.scroller.vl.getValue(i1)?.querySelector(".body");
-	if (element) {
-		element.replaceChildren();
-		appendChildren(element, contentRenderer(ref));
-	}
-}
 
 const combinedMessages = $computed((oldMessages) => {
 	const byIndex = new Map;
@@ -451,10 +490,7 @@ const combinedMessages = $computed((oldMessages) => {
 
 	for (let i = 0; i < messages.length;) {
 		let message = messages.value[i];
-		if (message.hidden) {
-			i++;
-			continue;
-		}
+		if (message.hidden) { i++; continue; }
 
 		const oldMessage = byIndex.get(message);
 		if (oldMessage) oldMessage.index = i;
@@ -463,41 +499,43 @@ const combinedMessages = $computed((oldMessages) => {
 		 * @type {AiChat.ResponseContentPart[]}
 		 */
 		const chunks = [];
-		gatherMessageChunks(message, chunks, i);
-
-		const isOtherMessage = message.role !== "assistant";
-		let r;
-		if (isOtherMessage && (!(r = MessageRoles[message.role]?.reactive) || !r(message))) {
-			out.push(oldMessage || { ...message, key: message, index: i, content: chunks });
-			i++;
-			continue;
-		}
 
 		const ref = oldMessage || {
 			key: message,
 			index: i,
-			role: message.role
+			role: message.role,
+			content: chunks,
 		};
+
+		const isAssistantMessage = message.role === "assistant";
+		let isReactiveElement = isAssistantMessage || MessageRoles[message.role]?.reactive;
+		if (typeof isReactiveElement === 'function') isReactiveElement = isReactiveElement(ref);
+
+		if (!oldMessage || isReactiveElement) chunkGather(message, chunks, i);
+
+		i++;
 		out.push(ref);
 
-		for (i++; i < messages.length; i++) {
-			if (message.finish_reason !== "tool_calls") break;
-			message = messages.value[i];
-			if (message.role !== "assistant") break;
-			gatherMessageChunks(message, chunks, i);
-		}
-		const hasSuccessor = i < messages.length;
+		if (!isReactiveElement) continue;
 
 		/** @type {boolean} */
-		let isGeneratingMessage;
-		if (!isOtherMessage) {
+		let generationEnded;
+
+		if (isAssistantMessage) {
+			for (; i < messages.length; i++) {
+				if (message.finish_reason !== "tool_calls") break;
+				message = messages.value[i];
+				if (message.role !== "assistant") break;
+				chunkGather(message, chunks, i);
+			}
+
 			ref.model = ref.key.model;
 			ref.time = ref.key.time;
 			ref.end_index = i;
 
-			isGeneratingMessage = !message.finish_reason;
-			ref[PINNED] = isGeneratingMessage || message[IN_EDIT_MODE];
-			if (isGeneratingMessage) {
+			generationEnded = message.finish_reason;
+			ref[PINNED] = !generationEnded || message[IN_EDIT_MODE];
+			if (!generationEnded) {
 				if (!message.time) chunks.push({ type: "loading" });
 			}
 			// show token usage & billing
@@ -513,58 +551,34 @@ const combinedMessages = $computed((oldMessages) => {
 					});
 				}
 			}
-		} else {
-			// skip markdown render check
-			isGeneratingMessage = true;
 		}
 
 		if (oldMessage) {
-			let prevReactiveChunks = oldMessage.content;
-			const prevChunks = unconscious(prevReactiveChunks);
+			let prevChunks = oldMessage.content;
 
-			const lookup = new MultiKeyMap();
-			for (let chunk of prevChunks) {
-				lookup.set(getChunkKey(chunk), chunk);
-			}
-
-			if (!isGeneratingMessage) {
+			if (generationEnded) {
 				// 因为流md渲染已经和常规渲染同构，不需要再次解析
 				const at = prevChunks.at(-1);
 				if (at?.type === "text") at.text = message.content;
 			}
 
-			prevChunks.length = 0;
-			for (let newChunk of chunks) {
-				prevChunks.push(lookup.get(getChunkKey(newChunk)) || newChunk);
-			}
-
-			if (hasSuccessor) {
-				ref.content = prevReactiveChunks;
-				// 不主动创建响应状态大概够了
-				if (isReactive(prevReactiveChunks)) $update(prevReactiveChunks);
-			} else {
-				if (prevChunks === prevReactiveChunks) {
-					ref.content = prevReactiveChunks = $state(prevChunks);
-
-					// dynamically attach, React永远无法触及的性能真实（虽然代码非常难写，这周围全是各种手动diff）！
-					// 优点：在任意长的对话中，面对新的流式响应（极高频操作），foreach永远只要做最后一条的diff
-					// 缺点：在删除对话之后（低频操作），需要重建HTML（响应式化）
-					regenerateHTML(out.length-1, ref);
-				} else {
-					$update(ref.content = prevReactiveChunks);
-				}
-			}
+			// 因为用虚拟列表了，不会有多大开销的，大部分都没有渲染，没有监听器
+			prevChunks.value = chunks;
 		} else {
-			ref.content = hasSuccessor ? chunks : $state(chunks);
-		}
-
-		if (hoveringElement?.closest(".msg")._identity === ref) {
-			updateButtons(hoveringMessage, hoveringElement);
+			ref.content = $state(chunks);
 		}
 	}
 
 	return out;
 }, [messages, updateMessageUI]);
+
+$watch([messages, updateMessageUI, abortCompletion], () => {
+	if (hoveringElement?.isConnected) updateButtons(hoveringMessage, hoveringElement);
+	else {
+		hoveringMessage = null;
+		hoveringElement = null;
+	}
+}, false);
 
 /**
  *
@@ -592,7 +606,7 @@ export function MessageList() {
 		const {role, time} = m;
 
 		const callback = () => updateButtons(m, buttons);
-		const div = <div onMouseEnter={callback} onTouchStart.passive={callback} onMouseLeave={() => hoveringElement = null} className={`msg`} _identity={m}>
+		const div = <div onMouseEnter={callback} onTouchStart.passive={callback} onMouseLeave={() => updateButtons()} className={`msg`} _identity={m}>
 			<div className={"line"+(isMobile?"":" sticky")}>
 				{m.key[IN_EDIT_MODE] ? <select onChange={e => {
 					m.role = m.key.role = e.target.selectedOptions[0].value;
@@ -605,7 +619,7 @@ export function MessageList() {
 				<span className='spacer'></span>
 				<span className='buttons' ref={buttons}></span>
 			</div>
-			<div className={`body ${role}`}>{contentRenderer(m)}</div>
+			<div className={`body ${role}`}>{chunkRenderer(m)}</div>
 		</div>;
 		if (hoveringMessage === m) updateButtons(m, buttons);
 		return div;
@@ -616,6 +630,7 @@ export function MessageList() {
 		overscan: 199,
 		gap: 20,
 		keyFunc: (item) => [item.key, item.key.time],
+		// 又是tricky code过段时间要重构掉
 		isSameKey: (el, b) => {
 			const [key, time] = el[ITEM_KEY];
 			if (key !== b[0]) return false;

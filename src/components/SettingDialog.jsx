@@ -1,6 +1,6 @@
-import {jsHide} from "../utils.js";
+import {jsHide} from "../utils/utils.js";
 import {$state, $watch} from "unconscious";
-import {SETTING_UI_CONFIG} from "../setting-ui.js";
+import {SETTINGS} from "../settings.js";
 
 import "./SettingDialog.css";
 import {PresetDropdown} from "./PresetDropdown.jsx";
@@ -46,10 +46,10 @@ function setTransparent(f) {
 	document.body?.classList.toggle("tr", f);
 }
 
-export function SettingDialog({oldUI}) {
+export function SettingDialog(oldUI) {
 	const elements = Array.from(oldUI.children);
-	for (let i = 0; i < SETTING_UI_CONFIG.length; i++) {
-		const item = SETTING_UI_CONFIG[i];
+	for (let i = 0; i < SETTINGS.length; i++) {
+		const item = SETTINGS[i];
 		const element = elements[i];
 		let tabNames = item._tab || "general";
 		if (!Array.isArray(tabNames)) tabNames = [tabNames];
@@ -72,7 +72,7 @@ export function SettingDialog({oldUI}) {
 
 	let header;
 	let body;
-	let dialog = <div className="modal-overlay hide" id={"settingDialog"} style={"display:none"+(isMobile?'':';z-index:15')}>
+	let dialog = <div className="modal-overlay hide" id={"settingDialog"} style={"display:none;z-index:"+(isMobile?16:15)}>
 		<div ref={header} className="modal ntp">
 			<div className="sidebar-list scroll">
 				<div className={"_vl"} onClick.delegate{".chat-item"}={({delegateTarget}) => {

@@ -1,5 +1,6 @@
-.edit-widget {
-    overflow: hidden;
-    font-size: inherit !important;
-    transition-property: border !important;
+.text-input.edit-widget {
+    overflow: auto !important;
+    transition-property: border;
+    max-height: 60vh;
+    height: 60vh;
 }

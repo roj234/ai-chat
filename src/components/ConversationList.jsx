@@ -3,13 +3,37 @@ import {VirtualList} from 'unconscious/ext/VirtualList.js';
 import {formatDate} from 'unconscious/ext/Utils.js';
 import {$update, $watchWithCleanup} from 'unconscious';
 import {deleteConversation, getMessages, updateConversation} from "../database.js";
-import {conversations, isMobile, messages, selectedConversation} from "../states.js";
-import {abortCompletion} from "../api-request.js";
+import {abortCompletion, conversations, isMobile, messages, selectedConversation} from "../states.js";
 import {showToast} from "./Toast.js";
 import SimpleModal from "./SimpleModal.jsx";
-import {BM, convertToBranchMessage} from "../BranchManager.js";
+import {BM, convertToBranchMessage} from "../utils/BranchManager.js";
+import {exportConversation} from "../data-exchange.js";
+import {onLoad} from "../plugin.js";
+import "/plugins/st/STTagList.css";
 
 //const searchText = $state("");
+
+let currentTarget;
+
+const closeHoverMenu = ({target}) => {
+	if (currentTarget !== target) {
+		hoverMenu.replaceWith(currentTarget);
+		currentTarget = null;
+	}
+}
+
+const hoverMenu = <div className={"tag-dropdown"} style={"position:absolute"}>
+	<div className="list" style={"display:block;left:-50%"}>
+		<label data-action={"edit"}>编辑标题</label>
+		<label data-action={"export"}>导出</label>
+		<label data-action={"delete"}>删除</label>
+	</div>
+</div>;
+
+onLoad((app) => {
+	if (!isMobile) hoverMenu.addEventListener("mouseleave", closeHoverMenu);
+	app.addEventListener("click", closeHoverMenu);
+});
 
 /**
  * React组件：渲染对话列表，按时间分组，支持选择、编辑标题、删除。
@@ -53,97 +77,73 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 		return groups;
 	}
 
-	// 处理点击编辑按钮
-	const leftBtnClick = (e, conv) => {
-		const id = vl.findIndex(conv);
-
-		if (editingNow === conv) {
-			editingNow = null;
-			const val = e.target.closest('.chat-item').querySelector('input').value.trim();
-			if (val) {
-				conv.title = val;
-				// 重新计算时间
-				$update(conversations);
-				updateConversation(conv);
-			}
-		} else {
-			const oldEditingNow = editingNow;
-			editingNow = conv;
-
-			const id1 = oldEditingNow ? vl.findIndex(oldEditingNow) : -1;
-			if (id1 > 0) vl.setItem(id1, oldEditingNow);
-		}
-
-		vl.setItem(id, conv);
-	};
-
-	// 处理删除点击
-	const rightBtnClick = (e, conv) => {
-		let id = vl.findIndex(conv);
-
-		if (editingNow === conv) {
-			editingNow = null;
-			vl.setItem(id, conv);
-			return;
-		}
-
-		SimpleModal({
-			message: '确认删除"'+conv.title+'"#'+conv.id+'？',
-			accent: 'danger',
-			confirmMessage: '删除',
-			onConfirm() {
-				const prev = groupAndConvArr[id-1];
-				const next = groupAndConvArr[id+1];
-				if (!prev.id && !next?.id) {
-					groupAndConvArr.splice(id-1, 2);
-				} else {
-					groupAndConvArr.splice(id, 1);
-				}
-				vl.resize();
-
-				const start = conversations.indexOf(conv);
-				if (start >= 0) {
-					conversations.splice(start, 1);
-					deleteConversation(conv);
-				}
-
-				if (selectedConversation.value === conv) {
-					selectedConversation.value = null;
-					messages.value = [];
-				}
-			}
-		});
-	};
-
-	// 处理Enter键确认编辑
-	const handleKeyDown = (e, conv) => {
-		if (e.key === 'Enter') {
-			leftBtnClick(e, conv);
-		} else if (e.key === 'Escape') {
-			rightBtnClick(e, conv);
-		}
-	};
-
 	function eventHandler(e) {
 		const target = e.target;
 		const owner = target.closest('.chat-item');
 		if (!owner) return;
 
-		const conv = owner._conversation;
-
-		let test = target.closest('.edit-btn');
-		if (test) return leftBtnClick(e, conv);
-
-		test = target.closest('.delete-btn');
-		if (test) return rightBtnClick(e, conv);
-
-		test = target.closest('.chat-title input');
-		if (test) return;
-
 		if (abortCompletion.value) {
 			showToast("正在生成响应");
 			return;
 		}
+
+		const conv = owner._conv;
+
+		let test = target.closest('label');
+		if (test) {
+			switch (test.dataset.action) {
+				case "edit":
+					SimpleModal({
+						type: "input",
+						title: "请输入新标题",
+						message: conv.title,
+						onConfirm(val) {
+							const id = vl.findIndex(conv);
+
+							conv.title = val;
+							// 重新计算时间
+							$update(conversations);
+							updateConversation(conv);
+
+							vl.setItem(id, conv);
+						}
+					});
+					break;
+				case "export":
+					exportConversation(false, conv);
+				break;
+				case "delete":
+					SimpleModal({
+						message: '确认删除"'+conv.title+'"#'+conv.id+'？',
+						accent: 'danger',
+						confirmMessage: '删除',
+						onConfirm() {
+							let id = vl.findIndex(conv);
+							const prev = groupAndConvArr[id-1];
+							const next = groupAndConvArr[id+1];
+							if (!prev.id && !next?.id) {
+								groupAndConvArr.splice(id-1, 2);
+							} else {
+								groupAndConvArr.splice(id, 1);
+							}
+							vl.resize();
+
+							const start = conversations.indexOf(conv);
+							if (start >= 0) {
+								conversations.splice(start, 1);
+								deleteConversation(conv);
+							}
+
+							if (selectedConversation.value === conv) {
+								selectedConversation.value = null;
+								messages.value = [];
+							}
+						}
+					});
+				break;
+			}
+		}
+
 
 		const active = list.querySelector(".active");
 		if (active) active.classList.remove('active');
@@ -152,6 +152,11 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 		conv.ready = false;
 		selectedConversation.value = conv;
 	}
+
+	const mouseHandler = ({target}) => {
+		currentTarget = target;
+		target.replaceWith(hoverMenu);
+	};
 
 	const list = <div className="sidebar-list scroll" id="chatList" onClick={eventHandler}></div>;
 	const groupAndConvArr = [];
@@ -163,23 +168,17 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 		keyFunc,
 		renderer(conv) {
 			if (!conv.id) return conv;
-			const isEditing = editingNow === conv;
+
+			const btn = <button className={"edit-btn " + ("ri-more-line")} title={"菜单"} />;
+			btn.addEventListener(isMobile ? 'click' : 'mouseover', mouseHandler);
+
 			return <div
-				_conversation={conv}
-				className={`chat-item${selectedConversation.value === conv ? ' active' : ''}${isEditing?" hover":''}`}
+				_conv={conv}
+				className={`chat-item${selectedConversation.value === conv ? ' active' : ''}`}
 				title={formatDate("Y-m-d H:i:s", conv.time)}
 			>
-				<span className="chat-title">{isEditing
-					? <input type="text" onKeyDown={(e) => handleKeyDown(e, conv)} className="chat-title-input" value={conv.title}/>
-					: conv.title || '无标题'}
-				</span>
-				{isMobile ? <div className="chat-actions">
-					<button className={"delete-btn " + ("ri-more-line")} title={"删除"}></button>
-				</div> : <div className="chat-actions">
-					<button className={"edit-btn " + (isEditing ? "ri-check-fill" : "ri-edit-2-line")}
-							title={editingNow === conv ? "保存" : "编辑"}></button>
-					<button className={"delete-btn " + (isEditing ? "ri-forbid-2-line" : "ri-delete-bin-line")} title={editingNow === conv ? "取消" : "删除"}></button>
-				</div>}
+				<span className="chat-title">{conv.title || '无标题'}</span>
+				<div className="chat-actions">{btn}</div>
 			</div>;
 		}
 	});
@@ -193,7 +192,8 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 
 		const groups = groupConversations();
 		for (const groupName in groups) {
-			groupAndConvArr.push(<div className="chat-group"><div>{groupName}</div></div>);
+			groupAndConvArr.push(<div className="chat-group">
+				<div>{groupName}</div></div>);
 			groupAndConvArr.push(...groups[groupName]);
 		}
 		vl.resize();

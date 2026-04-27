@@ -647,6 +647,10 @@ code {
     .code-header {
         top: 32px;
     }
+
+    code.hljs.done {
+        max-height: calc(40vh);
+    }
 }
 
 @media (hover: none) {
@@ -697,7 +701,7 @@ code {
         bottom: -200px;
     }
 
-    code.hljs {
+    code.hljs.done {
         max-height: calc(20vh + 7px);
     }
 

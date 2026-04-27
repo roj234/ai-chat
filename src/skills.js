@@ -1,6 +1,6 @@
 import {config, messages, selectedConversation} from "./states.js";
 import {$state, $update, $watch, debugSymbol} from "unconscious";
-import {loadingBlock, prettyError} from "./utils.js";
+import {loadingBlock, prettyError} from "./utils/utils.js";
 
 import "./skills.css";
 import {updateMessageUI} from "./components/MessageList.jsx";
@@ -226,8 +226,8 @@ toolScriptRegistry["use"] = {
 	},
 
 	renderer(context) {
-		if (context.success === false) return;
-		if (!context.newTools) return loadingBlock("等待异步回调……");
+		if (context.success === false || !context.time) return;
+		if (!context.newTools) return loadingBlock("等待调用结果……");
 
 		const isRevoked = !context.content.startsWith("You");
 		if (!context[use_isRevoked]) context[use_isRevoked] = $state(isRevoked);
@@ -529,15 +529,18 @@ export async function runTools(response, permitState) {
 				const fn = toolScriptRegistry[name];
 				let interactive = fn.interactive;
 				if (interactive) {
-					if (typeof interactive === "function") {
+					/*if (typeof interactive === "function") {
 						interactive = interactive(parameters);
-					}
+					}*/
 					if (interactive === "secure") {
 						if (!config.permitAllTools) {
 							autoNext = false;
-							if (permitState !== true && permitState !== i) continue;
+							if (permitState !== true && permitState !== i) {
+								delete msg.time;
+								continue;
+							}
 						}
-					} else {
+					} else if (interactive) {
 						autoNext = false;
 					}
 				}

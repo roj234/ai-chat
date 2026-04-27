@@ -1,6 +1,6 @@
 # AiChat - 爱聊天
 
-#### 当前版本 2.0.0
+#### 当前版本 2.1.0
 - 警告：2.0.0的数据格式与之前版本不兼容
 
 AiChat 是一个现代化的高性能**纯 Web** AI 聊天前端，基于 [Unconscious](https://github.com/Roj234/unconscious) 响应式框架构建，支持 OpenAI-兼容 API，提供流畅的聊天体验。

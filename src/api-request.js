@@ -1,15 +1,8 @@
 // API request
-import {markdownStreamParser} from "./md-wrapper.js";
+import {markdownStreamParser} from "./markdown/markdown.js";
+import {cloneNamed, deepEntries, getTextContent, jsonFetch, prettyError, streamFetch} from "./utils/utils.js";
 import {
-	jsonFetch,
-	deepEntries,
-	getTextContent,
-	prettyError,
-	streamFetch,
-	throttled,
-	highlightJsonLike, cloneNamed
-} from "./utils.js";
-import {
+	abortCompletion,
 	config,
 	isLlamaCppBackend,
 	isMyLlamaCppBackend,
@@ -28,21 +21,16 @@ import failure from "../media/failure.js";
 import complete from "../media/complete.js";
 import {appendBillingLog, updateConversation} from "./database.js";
 import {updateMessageUI} from "./components/MessageList.jsx";
-import {BODY_PARAMETERS, defaultCoTPrompt, defaultSystemPrompt} from "./setting-ui.js";
-import {jsonEncode} from "./stream-json.js";
+import {BODY_PARAMETERS, defaultCoTPrompt, defaultSystemPrompt} from "./settings.js";
+import {jsonEncode} from "/vendor/stream-json.js";
 import {AntiSlop} from "./antiSlop.js";
 import SimpleModal from "./components/SimpleModal.jsx";
+import {highlightJsonLike} from "./markdown/highlight.js";
 
 export function setStatus(text, tone = '') {
 	Shared.statusBadge.textContent = text;
 	Shared.statusBadge.className = 'badge ' + tone;
 }
-
-/**
- *
- * @type {import("unconscious").Reactive<null | AbortController>}
- */
-export const abortCompletion = $state(null);
 
 function isThinkingEnabled() {
 	return (typeof config.forceThink === "boolean" ? config.forceThink : config.think);
@@ -391,13 +379,11 @@ export function getMarkdownContainer(think) {
 	const bodyNode = scroller.children[0].children[0].lastElementChild?.querySelector(".body");
 	if (bodyNode) {
 		const children = bodyNode.children;
-		for (let i = children.length - 1; i >= 0; i--) {
-			let element = children[i];
-			if (think) {
-				if (element.matches(".think")) return element.lastElementChild;
-			} else {
-				if (element.matches(".content")) return element;
-			}
+		const element = children[children.length - 1];
+		if (think) {
+			if (element.matches(".think")) return element.lastElementChild;
+		} else {
+			if (element.matches(".content")) return element;
 		}
 	}
 }
@@ -406,7 +392,7 @@ export function getMarkdownContainer(think) {
  *
  * @param {string | OpenAI.ContentPart[]=} userText
  * @param {AntiSlop=} antiSlop
- * @return {Promise<boolean>}
+ * @return {Promise<string>}
  */
 export async function sendUserChatMessage(userText, antiSlop) {
 	if (abortCompletion.value) throw "already generating";
@@ -416,13 +402,14 @@ export async function sendUserChatMessage(userText, antiSlop) {
 	const {scroller} = Shared;
 	let updateCount = 0;
 	let content_;
+	let waitingForContent;
 
 	function updateMarkdown(content, force) {
 		content_ = content;
 
 		const currentIsThink = isReactive(content.think);
 		const container = getMarkdownContainer(currentIsThink);
-		if (!container) return true;
+		if ((waitingForContent = !container)) return true;
 
 		if (!force) {
 			const details = container.closest("details:not([open])");
@@ -455,7 +442,8 @@ export async function sendUserChatMessage(userText, antiSlop) {
 	function callback(type, content) {
 		switch (type) {
 			case MD_APPEND:
-				if (updateMarkdown(content)) break;
+				const flag = waitingForContent;
+				if (updateMarkdown(content) && !flag) break;
 			return;
 			case MD_END: {
 				if (content_) {
@@ -495,7 +483,7 @@ export async function sendUserChatMessage(userText, antiSlop) {
 
 		if (is_ok && assistantMessage.tool_calls && !config.debug && (!config.maxToolTurns || countAgentTurns(messages) < config.maxToolTurns)) {
 			if (!await runTools(assistantMessage)) {
-				// should I use this reason?
+				// 如果存在可能需要批准的工具调用
 				finishReason = 'interrupt';
 			}
 			needSave = true;
@@ -506,6 +494,8 @@ export async function sendUserChatMessage(userText, antiSlop) {
 		if (needSave) {
 			await updateConversation(unconscious(selectedConversation), unconscious(messages));
 		}
+
+		return finishReason;
 	} finally {
 		abortCompletion.value = null;
 	}
@@ -685,6 +675,7 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 						assistantMessage.tool_responses = [];
 					}
 
+					let hasNewToolCalls;
 					for (const call of delta.tool_calls) {
 						delete call.index;
 						if (!call.id) {
@@ -696,8 +687,9 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 							}
 						}
 						toolCalls.push($state(call));
+						hasNewToolCalls = true;
 					}
-					onProgress?.(MD_END);
+					if (hasNewToolCalls) onProgress?.(MD_END);
 				}
 			} else {
 				text = chunk.text;
@@ -728,7 +720,7 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 				} else {
 					thinkState.content += reasoning_text;
 				}
-			} else if (isReactive(thinkState) && content) {
+			} else if (isReactive(thinkState)) {
 				if (manualCoTCloseTag) {
 					let index = thinkState.index;
 
@@ -764,7 +756,7 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 			}
 
 			assistantMessage.content = content;
-			onProgress?.(MD_APPEND, assistantMessage);
+			if (!assistantMessage.tool_calls) onProgress?.(MD_APPEND, assistantMessage);
 		});
 	} catch (err) {
 		if (err.name === 'AbortError') {

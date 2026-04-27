@@ -1,13 +1,13 @@
 import {debugSymbol} from 'unconscious';
 import {config} from "./states.js";
 import {isEqual} from "../vendor/equals.js";
-import {cloneNamed} from "./utils.js";
+import {cloneNamed} from "./utils/utils.js";
+import * as db from "./database-idb.js";
 
 const MESSAGE_IN_DB = debugSymbol("MESSAGE_IN_DB");
 const CONVERSATION_IN_DB = debugSymbol("CONVERSATION_IN_DB");
 export const DONE = Promise.resolve();
 
-import * as db from "./database-idb.js";
 export {
 	deleteDatabase,
 	getKV, setKV,

@@ -1,8 +1,6 @@
 // openai.d.ts
 // OpenRouter OpenAI-compatible API TypeScript 类型定义
 
-import {AiChat} from "./aiChat";
-
 declare namespace OpenAI {
     // 模型名称
     type Model = string;

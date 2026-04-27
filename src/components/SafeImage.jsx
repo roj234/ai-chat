@@ -1,8 +1,8 @@
 import {$state, unconscious} from "unconscious";
 
 import "./SafeImage.css";
-import {isLanAddress} from "../tools/isLanAddress.js";
-import {loadingBlock} from "../utils.js";
+import {isLanAddress} from "../utils/isLanAddress.js";
+import {loadingBlock} from "../utils/utils.js";
 
 const whiteList = new Set([
 	"img.shields.io",

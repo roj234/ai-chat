@@ -1,8 +1,9 @@
 import {$computed, isReactive} from "unconscious";
 import './ThinkBlock.css';
-import {renderMarkdownToElement} from "../md-wrapper.js";
+import {renderMarkdownToElement} from "../markdown/markdown.js";
 import {EditWidget} from "./EditWidget.jsx";
-import {copyButtonAnimation} from "../utils.js";
+import {copyButtonAnimation} from "../utils/utils.js";
+import {config} from "../states.js";
 
 /**
  * 合并连续的 reasoning.text 片段
@@ -52,6 +53,13 @@ function getReasoningTextFromDetails(details) {
 	return str;
 }
 
+const reasoningFormatNames = {
+	r: "reason",
+	rc: "reasoning_content",
+	mthink: "纯文本<think>",
+	mthinking: "纯文本<thinking>",
+};
+
 /**
  *
  * @param {AiChat.AssistantMessage} think
@@ -62,25 +70,29 @@ export function ThinkBlock({message, edit}) {
 	const {think} = message;
 	if (!think) return null;
 
-	let content;
+	let container;
 	const renderContentAtFirstOpen = () => {
 		if (!isReactive(think)) {
-			let thinking = think.content;
-			if (!thinking) {
+			let {content, format} = think;
+			if (null == content) {
 				if (!message.reasoning_details) return;
-				thinking = getReasoningTextFromDetails(message.reasoning_details);
+				content = getReasoningTextFromDetails(message.reasoning_details);
 			}
 			if (edit) {
-				content.replaceWith(<EditWidget value={thinking} onChange={(value) => think.content = value}/>)
+				container.replaceWith(<div style={"font-size:14px"}>思维链格式&nbsp;&nbsp;<select onChange={({target}) => {
+					think.format = target.selectedOptions[0].value;
+				}}>
+					{Object.entries(reasoningFormatNames).map(([k, v]) => <option value={k} selected={format === k}>{v}</option>)}
+				</select></div>, <EditWidget value={content} onChange={(value) => think.content = value}/>);
 			} else {
-				renderMarkdownToElement(content, thinking);
+				renderMarkdownToElement(container, content);
 			}
 		}
 	}
 
 	const title = think.title;
 	return (
-		<details className={'think'} class:thinking={() => !!think.start}>
+		<details className={'think'} class:thinking={() => !!think.start} open={config.expandThinkBlock && isReactive(think)}>
 			<summary title={title || '展开思考过程'} onClick.once={renderContentAtFirstOpen}>
 				<span className="chevron ri-play-large-fill"></span>
 				{title || $computed(() => {
@@ -91,7 +103,7 @@ export function ThinkBlock({message, edit}) {
 					return "已思考 " + Math.round(duration / 1000) + " 秒";
 				})}
 			</summary>
-			<div ref={content} className="think-content">
+			<div ref={container} className="think-content">
 				<button className={"ri-file-copy-line ghost"} title={"复制"} onClick={({target}) => {
 					copyButtonAnimation(think.content, target);
 				}}></button>

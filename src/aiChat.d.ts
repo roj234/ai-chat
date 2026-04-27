@@ -1,7 +1,7 @@
-import {ImagePart, OpenAI, TextPart} from "./openai";
+import {OpenAI} from "./openai";
 
 declare namespace AiChat {
-    import OpenRouter = OpenAI.OpenRouter;
+
     export type Conversation = {
         id: number,
         title: string,
@@ -413,7 +413,9 @@ declare namespace AiChat {
                 id: number;
                 name: string;
                 lorebooks: number[];
+                lorebookNames?: string[];
                 preset: number;
+                presetName?: string;
                 greeting: number;
                 activatedLorebookItems: Set<string>;
             };

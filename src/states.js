@@ -1,5 +1,5 @@
 import {$asyncState, $state, $store, $update} from 'unconscious';
-import {jsonFetch} from "./utils.js";
+import {jsonFetch} from "./utils/utils.js";
 import {isEqual} from "../vendor/equals.js";
 
 export const isMobile = matchMedia('(max-width: 768px)').matches;
@@ -77,28 +77,6 @@ export let isLlamaCppBackend, isMyLlamaCppBackend;
 export function setIsLlamaCppBackend(b, b2) {
 	isLlamaCppBackend = b;
 	isMyLlamaCppBackend = b2;
-	emptyMessageTokens = -1;
-}
-
-let emptyMessageTokens = -1;
-const _countTokens = (text) => {
-	return jsonFetch(config.endpoint+"/messages/count_tokens", {
-		authorization: config.accessToken,
-		body: JSON.stringify({
-			model: config.model,
-			messages: [{
-				role: "user",
-				content: text
-			}]
-		})
-	}).then(result => result.input_tokens);
-};
-
-export async function countTokens(text) {
-	if (emptyMessageTokens < 0) {
-		emptyMessageTokens = await _countTokens("");
-	}
-	return await _countTokens(text) - emptyMessageTokens;
 }
 
 /**
@@ -138,3 +116,9 @@ export const Shared = {}
  * @type {import("unconscious").Reactive<boolean>}
  */
 export const lastScrollDirection = $state();
+
+/**
+ *
+ * @type {import("unconscious").Reactive<AbortController>}
+ */
+export const abortCompletion = $state();

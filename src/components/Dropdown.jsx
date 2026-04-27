@@ -1,7 +1,7 @@
 import "./Dropdown.css";
 
-import {$computed, $foreach} from "unconscious";
-import {indexInParent} from "../utils.js";
+import {$foreach} from "unconscious";
+import {indexInParent} from "../utils/utils.js";
 
 /**
  * 注意：如果传对象，必须是inline key
@@ -9,12 +9,13 @@ import {indexInParent} from "../utils.js";
  * @param {import("unconscious").Reactive<T[]>} items
  * @param {import("unconscious").Reactive<string>} selection
  * @param {function('s' | 'd', number): void} onChanged
+ * @param {'up'|'down'} dir
  * @return {JSX.Element & {
  *     setSelection(number): void
  * }}
  * @constructor
  */
-export function Dropdown({items, selection, onChanged}) {
+export function Dropdown({items, selection, onChanged, dir = 'down'}) {
 	function updateHighlight_(i) {
 		options.querySelector(".selected")?.classList.remove("selected");
 		options.children[i]?.classList.add("selected");
@@ -22,13 +23,10 @@ export function Dropdown({items, selection, onChanged}) {
 	}
 
 	let options;
-	const main = <div className="pretty-select">
+	const main = <div className={"pretty-select "+dir}>
 		<div className="input" onClick={() => main.classList.toggle("open")}>
 			<span>{() => selection.value ?? "default"}</span>
-			<svg className="arrow-icon" width="12" height="12" viewBox="0 0 24 24" fill="none"
-				 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-				<path d="m6 9 6 6 6-6"/>
-			</svg>
+			<span className={"arrow-icon ri-arrow-down-s-line"}></span>
 		</div>
 
 		<ul ref={options} className="dropdown"

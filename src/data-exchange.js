@@ -1,14 +1,15 @@
 import {config, conversations, messages, selectedConversation, Shared} from "./states.js";
 import {showToast} from "./components/Toast.js";
 import {
-	kvListSet,
 	CONVERSATION_KEYS,
 	deleteDatabase,
-	getMessages, kvListGetValues,
+	getMessages,
+	kvListGetValues,
+	kvListSet,
 	newConversation,
 	updateConversation
 } from "./database.js";
-import {deepEntries, prettyError} from "./utils.js";
+import {deepEntries, prettyError} from "./utils/utils.js";
 import {runAllTools} from "./skills.js";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {openZip, ZipWriter} from "../vendor/jszip.js";
@@ -59,6 +60,7 @@ async function loadBackupZip(file) {
 	const presets = await zipFile.getText("presets.json");
 	if (presets) {
 		for (const preset of JSON.parse(presets)) {
+			await decodeObjects(preset, null);
 			await kvListSet(preset, "preset");
 		}
 		reloadPresetList();
@@ -74,7 +76,7 @@ async function loadBackupZip(file) {
 			message.value = "正在导入 "+name;
 			try {
 				const conv = JSON.parse(await zipFile.getText(name));
-				await decodeBlobs(conv, zipFile);
+				await decodeObjects(conv, zipFile);
 				new_convs.push(await importConversationData(conv, true));
 			} catch (e) {
 				showToast(name+": 导入失败\n"+prettyError(e), 'error');
@@ -94,6 +96,7 @@ async function loadBackupZip(file) {
 	const preset = await zipFile.getText("config.json");
 	if (preset) {
 		const data = JSON.parse(preset);
+		await decodeObjects(data, null);
 		Object.assign(config.value, data);
 		$update(config);
 		Shared.SettingUI.onSettingsUpdated();
@@ -131,6 +134,7 @@ export async function importConversation(e) {
 				continue;
 			} else if (file.type === "application/json") {
 				const jsonData = JSON.parse(await file.text());
+				await decodeObjects(jsonData, null);
 				if (typeof jsonData.title === "string" && jsonData.messages?.length) {
 					await importConversationData(jsonData, files.length > 1);
 					continue;
@@ -172,16 +176,26 @@ export async function duplicateConversation() {
 }
 
 
-async function decodeBlobs(messages, zr) {
+async function decodeObjects(messages, zr) {
 	for (const [val, own, key] of deepEntries(messages)) {
-		if (val.$ === "Blob") {
-			const data = await zr.get("blobs/"+val.index);
-			own[key] = new Blob([data], {type: val.type});
+		switch (val.$) {
+			case "Blob":
+				if (!zr) throw "找不到引用的 Blob 对象";
+				const data = await zr.get("blobs/"+val.index);
+				if (!data) throw "找不到引用的 Blob 对象";
+				own[key] = new Blob([data], {type: val.type});
+				break;
+			case "Map":
+				own[key] = new Map(val.value);
+				break;
+			case "Set":
+				own[key] = new Set(val.value);
+				break;
 		}
 	}
 }
 
-function encodeBlobs(messages, mapping, zw) {
+function encodeObjects(messages, mapping, zw) {
 	const promises = [];
 	for (const [val, own, key] of deepEntries(messages)) {
 		if (val instanceof Blob) {
@@ -210,12 +224,29 @@ function encodeBlobs(messages, mapping, zw) {
 					return zw.add("blobs/"+blobName, new Uint8Array(await ab.arrayBuffer()));
 				}));
 			}
+
+			if (val instanceof Map) {
+				mapping.set(val, {
+					$: "Map",
+					value: [...val]
+				});
+			} else if (val instanceof Set) {
+				mapping.set(val, {
+					$: "Set",
+					value: [...val]
+				});
+			}
 		}
 	}
 	return Promise.all(promises);
 }
 
-export async function exportConversation(isConfig) {
+function cleanMessages(messages) {
+	for (const message of messages) delete message.id;
+	return messages;
+}
+
+export async function exportConversation(isConfig, _conv) {
 	const mapping = new Map;
 	const replacer = (_, value) => {
 		return mapping.get(value) ?? value;
@@ -238,15 +269,15 @@ export async function exportConversation(isConfig) {
 			compress: true
 		});
 	} else {
-		const conv = selectedConversation.value;
+		const conv = _conv || selectedConversation.value;
 		if (conv) {
 			data = {
 				//spec: "roj234:aichat:conversation",
 				title: conv.title,
 				time: conv.time,
-				messages: messages.value || await getMessages(conv)
+				messages: cleanMessages(/*messages.value || */await getMessages(conv))
 			};
-			await encodeBlobs(data.messages, mapping, zw);
+			await encodeObjects(data.messages, mapping, zw);
 
 			const jsonData = JSON.stringify(data, replacer, 2);
 			if (zw.fileCount() === 1) {
@@ -271,14 +302,9 @@ export async function exportConversation(isConfig) {
 				delete copy.id;
 
 				callbacks.push(getMessages(conv).then(messages => {
-					copy.messages = messages;
-					for (const item of messages) {
-						// TODO revise fork
-						delete item.id;
-						delete item.parent;
-					}
+					copy.messages = cleanMessages(messages);
 					my_conversations[index] = copy;
-					return encodeBlobs(messages, mapping, zw).then(() => {
+					return encodeObjects(messages, mapping, zw).then(() => {
 						successed.value ++;
 					});
 				}));
