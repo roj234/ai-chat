@@ -1,0 +1,11 @@
+
+
+.config-bar { margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid #eee; display: flex; gap: 10px; align-items: center; }
+
+table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+th, td { text-align: left; padding: 12px; border-bottom: 1px solid var(--border); }
+tr:hover { background: var(--chip-hover); }
+
+.preview-img { max-width: 50px; max-height: 50px; object-fit: cover; border-radius: 4px; cursor: pointer; border: 1px solid #ddd; }
+
+.pagination { display: flex; gap: 10px; align-items: center; justify-content: center; }

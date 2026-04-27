@@ -1,6 +1,6 @@
-import { driver } from "driver.js";
+import {driver} from "driver.js";
 import "driver.js/dist/driver.css";
-import {jsHide} from "./utils.js";
+import {jsHide} from "./utils/utils.js";
 
 function removeBrainDiv(driver) {
 	jsHide(setting);

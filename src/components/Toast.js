@@ -1,8 +1,8 @@
 import './Toast.css';
-import {onWindowLoad, prettyError} from "../utils.js";
+import {onLoad} from "../plugin.js";
 
-const container = <div className="toasts"></div>;
-onWindowLoad(() => document.body.append(container));
+const container = <div className="toasts" />;
+onLoad(() => document.body.append(container));
 
 /**
  *

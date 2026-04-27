@@ -1,8 +1,6 @@
 // openai.d.ts
 // OpenRouter OpenAI-compatible API TypeScript 类型定义
 
-import {AiChat} from "./aiChat";
-
 declare namespace OpenAI {
     // 模型名称
     type Model = string;
@@ -204,7 +202,7 @@ declare namespace OpenAI {
     }
 
     //region JSON Schemas
-    type ParameterType = 'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array';
+    type ParameterType = 'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array' | 'null';
     type StringFormat = 'date' | 'time' | 'date-time' | 'uri' | 'email' | 'hostname' | 'ipv4' | 'ipv6' | 'uuid'/* | /^uuid[1-5]/*/;
 
     type BaseSchema = {
@@ -225,7 +223,7 @@ declare namespace OpenAI {
         type: 'object';
         properties?: Record<string, Schema>;
         required?: string[];
-        additionalProperties?: boolean;
+        additionalProperties?: boolean | Schema;
     }
     type ArraySchema = BaseSchema & {
         type: 'array';
@@ -247,6 +245,7 @@ declare namespace OpenAI {
         maximum?: number;
         exclusiveMinimum?: number;
         exclusiveMaximum?: number;
+        multipleOf?: number;
     }
     type Schema = BaseSchema | ObjectSchema | ArraySchema | StringSchema | IntegerSchema;
     //endregion

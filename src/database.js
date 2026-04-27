@@ -1,19 +1,60 @@
 import {debugSymbol} from 'unconscious';
 import {config} from "./states.js";
 import {isEqual} from "../vendor/equals.js";
-import {cloneNamed} from "./utils.js";
+import {cloneNamed, prettyError} from "./utils/utils.js";
+import * as idb from "./database/db-indexeddb.js";
+import * as remote from "./database/db-remote.js";
+import {showToast} from "./components/Toast.js";
+import {SETTINGS} from "./settings.js";
+import {BM} from "./utils/BranchManager.js";
 
 const MESSAGE_IN_DB = debugSymbol("MESSAGE_IN_DB");
 const CONVERSATION_IN_DB = debugSymbol("CONVERSATION_IN_DB");
 export const DONE = Promise.resolve();
 
-import * as db from "./database-idb.js";
-export {
+function databaseError(err) {
+	showToast("数据库错误!\n"+prettyError(err)+"\n未保存的更改可能丢失，请直接从页面导出", 'error', 0);
+	return [];
+}
+
+if (DB_MODE !== 'local') {
+	SETTINGS.push({
+		id: "db_server",
+		_tab: ["general", "data"],
+		name: "数据库服务器",
+		title: "提供文件管理、消息搜索、多租户等功能\n修改后需要刷新页面"+(DB_MODE === "mixed" ? "\n填写 :idb: 使用本地数据库" : ""),
+		type: "input",
+		pattern: (DB_MODE === "mixed" ? /^(?:(?:https?:\/\/.+)?\/aichat\/v2\/?|:idb:$)/ : /^(?:https?:\/\/.+)?\/aichat\/v2\/?/),
+		warning: "请输入合法的服务器地址",
+		placeholder: "/aichat/v2/user"
+	});
+}
+const db = DB_MODE === 'remote' || (DB_MODE === "mixed" && config.db_server !== ':idb:') ? remote : idb;
+
+export const {
 	deleteDatabase,
 	getKV, setKV,
-	kvListGetValues, kvListSet, kvListDel, kvListGetKeys, kvListGet, kvListGetByName,
-	listConversations, searchMessages
-} from "./database-idb.js";
+	kvListGetValues, kvListSet, kvListDel, kvListGetKeys, kvListGet,
+	searchMessages,
+	updateBlob, getBlob
+} = db;
+
+/**
+ * 列出所有会话，按创建时间降序
+ * @returns {Promise<Array<{id:number, title:string, time:number, messageId?:number}>>}
+ */
+export async function listConversations() {
+	try {
+		const conversations = await db.listConversations();
+		conversations.forEach((conversation) => {
+			conversation[CONVERSATION_IN_DB] = serializeConversation(conversation);
+			conversation.ready = false;
+		});
+		return conversations;
+	} catch (e) {
+		return databaseError(e);
+	}
+}
 
 /**
  * 获取一个会话的消息
@@ -21,13 +62,14 @@ export {
  * @returns {Promise<AiChat.Message[]>}
  */
 export function getMessages(conversation) {
+	if (conversation.ready == null) return Promise.resolve([]);
+
 	return db.getMessages(conversation).then(messages => {
 		/**
 		 * @type {Map<number, string>}
 		 */
 		const m = new Map();
 		conversation[MESSAGE_IN_DB] = m;
-		conversation[CONVERSATION_IN_DB] = serializeConversation(conversation);
 
 		for (let message of messages) {
 			delete message.owner;
@@ -35,31 +77,34 @@ export function getMessages(conversation) {
 		}
 
 		return messages;
-	});
+	}).catch(databaseError);
 }
 
 /**
  * 新建一个会话
  * @returns {Promise<AiChat.Conversation>}
  */
-export function newConversation() {
+export async function newConversation() {
 	const conversation = {
 		title: "",
 		time: Date.now(),
 		[MESSAGE_IN_DB]: new Map
 	};
+	if (config.branchModeDefault) conversation.branches = 1;
 
 	if (config.debugDatabase) {
 		conversation.id = -1;
-		return Promise.resolve(conversation);
+	} else {
+		await db.newConversation(conversation)
 	}
 
-	return db.newConversation(conversation);
+	conversation[CONVERSATION_IN_DB] = serializeConversation(conversation);
+	return conversation;
 }
 
-const IGNORE_ID = new Set(["id"]);
+const IGNORE_ID = new Set(["id", "parent", "branches"]);
 
-export const CONVERSATION_KEYS = ["id", "title", "time", "allowedTools", "activatedModules"];
+export const CONVERSATION_KEYS = ["id", "title", "time", "allowedTools", "activatedModules", "branches"];
 
 function serializeConversation(data) {
 	return cloneNamed(data, CONVERSATION_KEYS);
@@ -68,20 +113,15 @@ function serializeConversation(data) {
 /**
  * 更新会话
  * @param {AiChat.Conversation} data
- * @param {AiChat.Message[]|false} messages=
+ * @param {AiChat.Message[]|false=} messages
+ * @param {boolean=} keepTime
  * @returns {Promise<void>}
  */
-export function updateConversation(data, messages) {
+export function updateConversation(data, messages, keepTime) {
 	if (config.debugDatabase) return DONE;
-	if (isNaN(data.time)) data.time = Date.now();
 
-	const promises = [];
-
-	const serializedForm = serializeConversation(data);
-	if (!isEqual(data[CONVERSATION_IN_DB], serializedForm, IGNORE_ID)) {
-		data[CONVERSATION_IN_DB] = serializedForm;
-		promises.push(db.updateConversation(serializedForm));
-	}
+	let serial = DONE;
+	let changed;
 
 	if (messages) {
 		/**
@@ -92,6 +132,10 @@ export function updateConversation(data, messages) {
 		 * @type {Map<number, AiChat.Message>}
 		 */
 		const messagesInMemory = new Map();
+
+		const pendingAdd = [];
+
+		if (data[BM]) messages = data[BM].messages;
 
 		for (let i = 0; i < messages.length; i++){
 			const message = messages[i];
@@ -108,6 +152,7 @@ export function updateConversation(data, messages) {
 				}
 			}
 
+			if (!keepTime) changed = true;
 			const newMessageKey = structuredClone(message);
 			if (id) messagesInMemory.set(id, newMessageKey);
 
@@ -126,16 +171,28 @@ export function updateConversation(data, messages) {
 					if (message.time !== value.time) return save();
 				})
 			}
-			promises.push(save());
+			pendingAdd.push(save);
 		}
 
-		if (messagesInDB)
-			messagesInDB.forEach((value, id) => promises.push(db.deleteMessage(id)));
+		if (messagesInDB) {
+			const deletePromises = [];
+			messagesInDB.forEach((value, id) => deletePromises.push(db.deleteMessage(id)));
+			serial = Promise.all(deletePromises);
+		}
+
+		for (let save of pendingAdd) serial = serial.then(save);
 
 		data[MESSAGE_IN_DB] = messagesInMemory;
 	}
 
-	return Promise.all(promises);
+	const serializedForm = serializeConversation(data);
+	if (changed || !isEqual(data[CONVERSATION_IN_DB], serializedForm, IGNORE_ID)) {
+		if (changed) serializedForm.time = data.time = Date.now();
+		data[CONVERSATION_IN_DB] = serializedForm;
+		serial = serial.then(() => db.updateConversation(serializedForm));
+	}
+
+	return serial.catch(databaseError);
 }
 
 /**

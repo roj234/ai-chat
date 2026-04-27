@@ -1,5 +1,5 @@
 .ntp {
-    display: flex;
+    flex-direction: row;
     height: 64dvh;
     max-width: 768px;
 

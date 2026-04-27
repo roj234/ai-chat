@@ -1,48 +1,41 @@
 // API request
-import {markdownStreamParser} from "./md-wrapper.js";
+import {createMarkdownStream} from "./markdown/markdown.js";
+import {cloneNamed, getTextContent, jsonFetch, prettyError, streamFetch} from "./utils/utils.js";
 import {
-	jsonFetch,
-	deepEntries,
-	getTextContent,
-	prettyError,
-	streamFetch,
-	throttled,
-	highlightJsonLike, cloneNamed
-} from "./utils.js";
-import {
+	abortCompletion,
 	config,
 	isLlamaCppBackend,
 	isMyLlamaCppBackend,
 	lastScrollDirection,
 	MessageRoles,
 	messages,
+	resumableCompletions,
+	runningConversations,
 	selectedConversation,
 	Shared,
 	state
 } from "./states.js";
-import {getTools, parseSkillMetadata, runTools, set_title_body} from "./skills.js";
-import {$state, $update, isReactive, unconscious} from "unconscious";
+import {getTools, parseSkillMetadata, PLACEHOLDERS, runTools, set_title_body} from "./skills.js";
+import {$stampLock, $state, $update, isReactive, unconscious} from "unconscious";
 import {showToast} from "./components/Toast.js";
 import {mergeReasoningDetails} from "./components/ThinkBlock.jsx";
 import failure from "../media/failure.js";
 import complete from "../media/complete.js";
 import {appendBillingLog, updateConversation} from "./database.js";
 import {updateMessageUI} from "./components/MessageList.jsx";
-import {BODY_PARAMETERS, defaultCoTPrompt, defaultSystemPrompt} from "./setting-ui.js";
-import {jsonEncode} from "./stream-json.js";
+import {BODY_PARAMETERS, defaultCoTPrompt, defaultSystemPrompt, defaultTitlePrompt} from "./settings.js";
+import {jsonEncode} from "/common/StreamJsonStringifier.js";
 import {AntiSlop} from "./antiSlop.js";
 import SimpleModal from "./components/SimpleModal.jsx";
+import {highlightJsonLike} from "./markdown/highlight.js";
+import {updateConversationListUI} from "./components/ConversationList.jsx";
+import {deepEntries} from "/common/jsonSchema.js";
 
+export const statusBadge = <span />;
 export function setStatus(text, tone = '') {
-	Shared.statusBadge.textContent = text;
-	Shared.statusBadge.className = 'badge ' + tone;
+	statusBadge.textContent = text;
+	statusBadge.className = 'badge ' + tone;
 }
-
-/**
- *
- * @type {import("unconscious").Reactive<null | AbortController>}
- */
-export const abortCompletion = $state(null);
 
 function isThinkingEnabled() {
 	return (typeof config.forceThink === "boolean" ? config.forceThink : config.think);
@@ -63,20 +56,15 @@ async function composeMessages(conversation, messages, allowTools, additionalBod
 	 */
 	const json_messages = [];
 
-	let systemPrompt;
-	if ((systemPrompt = processSystemPrompt(conversation, config.systemPrompt || defaultSystemPrompt)).prompt) {
-		if (messages[0]?.role !== 'system')
-			json_messages.push({role: 'system', content: systemPrompt.prompt});
-	}
-
 	/**
 	 * @type {AiChat.AssistantMessage}
 	 */
-	let assistantMessage = messages.at(-1);
-	if (!assistantMessage) throw "No message to continue";
-	else if (assistantMessage.role !== 'assistant') assistantMessage = null;
+	let initialAssistantMessage= messages.at(-1);
+	if (!initialAssistantMessage) throw "No message to continue";
+	else if (initialAssistantMessage.role !== 'assistant') initialAssistantMessage = null;
 
-	if (assistantMessage) {
+	let assistantMessage = initialAssistantMessage;
+	if (initialAssistantMessage) {
 		const isAutomatic = assistantMessage.finish_reason === "tool_calls";
 
 		if (isAutomatic) assistantMessage = null;
@@ -89,10 +77,12 @@ async function composeMessages(conversation, messages, allowTools, additionalBod
 
 	let toolsUsed = conversation.activatedModules?.size > 0;
 	let callbacks = [];
-	for (const m of messages) {
+	for (let j = 0; j < messages.length; j++){
+		const m = messages[j];
+
 		const customHandler = MessageRoles[m.role];
 		if (customHandler) {
-			customHandler.compose?.(m, json_messages, callbacks);
+			customHandler.compose?.(m, json_messages, callbacks, j, messages.length);
 			continue;
 		}
 
@@ -116,15 +106,16 @@ async function composeMessages(conversation, messages, allowTools, additionalBod
 			}
 		}
 
+		const isPrefill = antiSlop && m === messages.at(-1);
 		const think = m.think;
 		const format = think?.format;
-		if (format && config.trimCoT !== true) {
+		if (format && (config.stripCoT !== true || isPrefill)) {
 			const content = think.content;
 			if (format === "r") json_msg.reasoning = content;
 			if (format === "rc") json_msg.reasoning_content = content;
-			if (format[0] === "m" && config.trimCoT !== "m") {
+			if (format[0] === "m" && (config.stripCoT !== "m" || isPrefill)) {
 				const tag = think.format.substring(1);
-				json_msg.content = "<"+tag+">" + content + "</"+tag+">\n" + json_msg.content;
+				json_msg.content = "<"+tag+">" + content + (m.content ? "</"+tag+">\n" + m.content : "");
 			}
 		} else {
 			delete json_msg.reasoning_details;
@@ -139,6 +130,21 @@ async function composeMessages(conversation, messages, allowTools, additionalBod
 		'Authorization': `Bearer ${config.accessToken}`
 	};
 	let path = '/chat/completions';
+
+	const resumeObj = resumableCompletions[conversation.id];
+	if (resumeObj) {
+		delete resumableCompletions[conversation.id];
+		if (Date.now() - resumeObj.time < RESUME_TIMEOUT) {
+			return {
+				url: config.endpoint+'/resume/'+resumeObj.id,
+				data: { headers },
+				antiSlop,
+				assistantMessage,
+				initialAssistantMessage
+			};
+		}
+	}
+
 	/**
 	 * @type {Partial<OpenAI.ChatCompletionRequest>}
 	 */
@@ -147,10 +153,17 @@ async function composeMessages(conversation, messages, allowTools, additionalBod
 		stream: true
 	};
 
-	for (const callback of callbacks) {
-		callback(messages, json_messages, body);
+	for (const {id, body_id, _omit} of BODY_PARAMETERS) {
+		const v = config[id];
+		if (v !== undefined && v !== _omit) {
+			body[body_id] = v;
+		}
+	}
+	for (const key of ["stop", "logit_bias"]) {
+		if (state[key]) body[key] = state[key];
 	}
 
+	let toolPrompt;
 	if (config.mode === 'completions') {
 		path = '/completions';
 		// Build a single prompt from conversation (with roles)
@@ -158,15 +171,20 @@ async function composeMessages(conversation, messages, allowTools, additionalBod
 	} else {
 		body.messages = json_messages;
 
-		if (allowTools || toolsUsed) {
-			body.tools = getTools(conversation);
-			// is this default=true for llama.cpp ?
-			body.parallel_tool_calls = true;
-			if (!allowTools) body.tool_choice = "none";
-			else if (allowTools !== true) body.tool_choice = allowTools;
-		} else if (config.generateTitle === "tool" && !selectedConversation.title) {
-			//body.tool_choice = {type: "function", function: {name: "set_title"}};
-			body.tools = [set_title_body];
+		if (config.modalities?.includes("tool")) {
+			if (config.generateTitle === "tool" && !selectedConversation.title) {
+				// TODO allow set_title tool and provide system prompt ?
+				body.tools = [set_title_body];
+			}
+
+			// TODO use allowTools / allowNewTools or just provide?
+			if (allowTools || toolsUsed) {
+				[body.tools, toolPrompt] = getTools(conversation, allowTools);
+				// is this default=true for llama.cpp ?
+				body.parallel_tool_calls = true;
+				if (!allowTools) body.tool_choice = "none";
+				else if (allowTools !== true) body.tool_choice = allowTools;
+			}
 		}
 
 		const shouldThink = isThinkingEnabled() && config.reasoning;
@@ -184,18 +202,18 @@ async function composeMessages(conversation, messages, allowTools, additionalBod
 			}
 		}
 	}
-
-	for (const {id, body_id, _omit} of BODY_PARAMETERS) {
-		const v = config[id];
-		if (v !== undefined && v !== _omit) {
-			body[body_id] = v;
-		}
-	}
-	for (const key of ["stop", "logit_bias"]) {
-		if (state[key]) body[key] = state[key];
-	}
-	if (systemPrompt) Object.assign(body, systemPrompt.body);
 	if (additionalBody) Object.assign(body, additionalBody);
+
+	let [systemPrompt, systemBody] = makeSystemPrompt(conversation, config.systemPrompt || defaultSystemPrompt, toolPrompt);
+	if (systemPrompt) {
+		if (json_messages[0]?.role !== 'system')
+			json_messages.unshift({role: 'system', content: systemPrompt});
+	}
+	if (systemBody) Object.assign(body, systemBody);
+
+	for (const callback of callbacks) {
+		callback(messages, json_messages, body, !!antiSlop);
+	}
 
 	block:
 	if (state.antiSlop) {
@@ -271,7 +289,14 @@ async function composeMessages(conversation, messages, allowTools, additionalBod
 	};
 }
 
-function processSystemPrompt(conversation, prompt) {
+/**
+ *
+ * @param {AiChat.Conversation} conversation
+ * @param {string} prompt
+ * @param {string} toolPrompt
+ * @return {[prompt: string, body: {}]}
+ */
+export function makeSystemPrompt(conversation, prompt, toolPrompt) {
 	let body = {};
 
 	if (prompt.startsWith("---\n")) {
@@ -300,19 +325,31 @@ function processSystemPrompt(conversation, prompt) {
 		prompt = content;
 	}
 
-	prompt = prompt.replaceAll(/\{\{(.+?)}}/g, (text, match) => {
-		switch (match) {
+	const transform = (prompt) => prompt.replaceAll(/\{\{(.+?)}}/g, (text, id) => {
+		switch (id) {
 			case "think":
 				return isThinkingEnabled() && config.reasoning === false ? (config.CoTPrompt || defaultCoTPrompt) : "";
+			case "tools":
+				return transform(toolPrompt || "");
 		}
+
+		let val = PLACEHOLDERS[id];
+		if (val != null) {
+			if (typeof val === "function")
+				val = val();
+			return val;
+		}
+
 		return text;
 	}).trim();
 
-	return {prompt, body};
+	return [transform(prompt), body];
 }
 
 function applyDelta(chunk, delta) {
 	for (const item in delta) {
+		if (delta[item] == null) continue;
+
 		if (typeof(delta[item]) === "object") {
 			if (!chunk[item])
 				chunk[item] = Array.isArray(delta[item]) ? [] : {};
@@ -391,8 +428,8 @@ export function getMarkdownContainer(think) {
 	const bodyNode = scroller.children[0].children[0].lastElementChild?.querySelector(".body");
 	if (bodyNode) {
 		const children = bodyNode.children;
-		for (let i = children.length - 1; i >= 0; i--) {
-			let element = children[i];
+		const element = children[children.length - 1];
+		if (element) {
 			if (think) {
 				if (element.matches(".think")) return element.lastElementChild;
 			} else {
@@ -406,23 +443,28 @@ export function getMarkdownContainer(think) {
  *
  * @param {string | OpenAI.ContentPart[]=} userText
  * @param {AntiSlop=} antiSlop
- * @return {Promise<boolean>}
+ * @return {Promise<string>}
  */
 export async function sendUserChatMessage(userText, antiSlop) {
-	if (abortCompletion.value) throw "already generating";
+	if (abortCompletion.value) return "error";
 	abortCompletion.value = new AbortController();
 
-	let markdownRenderer = markdownStreamParser();
+	let markdownRenderer = createMarkdownStream();
 	const {scroller} = Shared;
 	let updateCount = 0;
 	let content_;
+	let waitingForContent;
 
 	function updateMarkdown(content, force) {
 		content_ = content;
 
 		const currentIsThink = isReactive(content.think);
 		const container = getMarkdownContainer(currentIsThink);
-		if (!container) return true;
+		if (!container) {
+			waitingForContent = currentIsThink;
+			return true;
+		}
+		waitingForContent = 0;
 
 		if (!force) {
 			const details = container.closest("details:not([open])");
@@ -449,13 +491,16 @@ export async function sendUserChatMessage(userText, antiSlop) {
 
 		markdownRenderer(currentIsThink ? content.think.content : content.content, container);
 
-		if (atBottom < 100 && !lastScrollDirection.value) scroller.scrollTop = scroller.scrollHeight;
+		if (atBottom < 100 && !lastScrollDirection.value) scroller.vl.scrollTo(scroller.scrollHeight);
 	}
-
 	function callback(type, content) {
+		if (selectedConversation.id !== conversation.id) return;
+
 		switch (type) {
 			case MD_APPEND:
-				if (updateMarkdown(content)) break;
+				// noinspection UnnecessaryLocalVariableJS
+				const flag = waitingForContent;
+				if (updateMarkdown(content) && waitingForContent !== flag) break;
 			return;
 			case MD_END: {
 				if (content_) {
@@ -468,11 +513,39 @@ export async function sendUserChatMessage(userText, antiSlop) {
 		$update(updateMessageUI);
 	}
 
-	if (userText) messages.push({role: 'user', content: userText, time: Date.now()});
+	const messages_ = $stampLock(messages);
+	const conversation = unconscious(selectedConversation);
+	const abortCompletion1 = unconscious(abortCompletion);
+	runningConversations.set(conversation.id, {
+		abort: abortCompletion1,
+		messages: messages_
+	});
+	$update(updateConversationListUI);
+
+	if (userText) messages_.push({role: 'user', content: userText, time: Date.now()});
 
 	try {
-		let finishReason = await _ApiRequest(selectedConversation, messages, config.tools, state.additionalBody, abortCompletion, callback, antiSlop);
-		const assistantMessage = messages.at(-1);
+		let finishReason = await _ApiRequest(conversation, messages_, config.tools, state.additionalBody, abortCompletion1, callback, antiSlop);
+		const assistantMessage = messages_.at(-1);
+
+		const resumeObj = resumableCompletions[conversation.id];
+		if (finishReason !== 'error' || assistantMessage.error !== "network error\n") {
+			if (resumeObj) {
+				try {
+					const result = await jsonFetch(config.endpoint+"/abort/"+resumeObj.id, {
+						authorization: config.accessToken,
+						method: 'POST'
+					});
+				} catch (e) {
+					showToast("Abort接口调用失败\n"+e, 'error');
+				}
+				delete resumableCompletions[conversation.id];
+			}
+		} else {
+			if (resumeObj) {
+				showToast("连接意外中止\n在"+(RESUME_TIMEOUT/60000)+"分钟内点击重试按钮可以无缝继续对话", 'error');
+			}
+		}
 
 		let needSave;
 
@@ -481,8 +554,8 @@ export async function sendUserChatMessage(userText, antiSlop) {
 
 		if ('interrupt' !== finishReason && 'loop' !== finishReason) {
 			if ('error' !== finishReason) {
-				if (!selectedConversation.title) {
-					await generateDescription(selectedConversation);
+				if (!conversation.title) {
+					await generateDescription(conversation, messages_);
 					needSave = true;
 				}
 			}
@@ -493,30 +566,49 @@ export async function sendUserChatMessage(userText, antiSlop) {
 			}
 		}
 
-		if (is_ok && assistantMessage.tool_calls && !config.debug && (!config.maxToolTurns || countAgentTurns(messages) < config.maxToolTurns)) {
+		if (is_ok && assistantMessage.tool_calls && !config.debug && (!config.maxToolTurns || countAgentTurns(messages_) < config.maxToolTurns)) {
 			if (!await runTools(assistantMessage)) {
-				// should I use this reason?
+				// 如果存在可能需要批准的工具调用
 				finishReason = 'interrupt';
 			}
+			$update(updateMessageUI);
 			needSave = true;
 		}
 
 		setStatus(finish_reason_names[finishReason], tone ?? 'error');
 
 		if (needSave) {
-			await updateConversation(unconscious(selectedConversation), unconscious(messages));
+			await updateConversation(conversation, unconscious(messages_), true);
 		}
+
+		if (selectedConversation.id !== conversation.id) {
+			finishReason = 'interrupt'; // 如果不在前台就不自动执行
+			showToast("对话 "+conversation.title+"(#"+conversation.id+") 已完成！", "ok");
+		}
+
+		return finishReason;
 	} finally {
-		abortCompletion.value = null;
+		runningConversations.delete(conversation.id);
+		$update(updateConversationListUI);
+		if(abortCompletion.value === abortCompletion1)
+			abortCompletion.value = null;
 	}
 }
 
 export const MD_APPEND = 2, MD_END = 3;
 
+function scrollToBottom() {
+	requestAnimationFrame(() => {
+		const {scroller} = Shared;
+		scroller.vl.scrollTo(scroller.scrollHeight);
+		lastScrollDirection.value = false;
+	});
+}
+
 /**
  *
  * @param {AiChat.Conversation} conversation
- * @param {AiChat.Message[]} messages
+ * @param {AiChat.Message[] | import("unconscious").Reactive<AiChat.Message[]>} messages
  * @param {boolean=} allowTool
  * @param {Record<string, any>=} additionalBody
  * @param {AbortController} abortCompletion
@@ -533,7 +625,7 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 		 */
 		data,
 		/** @type {AiChat.AssistantMessage} */
-		assistantMessage,
+		assistantMessage, initialAssistantMessage,
 		/** @type {string | Error} */
 		error,
 		/** @type {AntiSlop} */
@@ -571,13 +663,7 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 		})
 	}
 
-	if (onProgress) {
-		requestAnimationFrame(() => {
-			const {scroller} = Shared;
-			scroller.scrollTop = scroller.scrollHeight;
-			lastScrollDirection.value = false;
-		});
-	}
+	if (onProgress) scrollToBottom();
 
 	if (error) {
 		if (config.sound) failure();
@@ -600,7 +686,12 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 		let thinkState;
 		if ((thinkState = assistantMessage.think)) {
 			thinkState.start = startTime;
+			const format = thinkState.format;
+			manualCoTCloseTag = format.startsWith("m") && "</"+format.slice(1)+">\n";
 			assistantMessage.think = $state(thinkState);
+			requestAnimationFrame(() => {
+				onProgress?.(MD_APPEND, assistantMessage);
+			});
 		}
 	}
 
@@ -608,6 +699,7 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 
 	// Request
 	try {
+		let resumeObj;
 		await streamFetch(url, {
 			...data,
 			authorization: config.accessToken,
@@ -638,7 +730,12 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 				billingLog.request_id = json.id;
 				billingLog.model = json.model;
 				billingLog.ttft = billingLog.latency;
+
+				if (json.resumable) {
+					resumeObj = resumableCompletions[conversation.id] = { id: json.id };
+				}
 			}
+			if (resumeObj) resumeObj.time = Date.now();
 
 			/**
 			 * @type {OpenAI.ChatChoice | OpenAI.TextChoice}
@@ -647,7 +744,7 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 			if (config.debug) console.log("SSE response", chunk);
 
 			if (!finishReason) finishReason = chunk?.finish_reason;
-			if (finishReason) {getStats(json, billingLog);return;}
+			if (finishReason) {getStats(json, billingLog);}
 
 			let text;
 			let reasoning_text;
@@ -658,7 +755,9 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 			}
 
 			if (config.mode === 'chat') {
-				const delta = chunk.delta;
+				const {delta} = chunk;
+				if (!delta) return;
+
 				if (delta.role) assistantMessage.role = delta.role;
 				if (delta.images) genImages.push(...delta.images);
 				text = delta.content;
@@ -685,6 +784,7 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 						assistantMessage.tool_responses = [];
 					}
 
+					let hasNewToolCalls;
 					for (const call of delta.tool_calls) {
 						delete call.index;
 						if (!call.id) {
@@ -696,11 +796,13 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 							}
 						}
 						toolCalls.push($state(call));
+						hasNewToolCalls = true;
 					}
-					onProgress?.(MD_END);
+					if (hasNewToolCalls) onProgress?.(MD_END);
 				}
 			} else {
 				text = chunk.text;
+				if (!text) return;
 			}
 
 			let content = assistantMessage.content + (text || "");
@@ -728,7 +830,7 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 				} else {
 					thinkState.content += reasoning_text;
 				}
-			} else if (isReactive(thinkState) && content) {
+			} else if (isReactive(thinkState)) {
 				if (manualCoTCloseTag) {
 					let index = thinkState.index;
 
@@ -757,22 +859,30 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 					}
 				}
 
-				thinkState.duration += Date.now() - thinkState.start;
-				delete thinkState.start;
-				delete thinkState.index;
-				assistantMessage.think = { ... thinkState };
+				if (content) {
+					thinkState.duration += Date.now() - thinkState.start;
+					delete thinkState.start;
+					delete thinkState.index;
+					assistantMessage.think = { ... thinkState };
+				}
 			}
 
 			assistantMessage.content = content;
-			onProgress?.(MD_APPEND, assistantMessage);
+			if (!assistantMessage.tool_calls) onProgress?.(MD_APPEND, assistantMessage);
 		});
 	} catch (err) {
 		if (err.name === 'AbortError') {
 			setStatus('已取消');
 			finishReason = "interrupt";
 		} else {
+			finishReason = 'error';
 			abortCompletion.abort();
 			if (err !== "loop") {
+				// 即便服务端Session过期了，也不要清除已经生成的内容
+				if (typeof err === 'string' && initialAssistantMessage) {
+					assistantMessage = messages[messages.length-1] = initialAssistantMessage;
+				}
+
 				if (config.sound) failure();
 				setStatus('错误', 'error');
 				console.error(err);
@@ -784,20 +894,27 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 	} finally {
 		streamResponseCompleted(assistantMessage, genImages);
 
-		if (!finishReason) finishReason = 'error';
+		if (!finishReason) {
+			finishReason = 'error';
+			assistantMessage.error = "network error\n";
+		}
 		assistantMessage.finish_reason = finishReason;
 		billingLog.finish_reason = finishReason;
 
 		onProgress?.(MD_END);
 
+		const has_resp = billingLog.request_id && (finishReason !== 'error' || billingLog.input_tokens);
 		if (finishReason !== 'loop' && conversation.id) {
 			// wait for database update (billingLog requires message id), this should be fast
-			await updateConversation(unconscious(conversation), unconscious(messages));
-			billingLog.message_id = assistantMessage.id;
+			if (has_resp) {
+				await updateConversation(conversation, unconscious(messages));
+				billingLog.message_id = assistantMessage.id;
+			}
 		} else {
-			billingLog.message_id = "T_"+Date.now();
+			billingLog.message_id = "T$"+Date.now();
 		}
-		await appendBillingLog(billingLog);
+		// 不等了 fire and forgot
+		if (has_resp) appendBillingLog(billingLog);
 	}
 
 	return finishReason;
@@ -821,8 +938,9 @@ function countAgentTurns(messages) {
 function streamResponseCompleted(assistantMessage, genImages) {
 	delete assistantMessage.id;
 	if (assistantMessage.reasoning_details) {
-		assistantMessage.reasoning_details = mergeReasoningDetails(assistantMessage.reasoning_details);
-		delete assistantMessage.think?.content;
+		let hasText;
+		[assistantMessage.reasoning_details, hasText] = mergeReasoningDetails(assistantMessage.reasoning_details);
+		if (hasText) delete assistantMessage.think?.content;
 	}
 	if (assistantMessage.tool_calls) assistantMessage.tool_calls = assistantMessage.tool_calls.map(unconscious);
 
@@ -848,9 +966,10 @@ function streamResponseCompleted(assistantMessage, genImages) {
 /**
  *
  * @param {AiChat.Conversation} conversation
+ * @param {AiChat.Message[]} messages
  * @return {Promise<void>}
  */
-function generateDescription(conversation) {
+function generateDescription(conversation, messages) {
 	setStatus('生成标题');
 
 	let s1 = getTextContent(messages[0]).substring(0, 512);
@@ -869,12 +988,7 @@ function generateDescription(conversation) {
 		model: config.titleModel,
 		messages: [{
 			role: "system",
-			content: `基于以下用户-LLM对话内容，生成一个**20字以内**的中文标题，用于对话前端展示。标题需简洁、吸引人、概括核心主题。
-
-要求：
-- 标题长度：严格≤20字。
-- 风格：中性、专业，避免剧透或偏见。
-- 示例：如果对话是“教我做蛋糕”，标题可为“蛋糕制作教程/指南”。`
+			content: config.titlePrompt || defaultTitlePrompt,
 		}, {
 			role: "user",
 			content: "对话摘要：\n用户:\n" + s1 + "\nLLM:\n" + s2
@@ -939,7 +1053,8 @@ export class APIRequest {
 		this.abort = new AbortController();
 
 		try {
-			const messages = isReactive(this.messages) ? this.messages : [...this.messages];
+			const msg = this.messages;
+			const messages = isReactive(msg) ? msg : [...msg];
 			if (typeof last_message === "string") messages.push({role: 'user', content: userText, time: Date.now()});
 			else if (Array.isArray(last_message)) messages.push(...last_message);
 			else if (last_message) messages.push(last_message);

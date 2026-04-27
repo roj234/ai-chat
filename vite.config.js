@@ -1,20 +1,34 @@
 // vite.config.js
+import { defineConfig } from 'vite';
 
 import unconscious from 'unconscious/VitePlugin.mjs';
 import purgecss from 'unconscious/VitePurgeCSS.mjs';
 import FontFilter from "unconscious/postcss/font-filter.js";
 import OklchToRgb from "unconscious/postcss/oklch-to-rgb.js";
 import InlineVars from "unconscious/postcss/inline-vars.js";
-import { viteFontMinify } from 'unconscious/vite/font-minify.js';
+import {viteFontMinify} from 'unconscious/vite/font-minify.js';
 
 import packageInfo from "./package.json";
-import {mockFileSystem} from "./backend/fs/server-dev.js";
+
+import fs from 'node:fs';
+
+const VITE_TRICK_CONFIG = "../../backend/config.js";
+const VITE_TRICK_SERVER = "../../backend/server-dev.js";
 
 //https://cn.vite.dev/
-export default {
+export default defineConfig(async () => {
+    if (!fs.existsSync("backend/config.js")) {
+        fs.copyFileSync("backend/config.example.js", "backend/config.js");
+    }
+
+    return {
     define: {
         APP_NAME: JSON.stringify(packageInfo.name),
         APP_VERSION: JSON.stringify(packageInfo.version),
+        DB_SERVER: JSON.stringify(""), // https://nas.lan/aichat/v2/{{user}}
+        DB_MODE: JSON.stringify('mixed'), // local remote mixed
+        DEFAULT_LLM_ENDPOINT: JSON.stringify(""),
+        RESUME_TIMEOUT: JSON.stringify((await import(VITE_TRICK_CONFIG)).SSE_RESUME_TIMEOUT),
     },
 
     plugins: [
@@ -29,7 +43,7 @@ export default {
             ]
         }),
         viteFontMinify(),
-        mockFileSystem,
+        (await import(VITE_TRICK_SERVER)).serverDevPlugin(),
         {
             name: 'inject-build-time',
             transformIndexHtml(html) {
@@ -66,9 +80,6 @@ export default {
 
         assetsInlineLimit: 512,
         rollupOptions: {
-            external: (id) => {
-                return id.includes('../mermaid'); // 动态匹配你的预构建
-            },
             output: {
                 experimentalMinChunkSize: 10240,
                 entryFileNames: `[name].[hash].js`,
@@ -77,4 +88,4 @@ export default {
             },
         }
     }
-};
+}});

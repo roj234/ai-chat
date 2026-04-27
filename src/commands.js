@@ -1,166 +1,106 @@
 import {showToast} from "./components/Toast.js";
-import {beginConversation, messages, selectedConversation} from "./states.js";
-import {duplicateConversation} from "./data-exchange.js";
+import {beginConversation, selectedConversation} from "./states.js";
 import {updateConversation} from "./database.js";
 import {loadPreset} from "./components/PresetDropdown.jsx";
 
 /**
- *
- * @type {Record<string, function(string, Record<string, string>): void>}
+ * 指令处理器定义
+ * @typedef {[function(string[], Record<string, string>): Promise<void>|void, string?]} CommandHandler
  */
-export const COMMANDS = {};
+
+/** @type {Record<string, CommandHandler>} */
+export const COMMAND_REGISTRY = {
+	preset: [
+		(...names) => {
+			if (!names.length) throw new Error("请指定预设名称");
+			for (const name of names) {
+				if (loadPreset(name)) showToast(`已加载预设: ${name}`, 'success');
+			}
+		},
+		"加载预设: /preset <name>...",
+	],
+	new: [
+		() => beginConversation(),
+		"开启新对话",
+	],
+	title: [
+		async (args) => {
+			if (!selectedConversation.value) throw new Error("未选中对话");
+			const newTitle = args.join(" "); // 支持带空格的标题
+			if (!newTitle) throw new Error("标题不能为空");
+
+			selectedConversation.title = newTitle;
+			await updateConversation(selectedConversation.value);
+			showToast("标题已更新", "success");
+		},
+		"修改对话标题: /title <new_title>",
+	],
+	help: [
+		(args, params, element) => {
+			const helpText = Object.entries(COMMAND_REGISTRY)
+				.map(([name, [_, desc]]) => `/${name.padEnd(10)} - ${desc}`)
+				.join('\n');
+
+			// 直接在输入框显示帮助，或者弹窗
+			element.value = `/### 指令列表 ###\n${helpText}`;
+			element.dispatchEvent(new InputEvent("input"));
+		},
+		"显示帮助"
+	]
+};
 
 /**
- *
- * @param {HTMLTextAreaElement} element
- * @return {boolean}
+ * 解析指令字符串
+ * 示例: /title "My Room" category:work
+ * 返回: { command: "title", args: ["My Room"], params: { category: "work" } }
  */
-export function handleCommand(element) {
+function parseCommand(text) {
+	const parts = text.trim().substring(1).split(/\s+/);
+	const command = parts.shift().toLowerCase();
+	const args = [];
+	const params = {};
+
+	// 简单的正则处理：支持 key:value 或直接的参数
+	parts.forEach(part => {
+		if (part.includes(':')) {
+			const [k, v] = part.split(':');
+			params[k] = v;
+		} else {
+			args.push(part.replace(/^"|"$/g, '')); // 去掉引号
+		}
+	});
+
+	return { command, args, params };
+}
+
+/**
+ * 主入口函数
+ * @param {HTMLTextAreaElement} element
+ * @returns {Promise<boolean>} 是否拦截了输入
+ */
+export async function handleCommand(element) {
 	const text = element.value.trim();
 	if (!text.startsWith('/')) return false;
 
-	let index = text.indexOf(' ');
-	if (index < 0) index = text.length;
-	const command = text.substring(1, index);
-	if (command === "#") return true;
+	// 允许 "/#" 作为注释不执行
+	if (text.startsWith('/#')) return true;
 
-	const parameters = new Proxy({}, {
-		get(target, key) {
-			let targetElement = target[key];
-			if (targetElement === undefined)
-				throw new Error("缺少参数: "+key);
-			if (targetElement.startsWith("\""))
-				targetElement = JSON.parse(targetElement);
-			return targetElement;
-		}
-	});
+	const { command, args, params } = parseCommand(text);
+	const [execute] = COMMAND_REGISTRY[command] || [];
+
 	try {
-		parseParameters(text.substring(index+1), (key, value) => parameters[key] = value);
+		if (execute) {
+			// 清空输入框（除非是 help 指令想保留内容）
+			if (command !== 'help') element.value = "";
 
-		switch (command) {
-			default:
-				const customHandler = COMMANDS[command];
-				if (customHandler) customHandler(command, parameters);
-				else {
-					showToast("未知的指令", 'error');
-					return true;
-				}
-			break;
-			case "preset":
-				if (loadPreset(parameters.name)) {
-					showToast("已加载", 'success');
-				}
-			break;
-			case "clear":
-				messages.length = 0;
-			break;
-			case "dup":
-				duplicateConversation();
-			break;
-			case "new":
-				beginConversation();
-				break;
-			case "title":
-				if (!selectedConversation.value) {
-					showToast("未选中对话", 'error');
-					return true;
-				}
-
-				selectedConversation.title = parameters.title;
-				updateConversation(selectedConversation.value);
-			break;
-			case "":
-			case "help":
-				element.value = `/# 指令速查
-/preset name=<name> 读取设定
-/prompt name=<name> 使用之前保存的系统提示词模板 (未实现)
-/dup 复制(备份)当前对话
-/new 开启新对话
-/clear 清空当前对话
-/title title=<title> 设置对话标题
-`;
-				element.dispatchEvent(new InputEvent("input"));
-				return true;
+			await execute(args, params, element);
+		} else {
+			showToast(`未知指令: /${command}`, 'error');
 		}
 	} catch (e) {
 		console.error(e);
-		showToast(e, 'error');
-		return true;
+		showToast(e.message || "执行指令出错", 'error');
 	}
 
-	element.value = "";
 	return true;
 }
-
-
-const TOKEN_SAFE = /[0-9a-zA-Z!#$%&'*+-.^_`|~]/;
-/**
- *
- * @param {string} fieldValue
- * @param {function(string, string|null): void} callback
- */
-function parseParameters(fieldValue, callback) {
-	let i = 0;
-	let length = fieldValue.length;
-
-	outerLoop:
-		while (i < length) {
-			do {
-				if (fieldValue.charAt(i) !== ' ') break;
-				i++;
-			} while (i < length);
-
-			let j = i;
-			for (; j < length; j++) {
-				let c = fieldValue.charAt(j);
-				if (!TOKEN_SAFE.test(c)) break;
-			}
-
-			if (i === j) throw new Error("Empty token at("+i+"): "+fieldValue);
-			const key = fieldValue.substring(i, j);
-
-			if (j < length && fieldValue.charAt(j) === '=') {
-				i = ++j;
-
-				if (i < length) {
-					if (fieldValue.charAt(i) === '"') {
-						let isEscaped = false;
-						while (true) {
-							if (++i === length) throw new Error("Unterminated quoted-string at("+i+"): "+fieldValue);
-
-							const c = fieldValue.charAt(i);
-							if (c === '\\') {
-								isEscaped = true;
-							} else if (isEscaped) {
-								isEscaped = false;
-							} else if (c === '"') {
-								i++;
-								break;
-							}
-						}
-					} else {
-						for (; i < length; i++) {
-							const c = fieldValue.charAt(i);
-							if (!TOKEN_SAFE.test(c)) break;
-						}
-					}
-				}
-
-				const value = fieldValue.substring(j, i);
-				callback(key, value);
-			} else {
-				i = j;
-				callback(key, null);
-			}
-
-			let c;
-			do {
-				if (i === length) break outerLoop;
-			} while ((c = fieldValue.charAt(i++)) === ' ');
-
-			if (c !== ';') {
-				throw new Error("Unrecognized token at("+i+"): "+fieldValue);
-			}
-		}
-}
-//endregion

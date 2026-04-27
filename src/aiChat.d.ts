@@ -1,26 +1,27 @@
-import {ImagePart, OpenAI, TextPart} from "./openai";
+import {OpenAI} from "./openai";
 
 declare namespace AiChat {
-    import OpenRouter = OpenAI.OpenRouter;
+
     export type Conversation = {
         id: number,
         title: string,
         time: number,
-        /**
-         * 消息是否从DB加载完成
-         */
+
+        /** 消息是否从DB加载完成 */
         ready?: boolean,
 
-        /**
-         * 已激活的模块
-         */
+        /** 已激活的模块(技能) */
         activatedModules?: Set<string>,
-        /**
-         * 允许使用的工具
-         */
+        /** 允许使用的工具 */
         allowedTools?: Set<string>,
+        /** 本会话中自动允许的工具 */
+        grantedTools?: Set<string>,
 
-        branches?: true;
+        /**
+         * 分支对话，最后一条对话的ID
+         * 这个选项无法在开启后关闭
+         */
+        branches?: number;
     }
 
     export type Message = BaseMessage | AssistantMessage;
@@ -28,10 +29,13 @@ declare namespace AiChat {
     type BaseMessage = OpenAI.Message & {
         // No 'tool' type here
         role: string | 'system' | 'user' | 'assistant';
-        id: number,
+        id: number;
         time: number;
         error?: string;
+        // 插件注册hook用的消息可以选择隐藏自身不渲染
         hidden?: boolean;
+        // 上一条消息的ID
+        parent?: number;
     }
 
     type AssistantMessage = BaseMessage & {
@@ -51,14 +55,13 @@ declare namespace AiChat {
     }
 
     type ToolResponse = {
-        tool_name: string;
         time: number;
         content?: string | OpenAI.ContentPart[];
         success?: boolean;
     }
 
     export type Thinking = {
-        format: "r" | "rc" | "rd";
+        format: "r" | "rc" | "rd" | string;
         content?: string;
         duration?: number;
         // not stored, for text partial match only
@@ -89,6 +92,9 @@ declare namespace AiChat {
         allowContinue: boolean,
         maxToolTurns: number
         sound: false | 'always' | 'background',
+
+        forceThink: boolean | null,
+        modalities: ('image' | 'audio' | 'tool')[]
 
         // UI
         think: boolean,
@@ -175,15 +181,15 @@ declare namespace AiChat {
         interactive?: boolean | "secure";
         autorun?: boolean | "on_import";
 
-        script: (parameters: Record<string, any>, response: AiChat.ToolResponse & Payload, global_storage: AiChat.Conversation) => any | Promise<any>;
-        removed?: (context: AiChat.ToolResponse & Payload, global_storage: AiChat.Conversation) => void;
+        script: (parameters: Record<string, any>, response: ToolResponse & Payload, global_storage: Conversation) => any | Promise<any>;
+        undo?: (context: ToolResponse & Payload, global_storage: Conversation) => void;
 
-        renderer?: (context: AiChat.ToolResponse & Payload, has_successor: boolean) => HTMLElement;
+        renderer?: (context: ToolResponse & Payload, has_successor: boolean) => HTMLElement;
         /**
          * 判断自己在列表项中是否需要重新生成HTML
          * 往keys里面填任何对象就行
          */
-        keyFunc?: (keys: Array, context: AiChat.ToolResponse & Payload, has_successor: boolean) => void;
+        keyFunc?: (keys: Array, context: ToolResponse & Payload, has_successor: boolean) => void;
     }
 
     type FunctionTool<Payload> = OpenAI.FunctionToolJSON & FunctionToolImpl<Payload>;
@@ -245,32 +251,47 @@ declare namespace AiChat {
                 }
             },
             character_book: null | {
-                entries: {
-                    name: string;
-                    keys: string[],
-                    secondary_keys: string[],
-                    comment: string,
-                    content: string,
-                    // 不基于滑动窗口
-                    constant: boolean,
-                    // 不是很懂，感觉不如正则？
-                    selective: boolean,
-                    insertion_order: number,
-                    priority: number,
-                    enabled: boolean,
-                    position: "after_char" | "before_char",
-                    use_regex: boolean,
-                    probability: number,
-                    extensions: Record<string, any> & {
-                        // 滑动窗口大小
-                        depth: number,
-                        // 递归……等有人用到了再说
-                        excludeRecursion: boolean
-                    }
-                }[],
+                entries: STLorebookEntry[],
                 name: string
             },
         }
+
+        type STLorebookEntry = {
+            name: string;
+            comment: string,
+
+            keys: string[],
+
+            secondary_keys: string[],
+            keysecondary: string[],
+
+            content: string,
+            // 不基于滑动窗口
+            constant: boolean,
+            // 不是很懂，感觉不如正则？
+            selective: boolean,
+
+            priority: number,
+            enabled: boolean,
+            position: "after_char" | "before_char" | number,
+
+            excludeRecursion: boolean,
+            preventRecursion: boolean,
+            delayUntilRecursion: boolean,
+            depth: number;
+            role: null | number;
+
+            uid?: number;
+            displayIndex?: number;
+
+            probability: number,
+            extensions: Record<string, any> & {
+                // 滑动窗口大小
+                depth: number,
+                // 递归……等有人用到了再说
+                excludeRecursion: boolean
+            }
+        };
 
         type SillyTavernPreset = {
             extensions: Record<string, any>
@@ -334,12 +355,12 @@ declare namespace AiChat {
         interface CustomMessageRole {
             name: string;
             reactive?: boolean;
-            compose?(message: AiChat.Message, output: OpenAI.Message[], callbacks: MessageComposedCallback[]);
-            getChunks(message: AiChat.Message, chunks: ResponseContentPart[], index: number);
+            compose?(message: Message, output: OpenAI.Message[], callbacks: MessageComposedCallback[], index: number, length: number);
+            getChunks(message: Message, chunks: ResponseContentPart[], index: number, isEditing: function(Message): boolean);
             keyFunc?(chunk: ResponseContentPart): any[];
         }
 
-        type MessageComposedCallback = (messages: AiChat.Message[], output: OpenAI.Message[], body: Record<string, any>) => void;
+        type MessageComposedCallback = (messages: Message[], output: OpenAI.Message[], body: Record<string, any>, is_prefill: boolean) => void;
 
         type MyCharacter = IDBKVList & {
             type: "st|char",
@@ -354,6 +375,10 @@ declare namespace AiChat {
             personality: string;
             scenario: string;
             dialogueExamples: string[];
+
+            //override default st_user
+            user?: string;
+            userdesc?: string;
 
             greetings: string[];
             lorebook: MyLorebookPage[];
@@ -377,10 +402,12 @@ declare namespace AiChat {
             content: string,
             regex: boolean,
             constant: boolean,
-            recursion: boolean,
+            recursion: true | false | 'stop' | 'only',
             triggers: string[],
             window: number,
-            position: 'worldInfoBefore' | 'worldInfoAfter' | 'lastMessage',
+            position: 'worldInfoBefore' | 'worldInfoAfter' | 'depth',
+            role: 'assistant' | 'user' | null,
+            depth: number,
             id: string;
         }
 
@@ -410,10 +437,9 @@ declare namespace AiChat {
         interface MyCharConversation extends BaseMessage {
             role: "st|char";
             content: {
-                id: number;
                 name: string;
-                lorebooks: number[];
-                preset: number;
+                lorebookNames?: string[];
+                presetName?: string;
                 greeting: number;
                 activatedLorebookItems: Set<string>;
             };
@@ -428,49 +454,43 @@ declare namespace AiChat {
         }
     }
 
-    interface BranchPathItem {
-        index: number;
-        total: number;
-        message: AiChat.Message;
-    }
-
     class BranchManager {
-        readonly leaf: number;
+        readonly conversation: Conversation;
+        readonly messages: Message[];
+        leaf: Message;
 
-        constructor(allMessages: AiChat.Message[], leaf: number = 0);
+        constructor(conversation: Conversation, messages: Message[]);
 
         /**
-         * 获取当前分支的所有消息 (从叶子向上追溯到根)
-         * 开销极小：只需沿着 parent 向上爬
+         * 获取当前分支的所有消息
          */
-        getMessages();
+        getMessages(): Message[];
+
+        /**
+         * 获取当前分支的所有消息并删除分支管理器的所有相关字段
+         */
+        toArray(): Message[];
 
         /**
          * 在指定消息处创建新分支
-         * @param {number} parentId 父消息ID
-         * @param {AiChat.Message} message - 消息内容 (已入库，含 id 和 parent = this.leaf)
+         * @param {number} parent 父消息
+         * @param {Message} message 消息
          */
-        branchAt(parentId: number, message: AiChat.Message);
+        branchAt(parent: Message, message: Message);
 
         /**
-         * 切换分支：当某个 ID 有多个子节点时，选择其中一个
-         * @param {number} parentId 分支发生点的 ID
+         * 切换分支：当某个分支有多个子节点时，选择其中一个
+         * @param {number} parent 分支发生点
          * @param {number} index 选择第几个分支
          */
-        switchBranch(parentId: number, index: number);
+        switchBranch(parent: Message, index: number);
 
         /**
          * 获取对应消息的分支状态
-         * @param {AiChat.Message} message
+         * @param {Message} message
          * @returns [当前索引, 总分支数]
          */
-        getBranchInfo(message: AiChat.Message);
-
-        /**
-         * 向当前路径末尾追加一条消息
-         * @param {AiChat.Message} message - 消息内容 (已入库，含 id 和 parent = this.leaf)
-         */
-        push(message: AiChat.Message);
+        getBranchInfo(message: Message): [number, number];
 
         /**
          * 删除指定消息及其所有子孙节点，并回退当前叶子 ID 到父节点

@@ -1,7 +1,7 @@
 {
 	"name": "ai-chat",
 	"private": true,
-	"version": "2.0.0",
+	"version": "2.7.0",
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
@@ -18,5 +18,9 @@
 		"purgecss": "^8.0.0",
 		"unconscious": "^1.11.0",
 		"driver.js": "^1.4.0"
+	},
+	"dependencies": {
+		"ws": "^8.20.0",
+		"remove-markdown": "0.6.3"
 	}
 }

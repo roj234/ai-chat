@@ -2,7 +2,7 @@
 .branch-selector {
     position: absolute;
     right: 0;
-    bottom: -24px;
+    bottom: -26px;
 
     display: inline-flex;
     align-items: center;
@@ -41,8 +41,6 @@
     border: 1px solid transparent;
     border-radius: 8px;
     padding: 10px;
-
-    z-index: 9;
 
     & i {
         position: absolute;

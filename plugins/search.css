@@ -1,0 +1,116 @@
+
+
+.result-item {
+    background: var(--bg);
+    margin-bottom: 12px;
+
+    &:hover {
+        box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    }
+}
+
+.result-header {
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    user-select: none;
+    transition: background 0.2s;
+}
+.result-header:hover {
+    background: var(--chip-bg);
+}
+.result-item.open .result-header {
+    background: var(--chip-hover);
+}
+.result-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    flex: 1;
+    margin-right: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.result-title .similarity {
+    font-size: 12px;
+    font-weight: 500;
+    background: #e6f0ff;
+    color: #2563eb;
+    padding: 2px 8px;
+    border-radius: 10px;
+    white-space: nowrap;
+}
+.result-time {
+    font-size: 13px;
+    color: #94a3b8;
+    margin-right: 12px;
+    white-space: nowrap;
+}
+.arrow {
+    width: 20px;
+    height: 20px;
+    transition: transform 0.25s;
+    flex-shrink: 0;
+}
+.result-item.open .arrow {
+    transform: rotate(180deg);
+}
+.result-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.35s ease;
+}
+.result-item.open .result-body {
+    max-height: 2000px;
+    overflow: auto;
+}
+.messages-container {
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.message {
+    display: flex;
+    flex-direction: column;
+    max-width: 85%;
+}
+.message.user {
+    align-self: flex-end;
+}
+.message.assistant {
+    align-self: flex-start;
+}
+.message-role {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+    color: var(--muted);
+}
+.message.user .message-role {
+    text-align: right;
+}
+.message-bubble {
+    padding: 12px 16px;
+    border-radius: 16px;
+    font-size: 14px;
+    line-height: var(--md-line-height);
+    word-break: break-word;
+}
+.message.user .message-bubble {
+    background: var(--user);
+    color: white;
+}
+.message.assistant .message-bubble {
+    background: var(--chip-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+}
+.no-results {
+    text-align: center;
+    padding: 40px;
+    color: #94a3b8;
+}

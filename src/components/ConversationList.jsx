@@ -1,15 +1,70 @@
 import './ConversationList.css';
 import {VirtualList} from 'unconscious/ext/VirtualList.js';
 import {formatDate} from 'unconscious/ext/Utils.js';
-import {$update, $watchWithCleanup} from 'unconscious';
+import {$state, $update, $watchWithCleanup} from 'unconscious';
 import {deleteConversation, getMessages, updateConversation} from "../database.js";
-import {conversations, isMobile, messages, selectedConversation} from "../states.js";
-import {abortCompletion} from "../api-request.js";
-import {showToast} from "./Toast.js";
+import {conversations, isMobile, messages, runningConversations, selectedConversation} from "../states.js";
 import SimpleModal from "./SimpleModal.jsx";
-import {BM, convertToBranchMessage} from "../BranchManager.js";
+import {BM, enableBranches} from "../utils/BranchManager.js";
+import {exportConversation} from "../data-exchange.js";
+import {onLoad} from "../plugin.js";
+import "/plugins/st/STTagList.css";
 
-//const searchText = $state("");
+export const updateConversationListUI = $state();
+
+const closeHoverMenu = (e) => {
+	if (hoverMenu.isConnected) {
+		requestAnimationFrame(() => hoverMenu.remove());
+		if (e.target.closest('.tag-dropdown') !== hoverMenu)
+			e.stopPropagation();
+	}
+};
+
+const hoverMenu = <div className={"tag-dropdown"} style={"position:fixed"}>
+	<div className="list" style={"display:block;left:-50%"}>
+		<label data-action={"edit"}>编辑标题</label>
+		<label data-action={"export"}>导出</label>
+		<label data-action={"delete"}>删除</label>
+	</div>
+</div>;
+
+onLoad((app) => {
+	if (!isMobile) hoverMenu.addEventListener("mouseleave", closeHoverMenu);
+	app.addEventListener("click", closeHoverMenu, {capture: true});
+});
+
+// 分组逻辑：基于时间戳计算相对日期
+function groupConversations() {
+	const today = new Date().setHours(0, 0, 0, 0);
+	const yesterday = today - 86400000;
+	const sevenDaysAgo = today - 7 * 86400000;
+	const thirtyDaysAgo = today - 30 * 86400000;
+
+	const groups = {};
+
+	// idb sorted this
+	conversations.forEach(conv => {
+		const date = new Date(conv.time);
+		const timestamp = date.setHours(0, 0, 0, 0);
+		let name;
+		if (timestamp === today) {
+			name = "今天";
+		} else if (timestamp === yesterday) {
+			name = "昨天";
+		} else if (timestamp > sevenDaysAgo) {
+			name = "7天内";
+		} else if (timestamp > thirtyDaysAgo) {
+			name = "30天内";
+		} else {
+			name = date.getFullYear()+"-"+(date.getMonth()+1);
+		}
+
+		groups[name] = groups[name] || [];
+		groups[name].push(conv);
+	});
+
+	return groups;
+}
 
 /**
  * React组件：渲染对话列表，按时间分组，支持选择、编辑标题、删除。
@@ -18,140 +73,90 @@ import {BM, convertToBranchMessage} from "../BranchManager.js";
  * @param {import("unconscious").Reactive<Conversation>} [props.selectedConversation] - 当前激活的对话ID，用于添加active类
  */
 export function ConversationList(/*{ conversations, selectedConversation, messages }*/) {
-	let editingNow = null;
-
-	// 分组逻辑：基于时间戳计算相对日期
-	function groupConversations() {
-		const today = new Date().setHours(0, 0, 0, 0);
-		const yesterday = today - 86400000;
-		const sevenDaysAgo = today - 7 * 86400000;
-		const thirtyDaysAgo = today - 30 * 86400000;
-
-		const groups = {};
-
-		// idb sorted this
-		conversations.forEach(conv => {
-			const date = new Date(conv.time);
-			const timestamp = date.setHours(0, 0, 0, 0);
-			let name;
-			if (timestamp === today) {
-				name = "今天";
-			} else if (timestamp === yesterday) {
-				name = "昨天";
-			} else if (timestamp > sevenDaysAgo) {
-				name = "7天内";
-			} else if (timestamp > thirtyDaysAgo) {
-				name = "30天内";
-			} else {
-				name = date.getFullYear()+"-"+(date.getMonth()+1);
-			}
-
-			groups[name] = groups[name] || [];
-			groups[name].push(conv);
-		});
-
-		return groups;
-	}
-
-	// 处理点击编辑按钮
-	const leftBtnClick = (e, conv) => {
-		const id = vl.findIndex(conv);
-
-		if (editingNow === conv) {
-			editingNow = null;
-			const val = e.target.closest('.chat-item').querySelector('input').value.trim();
-			if (val) {
-				conv.title = val;
-				// 重新计算时间
-				$update(conversations);
-				updateConversation(conv);
-			}
-		} else {
-			const oldEditingNow = editingNow;
-			editingNow = conv;
-
-			const id1 = oldEditingNow ? vl.findIndex(oldEditingNow) : -1;
-			if (id1 > 0) vl.setItem(id1, oldEditingNow);
-		}
-
-		vl.setItem(id, conv);
-	};
-
-	// 处理删除点击
-	const rightBtnClick = (e, conv) => {
-		let id = vl.findIndex(conv);
-
-		if (editingNow === conv) {
-			editingNow = null;
-			vl.setItem(id, conv);
-			return;
-		}
-
-		SimpleModal({
-			message: '确认删除"'+conv.title+'"#'+conv.id+'？',
-			accent: 'danger',
-			confirmMessage: '删除',
-			onConfirm() {
-				const prev = groupAndConvArr[id-1];
-				const next = groupAndConvArr[id+1];
-				if (!prev.id && !next?.id) {
-					groupAndConvArr.splice(id-1, 2);
-				} else {
-					groupAndConvArr.splice(id, 1);
-				}
-				vl.resize();
-
-				const start = conversations.indexOf(conv);
-				if (start >= 0) {
-					conversations.splice(start, 1);
-					deleteConversation(conv);
-				}
-
-				if (selectedConversation.value === conv) {
-					selectedConversation.value = null;
-					messages.value = [];
-				}
-			}
-		});
-	};
-
-	// 处理Enter键确认编辑
-	const handleKeyDown = (e, conv) => {
-		if (e.key === 'Enter') {
-			leftBtnClick(e, conv);
-		} else if (e.key === 'Escape') {
-			rightBtnClick(e, conv);
-		}
-	};
-
 	function eventHandler(e) {
 		const target = e.target;
 		const owner = target.closest('.chat-item');
 		if (!owner) return;
 
-		const conv = owner._conversation;
+		/** @type {AiChat.Conversation} */
+		const conv = owner._conv;
 
-		let test = target.closest('.edit-btn');
-		if (test) return leftBtnClick(e, conv);
+		let test = target.closest('label');
+		if (test) {
+			switch (test.dataset.action) {
+				case "edit":
+					SimpleModal({
+						type: "input",
+						title: "请输入新标题",
+						message: conv.title,
+						onConfirm(val) {
+							const id = vl.findIndex(conv);
 
-		test = target.closest('.delete-btn');
-		if (test) return rightBtnClick(e, conv);
+							conv.title = val;
+							// 重新计算时间
+							$update(conversations);
+							updateConversation(conv);
 
-		test = target.closest('.chat-title input');
-		if (test) return;
+							vl.setItem(id, conv);
+						}
+					});
+				return;
+				case "export":
+					exportConversation(false, conv);
+				return;
+				case "delete":
+					SimpleModal({
+						message: '确认删除"'+conv.title+'"#'+conv.id+'？',
+						accent: 'danger',
+						confirmMessage: '删除',
+						onConfirm() {
+							let id = vl.findIndex(conv);
+							const prev = groupAndConvArr[id-1];
+							const next = groupAndConvArr[id+1];
+							if (!prev.id && !next?.id) {
+								groupAndConvArr.splice(id-1, 2);
+							} else {
+								groupAndConvArr.splice(id, 1);
+							}
+							vl.resize();
 
-		if (abortCompletion.value) {
-			showToast("正在生成响应");
-			return;
+							const start = conversations.indexOf(conv);
+							if (start >= 0) {
+								conversations.splice(start, 1);
+								deleteConversation(conv);
+							}
+
+							if (selectedConversation.value === conv) {
+								selectedConversation.value = null;
+								messages.value = [];
+							}
+						}
+					});
+				return;
+			}
 		}
 
 		const active = list.querySelector(".active");
 		if (active) active.classList.remove('active');
 		owner.classList.add('active');
 
-		conv.ready = false;
+		const val = runningConversations.get(conv.id);
+		if (val) {
+			messages.value = val.messages;
+		} else {
+			conv.ready = false;
+		}
+
 		selectedConversation.value = conv;
 	}
+
+	const mouseHandler = (e) => {
+		if (e.target.closest('.tag-dropdown') === hoverMenu) return;
+		hoverMenu.style.left = e.pageX+"px";
+		hoverMenu.style.top = e.pageY+"px";
+		e.target.append(hoverMenu);
+		e.stopPropagation();
+	};
 
 	const list = <div className="sidebar-list scroll" id="chatList" onClick={eventHandler}></div>;
 	const groupAndConvArr = [];
@@ -163,37 +168,37 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 		keyFunc,
 		renderer(conv) {
 			if (!conv.id) return conv;
-			const isEditing = editingNow === conv;
+
+			const btn = <button className={"edit-btn " + ("ri-more-line")} title={"菜单"} />;
+			btn.addEventListener(isMobile ? 'click' : 'mouseover', mouseHandler);
+
 			return <div
-				_conversation={conv}
-				className={`chat-item${selectedConversation.value === conv ? ' active' : ''}${isEditing?" hover":''}`}
+				_conv={conv}
+				className={`chat-item${selectedConversation.value === conv ? ' active' : ''}`}
 				title={formatDate("Y-m-d H:i:s", conv.time)}
 			>
-				<span className="chat-title">{isEditing
-					? <input type="text" onKeyDown={(e) => handleKeyDown(e, conv)} className="chat-title-input" value={conv.title}/>
-					: conv.title || '无标题'}
-				</span>
-				{isMobile ? <div className="chat-actions">
-					<button className={"delete-btn " + ("ri-more-line")} title={"删除"}></button>
-				</div> : <div className="chat-actions">
-					<button className={"edit-btn " + (isEditing ? "ri-check-fill" : "ri-edit-2-line")}
-							title={editingNow === conv ? "保存" : "编辑"}></button>
-					<button className={"delete-btn " + (isEditing ? "ri-forbid-2-line" : "ri-delete-bin-line")} title={editingNow === conv ? "取消" : "删除"}></button>
-				</div>}
+				{runningConversations.has(conv.id) ? <span className={"spinner"} /> : null}
+				<span className="chat-title">{conv.title || '无标题'}</span>
+				<div className="chat-actions">{btn}</div>
 			</div>;
 		}
 	});
 
 	function keyFunc(conv) {
-		return conv.id ? conv.id + "\0" + conv.title + "\0" + (selectedConversation.value === conv) : conv;
+		return conv.id ? conv.id + "\0" + conv.title + "\0" + (selectedConversation.value === conv) + "\0" + runningConversations.has(conv.id) : conv.textContent;
 	}
+
+	$watchWithCleanup(updateConversationListUI, () => {
+		vl.render();
+	})
 
 	$watchWithCleanup(conversations, () => {
 		groupAndConvArr.length = 0;
 
 		const groups = groupConversations();
 		for (const groupName in groups) {
-			groupAndConvArr.push(<div className="chat-group"><div>{groupName}</div></div>);
+			groupAndConvArr.push(<div className="chat-group">
+				<div>{groupName}</div></div>);
 			groupAndConvArr.push(...groups[groupName]);
 		}
 		vl.resize();
@@ -209,7 +214,7 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 				if (selectedConversation.value === conv) {
 					dontUpdateFlag = conv;
 					$update(selectedConversation);
-					messages.value = conv.branches ? convertToBranchMessage(conv, data) : data;
+					messages.value = conv.branches ? enableBranches(conv, data) : data;
 				}
 			});
 		}
@@ -229,10 +234,18 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 			const conv = selectedConversation.value;
 			if (conv === tmp) return;
 
-			conv.time = Date.now();
-			conversations.sort((a, b) => b.time - a.time);
+			const newTime = Date.now();
 
-			updateConversation(conv, conv.branches ? [...conv[BM]] : messages.value);
+			const newer = conversations[0];
+			if (newer !== conv && newTime > newer.time) {
+				conv.time = newTime;
+
+				let index = conversations.indexOf(conv);
+				conversations.splice(index, 1);
+				conversations.unshift(conv);
+			}
+
+			updateConversation(conv, conv.branches ? conv[BM].messages : messages.value);
 		}
 	}, false);
 

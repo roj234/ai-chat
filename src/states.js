@@ -1,8 +1,18 @@
-import {$asyncState, $state, $store, $update} from 'unconscious';
-import {jsonFetch} from "./utils.js";
+import {$asyncState, $state, $store, $update, $watch} from 'unconscious';
+import {jsonFetch} from "./utils/utils.js";
 import {isEqual} from "../vendor/equals.js";
+import {onLoad} from "./plugin.js";
 
-export const isMobile = matchMedia('(max-width: 768px)').matches;
+/**
+ * @type {boolean}
+ */
+export let isMobile ;
+
+const mobileCheck = () => isMobile = matchMedia('(max-width: 768px)').matches;
+mobileCheck();
+onLoad(() => {
+	window.addEventListener('resize', mobileCheck);
+});
 
 /**
  *
@@ -19,6 +29,7 @@ export const state = {};
  * @type {Record<string, AiChat.DnD.CustomMessageRole>}
  */
 export const MessageRoles = {};
+export const EditableMessageRoles = new Set(["system", "user", "assistant"]);
 
 export const inputText = $state("");//$store("inputText", "", {persist: true});
 
@@ -27,9 +38,7 @@ export const inputText = $state("");//$store("inputText", "", {persist: true});
  * @type {import("unconscious").Reactive<AiChat.Preset>}
  */
 export const config = $store("config", {
-	name: "default",
-
-	endpoint: 'http://localhost:8080/v1',
+	endpoint: DEFAULT_LLM_ENDPOINT,
 	mode: 'chat',
 
 	reasoning: 'medium',
@@ -77,28 +86,6 @@ export let isLlamaCppBackend, isMyLlamaCppBackend;
 export function setIsLlamaCppBackend(b, b2) {
 	isLlamaCppBackend = b;
 	isMyLlamaCppBackend = b2;
-	emptyMessageTokens = -1;
-}
-
-let emptyMessageTokens = -1;
-const _countTokens = (text) => {
-	return jsonFetch(config.endpoint+"/messages/count_tokens", {
-		authorization: config.accessToken,
-		body: JSON.stringify({
-			model: config.model,
-			messages: [{
-				role: "user",
-				content: text
-			}]
-		})
-	}).then(result => result.input_tokens);
-};
-
-export async function countTokens(text) {
-	if (emptyMessageTokens < 0) {
-		emptyMessageTokens = await _countTokens("");
-	}
-	return await _countTokens(text) - emptyMessageTokens;
 }
 
 /**
@@ -128,7 +115,6 @@ export function updateModels(force) {
  *     scroller: HTMLElement,
  *     sendBtn: HTMLButtonElement,
  *     SettingUI: HTMLElement,
- *     statusBadge: HTMLElement,
  * }}
  */
 export const Shared = {}
@@ -138,3 +124,24 @@ export const Shared = {}
  * @type {import("unconscious").Reactive<boolean>}
  */
 export const lastScrollDirection = $state();
+
+/**
+ *
+ * @type {import("unconscious").Reactive<AbortController>}
+ */
+export const abortCompletion = $state();
+
+/**
+ *
+ * @type {Map<number, {
+ *     abort: AbortController,
+ *     messages: AiChat.Message[]
+ * }>}
+ */
+export const runningConversations = new Map;
+
+$watch(selectedConversation, () => {
+	abortCompletion.value = runningConversations.get(selectedConversation.id)?.abort;
+});
+
+export const resumableCompletions = $store("resumableCompletions", {}, {persist: true, deep: false});
