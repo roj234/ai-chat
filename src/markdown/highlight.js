@@ -1,8 +1,11 @@
-import hljs from "highlight.js/lib/core";
+import hljs from "/vendor/hljs/core.js";
 import morphdom from "morphdom";
 import './highlight-theme.css';
 
 import json from 'highlight.js/lib/languages/json';
+import {VirtualList} from "unconscious/ext/VirtualList.js";
+import {$disposable} from "unconscious";
+import {onLoad} from "../plugin.js";
 
 hljs.registerLanguage('json', json);
 
@@ -13,19 +16,61 @@ function light(newCode, language) {
 	return hljs.highlight(newCode, {
 		language,
 		ignoreIllegals: true
-	}).value;
+	});
 }
+
+function lightSync(newCode, language) {
+	const gen = light(newCode, language);
+	let result;
+	while (!(result = gen.next()).done) ;
+	return result.value.value;
+}
+
+// 辅助工具：提取并修补不完整的 HTML 行
+function processLines(rawHtml, openTagsStack = []) {
+	const lines = rawHtml.split('\n');
+	return lines.map((lineContent, index) => {
+		// 1. 在行首补全之前未闭合的标签
+		let prefix = openTagsStack.map(tag => tag.full).join('');
+
+		// 2. 分析当前行新增的标签状态
+		// 匹配 <span class="..."> 或 </span>
+		const tagRegex = /<(span) class="([^"]+)">|<\/(span)>/g;
+		let match;
+		let currentLineHtml = lineContent;
+
+		while ((match = tagRegex.exec(lineContent)) !== null) {
+			if (match[1] === 'span') { // 开始标签
+				openTagsStack.push({name: 'span', full: match[0]});
+			} else if (match[3] === 'span') { // 闭合标签
+				openTagsStack.pop();
+			}
+		}
+
+		// 3. 在行尾补全闭合标签（逆序闭合）
+		let suffix = '</span>'.repeat(openTagsStack.length);
+
+		return prefix + currentLineHtml + suffix;
+	});
+}
+
+let heightTest;
+onLoad((app) => {
+	app.append(<code className="hljs" style="position:absolute;visibility:hidden;pointer-events:none">
+		<div ref={heightTest} className="line"/>
+	</code>);
+});
 
 /**
  * 语法高亮
  * @param {string} code
  * @param {string} language
  * @param {HTMLElement} node
- * @param {boolean} is_end
+ * @param {boolean} is_finished
  * @return {boolean}
  */
-export function highlight(code, language, node, is_end) {
-	function end() {
+export function highlight(code, language, node, is_finished) {
+	if (is_finished) {
 		node.classList.add("done");
 		requestAnimationFrame(() => {
 			node.scrollTop = node.scrollHeight;
@@ -33,11 +78,40 @@ export function highlight(code, language, node, is_end) {
 	}
 
 	const callback = (code) => {
-		if (is_end) {
+		if (is_finished) {
 			delete node._cache;
-			// 最终做一次全量
-			morphdom(node, `<code class="hljs">${light(code, language)}</code>`);
-			end();
+			const generator = light(code, language);
+
+			const items = [];
+			const virtualList = new VirtualList({
+				overscan: 50,
+				itemHeight: heightTest.getBoundingClientRect().height,
+				data: items,
+				renderer(item, index) {
+					// TODO 加上行号，有了虚拟列表这非常容易
+					return <div className={'line'} dangerouslySetInnerHTML={item}/>
+				}
+			});
+			$disposable(node, () => virtualList.destroy());
+
+			const highlightReallyFast = () => {
+				if (!node.isConnected) return;
+
+				// Monkey Patch: yield every 256 time regexp matches
+				const result = generator.next();
+
+				if (!result.done) {
+					requestAnimationFrame(highlightReallyFast);
+				} else {
+					node.replaceChildren(virtualList.dom);
+					virtualList.attach(node);
+					// noinspection JSPrimitiveTypeWrapperUsage
+					virtualList.items = processLines(result.value.value, []).map(s => new String(s));
+					virtualList.scrollToBottom();
+					node._value = code;
+				}
+			};
+			requestAnimationFrame(highlightReallyFast);
 			return;
 		}
 
@@ -51,17 +125,18 @@ export function highlight(code, language, node, is_end) {
 		}
 
 		let newCode = code.substring(cache.pos);
-		let newHtml = light(newCode, language);
+		let newHtml = lightSync(newCode, language);
 
 		// 除去白名单内的流式语言（例如JSON），在单行内应用 morphdom
 		// 是的这就是他妈的比 shiki-stream 快，你去 benchmark 吧
+		// 但是不支持 subLanguage 比如 JS/CSS in HTML 因为没有上下文
 		const stableHtml = (fullStreamableLanguages.has(language) || newCode.includes("\n")) && trimLastTopLevelElement(newHtml);
 		if (stableHtml) {
 			for (let reduced = 1; reduced < newCode.length; reduced++) {
 				const testLength = newCode.length - reduced;
 				// 尽可能长的匹配字符串
 				// 二分可以得到近似结果，但事实上不是线性关系，所以得不到精确结果
-				const testHtml = light(newCode.substring(0, testLength), language);
+				const testHtml = lightSync(newCode.substring(0, testLength), language);
 
 				// 后续依赖，如 'a(' 的 a 被高亮为函数但 '(' 本身不高亮
 				if (!testHtml.startsWith(stableHtml)) break;
@@ -83,9 +158,9 @@ export function highlight(code, language, node, is_end) {
 
 	if (!hljs.getLanguage(language)) {
 		if (node.dataset.processed) return true;
-		end();
 
 		const loaded = loadLanguage(language);
+		// 纯文本走这里
 		if (!loaded) return true;
 
 		node.dataset.processed = "y";
@@ -129,10 +204,7 @@ export function highlightJsonLike(obj, maxChars = 10000, maxStringLen = 1000) {
 
 	if (str.length > maxChars) str = str.substring(0, maxChars) + "\n/* 与 " + (str.length - maxChars) + " 额外字符 */";
 
-	return /*isJson ? */hljs.highlight(str, {
-		language: "json",
-		ignoreIllegals: true
-	}).value;
+	return /*isJson ? */lightSync(str, 'json');
 }
 
 const VOID_TAGS = /*#__PURE__*/ new Set(["area","base","br","col","embed","hr","img","input","link","meta","source","track","wbr"]);

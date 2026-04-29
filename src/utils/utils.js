@@ -330,7 +330,8 @@ export function streamFetch(url, data = {}, onToken) {
  * @return {string}
  */
 export function getTextContent(m) {
-	return Array.isArray(unconscious(m.content)) ? m.content.filter(e => e.type === "text").map(e => e.text).join("\n\n") : m.content;
+	const content = unconscious(m.content);
+	return Array.isArray(content) ? content.filter(e => e.type === "text").map(e => e.text).join("\n\n") :  typeof content === "string" ? content : null;
 }
 
 /**

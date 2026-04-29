@@ -452,8 +452,15 @@ code {
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     &.hljs {
         background: transparent;
+        padding-right: 0;
+        scrollbar-gutter: stable;
+
+        .line {
+            line-height: 1.2;
+            min-height: 1.2rem;
+        }
     }
-    &:not(pre > code) {
+    &:not(.hljs) {
         border: 1px solid #4a5568;
         padding: 2px;
         border-radius: var(--border-radius-sm);
@@ -648,9 +655,7 @@ code {
         top: 32px;
     }
 
-    code.hljs.done {
-        max-height: calc(40vh);
-    }
+    .hljs.done {max-height: calc(40vh);}
 }
 
 @media (hover: none) {
@@ -701,9 +706,7 @@ code {
         bottom: -200px;
     }
 
-    code.hljs.done {
-        max-height: calc(20vh + 7px);
-    }
+    .hljs.done {max-height: calc(20vh);}
 
     .bar {
         display: grid;

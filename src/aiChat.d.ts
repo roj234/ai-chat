@@ -21,6 +21,11 @@ declare namespace AiChat {
         allowedTools?: Set<string>,
 
         branches?: true;
+
+        running?: {
+            abort: AbortController,
+            messages: Message[]
+        }
     }
 
     export type Message = BaseMessage | AssistantMessage;
@@ -245,32 +250,47 @@ declare namespace AiChat {
                 }
             },
             character_book: null | {
-                entries: {
-                    name: string;
-                    keys: string[],
-                    secondary_keys: string[],
-                    comment: string,
-                    content: string,
-                    // 不基于滑动窗口
-                    constant: boolean,
-                    // 不是很懂，感觉不如正则？
-                    selective: boolean,
-                    insertion_order: number,
-                    priority: number,
-                    enabled: boolean,
-                    position: "after_char" | "before_char",
-                    use_regex: boolean,
-                    probability: number,
-                    extensions: Record<string, any> & {
-                        // 滑动窗口大小
-                        depth: number,
-                        // 递归……等有人用到了再说
-                        excludeRecursion: boolean
-                    }
-                }[],
+                entries: STLorebookEntry[],
                 name: string
             },
         }
+
+        type STLorebookEntry = {
+            name: string;
+            comment: string,
+
+            keys: string[],
+
+            secondary_keys: string[],
+            keysecondary: string[],
+
+            content: string,
+            // 不基于滑动窗口
+            constant: boolean,
+            // 不是很懂，感觉不如正则？
+            selective: boolean,
+
+            priority: number,
+            enabled: boolean,
+            position: "after_char" | "before_char" | number,
+
+            excludeRecursion: boolean,
+            preventRecursion: boolean,
+            delayUntilRecursion: boolean,
+            depth: number;
+            role: null | number;
+
+            uid?: number;
+            displayIndex?: number;
+
+            probability: number,
+            extensions: Record<string, any> & {
+                // 滑动窗口大小
+                depth: number,
+                // 递归……等有人用到了再说
+                excludeRecursion: boolean
+            }
+        };
 
         type SillyTavernPreset = {
             extensions: Record<string, any>
@@ -377,10 +397,12 @@ declare namespace AiChat {
             content: string,
             regex: boolean,
             constant: boolean,
-            recursion: boolean,
+            recursion: true | false | 'stop' | 'only',
             triggers: string[],
             window: number,
-            position: 'worldInfoBefore' | 'worldInfoAfter' | 'lastMessage',
+            position: 'worldInfoBefore' | 'worldInfoAfter' | 'depth',
+            role: 'assistant' | 'user' | null,
+            depth: number,
             id: string;
         }
 

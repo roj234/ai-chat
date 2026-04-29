@@ -58,7 +58,7 @@ function createList(dirtyHandle, config, onUpdate) {
 				return true;
 			}
 			onUpdate?.(k, v, obj, el);
-		}} isMobile={true}/>;
+		}} showTitle={true} fillPlaceholder={false} />;
 		filter.onSettingsUpdated(true);
 		return filter;
 	}
@@ -150,12 +150,35 @@ function createLorebookList(dirtyHandle) {
 			choices: {
 				"正则": "regex",
 				"常驻": "constant",
-				"连锁": "recursion",
+				"向量化": "rag",
 			},
 			title: {
 				"正则": "开启后，触发词将作为正则表达式处理，能匹配更复杂的模式。",
 				"常驻": "不依赖触发词，对话一开始就自动加入背景，适合全局性设定（如世界观基调）。",
-				"连锁": "允许当前条目的内容触发更多条目"
+				"向量化": "基于嵌入向量和输入的余弦相似度判断"
+			}
+		},
+		{
+			id: "cossim",
+			name: "余弦相似度阈值",
+			type: "number",
+			min: 0,
+			max: 1,
+			step: 0.01
+		},
+		{
+			id: "recursion",
+			name: "连锁（未实现）",
+			type: "radio",
+			choices: {
+				"能被连锁激活": true,
+				"只被连锁激活": "only",
+				"连锁到此为止": "stop",
+			},
+			title: {
+				"能被连锁激活": "该条目能被其它条目中的关键词激活",
+				"只被连锁激活": "该条目只能被其它条目激活",
+				"连锁到此为止": "该条目不能触发其它条目"
 			}
 		},
 		{
@@ -184,9 +207,26 @@ function createLorebookList(dirtyHandle) {
 			choices: {
 				"角色定义前": "worldInfoBefore",
 				"角色定义后": "worldInfoAfter",
-				//"对话开头": "firstMessage",
-				"对话末尾": "lastMessage",
+				"深度@N": "depth",
 			}
+		},
+		{
+			id: "depth",
+			name: "深度",
+			type: "number",
+			title: "插入到倒数第N条消息的末尾",
+			min: 1,
+			max: 50,
+		},
+		{
+			id: "role",
+			name: "消息角色",
+			ttile: "不选为任意",
+			type: "radio",
+			choices: {
+				"助手": "assistant",
+				"用户": "user",
+			},
 		},
 		{
 			id: "id",
@@ -208,8 +248,27 @@ function createLorebookList(dirtyHandle) {
 			}
 		}
 		if (k === "constant") {
-			el.querySelector("[data-id=\"window\"]").style.display = v ? "none" : "";
+			const querySelector = el.querySelector("[data-id=\"window\"]");
+			querySelector.previousElementSibling.style.display = v ? "none" : "";
+			querySelector.style.display = v ? "none" : "";
 			el.querySelector("[data-id=\"id\"]").style.display = v ? "none" : "";
+			el.querySelector("[data-id=\"recursion\"]").style.display = v ? "none" : "";
+			if (v) {
+				delete obj[TRIGGER];
+				delete obj.recursion;
+			}
+		}
+		if (k === "position") {
+			const hide = v !== "depth";
+			el.querySelector("[data-id=\"depth\"]").style.display = hide ? "none" : "";
+			el.querySelector("[data-id=\"role\"]").style.display = hide ? "none" : "";
+			if (hide) {
+				delete obj.depth;
+				delete obj.role;
+			}
+		}
+		if (k === "rag") {
+			el.querySelector("[data-id=\"cossim\"]").style.display = !v ? "none" : "";
 		}
 	});
 }
@@ -291,7 +350,7 @@ function createTextList(handler, textFieldName) {
 							virtualList.setItems(items);
 							return true;
 						}
-					}} isMobile={true} />
+					}} showTitle={true} />
 				) : null}
 			</li>;
 		}
@@ -472,7 +531,7 @@ export function _CharacterEditor(char, isOpen, close) {
 			type: "textbox"
 		}
 	];
-	const charOptions = <Filter choices={char} config={config} isMobile={true} onChange={(k, v, chr) => {
+	const charOptions = <Filter choices={char} config={config} showTitle={true} onChange={(k, v, chr) => {
 		markDirty(char);
 	}} />;
 
@@ -510,7 +569,7 @@ export function _CharacterEditor(char, isOpen, close) {
 	}, null);
 
 	greetingListener.set(() => {
-		char.dialogueExamples = greetingVL.items.map((item) => item.content);
+		char.greetings = greetingVL.items.map((item) => item.content);
 		markDirty(char);
 	}, null);
 
@@ -520,11 +579,9 @@ export function _CharacterEditor(char, isOpen, close) {
 		charOptions.onSettingsUpdated(false, true);
 		greetingVL.setItems((char.greetings || (char.greetings = [])).map(newItem.bind(null, greetingListener)));
 		expMsgVL.setItems((char.dialogueExamples || (char.dialogueExamples = [])).map(newItem.bind(null, expMsgListener)));
-		lorebookVL.setItems((char.lorebook || (char.lorebook = [])).map(item => {
-			item[TRIGGER] = item.triggers.join("\n");
-			console.log(item);
-			return item;
-		}));
+		const arr = char.lorebook || (char.lorebook = []);
+		arr.forEach(item => item[TRIGGER] = item.triggers.join("\n"));
+		lorebookVL.setItems(arr);
 		autoMessageVL.setItems(char.autoMessages || (char.autoMessages = []));
 	});
 
@@ -544,9 +601,7 @@ export function _CharacterEditor(char, isOpen, close) {
 										const value = panel.value;
 										const vl = vls[value];
 
-										vl.items.unshift(value === 1 ? {
-											id: randomId()
-										} : newItem(value === 3 ? greetingListener : expMsgListener, ""));
+										vl.items.unshift(value === 1 ? lorebookTemplate() : newItem(value === 3 ? greetingListener : expMsgListener, ""));
 										vl.render();
 
 									}} /> : null;
@@ -568,6 +623,15 @@ export function _CharacterEditor(char, isOpen, close) {
 	);
 }
 
+function lorebookTemplate() {
+	return {
+		id: randomId(),
+		rag: false,
+		position: "worldInfoAfter",
+		window: 5
+	}
+}
+
 /**
  * 世界书编辑面板构造器
  * @param {import("unconscious").Reactive<AiChat.DnD.MyLorebook>} lorebook
@@ -579,10 +643,9 @@ export function _LorebookEditor(lorebook, isOpen, close) {
 	const [itemEL, itemVL] = createLorebookList(lorebook);
 
 	$watchWithCleanup($computed(() => lorebook.value), () => {
-		itemVL.setItems((lorebook.pages || (lorebook.pages = [])).map(item => {
-			item[TRIGGER] = item.triggers.join("\n");
-			return item;
-		}));
+		const arr = lorebook.pages || (lorebook.pages = []);
+		arr.forEach(item => item[TRIGGER] = item.triggers?.join("\n"));
+		itemVL.setItems(arr);
 	});
 
 	return (
@@ -591,9 +654,7 @@ export function _LorebookEditor(lorebook, isOpen, close) {
 				<h2 className="title" title={() => lorebook.name}>{() => lorebook.name}</h2>
 				<div style={"display:flex;gap:0.5rem"}>
 					<button className="ri-add-line btn ghost" title={"在开头增加一项"} onClick={() => {
-						itemVL.items.unshift({
-							id: randomId()
-						});
+						itemVL.items.unshift(lorebookTemplate());
 						itemVL.render();
 					}}>
 					</button>

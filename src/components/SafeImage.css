@@ -14,17 +14,16 @@
         gap: 8px;
         color: var(--muted);
         font-size: smaller;
-
-
-        & .spinner {
-            width: 16px;
-            height: 16px;
-            border: 2px solid rgba(0,0,0,0.1);
-            border-top-color: #1890ff;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
     }
+}
+
+.spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(0,0,0,0.1);
+    border-top-color: #1890ff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
 }
 
 @keyframes spin {

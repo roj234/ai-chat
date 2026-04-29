@@ -225,7 +225,7 @@ export function makeStory(char, lbBefore = "", lbAfter = "") {
 	if (char.personality) story += "\n\n"+char.personality;
 	if (char.scenario) story += "\n\n"+char.scenario;
 	if (lbAfter) story += /*"\n\n"+*/lbAfter;
-	if (char.dialogueExamples) story += "\n\n[Example Chat]\n\n"+char.dialogueExamples.join("\n\n[Example Chat]\n\n");
+	if (char.dialogueExamples?.length) story += "\n\n[Example Chat]\n\n"+char.dialogueExamples.join("\n\n[Example Chat]\n\n");
 
 	return applyMacro(story + `\n\n[Start a new Chat]`, createDefaultCtx(char)).trim();
 }

@@ -1,10 +1,9 @@
 import './ConversationList.css';
 import {VirtualList} from 'unconscious/ext/VirtualList.js';
 import {formatDate} from 'unconscious/ext/Utils.js';
-import {$update, $watchWithCleanup} from 'unconscious';
+import {$state, $update, $watchWithCleanup} from 'unconscious';
 import {deleteConversation, getMessages, updateConversation} from "../database.js";
-import {abortCompletion, conversations, isMobile, messages, selectedConversation} from "../states.js";
-import {showToast} from "./Toast.js";
+import {conversations, isMobile, messages, selectedConversation} from "../states.js";
 import SimpleModal from "./SimpleModal.jsx";
 import {BM, convertToBranchMessage} from "../utils/BranchManager.js";
 import {exportConversation} from "../data-exchange.js";
@@ -12,6 +11,8 @@ import {onLoad} from "../plugin.js";
 import "/plugins/st/STTagList.css";
 
 //const searchText = $state("");
+
+export const updateConversationListUI = $state();
 
 let currentTarget;
 
@@ -35,6 +36,39 @@ onLoad((app) => {
 	app.addEventListener("click", closeHoverMenu);
 });
 
+// 分组逻辑：基于时间戳计算相对日期
+function groupConversations() {
+	const today = new Date().setHours(0, 0, 0, 0);
+	const yesterday = today - 86400000;
+	const sevenDaysAgo = today - 7 * 86400000;
+	const thirtyDaysAgo = today - 30 * 86400000;
+
+	const groups = {};
+
+	// idb sorted this
+	conversations.forEach(conv => {
+		const date = new Date(conv.time);
+		const timestamp = date.setHours(0, 0, 0, 0);
+		let name;
+		if (timestamp === today) {
+			name = "今天";
+		} else if (timestamp === yesterday) {
+			name = "昨天";
+		} else if (timestamp > sevenDaysAgo) {
+			name = "7天内";
+		} else if (timestamp > thirtyDaysAgo) {
+			name = "30天内";
+		} else {
+			name = date.getFullYear()+"-"+(date.getMonth()+1);
+		}
+
+		groups[name] = groups[name] || [];
+		groups[name].push(conv);
+	});
+
+	return groups;
+}
+
 /**
  * React组件：渲染对话列表，按时间分组，支持选择、编辑标题、删除。
  * @param {Object} props
@@ -42,51 +76,12 @@ onLoad((app) => {
  * @param {import("unconscious").Reactive<Conversation>} [props.selectedConversation] - 当前激活的对话ID，用于添加active类
  */
 export function ConversationList(/*{ conversations, selectedConversation, messages }*/) {
-	let editingNow = null;
-
-	// 分组逻辑：基于时间戳计算相对日期
-	function groupConversations() {
-		const today = new Date().setHours(0, 0, 0, 0);
-		const yesterday = today - 86400000;
-		const sevenDaysAgo = today - 7 * 86400000;
-		const thirtyDaysAgo = today - 30 * 86400000;
-
-		const groups = {};
-
-		// idb sorted this
-		conversations.forEach(conv => {
-			const date = new Date(conv.time);
-			const timestamp = date.setHours(0, 0, 0, 0);
-			let name;
-			if (timestamp === today) {
-				name = "今天";
-			} else if (timestamp === yesterday) {
-				name = "昨天";
-			} else if (timestamp > sevenDaysAgo) {
-				name = "7天内";
-			} else if (timestamp > thirtyDaysAgo) {
-				name = "30天内";
-			} else {
-				name = date.getFullYear()+"-"+(date.getMonth()+1);
-			}
-
-			groups[name] = groups[name] || [];
-			groups[name].push(conv);
-		});
-
-		return groups;
-	}
-
 	function eventHandler(e) {
 		const target = e.target;
 		const owner = target.closest('.chat-item');
 		if (!owner) return;
 
-		if (abortCompletion.value) {
-			showToast("正在生成响应");
-			return;
-		}
-
+		/** @type {AiChat.Conversation} */
 		const conv = owner._conv;
 
 		let test = target.closest('label');
@@ -108,10 +103,10 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 							vl.setItem(id, conv);
 						}
 					});
-					break;
+				return;
 				case "export":
 					exportConversation(false, conv);
-				break;
+				return;
 				case "delete":
 					SimpleModal({
 						message: '确认删除"'+conv.title+'"#'+conv.id+'？',
@@ -140,20 +135,26 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 							}
 						}
 					});
-				break;
+				return;
 			}
 		}
-
 
 		const active = list.querySelector(".active");
 		if (active) active.classList.remove('active');
 		owner.classList.add('active');
 
-		conv.ready = false;
+		if (conv.running) {
+			messages.value = conv.running.messages;
+		} else {
+			conv.ready = false;
+		}
+
 		selectedConversation.value = conv;
 	}
 
-	const mouseHandler = ({target}) => {
+	const mouseHandler = (e) => {
+		closeHoverMenu(e);
+		const {target} = e;
 		currentTarget = target;
 		target.replaceWith(hoverMenu);
 	};
@@ -177,6 +178,7 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 				className={`chat-item${selectedConversation.value === conv ? ' active' : ''}`}
 				title={formatDate("Y-m-d H:i:s", conv.time)}
 			>
+				{conv.running && <span className={"spinner"} />}
 				<span className="chat-title">{conv.title || '无标题'}</span>
 				<div className="chat-actions">{btn}</div>
 			</div>;
@@ -184,8 +186,12 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 	});
 
 	function keyFunc(conv) {
-		return conv.id ? conv.id + "\0" + conv.title + "\0" + (selectedConversation.value === conv) : conv;
+		return conv.id ? conv.id + "\0" + conv.title + "\0" + (selectedConversation.value === conv) + "\0" + !!(conv.running) : conv;
 	}
+
+	$watchWithCleanup(updateConversationListUI, () => {
+		vl.render();
+	})
 
 	$watchWithCleanup(conversations, () => {
 		groupAndConvArr.length = 0;

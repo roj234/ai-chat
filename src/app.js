@@ -39,7 +39,7 @@ function createApp() {
 		statusBadge, sidebar,
 		thinkBtn, toolCallBtn, scroller;
 
-	const SettingUI = <Filter config={SETTINGS} choices={config} onChange={onSettingChanged} isMobile={isMobile} />;
+	const SettingUI = <Filter config={SETTINGS} choices={config} onChange={onSettingChanged} showTitle={isMobile} />;
 	const newSettingUI = SettingDialog(SettingUI);
 
 	/**
@@ -173,21 +173,21 @@ function createApp() {
 					{/*我们可能很快不再需要这个了（或者仅用于调试？）*/}
 					<div className="controls"><span ref={statusBadge}></span></div>
 					<div className="query">
-					<textarea placeholder="今天有什么能帮到你？"
-							  id="userInput" ref={userInput}
-							  onInput={() => {
-								  // Auto resize when typing
-								  userInput.style.height = '';
-								  userInput.style.height = (userInput.scrollHeight) + 'px';
-							  }}
-							  onKeyDown={(e) => {
-								  if (isMobile) return;
-								  if (e.key === 'Enter' && !e.shiftKey) {
-									  e.preventDefault();
-									  if (!abortCompletion.value) onSend();
-								  }
-							  }}
-					></textarea>
+						<textarea placeholder="今天有什么能帮到你？" id="userInput" ref={userInput}
+							onInput={() => {
+								// Auto resize when typing
+								userInput.style.height = '';
+								userInput.style.height = (userInput.scrollHeight) + 'px';
+							}}
+							onKeyDown={(e) => {
+								if (isMobile) return;
+								if (e.key === 'Enter' && !e.shiftKey) {
+									e.preventDefault();
+									if (!abortCompletion.value) onSend();
+								}
+							}}
+						></textarea>
+						{_InputAttachment(attachments)}
 						<div className="controls">
 							<button className="chip" class:active={() => config.think} ref={thinkBtn}
 									onClick={() => {
@@ -210,7 +210,6 @@ function createApp() {
 						</div>
 
 					</div>
-					{_InputAttachment(attachments)}
 					<div className="hint"
 						 style="text-align:center">{() => messages.length ? "内容由AI生成，可能包含错误，请仔细甄别" : isMobile ? "欢迎使用" : "Shift+Enter 换行"}</div>
 				</div>

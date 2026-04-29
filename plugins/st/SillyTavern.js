@@ -24,7 +24,7 @@ import {COMMANDS} from "/src/commands.js";
 import {createTab} from "/src/components/SettingDialog.jsx";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {_CharacterEditor, _LorebookEditor, _PresetEditor, createPanel} from "./STPresetPanel.jsx";
-import {convertSTCharacter, convertSTPreset, normalizeCRLF, utf2str} from "./convert.js";
+import {convertSTCharacter, convertSTLorebook, convertSTPreset, normalizeCRLF, utf2str} from "./convert.js";
 import {applyMacro, applyPreset, createDefaultCtx, DEFAULT_USER_NAME, makeStory} from "./prompt.js";
 import {LorebookList, PresetList} from "./STTagList.jsx";
 
@@ -154,6 +154,7 @@ function _SchemaEditorImpl(typeId, template, editorConstructor) {
 
 						kvListSet(selectedItem.value, typeId, name).then(id => {
 							onInserted(id, name);
+							selectedItem.id = id;
 						});
 					}
 				})
@@ -397,11 +398,17 @@ onConversationChanged((conv, messages) => {
 
 	const promises = [_kvListGetCached(id).then(item => {
 		readyObj.character = item;
-		if (!item && name) return kvListGetByName("st|char", name).then(item => readyObj.character = item);
+		if (name && (!item || item.name !== name)) return kvListGetByName("st|char", name).then(item => {
+			readyObj.character = item;
+			data.id = item.id;
+		});
 	})];
 	if (preset >= 0) promises.push(_kvListGetCached(preset).then(item => {
 		readyObj.preset = item;
-		if (!item && presetName) return kvListGetByName("st|preset", presetName).then(item => readyObj.preset = item);
+		if (presetName && (!item || item.name !== presetName)) return kvListGetByName("st|preset", presetName).then(item => {
+			readyObj.preset = item;
+			data.preset = item.id;
+		});
 	}));
 
 	if (lorebookSize) {
@@ -409,7 +416,11 @@ onConversationChanged((conv, messages) => {
 			const j = i;
 			promises.push(_kvListGetCached(lorebooks[i]).then(item => {
 				readyObj.lorebooks[j] = item;
-				if (!item && lorebookNames?.[j]) return kvListGetByName("st|lorebook", lorebookNames[j]).then(item => readyObj.lorebooks[j] = item);
+				const lbName = lorebookNames?.[j];
+				if (lbName && (!item || item.name !== presetName)) return kvListGetByName("st|lorebook", lbName).then(item => {
+					readyObj.lorebooks[j] = item;
+					data.lorebooks[j] = item.id;
+				});
 			}));
 		}
 	}
@@ -452,11 +463,14 @@ const checkJSON = (json, batch, fileName) => {
 	json = normalizeCRLF(json);
 
 	if (json.spec === "chara_card_v3" || json.spec === "chara_card_v2") {
-		json = convertSTCharacter(json, batch, fileName);
+		json = convertSTCharacter(json);
 		return importObject("st|char", json);
 	} else if (json.prompts && json.prompt_order) {
 		json = convertSTPreset(json, fileName);
 		return importObject("st|preset", json);
+	} else if (json.entries) {
+		json = convertSTLorebook(json, fileName);
+		return importObject("st|lorebook", json);
 	}
 
 	// TODO schema 校验
@@ -625,12 +639,15 @@ MessageRoles["st|char"] = {
 				for (let book of pages) {
 					let found = activeBooks.has(book.id) || book.constant;
 
-					if (!found) {
-						const min = Math.max(2, output.length - (book.window === 50 ? 999 : book.window));
-						for (let i = input.length-1; i >= min; i--) {
-							let text = getTextContent(input[i])?.toLowerCase();
+					// TODO 最好做一个基于滑动窗口的缓存
+					if (!book.constant) {
+						found = false;
 
-							found = new RegExp(book.triggers.join("|")).exec(text);
+						const min = book.window === 50 ? 0 : Math.max(0, output.length - book.window);
+						for (let i = output.length-1; i >= min; i--) {
+							let text = getTextContent(output[i])?.toLowerCase();
+
+							found = new RegExp(book.triggers.join("|"), 'miu').exec(text);
 							if (found) break;
 						}
 					}
@@ -639,13 +656,23 @@ MessageRoles["st|char"] = {
 						activeBooks.add(book.id);
 						const content = "\n\n"+book.content;
 						if (book.position === "worldInfoBefore") lbBefore += content;
-						if (book.position === "worldInfoAfter") lbAfter += content;
-						else lbLast += content;
+						else if (book.position === "worldInfoAfter") lbAfter += content;
+						else {
+							let depth = book.depth;
+							for (let i = output.length-1; i >= 0; i--) {
+								const o = output[i];
+								if ((!book.role || o.role === book.role) && !--depth) {
+									o.content += lbLast;
+									break;
+								}
+							}
+						}
 					} else {
 						activeBooks.delete(book.id);
 					}
 				}
 
+				// TODO 用名字而不是ID方便调试
 				self[_FetchFromDB].activatedLorebookItems.value = Array.from(activeBooks.keys());
 			}
 			//endregion
@@ -806,7 +833,7 @@ MessageRoles["st|char"] = {
 					activatedLorebookItems.length ? (<details className={"think"}>
 						<summary>
 							<span className="chevron ri-play-large-fill"></span>
-							激活了 {() => activatedLorebookItems.length} 个世界书页
+							目前激活 {() => activatedLorebookItems.length} 个世界书条目
 						</summary>
 						<ul>{$foreach(activatedLorebookItems, item => <li>{item}</li>)}</ul>
 					</details>) : undefined

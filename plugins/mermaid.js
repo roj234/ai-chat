@@ -19,7 +19,6 @@ registerCodeBlockRenderer("mermaid", (code, language, node, is_finished) => {
 
 	// for [copy code] button
 	node.dataset.text = code;
-	node.textContent = code;
 
 	renderQueue = renderQueue.then(async () => {
 		if (node.isConnected) {

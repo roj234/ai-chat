@@ -1,4 +1,4 @@
-import {$asyncState, $state, $store, $update} from 'unconscious';
+import {$asyncState, $state, $store, $update, $watch} from 'unconscious';
 import {jsonFetch} from "./utils/utils.js";
 import {isEqual} from "../vendor/equals.js";
 
@@ -122,3 +122,6 @@ export const lastScrollDirection = $state();
  * @type {import("unconscious").Reactive<AbortController>}
  */
 export const abortCompletion = $state();
+$watch(selectedConversation, () => {
+	abortCompletion.value = selectedConversation.running?.abort;
+});

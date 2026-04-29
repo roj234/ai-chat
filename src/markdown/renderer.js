@@ -10,7 +10,7 @@ const customCodeRenderer = {};
 /**
  *
  * @param {string} type
- * @param {function(code: string, language: string, node: HTMLElement, is_finished: boolean): void} htmlGenerator
+ * @param {function(code: string, language: string, node: HTMLElement, is_finished: boolean | undefined): void} htmlGenerator
  */
 export function registerCodeBlockRenderer(type, htmlGenerator) {
 	customCodeRenderer[type] = htmlGenerator;
@@ -80,7 +80,7 @@ export function fmdHTMLRenderer(root, options = {}) {
 							<div className="code-header sticky">
 								<span>text</span>
 								<span className="buttons">
-									<button className="ri-download-2-line ghost" data-action="download" title="下载代码"></button>
+									<button className="ri-download-2-line ghost" data-action="save" title="下载代码"></button>
 									<button className="ri-file-copy-line ghost" data-action="copy" title="复制代码"></button>
 								</span>
 							</div>
@@ -125,19 +125,22 @@ export function fmdHTMLRenderer(root, options = {}) {
 		},
 		end_token(token_id, parser, undo) {
 			const node = nodes.pop();
-			// undo
+
 			if (undo) {
-				const text = node._value || node.textContent;
 				node.remove();
-				return text;
+				return node._value || node.textContent;
 			}
 
 			if (token_id === fastmd.CODE_FENCE) {
-				const language = node.closest("pre").getAttribute("lang");
-				const code = node._value || node.textContent;
+				const language = node.closest("pre").lang;
+
+				const code = node._value;
+				delete node._value;
+
+				if (!options.stream) node.textContent = code;
+
 				const render = customCodeRenderer[language] || highlight;
 				render(code, language, node, true);
-				delete node._value;
 			}
 		},
 		add_text(text, parser) {
@@ -177,7 +180,7 @@ export function fmdHTMLRenderer(root, options = {}) {
 				}
 				case fastmd.CODE_FENCE: {
 					const code = node._value = (node._value || "") + text;
-					if (!options.stream) break;
+					if (!options.stream) return;
 
 					let language = node.closest("pre").getAttribute("lang");
 					const ccr = customCodeRenderer[language];

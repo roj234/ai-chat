@@ -14,7 +14,7 @@ import {
 	state
 } from "./states.js";
 import {getTools, parseSkillMetadata, runTools, set_title_body} from "./skills.js";
-import {$state, $update, isReactive, unconscious} from "unconscious";
+import {$stampLock, $state, $update, isReactive, unconscious} from "unconscious";
 import {showToast} from "./components/Toast.js";
 import {mergeReasoningDetails} from "./components/ThinkBlock.jsx";
 import failure from "../media/failure.js";
@@ -26,6 +26,7 @@ import {jsonEncode} from "/vendor/stream-json.js";
 import {AntiSlop} from "./antiSlop.js";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {highlightJsonLike} from "./markdown/highlight.js";
+import {updateConversationListUI} from "./components/ConversationList.jsx";
 
 export function setStatus(text, tone = '') {
 	Shared.statusBadge.textContent = text;
@@ -395,7 +396,7 @@ export function getMarkdownContainer(think) {
  * @return {Promise<string>}
  */
 export async function sendUserChatMessage(userText, antiSlop) {
-	if (abortCompletion.value) throw "already generating";
+	if (abortCompletion.value) return "error";
 	abortCompletion.value = new AbortController();
 
 	let markdownRenderer = markdownStreamParser();
@@ -438,10 +439,12 @@ export async function sendUserChatMessage(userText, antiSlop) {
 
 		if (atBottom < 100 && !lastScrollDirection.value) scroller.scrollTop = scroller.scrollHeight;
 	}
-
 	function callback(type, content) {
+		if (selectedConversation.id !== conversation.id) return;
+
 		switch (type) {
 			case MD_APPEND:
+				// noinspection UnnecessaryLocalVariableJS
 				const flag = waitingForContent;
 				if (updateMarkdown(content) && !flag) break;
 			return;
@@ -456,11 +459,18 @@ export async function sendUserChatMessage(userText, antiSlop) {
 		$update(updateMessageUI);
 	}
 
-	if (userText) messages.push({role: 'user', content: userText, time: Date.now()});
+	const messages_ = $stampLock(messages);
+	const conversation = unconscious(selectedConversation);
+	conversation.running = {
+		abort: abortCompletion.value,
+		messages: messages_
+	};
+
+	if (userText) messages_.push({role: 'user', content: userText, time: Date.now()});
 
 	try {
-		let finishReason = await _ApiRequest(selectedConversation, messages, config.tools, state.additionalBody, abortCompletion, callback, antiSlop);
-		const assistantMessage = messages.at(-1);
+		let finishReason = await _ApiRequest(conversation, messages_, config.tools, state.additionalBody, abortCompletion, callback, antiSlop);
+		const assistantMessage = messages_.at(-1);
 
 		let needSave;
 
@@ -469,8 +479,8 @@ export async function sendUserChatMessage(userText, antiSlop) {
 
 		if ('interrupt' !== finishReason && 'loop' !== finishReason) {
 			if ('error' !== finishReason) {
-				if (!selectedConversation.title) {
-					await generateDescription(selectedConversation);
+				if (!conversation.title) {
+					await generateDescription(conversation, messages_);
 					needSave = true;
 				}
 			}
@@ -481,7 +491,7 @@ export async function sendUserChatMessage(userText, antiSlop) {
 			}
 		}
 
-		if (is_ok && assistantMessage.tool_calls && !config.debug && (!config.maxToolTurns || countAgentTurns(messages) < config.maxToolTurns)) {
+		if (is_ok && assistantMessage.tool_calls && !config.debug && (!config.maxToolTurns || countAgentTurns(messages_) < config.maxToolTurns)) {
 			if (!await runTools(assistantMessage)) {
 				// 如果存在可能需要批准的工具调用
 				finishReason = 'interrupt';
@@ -492,11 +502,18 @@ export async function sendUserChatMessage(userText, antiSlop) {
 		setStatus(finish_reason_names[finishReason], tone ?? 'error');
 
 		if (needSave) {
-			await updateConversation(unconscious(selectedConversation), unconscious(messages));
+			await updateConversation(conversation, unconscious(messages_));
+		}
+
+		if (selectedConversation.id !== conversation.id) {
+			finishReason = 'interrupt'; // 如果不在前台就不自动执行
+			showToast("对话 "+conversation.title+"(#"+conversation.id+") 已完成！", "ok");
 		}
 
 		return finishReason;
 	} finally {
+		delete conversation.running;
+		$update(updateConversationListUI);
 		abortCompletion.value = null;
 	}
 }
@@ -506,7 +523,7 @@ export const MD_APPEND = 2, MD_END = 3;
 /**
  *
  * @param {AiChat.Conversation} conversation
- * @param {AiChat.Message[]} messages
+ * @param {AiChat.Message[] | import("unconscious").Reactive<AiChat.Message[]>} messages
  * @param {boolean=} allowTool
  * @param {Record<string, any>=} additionalBody
  * @param {AbortController} abortCompletion
@@ -784,7 +801,7 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 
 		if (finishReason !== 'loop' && conversation.id) {
 			// wait for database update (billingLog requires message id), this should be fast
-			await updateConversation(unconscious(conversation), unconscious(messages));
+			await updateConversation(conversation, unconscious(messages));
 			billingLog.message_id = assistantMessage.id;
 		} else {
 			billingLog.message_id = "T_"+Date.now();
@@ -840,9 +857,10 @@ function streamResponseCompleted(assistantMessage, genImages) {
 /**
  *
  * @param {AiChat.Conversation} conversation
+ * @param {AiChat.Message[]} messages
  * @return {Promise<void>}
  */
-function generateDescription(conversation) {
+function generateDescription(conversation, messages) {
 	setStatus('生成标题');
 
 	let s1 = getTextContent(messages[0]).substring(0, 512);

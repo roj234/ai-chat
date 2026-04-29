@@ -61,7 +61,7 @@ export function ToolCallCard(props) {
         // 什么都ondemand，算了，反正【我觉得爽也是一种优秀】
         if (isReactive(tool)) {
             $watch(tool, () => {
-                highlight(tool.function.arguments, "json", input, false);
+                highlight(tool.function.arguments, "json", input);
             });
         } else {
             // 这个函数自带JSON格式化，但是不应该在流式响应的时候使用它，不是么

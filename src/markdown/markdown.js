@@ -70,14 +70,15 @@ function getElementToCopy(el) {
 export const copyCodeEventHandler = (e) => {
 	const btn = e.target.closest(".code-block button[data-action]");
 	if (!btn) return;
+
+	const code = getElementToCopy(btn);
 	switch (btn.dataset.action) {
 		case "copy": {
-			const elementToCopy = getElementToCopy(btn);
-			copyButtonAnimation(elementToCopy.dataset.text || elementToCopy.innerText, btn);
+			copyButtonAnimation(code._value || code.textContent, btn);
 		}
 		break;
-		case "download": {
-			const url = URL.createObjectURL(new Blob([getElementToCopy(btn).innerText]));
+		case "save": {
+			const url = URL.createObjectURL(new Blob([code._value || code.textContent]));
 			const span = btn.parentElement.previousElementSibling;
 			const filename = span.dataset.name;
 			const lang = span.innerHTML.toLowerCase();
@@ -92,6 +93,9 @@ export const copyCodeEventHandler = (e) => {
 			URL.revokeObjectURL(url);
 		}
 		break;
+		/*case "open": {
+			btn.closest("pre").querySelector(".hljs").classList.toggle("done");
+		}*/
 	}
 };
 

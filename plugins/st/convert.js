@@ -79,14 +79,96 @@ export function convertSTPreset(inp, fileName) {
 	return out;
 }
 
+const ROLE = ['system', 'user', 'assistant'];
+
+/**
+ *
+ * @param {AiChat.DnD.STLorebookEntry[]} entries
+ * @return {AiChat.DnD.MyLorebookPage[]}
+ */
+function convertSTLorebookEntry(entries) {
+	if (entries[0]?.displayIndex) {
+		entries.sort((a, b) => a.displayIndex - b.displayIndex);
+	}
+
+	return entries.map(item => {
+		/**
+		 *
+		 * @type {Partial<AiChat.DnD.MyLorebookPage>}
+		 */
+		const obj = {
+			enabled: item.enabled,
+			content: item.content,
+			constant: item.constant,
+			triggers: item.keys.map(s => s.toLowerCase().trim()),
+			window: (item.sticky || 0) + 1,
+			id: randomId(),
+		};
+
+		obj.name = item.name || item.comment;
+		if (item.name) obj.comment = item.comment;
+
+		switch (item.position) {
+			case "before_char":
+				obj.position = "worldInfoBefore";
+				break;
+			case "":
+			default:
+			case "after_char":
+				obj.position = "worldInfoAfter";
+				break;
+			case 4:
+				obj.position = 'depth';
+				obj.role = ROLE[item.role];
+				obj.depth = item.depth;
+				break;
+		}
+
+		let recursionMode;
+		if (item.extensions?.excludeRecursion) {
+			recursionMode = false;
+		} else {
+			if (item.excludeRecursion) {
+				recursionMode = false;
+			} else if (item.preventRecursion) {
+				recursionMode = 'stop';
+			} else if (item.delayUntilRecursion) {
+				recursionMode = 'only';
+			} else {
+				recursionMode = true;
+			}
+		}
+		obj.recursion = recursionMode;
+
+		if (item.extensions?.depth) {
+			obj.position = 'depth';
+			obj.role = null; // any
+			obj.depth = item.extensions?.depth;
+		}
+
+		return obj;
+	});
+}
+
+/**
+ *
+ * @param {{entries: Record<string, AiChat.DnD.STLorebookEntry>}} json
+ * @param {string} fileName
+ * @return {AiChat.DnD.MyLorebook}
+ */
+export function convertSTLorebook(json, fileName) {
+	return {
+		name: fileName,
+		pages: convertSTLorebookEntry(Object.values(json.entries))
+	}
+}
+
 /**
  *
  * @param {AiChat.DnD.SillyTavernCharacterCard} json
- * @param {boolean} batch
- * @param {string} fileName
  * @return {AiChat.DnD.MyCharacter}
  */
-export function convertSTCharacter(json, batch, fileName) {
+export function convertSTCharacter(json) {
 	let inp = json.data;
 
 	/**
@@ -125,21 +207,7 @@ export function convertSTCharacter(json, batch, fileName) {
 	}
 
 	if (inp.character_book?.entries.length) {
-		out.lorebook = inp.character_book.entries.map(item => {
-			return {
-				enabled: item.enabled,
-				name: item.name,
-				comment: item.comment,
-				content: item.content,
-				regex: item.use_regex,
-				constant: item.constant,
-				recursion: !item.extensions?.excludeRecursion,
-				triggers: item.keys.map(s => s.toLowerCase().trim()),
-				window: item.extensions?.depth,
-				position: item.position,
-				id: randomId(),
-			}
-		});
+		out.lorebook = convertSTLorebookEntry(inp.character_book.entries);
 	}
 
 	const messages = [];
