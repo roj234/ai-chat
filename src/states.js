@@ -122,6 +122,16 @@ export const lastScrollDirection = $state();
  * @type {import("unconscious").Reactive<AbortController>}
  */
 export const abortCompletion = $state();
+
+/**
+ *
+ * @type {Map<number, {
+ *     abort: AbortController,
+ *     messages: AiChat.Message[]
+ * }>}
+ */
+export const runningConversations = new Map;
+
 $watch(selectedConversation, () => {
-	abortCompletion.value = selectedConversation.running?.abort;
+	abortCompletion.value = runningConversations.get(selectedConversation.id)?.abort;
 });

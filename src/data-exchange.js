@@ -9,12 +9,13 @@ import {
 	newConversation,
 	updateConversation
 } from "./database.js";
-import {deepEntries, prettyError} from "./utils/utils.js";
+import {prettyError} from "./utils/utils.js";
 import {runAllTools} from "./skills.js";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {openZip, ZipWriter} from "../vendor/jszip.js";
 import {$computed, $state, $update} from "unconscious";
 import {reloadPresetList} from "./components/PresetDropdown.jsx";
+import {decodeObjects, encodeObjects} from "./utils/marshal.js";
 
 /**
  *
@@ -173,72 +174,6 @@ export async function duplicateConversation() {
 	});
 
 	showToast('已将当前对话另存为', 'ok');
-}
-
-
-async function decodeObjects(messages, zr) {
-	for (const [val, own, key] of deepEntries(messages)) {
-		switch (val.$) {
-			case "Blob":
-				if (!zr) throw "找不到引用的 Blob 对象";
-				const data = await zr.get("blobs/"+val.index);
-				if (!data) throw "找不到引用的 Blob 对象";
-				own[key] = new Blob([data], {type: val.type});
-				break;
-			case "Map":
-				own[key] = new Map(val.value);
-				break;
-			case "Set":
-				own[key] = new Set(val.value);
-				break;
-		}
-	}
-}
-
-function encodeObjects(messages, mapping, zw) {
-	const promises = [];
-	for (const [val, own, key] of deepEntries(messages)) {
-		if (val instanceof Blob) {
-			promises.push(val.arrayBuffer().then(ab => {
-				const blobName = zw.fileCount();
-
-				mapping.set(val, {
-					$: "Blob",
-					type: val.type,
-					index: blobName
-				});
-
-				return zw.add("blobs/"+blobName, new Uint8Array(ab));
-			}));
-		} else {
-			if (import.meta.env.DEV && key === "url") {
-				promises.push(fetch(val).then(r => r.blob()).then(async ab => {
-					const blobName = zw.fileCount();
-
-					mapping.set(val, {
-						$: "Blob",
-						type: ab.type,
-						index: blobName
-					});
-
-					return zw.add("blobs/"+blobName, new Uint8Array(await ab.arrayBuffer()));
-				}));
-			}
-
-			if (val instanceof Map) {
-				mapping.set(val, {
-					$: "Map",
-					value: [...val]
-				});
-			} else if (val instanceof Set) {
-				mapping.set(val, {
-					$: "Set",
-					value: [...val]
-				});
-			}
-		}
-	}
-	return Promise.all(promises);
 }
 
 function cleanMessages(messages) {

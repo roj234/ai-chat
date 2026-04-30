@@ -572,6 +572,7 @@ code {
     &.text-part {
         padding: 8px;
         font-size: 12px;
+        width: 64px;
 
         & .text-preview {
             overflow: hidden;

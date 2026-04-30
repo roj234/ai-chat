@@ -26,7 +26,9 @@ import {MobileTitleEdit} from "./components/MobileTitleEdit.jsx";
 import {SettingDialog} from "./components/SettingDialog.jsx";
 import {onPluginLoaded} from "/plugins/PluginRegistry.js";
 import {callOnLoadHandler} from "./plugin.js";
-import {_InputAttachment} from "./components/InputAttachment.jsx";
+import {_InputAttachment, FILE_NAME} from "./components/InputAttachment.jsx";
+import {readAsString} from "/vendor/chardet.js";
+import {formatSize} from "unconscious/ext/Utils.js";
 
 const $ = sel => document.getElementById(sel);
 
@@ -60,6 +62,11 @@ function createApp() {
 
 	const fileInput = <input type="file" accept="image/png,image/jpeg,image/bmp,image/gif,audio/wav,audio/mp3,audio/flac,text/plain" multiple onChange={({target}) => {
 		for (const file of target.files) {
+			if (file.size > 104857600) {
+				showToast("文件 "+file.name+" 过大, 仅允许10MB以内的文件", "error");
+				continue;
+			}
+
 			if (file.type.startsWith('image')) {
 				attachments.push({
 					type: "image_url",
@@ -74,15 +81,13 @@ function createApp() {
 					}
 				});
 			} else if (file.type.startsWith('text')) {
-				const reader = new FileReader();
-				reader.onload = (e) => {
-					const text = e.target.result;
+				readAsString(file).then(text => {
 					attachments.push({
 						type: "text",
+						[FILE_NAME]: file.name+"\n"+formatSize(file.size),
 						text
 					});
-				};
-				reader.readAsText(file);
+				})
 			}
 		}
 

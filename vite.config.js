@@ -6,15 +6,25 @@ import FontFilter from "unconscious/postcss/font-filter.js";
 import OklchToRgb from "unconscious/postcss/oklch-to-rgb.js";
 import InlineVars from "unconscious/postcss/inline-vars.js";
 import { viteFontMinify } from 'unconscious/vite/font-minify.js';
+import {serverDevPlugin} from "./backend/server-dev.js";
 
 import packageInfo from "./package.json";
-import {mockFileSystem} from "./backend/fs/server-dev.js";
+
+const sqliteFlag = !!process.env.USE_SQLITE ? {
+    './database/db-indexeddb.js': './database/db-sqlite.js',
+} : {};
 
 //https://cn.vite.dev/
 export default {
     define: {
         APP_NAME: JSON.stringify(packageInfo.name),
         APP_VERSION: JSON.stringify(packageInfo.version),
+    },
+
+    resolve: {
+        alias: {
+            ...sqliteFlag
+        },
     },
 
     plugins: [
@@ -29,7 +39,7 @@ export default {
             ]
         }),
         viteFontMinify(),
-        mockFileSystem,
+        serverDevPlugin(),
         {
             name: 'inject-build-time',
             transformIndexHtml(html) {

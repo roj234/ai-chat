@@ -3,7 +3,7 @@ import {VirtualList} from 'unconscious/ext/VirtualList.js';
 import {formatDate} from 'unconscious/ext/Utils.js';
 import {$state, $update, $watchWithCleanup} from 'unconscious';
 import {deleteConversation, getMessages, updateConversation} from "../database.js";
-import {conversations, isMobile, messages, selectedConversation} from "../states.js";
+import {conversations, isMobile, messages, runningConversations, selectedConversation} from "../states.js";
 import SimpleModal from "./SimpleModal.jsx";
 import {BM, convertToBranchMessage} from "../utils/BranchManager.js";
 import {exportConversation} from "../data-exchange.js";
@@ -143,8 +143,9 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 		if (active) active.classList.remove('active');
 		owner.classList.add('active');
 
-		if (conv.running) {
-			messages.value = conv.running.messages;
+		const val = runningConversations.get(conv.id);
+		if (val) {
+			messages.value = val.messages;
 		} else {
 			conv.ready = false;
 		}
@@ -178,7 +179,7 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 				className={`chat-item${selectedConversation.value === conv ? ' active' : ''}`}
 				title={formatDate("Y-m-d H:i:s", conv.time)}
 			>
-				{conv.running && <span className={"spinner"} />}
+				{runningConversations.has(conv.id) ? <span className={"spinner"} /> : null}
 				<span className="chat-title">{conv.title || '无标题'}</span>
 				<div className="chat-actions">{btn}</div>
 			</div>;
@@ -186,7 +187,7 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 	});
 
 	function keyFunc(conv) {
-		return conv.id ? conv.id + "\0" + conv.title + "\0" + (selectedConversation.value === conv) + "\0" + !!(conv.running) : conv;
+		return conv.id ? conv.id + "\0" + conv.title + "\0" + (selectedConversation.value === conv) + "\0" + runningConversations.has(conv.id) : conv.textContent;
 	}
 
 	$watchWithCleanup(updateConversationListUI, () => {
@@ -235,8 +236,16 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 			const conv = selectedConversation.value;
 			if (conv === tmp) return;
 
-			conv.time = Date.now();
-			conversations.sort((a, b) => b.time - a.time);
+			const newTime = Date.now();
+
+			const newer = conversations[0];
+			if (newer !== conv && newTime > newer.time) {
+				conv.time = newTime;
+
+				let index = conversations.indexOf(conv);
+				conversations.splice(index, 1);
+				conversations.unshift(conv);
+			}
 
 			updateConversation(conv, conv.branches ? [...conv[BM]] : messages.value);
 		}

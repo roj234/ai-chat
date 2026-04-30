@@ -369,6 +369,7 @@ export const SETTINGS = [
 		element: <div className={"choice-scroll"}>
 			<button className="btn ghost" onClick={() => exportConversation(false)}>导出对话</button>
 			<button className="btn ghost" onClick={() => exportConversation(true)}>导出预设</button>
+			{/*<button className="btn ghost" onClick={() => exportConversation(true)}>导出所有</button>*/}
 		</div>
 	},
 	{

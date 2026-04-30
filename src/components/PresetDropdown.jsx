@@ -5,6 +5,7 @@ import SimpleModal from "./SimpleModal.jsx";
 import {PRESET_KEYS} from "../settings.js";
 import {Dropdown} from "./Dropdown.jsx";
 import {kvListDel, kvListGet, kvListGetKeys, kvListSet} from "../database.js";
+import {onLoad} from "../plugin.js";
 
 /**
  * @type {import("unconscious").Reactive<AiChat.IDBKVList[]>}
@@ -14,7 +15,7 @@ const presets = $state([]);
 export async function reloadPresetList() {
 	presets.value = await kvListGetKeys("preset");
 }
-reloadPresetList();
+onLoad(reloadPresetList);
 
 export function createPreset(name) {
 	if (!name) {

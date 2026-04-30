@@ -62,7 +62,7 @@
     border-radius: var(--border-radius-md);
     font-size: 12px;
     line-height: var(--md-line-height);
-    min-height: 16px;
+    min-height: 26px;
 
     position: relative;
     & > .ghost {

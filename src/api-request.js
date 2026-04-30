@@ -9,6 +9,7 @@ import {
 	lastScrollDirection,
 	MessageRoles,
 	messages,
+	runningConversations,
 	selectedConversation,
 	Shared,
 	state
@@ -437,7 +438,7 @@ export async function sendUserChatMessage(userText, antiSlop) {
 
 		markdownRenderer(currentIsThink ? content.think.content : content.content, container);
 
-		if (atBottom < 100 && !lastScrollDirection.value) scroller.scrollTop = scroller.scrollHeight;
+		if (atBottom < 100 && !lastScrollDirection.value) scroller.vl.scrollTo(scroller.scrollHeight);
 	}
 	function callback(type, content) {
 		if (selectedConversation.id !== conversation.id) return;
@@ -461,10 +462,11 @@ export async function sendUserChatMessage(userText, antiSlop) {
 
 	const messages_ = $stampLock(messages);
 	const conversation = unconscious(selectedConversation);
-	conversation.running = {
+	runningConversations.set(conversation.id, {
 		abort: abortCompletion.value,
 		messages: messages_
-	};
+	});
+	$update(updateConversationListUI);
 
 	if (userText) messages_.push({role: 'user', content: userText, time: Date.now()});
 
@@ -512,13 +514,21 @@ export async function sendUserChatMessage(userText, antiSlop) {
 
 		return finishReason;
 	} finally {
-		delete conversation.running;
+		runningConversations.delete(conversation.id);
 		$update(updateConversationListUI);
 		abortCompletion.value = null;
 	}
 }
 
 export const MD_APPEND = 2, MD_END = 3;
+
+function scrollToBottom() {
+	requestAnimationFrame(() => {
+		const {scroller} = Shared;
+		scroller.vl.scrollTo(scroller.scrollHeight);
+		lastScrollDirection.value = false;
+	});
+}
 
 /**
  *
@@ -578,13 +588,7 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 		})
 	}
 
-	if (onProgress) {
-		requestAnimationFrame(() => {
-			const {scroller} = Shared;
-			scroller.scrollTop = scroller.scrollHeight;
-			lastScrollDirection.value = false;
-		});
-	}
+	if (onProgress) scrollToBottom();
 
 	if (error) {
 		if (config.sound) failure();

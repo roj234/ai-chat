@@ -1,5 +1,7 @@
 import {indexInParent} from "../utils/utils.js";
-import {$foreach} from "unconscious";
+import {$foreach, debugSymbol} from "unconscious";
+
+export const FILE_NAME = debugSymbol("FILE_NAME");
 
 /**
  *
@@ -32,7 +34,7 @@ export function _InputAttachment(attachments) {
 					return (
 						<div className="attachment text-part" style={"--format: \"TXT\""}>
 							<div className="text-preview">
-								{att.text.length > 50 ? att.text.substring(0, 47) + "..." : att.text}
+								{att[FILE_NAME]}
 							</div>
 							{DeleteBtn}
 						</div>

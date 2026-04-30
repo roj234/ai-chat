@@ -6,6 +6,7 @@ import json from 'highlight.js/lib/languages/json';
 import {VirtualList} from "unconscious/ext/VirtualList.js";
 import {$disposable} from "unconscious";
 import {onLoad} from "../plugin.js";
+import {selectableVirtualListMixin} from "./selectableVirtualListMixin.js";
 
 hljs.registerLanguage('json', json);
 
@@ -71,10 +72,13 @@ onLoad((app) => {
  */
 export function highlight(code, language, node, is_finished) {
 	if (is_finished) {
-		node.classList.add("done");
-		requestAnimationFrame(() => {
-			node.scrollTop = node.scrollHeight;
-		});
+		const is_long = code.length > 1000 || code.split("\n") > 50;
+		if (is_long) {
+			node.classList.add("done");
+			requestAnimationFrame(() => {
+				node.scrollTop = node.scrollHeight;
+			});
+		}
 	}
 
 	const callback = (code) => {
@@ -82,13 +86,12 @@ export function highlight(code, language, node, is_finished) {
 			delete node._cache;
 			const generator = light(code, language);
 
-			const items = [];
+			const items = code.split('\n');
 			const virtualList = new VirtualList({
 				overscan: 50,
 				itemHeight: heightTest.getBoundingClientRect().height,
 				data: items,
 				renderer(item, index) {
-					// TODO 加上行号，有了虚拟列表这非常容易
 					return <div className={'line'} dangerouslySetInnerHTML={item}/>
 				}
 			});
@@ -105,6 +108,8 @@ export function highlight(code, language, node, is_finished) {
 				} else {
 					node.replaceChildren(virtualList.dom);
 					virtualList.attach(node);
+					selectableVirtualListMixin(virtualList, (line) => items[line]);
+
 					// noinspection JSPrimitiveTypeWrapperUsage
 					virtualList.items = processLines(result.value.value, []).map(s => new String(s));
 					virtualList.scrollToBottom();

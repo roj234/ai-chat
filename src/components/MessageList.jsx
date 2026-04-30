@@ -322,13 +322,14 @@ function updateButtons(m, container) {
 	const buttons = new Set();
 	const notGenerating = abortCompletion.value == null;
 	const isEditing = m.key[IN_EDIT_MODE];
-	const mayChange = ((end_index ? end_index !== messages.length : index !== messages.length-1) || notGenerating) && editableRoles.has(role);
+	const isNotLast = (end_index ? end_index !== messages.length : index !== messages.length-1);
+	const mayChange = (isNotLast || notGenerating) && editableRoles.has(role);
 	const isComposite = end_index > index + 1;
 	// 不支持编辑组合消息（工具调用）
 	if (mayChange && !isComposite) buttons.add(isEditing ? saveBtn : editBtn);
 	if (!isEditing) {
 		// 有内容才能复制
-		if (notGenerating && unconscious(content).find(item => item.text)) buttons.add(copyBtn);
+		if ((isNotLast || notGenerating) && unconscious(content).find(item => item.text)) buttons.add(copyBtn);
 		if (end_index === messages.length && notGenerating) {
 			// TODO 之前也能regen，要加分叉功能
 			if (end_index !== 1) buttons.add(regenBtn);

@@ -1,7 +1,7 @@
 import {copyButtonAnimation} from "../utils/utils.js";
 import {formatDate} from "unconscious/ext/Utils.js";
 
-import {fmdHTMLRenderer, registerCodeBlockRenderer} from "./renderer.js";
+import {fmdHTMLRenderer} from "./renderer.js";
 import {FastMDParser} from "fastmd";
 
 const mdParserOptions = {

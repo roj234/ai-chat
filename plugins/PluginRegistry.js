@@ -4,6 +4,8 @@ import {registerDefaultTools, registerSkill} from "/src/skills.js";
 // 下面的静态导入完全可以变成动态导入，就看我愿不愿意了
 export const onPluginLoaded = Promise.resolve();
 
+import "./search_dev.js";
+
 // 文件系统和Agent工具组 (use:fs)
 import "./tools/filesystem.js";
 // 图表工具 (use:chart)

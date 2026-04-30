@@ -1,5 +1,7 @@
-import {getTextContent} from "./utils/utils.js";
-import {DONE} from "./database.js";
+import {getTextContent} from "../utils/utils.js";
+import {DONE} from "../database.js";
+import {AS_IS} from "unconscious";
+
 
 const DB_NAME = 'AiChat';
 const DB_VERSION = 7;
@@ -354,3 +356,6 @@ export function appendBillingLog(log) {
 export function getBillingLog(message_id) {
 	return transaction('statistics', tx => tx.objectStore('statistics').get(message_id));
 }
+
+export const updateBlob = AS_IS;
+export const getBlob = AS_IS;
