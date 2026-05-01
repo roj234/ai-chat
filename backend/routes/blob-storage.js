@@ -19,13 +19,29 @@ export function registerBlobRoutes(router, blobDir) {
 
 		try {
 			// 检查文件是否存在
-			await stat(dataPath);
+			const stats = await stat(dataPath);
+			const lastModified = new Date(stats.mtimeMs).toUTCString();
+
+			const ifModifiedSince = ctx.req.headers['if-modified-since'];
+			if (ifModifiedSince) {
+				const imsDate = new Date(ifModifiedSince);
+				if (!isNaN(imsDate.getTime()) && stats.mtimeMs <= imsDate) {
+					ctx.res.writeHead(304, {
+						'Content-Length': 0,
+						'Last-Modified': lastModified,
+					});
+					ctx.res.end();
+					return;
+				}
+			}
+
 			// 读取 MIME 类型 (这里是 O(1) 操作，直接定位文件)
 			const contentType = await readFile(metaPath, 'utf8').catch(() => 'application/octet-stream');
 
 			ctx.res.writeHead(200, {
 				'Content-Type': contentType,
-				'Cache-Control': 'public, max-age=31536000, immutable'
+				'Cache-Control': 'public, max-age=31536000, immutable',
+				'Last-Modified': lastModified
 			});
 
 			await pipeline(createReadStream(dataPath), ctx.res);

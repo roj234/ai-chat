@@ -289,14 +289,7 @@ export async function openZip(blob) {
 			return td.decode(data);
 		},
 
-		/**
-		 * 获取文件内容并解压，不验证CRC32
-		 * @return Promise<Uint8Array>
-		 */
-		async get(name) {
-			const entry = entries.get(name);
-			if (!entry) return null;
-
+		async getRaw(entry) {
 			// 读取 Local Header 来确定确切的数据起始位置
 			// Local Header 定长 30 字节，后面跟着变长的文件名和额外字段
 			const { view: locView } = await _readChunk(entry.localHeaderOffset, 30);
@@ -307,7 +300,18 @@ export async function openZip(blob) {
 			const dataStart = entry.localHeaderOffset + 30 + locNameLen + locExtraLen;
 
 			// 仅对该文件的数据部分进行 slice
-			const rawData = blob.slice(dataStart, dataStart + entry.compressedSize);
+			return blob.slice(dataStart, dataStart + entry.compressedSize);
+		},
+
+		/**
+		 * 获取文件内容并解压，不验证CRC32
+		 * @return Promise<Uint8Array>
+		 */
+		async get(name) {
+			const entry = entries.get(name);
+			if (!entry) return null;
+
+			const rawData = this.getRaw(entry);
 
 			if (entry.method === 8) { // Deflate
 				return await decompressData(rawData);

@@ -1,6 +1,6 @@
 const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-const LOOKUP = new Uint8Array(Array.from(CHARS).map(c => c.charCodeAt(0)));
-const EMPTY = new Uint8Array(0);
+const LOOKUP = /* #__PURE__ */ new Uint8Array(Array.from(CHARS).map(c => c.charCodeAt(0)));
+const EMPTY = /* #__PURE__ */ new Uint8Array(0);
 
 class Base64Encoder {
 	constructor(initialCapacity = 1024) {

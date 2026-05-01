@@ -151,20 +151,6 @@ export async function compressImage(file, { quality = 0.85, maxSide = 2048, maxS
 	}
 }
 
-export function* deepEntries(obj, seen = new Set()) {
-	if (obj === null || typeof obj !== 'object') return;
-	if (seen.has(obj)) return;
-	seen.add(obj);
-
-	for (const key of Object.getOwnPropertyNames(obj)) {
-		const value = obj[key];
-		yield [value, obj, key];
-		if (value && typeof value === 'object') {
-			yield* deepEntries(value, seen);
-		}
-	}
-}
-
 /**
  * @param {Error | string} error
  * @return {string}

@@ -168,7 +168,7 @@ function createApp() {
 						display: "flex",
 						alignItems: "flex-end",
 					}}
-						  dangerouslySetInnerHTML={() => config.name === "default" ? "<span class='ri-ai' style='font-size:40px'></span>Chat" : config.name}></span>
+						  dangerouslySetInnerHTML={() => config.name || "<span class='ri-ai' style='font-size:40px'></span>Chat"}></span>
 
 						<span style={{
 							height: "80px",

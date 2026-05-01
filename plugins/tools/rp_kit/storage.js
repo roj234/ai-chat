@@ -1,5 +1,6 @@
 import {$state, $update, debugSymbol, unconscious} from "unconscious";
-import {jsonPathOp, parseJsonPath, volatileEnvironment} from "/src/skills.js";
+import {jsonPathOp, volatileEnvironment} from "/src/skills.js";
+import {parseJsonPath} from "/vendor/jsonSchema.js";
 
 const actionLabels = {
 	set: '更新', add: '数值变动', append: '获得物品', merge: '属性修正', delete: '移除'

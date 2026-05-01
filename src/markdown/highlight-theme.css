@@ -1,11 +1,19 @@
 pre code.hljs {
     display: block;
     overflow-x: auto;
-    padding: 1em
+    padding: 1em 0 1em 1em;
+
+    &::-webkit-scrollbar-thumb {
+        background: rgba(171, 178, 191, 0.4);
+    }
+    &::-webkit-scrollbar-thumb:hover {
+        background: rgba(171, 178, 191, 0.6);
+    }
+    &::-webkit-scrollbar-thumb:active {
+        background: rgba(171, 178, 191, 0.8);
+    }
 }
-code.hljs {
-    padding: 3px 5px
-}
+
 /*
 
 Atom One Dark With support for ReasonML by Gidi Morris, based off work by Daniel Gamage

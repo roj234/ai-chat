@@ -4,6 +4,7 @@ import {loadingBlock, prettyError} from "./utils/utils.js";
 
 import "./skills.css";
 import {updateMessageUI} from "./components/MessageList.jsx";
+import {parseJsonPath} from "/vendor/jsonSchema.js";
 
 
 /**
@@ -52,25 +53,6 @@ export class ContentPart {
 	}
 }
 
-/**
- *
- * @param {string} path
- * @return {string[]}
- */
-export const parseJsonPath = (path) => {
-	const keys = path.split('.');
-	for (let i = 0; i < keys.length; i++) {
-		const key = keys[i];
-		if (key.endsWith("]")) {
-			const j = key.indexOf("[");
-			const pre = key.substring(0, j);
-			const post = key.substring(j+1, key.length-1);
-			keys.splice(i, 1, pre, post);
-			i++;
-		}
-	}
-	return keys;
-}
 
 /**
  * 辅助函数：解析路径并操作对象

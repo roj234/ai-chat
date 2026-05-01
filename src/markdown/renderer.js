@@ -57,7 +57,7 @@ export function fmdHTMLRenderer(root, options = {}) {
 				case fastmd.STRONG_AST:
 				case fastmd.STRONG_UND:    slot = <strong />    ;break
 				case fastmd.STRIKE:        slot = <s />         ;break
-				case fastmd.CODE_INLINE:   slot = <code />      ;break
+				case fastmd.CODE_INLINE:   slot = <kbd />      ;break
 				case fastmd.RAW_URL:
 				case fastmd.LINK:          slot = <a />         ;break
 				case fastmd.IMAGE:
@@ -74,7 +74,7 @@ export function fmdHTMLRenderer(root, options = {}) {
 				case fastmd.CHECKBOX:      slot = <input type="checkbox" disabled />; break
 				case fastmd.CODE_BLOCK: // \s{4}text
 				case fastmd.CODE_FENCE: // ```type\n...\n```
-					slot = <code className="hljs"></code>;
+					slot = <code />;
 					parent = parent.appendChild(
 						<pre className="code-block">
 							<div className="code-header sticky">
@@ -132,7 +132,7 @@ export function fmdHTMLRenderer(root, options = {}) {
 			}
 
 			if (token_id === fastmd.CODE_FENCE) {
-				const language = node.closest("pre").lang;
+				const language = node.lang;
 
 				const code = node._value;
 				delete node._value;
@@ -182,7 +182,7 @@ export function fmdHTMLRenderer(root, options = {}) {
 					const code = node._value = (node._value || "") + text;
 					if (!options.stream) return;
 
-					let language = node.closest("pre").getAttribute("lang");
+					let language = node.lang;
 					const ccr = customCodeRenderer[language];
 					if (ccr) {
 						if (ccr(code, language, node, false)) {
@@ -209,10 +209,11 @@ export function fmdHTMLRenderer(root, options = {}) {
 			if (type === fastmd.LANG) {
 				const owner = node.closest("pre.code-block");
 				let [language, filename] = value.split(":", 2);
-				owner.setAttribute("lang", language);
+
 				const span = owner.querySelector("span");
 				if (filename) span.dataset.name = filename;
 				span.innerText = filename || language;
+				value = language;
 			}
 
 			if (type === fastmd.SRC && !options.noImage) {

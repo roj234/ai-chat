@@ -10,21 +10,13 @@ import {serverDevPlugin} from "./backend/server-dev.js";
 
 import packageInfo from "./package.json";
 
-const sqliteFlag = !!process.env.USE_SQLITE ? {
-    './database/db-indexeddb.js': './database/db-sqlite.js',
-} : {};
-
 //https://cn.vite.dev/
 export default {
     define: {
         APP_NAME: JSON.stringify(packageInfo.name),
         APP_VERSION: JSON.stringify(packageInfo.version),
-    },
-
-    resolve: {
-        alias: {
-            ...sqliteFlag
-        },
+        DB_SERVER: JSON.stringify(""), // https://nas.lan/aichat/v2/{{user}}
+        DB_MODE: JSON.stringify('mixed') // local remote mixed
     },
 
     plugins: [

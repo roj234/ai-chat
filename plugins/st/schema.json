@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "OpenAIRole": {
+      "enum": ["system", "assistant", "user"]
+    },
+    "MyLorebookPage": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "enabled": { "type": "boolean", "default": true },
+        "comment": { "type": "string", "default": "" },
+        "content": { "type": "string" },
+        "regex": { "type": "boolean", "default": false },
+        "constant": { "type": "boolean", "default": false },
+        "recursion": {
+          "enum": [true, false, "stop", "only"]
+        },
+        "triggers": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string" }
+        },
+        "window": { "type": "number" },
+        "position": {
+          "enum": ["worldInfoBefore", "worldInfoAfter", "depth"]
+        },
+        "role": { "$ref": "#/$defs/OpenAIRole" },
+        "depth": { "type": "number" },
+        "id": { "type": "string" }
+      },
+      "required": [
+        "name", "enabled", "comment", "content", "regex",
+        "constant", "recursion", "triggers", "window",
+        "position", "role", "depth", "id"
+      ],
+      "additionalProperties": false
+    },
+    "st|char": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "st|char" },
+        "name": { "type": "string" },
+        "creator": { "type": "string", "default": "unspecified" },
+        "creatorNotes": { "type": "string", "default": "" },
+        "tags": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string" }
+        },
+        "systemPrompt": { "type": "string", "default": "" },
+        "description": { "type": "string" },
+        "personality": { "type": "string", "default": "" },
+        "scenario": { "type": "string", "default": "" },
+        "dialogueExamples": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string" }
+        },
+        "greetings": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string" }
+        },
+        "lorebook": {
+          "type": "array",
+          "default": [],
+          "items": { "$ref": "#/$defs/MyLorebookPage" }
+        },
+        "autoMessages": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "depth": { "type": "number" },
+              "content": { "type": "string" }
+            },
+            "required": ["name", "depth", "content"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "type", "creator", "creatorNotes", "tags",
+        "systemPrompt", "description", "personality",
+        "scenario", "dialogueExamples", "greetings",
+        "lorebook", "autoMessages"
+      ],
+      "additionalProperties": false
+    },
+    "st|lorebook": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "st|lorebook" },
+        "name": { "type": "string" },
+        "pages": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/MyLorebookPage" }
+        }
+      },
+      "required": ["type", "pages"],
+      "additionalProperties": false
+    },
+    "MyPrompt": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "enabled": { "type": "boolean", "default": true },
+        "role": { "$ref": "#/$defs/OpenAIRole" },
+        "content": { "type": "string" },
+        "attr": { "enum": ["first", "marker"] }
+      },
+      "required": ["name", "enabled", "role", "content"],
+      "additionalProperties": false
+    },
+    "MyRegexp": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "enabled": { "type": "boolean", "default": true },
+        "search": { "type": "string" },
+        "replace": { "type": "string" },
+        "stage": { "enum": ["render", "prompt", "all"] },
+        "depth": {
+          "type": "array",
+          "items": [
+            { "type": "integer" },
+            { "type": "integer" }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        }
+      },
+      "required": ["name", "enabled", "search", "replace", "stage", "depth"],
+      "additionalProperties": false
+    },
+    "st|preset": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "st|preset" },
+        "name": { "type": "string" },
+        "prompts": {
+          "type": "array",
+          "default": [],
+          "items": { "$ref": "#/$defs/MyPrompt" }
+        },
+        "regexps": {
+          "type": "array",
+          "default": [],
+          "items": { "$ref": "#/$defs/MyRegexp" }
+        }
+      },
+      "required": ["type", "prompts", "regexps"],
+      "additionalProperties": false
+    }
+  }
+}

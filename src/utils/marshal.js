@@ -1,5 +1,5 @@
-import {deepEntries} from "./utils.js";
 import {getBlob, updateBlob} from "../database.js";
+import {deepEntries} from "../../vendor/jsonSchema.js";
 
 async function decodeDollar(val, zr) {
 	switch (val.$) {
@@ -22,7 +22,7 @@ async function decodeDollar(val, zr) {
  * @return {Promise<T>}
  */
 export async function decodeObjects(input, zr) {
-	if (input.$) return decodeDollar(input, zr);
+	if (input?.$) return decodeDollar(input, zr);
 	for (const [val, own, key] of deepEntries(input)) {
 		if (val.$) own[key] = await decodeDollar(val, zr);
 	}
@@ -56,7 +56,8 @@ export function encodeObjects(messages, mapping, zw) {
 				promises.push(updateBlob(val).then(hash => {
 					mapping.set(val, {
 						$: "BlobH",
-						hash
+						hash,
+						name: val.name
 					});
 				}));
 			}

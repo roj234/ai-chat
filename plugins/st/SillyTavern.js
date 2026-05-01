@@ -27,6 +27,10 @@ import {_CharacterEditor, _LorebookEditor, _PresetEditor, createPanel} from "./S
 import {convertSTCharacter, convertSTLorebook, convertSTPreset, normalizeCRLF, utf2str} from "./convert.js";
 import {applyMacro, applyPreset, createDefaultCtx, DEFAULT_USER_NAME, makeStory} from "./prompt.js";
 import {LorebookList, PresetList} from "./STTagList.jsx";
+import schema from "./schema.json";
+import {compileSchema, validate} from "/vendor/jsonSchema.js";
+
+compileSchema(schema);
 
 const definition = {
 	'st|preset': [
@@ -42,6 +46,7 @@ const definition = {
 		["pages"]
 	]
 };
+
 
 // MyCharacterInstance用到的非序列化属性
 const _FetchFromDB = debugSymbol("MCI_READY");
@@ -473,8 +478,15 @@ const checkJSON = (json, batch, fileName) => {
 		return importObject("st|lorebook", json);
 	}
 
-	// TODO schema 校验
-	if (definition[json.type]) return importObject(json.type, json);
+	if (definition[json.type]) {
+		try {
+			validate(json, schema.$defs[json.type]);
+		} catch (e) {
+			showToast("格式校验失败\n文件可能已损坏\n"+e, 'error', 10000);
+			return;
+		}
+		return importObject(json.type, json);
+	}
 };
 
 registerDataImportHandler("application/json", checkJSON);

@@ -10,6 +10,7 @@ registerCodeBlockRenderer("mermaid", (code, language, node, is_finished) => {
 			mermaid = module.default;
 			mermaid.initialize({
 				startOnLoad: false,
+				theme: matchMedia('(prefers-color-scheme: dark)') ? 'dark' : 'default',
 				securityLevel: "antiscript"
 			});
 		});
@@ -22,13 +23,14 @@ registerCodeBlockRenderer("mermaid", (code, language, node, is_finished) => {
 
 	renderQueue = renderQueue.then(async () => {
 		if (node.isConnected) {
-			node.classList.remove("error");
+			node.className = "";
 			delete node.dataset.processed;
 
 			try {
 				await mermaid.run({ nodes: [node] });
+				node.className = "mermaid";
 			} catch (err) {
-				node.classList.add("error");
+				node.className = "error";
 				node.textContent = err.message;
 			}
 		}

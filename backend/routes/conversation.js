@@ -3,7 +3,7 @@ import {serializeConversation} from '../utils.js';
 export function registerConversationRoutes(router) {
 	// GET conversations
 	router.get('conversations', (ctx) => {
-		const rows = ctx.db.prepare('SELECT * FROM conversations ORDER BY time DESC').all();
+		const rows = ctx.db.prepare('SELECT id, title, time FROM conversations ORDER BY time DESC').all();
 		ctx.send(200, rows.map(serializeConversation));
 	});
 
@@ -49,7 +49,13 @@ export function registerConversationRoutes(router) {
 	// DELETE conversations/:id
 	router.delete('conversations/:id', (ctx) => {
 		const id = Number(ctx.params.id);
-		ctx.db.prepare('DELETE FROM messages WHERE owner = ?').run(id);
+		const deletedRows = ctx.db.prepare('DELETE FROM messages WHERE owner = ? RETURNING id').all(id);
+		if (ctx.vectorDB) {
+			deletedRows.forEach(({id}) => {
+				ctx.vectorDB.delete('m#'+id.toString(36));
+				ctx.vectorDB.delete('M#'+id.toString(36));
+			});
+		}
 		ctx.db.prepare('DELETE FROM conversations WHERE id = ?').run(id);
 		ctx.send(200, { success: true });
 	});

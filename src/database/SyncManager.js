@@ -4,7 +4,7 @@ import {showToast} from "../components/Toast.js";
 import {$watch, unconscious} from "unconscious";
 import SimpleModal from "../components/SimpleModal.jsx";
 import {onLoad} from "../plugin.js";
-import {serializeJSON} from "./db-sqlite.js";
+import {serializeJSON} from "./db-remote.js";
 
 let closeToast;
 
@@ -35,10 +35,10 @@ export function initSync(address) {
 		pendingEvents = [];
 	};
 	ws.onclose = () => {
-		closeToast = showToast(<>实时同步服务意外断开<button className={"btn primary"} onClick={({target}) => {
+		closeToast = showToast(<>实时同步服务已断开 <button className={"btn primary"} onClick={({target}) => {
 			initSync(address);
 			closeToast();
-		}}>重试</button></>, "error", 0);
+		}}>重连</button></>, "error", 0);
 	}
 	ws.onmessage = async (event) => {
 		let {type, data} = JSON.parse(event.data);

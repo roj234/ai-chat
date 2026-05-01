@@ -8,16 +8,18 @@ import {config} from "../states.js";
 /**
  * 合并连续的 reasoning.text 片段
  * @param {OpenAI.ReasoningDetail[]} details
- * @returns {OpenAI.ReasoningDetail[]}
+ * @returns {[OpenAI.ReasoningDetail[], boolean]}
  */
 export function mergeReasoningDetails(details) {
-	if (details.length === 0) return details;
+	if (details.length === 0) return [details, false];
 
 	const result = [];
 	let currentGroup = null;
+	let hasText = 0;
 
 	for (const item of details) {
 		if (item.type === "reasoning.text") {
+			hasText |= !!item.text;
 			// 如果当前有合并组，且格式相同，则追加文本
 			if (currentGroup && item.format === currentGroup.format) {
 				currentGroup.text += item.text;
@@ -31,7 +33,7 @@ export function mergeReasoningDetails(details) {
 		}
 	}
 
-	return result;
+	return [result, hasText];
 }
 
 /**

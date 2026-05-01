@@ -36,7 +36,7 @@ export async function importConversationData({messages: messages_, ...rest}, bat
 		runAllTools(newConv, messages_, true);
 	}
 
-	await updateConversation(newConv, messages_);
+	await updateConversation(newConv, messages_, true);
 	if (!batch) {
 		newConv.ready = true;
 		conversations.unshift(newConv);

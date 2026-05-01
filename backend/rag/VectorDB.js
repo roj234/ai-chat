@@ -2,16 +2,111 @@ import fs from "node:fs";
 import {
 	SEMANTIC_SEARCH_API_BASE,
 	SEMANTIC_SEARCH_API_KEY,
-	SEMANTIC_SEARCH_API_MODEL, SEMANTIC_SEARCH_CHUNK_MODE,
+	SEMANTIC_SEARCH_API_MODEL,
+	SEMANTIC_SEARCH_CHUNK_MODE,
 	SEMANTIC_SEARCH_EMBEDDING_SIZE
 } from "../config.js";
+import {TopK} from "../utils/TopK.js";
+import removeMd from "remove-markdown";
+
+// ---------- bf16 转换工具 ----------
+
+const bf16ConvTemp = new DataView(new ArrayBuffer(4));
 
 /**
- *
+ * bf16 (16位) -> float32
+ * @param {number} h - 16位无符号整数
+ * @returns {number} IEEE 754 单精度浮点数
+ */
+function bf16ToFloat32(h) {
+	const s = (h >> 15) & 0x1;
+	const e = (h >> 7) & 0xFF;   // 8位指数
+	const f = h & 0x7F;           // 7位尾数
+
+	let bits;
+	if (e === 0) {
+		// 零或非规格化数
+		if (f !== 0) {
+			// 非规格化数：直接映射到 float32 的非规格化，尾数左移16位
+			bits = (s << 31) | (e << 23) | (f << 16);
+		} else {
+			bits = s << 31;  // 有符号零
+		}
+	} else if (e === 0xFF) {
+		// 无穷大或 NaN
+		if (f === 0) {
+			bits = (s << 31) | (0xFF << 23);           // 无穷大
+		} else {
+			bits = (s << 31) | (0xFF << 23) | (f << 16) | 1; // 静默 NaN，确保不是无穷大
+		}
+	} else {
+		// 正常数：指数相同，尾数左移16位
+		bits = (s << 31) | (e << 23) | (f << 16);
+	}
+
+	bf16ConvTemp.setInt32(0, bits);
+	return bf16ConvTemp.getFloat32(0);
+}
+
+/**
+ * float32 -> bf16 (返回16位整数)
+ * 舍入方式：就近舍入，偶数优先
+ * @param {number} value
+ * @returns {number} 16位无符号整数
+ */
+function float32ToBf16(value) {
+	if (isNaN(value)) return 0x7FC0;
+
+	bf16ConvTemp.setFloat32(0, value);
+	let bits = bf16ConvTemp.getInt32(0);
+
+	const s = (bits >>> 31) & 1;
+	let e = (bits >>> 23) & 0xFF;
+	const f = bits & 0x7FFFFF;
+
+	// 无穷大或 NaN
+	if (e === 0xFF) {
+		if (f !== 0) {
+			// NaN：保留尾数高7位，并确保非零
+			const bf16F = (f >> 16) | 1;
+			return (s << 15) | (0xFF << 7) | bf16F;
+		}
+		return (s << 15) | (0xFF << 7); // 无穷大
+	}
+
+	// 非规格化数 (e == 0)
+	if (e === 0) {
+		if (f === 0) return s << 15; // 零
+		// 简单截断 + 舍入
+		const bf16F = f >> 16;
+		const roundBit = (f >> 15) & 1;
+		const remainder = f & 0x7FFF;
+		let bf16Bits = (s << 15) | (bf16F & 0x7F);
+		if (roundBit && (remainder > 0 || (bf16F & 1))) {
+			bf16Bits += 1;
+		}
+		return bf16Bits & 0xFFFF;
+	}
+
+	// 正常数
+	const bf16F = f >> 16;
+	const roundBit = (f >> 15) & 1;
+	const remainder = f & 0x7FFF;
+	let bf16Bits = (s << 15) | (e << 7) | bf16F;
+	if (roundBit && (remainder > 0 || (bf16F & 1))) {
+		bf16Bits += 1;
+	}
+	return bf16Bits & 0xFFFF;
+}
+
+// ---------- 原业务代码（已修改为 bf16 存储） ----------
+
+/**
  * @param {string} text
  * @return {Promise<Float32Array>}
  */
 export async function getEmbedding(text) {
+	text = removeMd(text);
 	if (text.length > SEMANTIC_SEARCH_CHUNK_MODE.length) {
 		text = text.substring(0, SEMANTIC_SEARCH_CHUNK_MODE.length);
 	}
@@ -20,7 +115,7 @@ export async function getEmbedding(text) {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json',
-			'Authorization': `Bearer `+SEMANTIC_SEARCH_API_KEY
+			'Authorization': `Bearer ` + SEMANTIC_SEARCH_API_KEY
 		},
 		body: JSON.stringify({
 			model: SEMANTIC_SEARCH_API_MODEL,
@@ -42,7 +137,7 @@ export class VectorDB {
 		this.filePath = filePath;
 		this.dimension = dimension;
 		this.idByteSize = 16;
-		this.vectorByteSize = dimension * 4;
+		this.vectorByteSize = dimension * 2; // bf16
 		this.recordSize = this.idByteSize + this.vectorByteSize;
 
 		// 内存索引：id -> { vector: Float32Array, offset: number }
@@ -78,12 +173,16 @@ export class VectorDB {
 			if (isEmpty) {
 				this.freeSlots.push(offset);
 			} else {
-				// 除去末尾可能的补全零，转回字符串作为 Key
+				// 去除末尾可能的零，转回字符串作为 Key
 				const id = idBuf.toString('utf8').replace(/\0/g, '');
-				const vectorBuf = buffer.slice(offset + this.idByteSize, offset + this.recordSize);
-				// 拷贝一份数据防止由于 Buffer 共享导致的内存问题
-				const vector = new Float32Array(new Uint8Array(vectorBuf).buffer);
-				this.index.set(id, { vector, offset });
+				// 读取 bf16 向量并转换为 Float32Array
+				const view = new DataView(buffer.buffer, offset + this.idByteSize, this.vectorByteSize);
+				const floatVec = new Float32Array(this.dimension);
+				for (let i = 0; i < this.dimension; i++) {
+					const h = view.getUint16(i * 2);
+					floatVec[i] = bf16ToFloat32(h);
+				}
+				this.index.set(id, { vector: floatVec, offset });
 			}
 			offset += this.recordSize;
 		}
@@ -107,14 +206,14 @@ export class VectorDB {
 	set(id, text) {
 		// TODO 在这里做版本机制，只保留最新的
 		return getEmbedding(text).then(embedding => {
-			this.upsert(id, embedding);
+			return this.upsert(id, embedding);
 		});
 	}
 
 	/**
-	 * 写入/更新向量
+	 * 写入/更新向量（磁盘存 bf16，内存存 float32）
 	 */
-	async upsert(id, vector) {
+	upsert(id, vector) {
 		const floatVector = vector instanceof Float32Array ? vector : new Float32Array(vector);
 		if (floatVector.length !== this.dimension) throw new Error("Dimension mismatch");
 
@@ -133,9 +232,15 @@ export class VectorDB {
 			offset = stats.size;
 		}
 
+		// 将 Float32Array 转换为 bf16 字节序列
+		const bf16Buf = Buffer.alloc(this.vectorByteSize);
+		for (let i = 0; i < this.dimension; i++) {
+			const h = float32ToBf16(floatVector[i]);
+			bf16Buf.writeUInt16BE(h, i * 2);
+		}
+
 		const idBuf = this._formatId(id);
-		const vectorBuf = Buffer.from(floatVector.buffer);
-		const recordBuf = Buffer.concat([idBuf, vectorBuf]);
+		const recordBuf = Buffer.concat([idBuf, bf16Buf]);
 
 		// 执行文件随机写
 		const fd = fs.openSync(this.filePath, 'r+');
@@ -165,28 +270,28 @@ export class VectorDB {
 		this.index.delete(id);
 	}
 
-	query(text, topK = 5) {
-		return getEmbedding(text).then(emb => this.search(emb, topK));
+	query(text, topK, threshold) {
+		return getEmbedding(text).then(emb => this.search(emb, topK, threshold));
 	}
 
 	/**
 	 * 搜索
+	 * @param {Float32Array} query
+	 * @param {number} topK
+	 * @param {number} threshold
 	 */
-	search(queryVector, topK = 5) {
-		const qv = queryVector instanceof Float32Array ? queryVector : new Float32Array(queryVector);
-		const results = [];
-
+	search(query, topK = 5, threshold = 0.3) {
+		const array = new TopK(topK, (l, r) => r.score - l.score);
 		for (const [id, item] of this.index) {
 			let score = 0;
 			const v = item.vector;
 			for (let i = 0; i < this.dimension; i++) {
-				score += qv[i] * v[i];
+				score += query[i] * v[i];
 			}
-			results.push({ id, score });
+			if (score > threshold)
+				array.add({ id, score });
 		}
 
-		return results
-			.sort((a, b) => b.score - a.score)
-			.slice(0, topK);
+		return array.toArray();
 	}
 }

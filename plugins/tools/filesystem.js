@@ -3,12 +3,12 @@ import {config} from "/src/states.js";
 import {SETTINGS} from "/src/settings.js";
 
 SETTINGS.push({
-	id: "fs_endpoint",
+	id: "fs_server",
 	_tab: "tools",
 	name: "[fs] 本地访问服务",
 	title: "提供本地文件系统访问和执行命令功能",
 	type: "input",
-	pattern: /^(\/|https?:\/\/).+\/aichat\/v2$/,
+	pattern: /^(\/|https?:\/\/).+\/aichat\/v2\/?$/,
 	warning: "请输入合法的API端点",
 	placeholder: "http://localhost:1/aichat/v2"
 });
@@ -17,10 +17,11 @@ const HOST_OS = /\((.+?)\)/.exec(navigator.userAgent)?.[1] || "unknown";
 
 function callAPI(func, type = 'fs') {
 	return async (parameters) => {
-		const baseUrl = (import.meta.env.DEV ? "/aichat/v2" : config.fs_agent_endpoint);
+		let baseUrl = (import.meta.env.DEV ? "/aichat/v2" : config.fs_agent_endpoint);
 		if (!baseUrl) throw ("用户未配置");
+		if (!baseUrl.endsWith('/')) baseUrl += '/';
 
-		const response = await fetch(baseUrl+"/"+type+"/"+func, {
+		const response = await fetch(baseUrl+type+"/"+func, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(parameters)

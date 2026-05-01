@@ -229,6 +229,12 @@ export function searchMessages(keyword) {
 				messages = messages.filter(msg => getTextContent(msg)?.toLowerCase().includes(lowerKeyword));
 
 				if (messages.length > 0) {
+					messages.forEach(m => {
+						delete m.tool_calls;
+						delete m.tool_responses;
+						delete m.owner;
+					});
+
 					return {
 						...conv,
 						messages
@@ -356,6 +362,3 @@ export function appendBillingLog(log) {
 export function getBillingLog(message_id) {
 	return transaction('statistics', tx => tx.objectStore('statistics').get(message_id));
 }
-
-export const updateBlob = AS_IS;
-export const getBlob = AS_IS;

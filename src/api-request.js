@@ -1,6 +1,6 @@
 // API request
 import {markdownStreamParser} from "./markdown/markdown.js";
-import {cloneNamed, deepEntries, getTextContent, jsonFetch, prettyError, streamFetch} from "./utils/utils.js";
+import {cloneNamed, getTextContent, jsonFetch, prettyError, streamFetch} from "./utils/utils.js";
 import {
 	abortCompletion,
 	config,
@@ -28,6 +28,7 @@ import {AntiSlop} from "./antiSlop.js";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {highlightJsonLike} from "./markdown/highlight.js";
 import {updateConversationListUI} from "./components/ConversationList.jsx";
+import {deepEntries} from "../vendor/jsonSchema.js";
 
 export function setStatus(text, tone = '') {
 	Shared.statusBadge.textContent = text;
@@ -504,7 +505,7 @@ export async function sendUserChatMessage(userText, antiSlop) {
 		setStatus(finish_reason_names[finishReason], tone ?? 'error');
 
 		if (needSave) {
-			await updateConversation(conversation, unconscious(messages_));
+			await updateConversation(conversation, unconscious(messages_), true);
 		}
 
 		if (selectedConversation.id !== conversation.id) {
@@ -834,8 +835,9 @@ function countAgentTurns(messages) {
 function streamResponseCompleted(assistantMessage, genImages) {
 	delete assistantMessage.id;
 	if (assistantMessage.reasoning_details) {
-		assistantMessage.reasoning_details = mergeReasoningDetails(assistantMessage.reasoning_details);
-		delete assistantMessage.think?.content;
+		let hasText;
+		[assistantMessage.reasoning_details, hasText] = mergeReasoningDetails(assistantMessage.reasoning_details);
+		if (hasText) delete assistantMessage.think?.content;
 	}
 	if (assistantMessage.tool_calls) assistantMessage.tool_calls = assistantMessage.tool_calls.map(unconscious);
 

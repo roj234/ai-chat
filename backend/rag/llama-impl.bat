@@ -1,1 +1,2 @@
+rem https://huggingface.co/batiai/Qwen3-Embedding-0.6B-GGUF
 llama-server -m Qwen3-Embedding-0.6B-Q6_K.gguf --embedding -c 4096 -ngl 0 --cache-ram 0

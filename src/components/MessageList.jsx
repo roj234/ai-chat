@@ -517,7 +517,10 @@ const combinedMessages = $computed((oldMessages) => {
 		i++;
 		out.push(ref);
 
-		if (!isReactiveElement) continue;
+		if (!isReactiveElement) {
+			ref.time = ref.key.time;
+			continue;
+		}
 
 		/** @type {boolean} */
 		let generationEnded;

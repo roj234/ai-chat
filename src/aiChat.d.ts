@@ -21,11 +21,6 @@ declare namespace AiChat {
         allowedTools?: Set<string>,
 
         branches?: true;
-
-        running?: {
-            abort: AbortController,
-            messages: Message[]
-        }
     }
 
     export type Message = BaseMessage | AssistantMessage;

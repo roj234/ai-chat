@@ -20,7 +20,7 @@
     --error: oklch(0.592 0.202 21.239);
     --error-bg: oklch(0.592 0.202 21.239 / 0.15);
     --ok: oklch(0.696 0.149 162.48);
-    --user: oklch(0.551 0.162 251.413);
+    --user: #2563eb;
     --assistant: oklch(0.545 0.022 80.03);
     --system: oklch(0.323 0.059 168.518);
 
@@ -355,24 +355,6 @@ button[class^="ri-"] {
     z-index: 999;
 }
 
-/* 文本视图 */
-#rawPanel {
-    margin: var(--spacing-xl);
-    background: var(--border);
-    box-shadow: var(--shadow);
-}
-.raw-text {
-    width: 100%;
-    height: 100%;
-    resize: none;
-    background: var(--panel-2);
-    color: var(--text);
-    border: 1px solid var(--border);
-    padding: var(--spacing-md);
-    white-space: pre-wrap;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-}
-
 /* 输入框 */
 .composer {
     position: sticky;
@@ -381,7 +363,10 @@ button[class^="ri-"] {
 
     background: linear-gradient(0deg, var(--bg) 90%, transparent 100%);
     padding: var(--spacing-sm) 0;
+
     z-index: 12;
+    /* 貌似可以不让它漏出底下._vl的字 */
+    will-change: transform;
 }
 .composer .controls {
     display: flex; gap: var(--spacing-md); flex-wrap: wrap; align-items: center;
@@ -448,26 +433,30 @@ button[class^="ri-"] {
     /*border-bottom: 1px solid #718096;*/
     border-radius: var(--border-radius-md) var(--border-radius-md) 0 0;
 }
-code {
+code, kbd {
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     &.hljs {
-        background: transparent;
-        padding-right: 0;
         scrollbar-gutter: stable;
 
+        line-height: 1.3;
         .line {
-            line-height: 1.2;
-            min-height: 1.2rem;
+            min-height: 1.3em;
         }
     }
-    &:not(.hljs) {
-        border: 1px solid #4a5568;
-        padding: 2px;
-        border-radius: var(--border-radius-sm);
-        color: oklch(0.6 0.18 18deg);
-        margin: 0 var(--spacing-xs);
-        word-break: break-word;
+
+    &.mermaid {
+        display: flex;
+        justify-content: center;
     }
+}
+
+kbd {
+    border: 1px solid #4a5568;
+    padding: 2px;
+    border-radius: var(--border-radius-sm);
+    color: oklch(0.6 0.18 18deg);
+    margin: 0 var(--spacing-xs);
+    word-break: break-word;
 }
 
 .content {
@@ -653,10 +642,10 @@ code {
     }
 
     .code-header {
-        top: 32px;
+        top: 31px;
     }
 
-    .hljs.done {max-height: calc(40vh);}
+    .hljs {max-height: calc(40vh);}
 }
 
 @media (hover: none) {
@@ -707,7 +696,7 @@ code {
         bottom: -200px;
     }
 
-    .hljs.done {max-height: calc(20vh);}
+    .hljs {max-height: calc(20vh);}
 
     .bar {
         display: grid;

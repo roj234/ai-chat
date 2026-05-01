@@ -1,35 +1,20 @@
-// db-sqlite.js
-
-import {SETTINGS} from "../settings.js";
 import {config} from "../states.js";
 import {decodeObjects, encodeObjects} from "../utils/marshal.js";
-import {onLoad} from "../plugin.js";
 import {initSync} from "./SyncManager.js";
+import SimpleModal from "../components/SimpleModal.jsx";
+import {showToast} from "../components/Toast.js";
 
 let sync;
 
-SETTINGS.push({
-	id: "db_endpoint",
-	name: "数据库后端地址",
-	title: "提供文件管理、消息搜索、多租户等功能\n修改后需要刷新页面才能生效",
-	type: "input",
-	pattern: /^(\/|https?:\/\/).+\/aichat\/v2/,
-	warning: "请输入合法的API端点",
-	placeholder: "/aichat/v2/username"
-});
-
-let dbUrl = import.meta.env.DEV ? config.db_endpoint || "/aichat/v2/user" : config.db_endpoint;
-
-onLoad(() => {
-	request("props").then(data => {
-		if (data.sync) sync = initSync(data.sync.replace(/^http/, "ws"));
-	});
-})
+/** @type {string} */
+let dbUrl = config.db_server;
 
 async function request(path, options = {}) {
-	const res = await fetch(dbUrl+'/'+path, {
+	if (!dbUrl.endsWith('/')) dbUrl += '/';
+	const res = await fetch(dbUrl+path, {
 		headers: { 'Content-Type': 'application/json' },
 		...options,
+		referrerPolicy: "no-referrer"
 	});
 	if (!res.ok) {
 		const text = await res.text();
@@ -52,7 +37,10 @@ export async function serializeJSON(obj) {
 }
 
 export function getMessages(conversation) {
-	return request(`conversations/${conversation.id}/messages`).then(decodeObjects);
+	return request(`conversations/${conversation.id}`).then(async json => {
+		Object.assign(conversation, await decodeObjects(json));
+		return request(`conversations/${conversation.id}/messages`).then(decodeObjects);
+	});
 }
 
 export async function newConversation(conversation) {
@@ -99,7 +87,56 @@ export function deleteConversation(id) {
 }
 
 export function listConversations() {
-	return request('conversations').then(decodeObjects);
+	const next = () => {
+		request("props").then(data => {
+			let syncServer = data.sync;
+			if (syncServer) {
+				if (syncServer.startsWith("/")) {
+					syncServer = (<a href={syncServer} />).href;
+				}
+				sync = initSync(syncServer.replace(/^http/, "ws"));
+			}
+		});
+		return request('conversations').then(decodeObjects);
+	};
+
+	if (config.db_server && (DB_MODE !== 'remote' || config.db_server !== ':idb:')) return next();
+
+	return new Promise(resolve => {
+		SimpleModal({
+			type: "input",
+			title: "登录",
+			message: "请输入"+(DB_SERVER?"用户名或":"")+"数据库服务器地址\n之后也可以在设置页面修改"+(DB_MODE === "mixed" ? "\n您也可以点击取消使用本地数据库": ""),
+			placeholder: (DB_SERVER?"新用户将直接注册":"")+(import.meta.env.DEV?"\n留空使用开发服务器调试账户":""),
+			confirmMessage: "登录",
+			onConfirm(value) {
+				if (!value) {
+					if (import.meta.env.DEV) {
+						value = "/aichat/v2/user";
+						showToast("您正使用开发服务器调试账户");
+					} else {
+						return false;
+					}
+				}
+
+				if (!value.toLowerCase().startsWith("http") && !value.startsWith("/")) {
+					if (DB_SERVER) {
+						value = DB_SERVER.replace("{{user}}", encodeURIComponent(value));
+					} else {
+						return false;
+					}
+				}
+				config.db_server = dbUrl = value;
+				location.reload();
+			},
+			onCancel(value) {
+				if (DB_MODE !== 'mixed') return false;
+				config.db_server = ':idb:';
+				location.reload();
+			}
+		});
+		}
+	);
 }
 
 export function searchMessages(keyword) {
@@ -161,7 +198,7 @@ export function kvListDel(key) {
 
 export function appendBillingLog(log) {
 	if (log.message_id == null) return Promise.resolve(); // 原行为直接返回DONE
-	return request('billing', {
+	return request('log', {
 		method: 'POST',
 		body: JSON.stringify(log),
 	});
@@ -169,12 +206,18 @@ export function appendBillingLog(log) {
 
 export function getBillingLog(message_id) {
 	if (message_id == null) return Promise.resolve(); // 原行为返回DONE? 但原函数返回DONE也不是null，这里应该返回null或空？原函数：getBillingLog(message_id) { if (message_id == null) return DONE; ...} DONE是Promise.resolve()，那么返回就是Promise<undefined>。为了类型兼容，可以返回Promise.resolve(null)。
-	return request(`billing/${message_id}`);
+	return request(`log/${message_id}`);
 }
 
 export async function deleteDatabase() {
 	return request('database', { method: 'DELETE' });
 }
+
+const URLSAFE = {
+	'+': '-',
+	'/': '_',
+	'=': ''
+};
 
 /**
  * 使用 SubtleCrypto 计算 Blob 的 SHA-256（十六进制字符串）
@@ -186,7 +229,7 @@ export async function sha256(blob) {
 	// Web Crypto 好垃圾哦
 	const buffer = await blob.arrayBuffer();
 	const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-	return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+	return btoa(String.fromCharCode(...new Uint8Array(hashBuffer))).replaceAll(/[+\/=]/g, match => URLSAFE[match]);
 }
 
 /**
@@ -196,9 +239,9 @@ export async function sha256(blob) {
  */
 export async function updateBlob(blob) {
 	const hash = await sha256(blob);
-	let resp = await fetch(dbUrl+`/blob/`+hash);
+	let resp = await fetch(dbUrl+`blob/`+hash);
 	if (!resp.ok) {
-		resp = await fetch(dbUrl+`/blob/`+hash, {
+		resp = await fetch(dbUrl+`blob/`+hash, {
 			method: 'POST',
 			headers: { 'Content-Type': blob.type },
 			body: blob
@@ -212,9 +255,11 @@ export async function updateBlob(blob) {
 
 /**
  *
- * @param {{hash: string, type: string}} obj
+ * @param {{hash: string, name: string}} obj
  * @return {Promise<Blob>}
  */
-export async function getBlob(obj) {
-	return (await fetch(dbUrl+`/blob/`+obj.hash)).blob();
+export async function getBlob({hash, name}) {
+	const blob = await (await fetch(dbUrl+`blob/`+hash)).blob();
+	if (name) blob.name = name;
+	return blob;
 }

@@ -1,5 +1,5 @@
 import {INDEX, VirtualList} from "unconscious/ext/VirtualList.js";
-import {isEqual} from "../../vendor/equals.js";
+import {isEqual} from "/vendor/equals.js";
 
 /**
  * @param {VirtualList} virtualList

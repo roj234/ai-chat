@@ -6,6 +6,7 @@ import './SimpleModal.css';
  * @param {string} title
  * @param {string} message
  * @param {string} placeholder
+ * @param {string} value
  * @param {'primary' | 'danger' | 'ghost'} accent
  * @param {string} confirmMessage
  * @param {function(string): void = } onConfirm
@@ -14,24 +15,29 @@ import './SimpleModal.css';
  * @constructor
  */
 const SimpleModal = ({
-						 type = 'info', // 'info' or 'input'
-						 title = '提示',
-						 message,
-						 placeholder,
-						 accent = 'primary',
-						 confirmMessage = '确认',
-						 onConfirm,
-						 onCancel
-					 }) => {
+		type = 'info', // 'info' or 'input'
+		title = '提示',
+		message,
+		placeholder,
+		value,
+		accent = 'primary',
+		confirmMessage = '确认',
+		onConfirm,
+		onCancel
+}) => {
 	let inputValue = '';
 
 	const handleClose = () => {
-		onCancel?.(inputValue);
+		if (false === onCancel?.(inputValue)) {
+			return;
+		}
 		element.remove();
 	}
 
 	const handleConfirm = () => {
-		onConfirm?.(inputValue);
+		if (false === onConfirm?.(inputValue)) {
+			return;
+		}
 		element.remove();
 	};
 
@@ -40,17 +46,14 @@ const SimpleModal = ({
 			<div className="modal" onClick={(e) => e.stopPropagation()}>
 				<div className="header"><b>{title}</b></div>
 				<div className="body">
-					{type === 'info' ? (
-						<p>{message}</p>
-					) : (
-						<textarea
-							onChange={(e) => inputValue = e.target.value}
-							placeholder={placeholder}
-						>{message}</textarea>
-					)}
+					{message && <p>{message}</p>}
+					{type === 'input' ? <textarea
+						onChange={(e) => inputValue = e.target.value}
+						placeholder={placeholder}
+					>{value}</textarea> : null}
 				</div>
 				<div className="footer">
-					<button className={"btn "+accent} onClick={handleConfirm}>{confirmMessage}</button>
+					<button className={"btn " + accent} onClick={handleConfirm}>{confirmMessage}</button>
 					<button className="btn ghost" onClick={handleClose}>取消</button>
 				</div>
 			</div>

@@ -13,10 +13,10 @@ import {registerBlobRoutes} from "./routes/blob-storage.js";
 
 import path from 'node:path';
 import {VectorDB} from "./rag/VectorDB.js";
-import {SEMANTIC_SEARCH_ENABLE, WEBSOCKET_SYNC_ENABLE} from "./config.js";
+import {SEMANTIC_SEARCH_ENABLE, WEBSOCKET_SYNC_BASE, WEBSOCKET_SYNC_ENABLE} from "./config.js";
 
 
-export function initServer(dataPath, basePath = "aichat/v2") {
+export function initServer(dataPath, basePath = "aichat/v2", zipBlob) {
 	const ROOT_DIR = path.resolve(dataPath);
 	const workspace = path.resolve(ROOT_DIR+"/workspace");
 
@@ -33,7 +33,7 @@ export function initServer(dataPath, basePath = "aichat/v2") {
 				get: () => getData().vector,
 			});
 		}
-	});
+	}, zipBlob);
 
 	router.push(basePath);
 
@@ -42,7 +42,7 @@ export function initServer(dataPath, basePath = "aichat/v2") {
 	router.get("props", ctx => {
 		ctx.send(200, {
 			version: 2,
-			sync: WEBSOCKET_SYNC_ENABLE ? "ws://"+ctx.req.headers.host+"/aichat/v2/sync?user="+encodeURIComponent(ctx.params.userId) : null,
+			sync: WEBSOCKET_SYNC_ENABLE ? WEBSOCKET_SYNC_BASE(ctx) : undefined,
 		});
 	});
 
@@ -113,11 +113,13 @@ function initDB(dbPath) {
     CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       owner INTEGER NOT NULL,
+      time INTEGER,
+	  content TEXT NOT NULL,
       data TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS kv (
       key TEXT PRIMARY KEY,
-      value TEXT
+      value TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS kvs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -129,6 +131,7 @@ function initDB(dbPath) {
     CREATE INDEX IF NOT EXISTS idx_kvs_type_name ON kvs(type, name);
     CREATE TABLE IF NOT EXISTS statistics (
       message_id INTEGER PRIMARY KEY,
+      time INTEGER NOT NULL,
       data TEXT NOT NULL
     );
   `);

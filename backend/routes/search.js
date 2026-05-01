@@ -13,16 +13,15 @@ export function registerSearchRoutes(router) {
 
 		const vectorDB = ctx.vectorDB;
 
-		// --- 核心逻辑：如果向量库为空，则后台填充数据 ---
 		if (vectorDB && vectorDB.size === 0) {
-			console.log("正在初始化向量数据库...");
+			console.log("正在初始化语义索引...");
 			const batchSize = 500;
 			let lastId = 0;
 
 			while (true) {
 				// 使用 ID 游标分页比 OFFSET 更快
 				const rows = ctx.db.prepare(
-					'SELECT id, data FROM messages WHERE id > ? ORDER BY id LIMIT ?'
+					'SELECT id, content, data FROM messages WHERE id > ? ORDER BY id LIMIT ?'
 				).all(lastId, batchSize);
 
 				if (rows.length === 0) break;
@@ -32,44 +31,42 @@ export function registerSearchRoutes(router) {
 					const idStr = row.id.toString(36);
 
 					// 索引内容
-					if (body.content) await vectorDB.set('m#' + idStr, body.content);
+					if (row.content) await vectorDB.set('m#'+idStr, row.content);
 					// 索引思考过程
 					const thinking = body.think?.content;
-					if (thinking) await vectorDB.set('M#' + idStr, thinking);
+					if (thinking) await vectorDB.set('M#'+idStr, thinking);
 
 					lastId = row.id;
 				}
 				console.log(`已索引至 ID: ${lastId}`);
 			}
-			console.log("VectorDB 索引初始化完成。");
+			console.log("语义索引初始化完成。");
 		}
-		// ----------------------------------------------
 
-		let vectorResults = [];
+		let vectorKeys = new Map;
 		if (mode !== 'keyword' && vectorDB && keyword.length > 2) {
-			let threshold = 0.5;
+			console.time("语义搜索");
 			// ids 结构为 [{id: "m#abc", score: 0.9}, ...]
-			const matches = await vectorDB.query(keyword, limit);
-			for (let i = 0; i < matches.length; i++) {
-				if (matches[i].score < threshold) {
-					matches.length = i;
-					break;
-				}
-			}
-			vectorResults = matches.map(m => parseInt(m.id.substring(2), 36));
+			const matches = await vectorDB.query(keyword, limit, 0.5);
+			matches.forEach(m => vectorKeys.set(parseInt(m.id.substring(2), 36), m.score));
+			console.timeEnd("语义搜索");
 		}
 
 		const searchPattern = `%${keyword}%`;
 
-		const placeholders = Array(vectorResults.length).fill('?').join(',');
+		const placeholders = Array(vectorKeys.size).fill('?').join(',');
+		console.time("查询数据库");
 		const sql = `
             WITH MatchedSet AS (
                 -- 找出所有命中的消息及其所属对话
-                SELECT m.id AS msg_id, m.owner AS conv_id, m.data AS msg_data
+                SELECT m.id AS msg_id, 
+                       m.owner AS conv_id, 
+                       m.data AS msg_data,
+                       m.content AS msg_content,
+                       m.time AS msg_time
                 FROM messages m
                 WHERE m.id IN (${placeholders})
-                   OR json_extract(m.data, '$.content') LIKE ?
-                   OR json_extract(m.data, '$.think.content') LIKE ?
+                   OR m.content LIKE ?
             ),
             RankedMatches AS (
                 -- 对命中的消息按对话分组，并给每一行编个号
@@ -86,7 +83,9 @@ export function registerSearchRoutes(router) {
             SELECT 
                 c.*, 
                 rm.msg_id, 
-                rm.msg_data
+                rm.msg_data,
+                rm.msg_content,
+                rm.msg_time
             FROM FilteredConvs fc
             JOIN conversations c ON c.id = fc.conv_id
             JOIN RankedMatches rm ON rm.conv_id = fc.conv_id
@@ -95,12 +94,13 @@ export function registerSearchRoutes(router) {
         `;
 
 		const rows = ctx.db.prepare(sql).all(
-			...vectorResults,
-			searchPattern,
+			...vectorKeys.keys(),
 			searchPattern,
 			limit,
-			10 // 返回的消息数量
+			10 // 每个对话最多返回的消息数量
 		);
+		console.timeEnd(`查询数据库`);
+		console.log(`完成，找到 ${rows.length} 条消息`);
 
 		// 3. 内存聚合（将扁平的行结构转回 conversation -> messages 结构）
 		const conversations = new Map();
@@ -112,11 +112,18 @@ export function registerSearchRoutes(router) {
 				conversations.set(row.id, conv);
 			}
 
-			const msg = jsonParse(row.msg_data);
-			msg.id = row.msg_id;
+			const msg = jsonParse(row.msg_data, {
+				id: row.msg_id,
+				content: row.msg_content,
+				time: row.msg_time
+			});
+
+			const score = vectorKeys.get(msg.id);
+			if (score != null) msg.cossim = score;
 
 			delete msg.tool_responses;
 			delete msg.tool_calls;
+			delete msg.reasoning_details;
 
 			conversations.get(row.id).messages.push(msg);
 		}

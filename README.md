@@ -28,24 +28,26 @@ AiChat 是一个现代化的高性能**纯 Web** AI 聊天前端，基于 [Uncon
 > 说真的，如果你希望有一个点开`index.html`就能用的前端，那你恐怕只能选我  
 > 当然，我不提供真正的单文件版本（Release 版本至少需要静态文件服务器，`llama-server`都可以）  
 > 实在想，你可以用`vite-single-file`插件，vite配置里写了，你只需要npm安装这个包，然后取消注释我的代码即可
-> 
-> **设计理念**：微服务/插拔式后端
-> - LLM 端点：OpenAI API规范
->   - 请注意：只有LLM端点位于本地网络时，才会检查是否为 llama-server 
-> - T2I 端点：ComfyUI或A1111 WebUI规范
->   - 参考实现：你可直接使用 [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp)
-> - TTS 端点：我的TTS规范（基于OpenAI + 自定义音色 API）
->   - 参考实现：[qwen3-audio.cpp](https://github.com/Roj234/qwen3-audio.cpp)
-> - 数据库端点：我的数据库API规范
->   - 参考实现：`backend/server.js`
-> - 文件访问端点：我的文件访问API规范
->   - 参考实现：`backend/server.js`
-> 
+
+**设计理念**：微服务/插拔式后端
+- LLM 端点：OpenAI API规范
+  - 请注意：只有LLM端点位于本地网络时，才会检查是否为 llama-server 
+- T2I 端点：ComfyUI或A1111 WebUI规范
+  - 参考实现：你可直接使用 [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp)
+- TTS 端点：我的TTS规范（基于OpenAI + 自定义音色 API）
+  - 参考实现：[qwen3-audio.cpp](https://github.com/Roj234/qwen3-audio.cpp)
+- 数据库端点：我的数据库API规范
+  - 参考实现：`backend/server.js`
+- 文件访问端点：我的文件访问API规范
+  - 参考实现：`backend/server.js`
+
 > **唯一必须的，只是LLM端点。**  
 > 如果你不需要它作为Agent，那么不需要文件访问服务  
 > 如果你想要网络搜索/真正的RAG，注册一个工具有何不可？  
-> 
-> 没有后端，并不意味着功能少。  
+
+在任何可能引入外部重依赖的地方，我用一层抽象把选择权交还给你  
+> 如果你觉得我的naive实现不好，那就override它吧  
+> 随便哪个2026年的LLM（例如DeepSeek V4P or Gemini3F）都能在一轮对话内按照这些API规范生成实现
 
 - **多模态支持**：文本、图片、音频输入
 - **对话管理**：支持并发对话、自动标题生成，采用 IndexedDB + 索引存储，不浪费内存

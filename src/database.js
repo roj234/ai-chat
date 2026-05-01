@@ -2,25 +2,40 @@ import {debugSymbol} from 'unconscious';
 import {config} from "./states.js";
 import {isEqual} from "../vendor/equals.js";
 import {cloneNamed, prettyError} from "./utils/utils.js";
-import * as db from "./database/db-indexeddb.js";
+import * as idb from "./database/db-indexeddb.js";
+import * as remote from "./database/db-remote.js";
 import {showToast} from "./components/Toast.js";
+import {SETTINGS} from "./settings.js";
 
 const MESSAGE_IN_DB = debugSymbol("MESSAGE_IN_DB");
 const CONVERSATION_IN_DB = debugSymbol("CONVERSATION_IN_DB");
 export const DONE = Promise.resolve();
 
-export {
+function databaseError(err) {
+	showToast("数据库错误!\n"+prettyError(err)+"\n未保存的更改可能丢失，请直接从页面导出", 'error', 0);
+	return [];
+}
+
+if (DB_MODE !== 'local') {
+	SETTINGS.push({
+		id: "db_server",
+		name: "数据库服务器",
+		title: "提供文件管理、消息搜索、多租户等功能\n修改后需要刷新页面"+(DB_MODE === "mixed" ? "\n填写 :idb: 使用本地数据库" : ""),
+		type: "input",
+		pattern: (DB_MODE === "mixed" ? /^(?:(?:https?:\/\/.+)?\/aichat\/v2\/?|:idb:$)/ : /^(?:https?:\/\/.+)?\/aichat\/v2\/?/),
+		warning: "请输入合法的服务器地址",
+		placeholder: "/aichat/v2/user"
+	});
+}
+const db = DB_MODE === 'remote' || (DB_MODE === "mixed" && config.db_server !== ':idb:') ? remote : idb;
+
+export const {
 	deleteDatabase,
 	getKV, setKV,
 	kvListGetValues, kvListSet, kvListDel, kvListGetKeys, kvListGet, kvListGetByName,
 	searchMessages,
 	updateBlob, getBlob
-} from "./database/db-indexeddb.js";
-
-function databaseError(err) {
-	showToast("数据库错误!\n"+prettyError(err)+"\n未保存的更改可能丢失，请直接从页面导出", 'error', 0);
-	return [];
-}
+} = db;
 
 /**
  * 列出所有会话，按创建时间降序
@@ -95,10 +110,11 @@ function serializeConversation(data) {
 /**
  * 更新会话
  * @param {AiChat.Conversation} data
- * @param {AiChat.Message[]|false} messages=
+ * @param {AiChat.Message[]|false=} messages
+ * @param {boolean=} keepTime
  * @returns {Promise<void>}
  */
-export function updateConversation(data, messages) {
+export function updateConversation(data, messages, keepTime) {
 	if (config.debugDatabase) return DONE;
 
 	const promises = [];
@@ -129,7 +145,7 @@ export function updateConversation(data, messages) {
 				}
 			}
 
-			changed = true;
+			if (!keepTime) changed = true;
 			const newMessageKey = structuredClone(message);
 			if (id) messagesInMemory.set(id, newMessageKey);
 
@@ -159,7 +175,7 @@ export function updateConversation(data, messages) {
 
 	const serializedForm = serializeConversation(data);
 	if (changed || !isEqual(data[CONVERSATION_IN_DB], serializedForm, IGNORE_ID)) {
-		serializedForm.time = data.time = Date.now();
+		if (changed) serializedForm.time = data.time = Date.now();
 		data[CONVERSATION_IN_DB] = serializedForm;
 		promises.push(db.updateConversation(serializedForm));
 	}

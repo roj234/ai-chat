@@ -6,7 +6,7 @@ import json from 'highlight.js/lib/languages/json';
 import {VirtualList} from "unconscious/ext/VirtualList.js";
 import {$disposable} from "unconscious";
 import {onLoad} from "../plugin.js";
-import {selectableVirtualListMixin} from "./selectableVirtualListMixin.js";
+import {selectableVirtualListMixin} from "/vendor/selectableVirtualListMixin.js";
 
 hljs.registerLanguage('json', json);
 
@@ -57,10 +57,28 @@ function processLines(rawHtml, openTagsStack = []) {
 
 let heightTest;
 onLoad((app) => {
-	app.append(<code className="hljs" style="position:absolute;visibility:hidden;pointer-events:none">
+	app.append(<pre className={"code-block"} style="position:absolute;visibility:hidden;pointer-events:none">
+		<code className="hljs">
 		<div ref={heightTest} className="line"/>
-	</code>);
+	</code>
+	</pre>);
 });
+
+function getOrCreateVL(node) {
+	let vl = node._vl;
+	if (!vl) {
+		node._vl = vl = new VirtualList({
+			overscan: 50,
+			itemHeight: heightTest.getBoundingClientRect().height,
+			data: [{text: ""}],
+			renderer: (item, index) => <div className={'line'} dangerouslySetInnerHTML={item.text ?? item}/>,
+			keyFunc: (item) => item.text ?? item
+		});
+		vl._anchor = false;
+		$disposable(node, () => vl.destroy());
+	}
+	return vl;
+}
 
 /**
  * 语法高亮
@@ -71,14 +89,14 @@ onLoad((app) => {
  * @return {boolean}
  */
 export function highlight(code, language, node, is_finished) {
+	if (!code) return true;
+	node.className = "hljs";
+
 	if (is_finished) {
-		const is_long = code.length > 1000 || code.split("\n") > 50;
-		if (is_long) {
-			node.classList.add("done");
-			requestAnimationFrame(() => {
-				node.scrollTop = node.scrollHeight;
-			});
-		}
+		requestAnimationFrame(() => {
+			node.scrollTop = node.scrollHeight;
+		});
+		node.dataset.finished = '1';
 	}
 
 	const callback = (code) => {
@@ -86,16 +104,8 @@ export function highlight(code, language, node, is_finished) {
 			delete node._cache;
 			const generator = light(code, language);
 
-			const items = code.split('\n');
-			const virtualList = new VirtualList({
-				overscan: 50,
-				itemHeight: heightTest.getBoundingClientRect().height,
-				data: items,
-				renderer(item, index) {
-					return <div className={'line'} dangerouslySetInnerHTML={item}/>
-				}
-			});
-			$disposable(node, () => virtualList.destroy());
+			const lines = code.split('\n');
+			const virtualList = getOrCreateVL(node);
 
 			const highlightReallyFast = () => {
 				if (!node.isConnected) return;
@@ -108,26 +118,27 @@ export function highlight(code, language, node, is_finished) {
 				} else {
 					node.replaceChildren(virtualList.dom);
 					virtualList.attach(node);
-					selectableVirtualListMixin(virtualList, (line) => items[line]);
+					selectableVirtualListMixin(virtualList, (line) => lines[line]);
 
 					// noinspection JSPrimitiveTypeWrapperUsage
 					virtualList.items = processLines(result.value.value, []).map(s => new String(s));
 					virtualList.scrollToBottom();
+					virtualList.resize();
 					node._value = code;
 				}
 			};
-			requestAnimationFrame(highlightReallyFast);
+			setTimeout(highlightReallyFast);
 			return;
 		}
 
 		let cache = node._cache;
 		if (!cache) {
-			node._cache = cache = {
-				work: <span/>,
-				pos: 0
-			};
-			node.replaceChildren(cache.work);
+			const virtualList = getOrCreateVL(node);
+			node._cache = cache = { work: <span/>, pos: 0 };
+			node.replaceChildren(virtualList.dom);
+			virtualList.attach(node);
 		}
+		const vl = node._vl;
 
 		let newCode = code.substring(cache.pos);
 		let newHtml = lightSync(newCode, language);
@@ -135,7 +146,21 @@ export function highlight(code, language, node, is_finished) {
 		// 除去白名单内的流式语言（例如JSON），在单行内应用 morphdom
 		// 是的这就是他妈的比 shiki-stream 快，你去 benchmark 吧
 		// 但是不支持 subLanguage 比如 JS/CSS in HTML 因为没有上下文
-		const stableHtml = (fullStreamableLanguages.has(language) || newCode.includes("\n")) && trimLastTopLevelElement(newHtml);
+		let stableHtml = (fullStreamableLanguages.has(language) || newCode.includes("\n")) && trimLastTopLevelElement(newHtml);
+
+		// 强制换行，避免长文本行性能崩溃
+		if (newCode.length > 200 && !stableHtml) {
+			const i = newCode.indexOf('\n')+1;
+			if (i > 0) {
+				vl.items.at(-1).text += newHtml.substring(0, i-1);
+				vl.items.push({text:""});
+				vl.render();
+
+				cache.pos += i;
+				newHtml = newHtml.substring(i);
+			}
+		}
+
 		if (stableHtml) {
 			for (let reduced = 1; reduced < newCode.length; reduced++) {
 				const testLength = newCode.length - reduced;
@@ -147,8 +172,12 @@ export function highlight(code, language, node, is_finished) {
 				if (!testHtml.startsWith(stableHtml)) break;
 
 				if (testHtml === stableHtml) {
-					// 持久化
-					cache.work.insertAdjacentHTML('beforebegin', testHtml);
+					const lines = processLines(testHtml, []);
+
+					vl.items.at(-1).text += lines.shift();
+					vl.items.push(...lines.map(i => {return{text:i}}));
+					vl.render();
+
 					cache.pos += testLength;
 
 					newHtml = newHtml.substring(stableHtml.length);
@@ -157,23 +186,32 @@ export function highlight(code, language, node, is_finished) {
 			}
 		}
 
+		const last = vl.dom.lastElementChild;
+		if (last && last?.lastElementChild !== cache.work)
+			last.append(cache.work);
 		// 动态部分
 		morphdom(cache.work, `<span>${newHtml}</span>`);
+		vl.scrollTo(node.scrollHeight);
 	};
 
 	if (!hljs.getLanguage(language)) {
-		if (node.dataset.processed) return true;
+		if (!node.dataset.processed) {
+			const onload = loadLanguage(language);
+			if (onload) {
+				node.dataset.processed = '1';
+				onload.then((langName) => {
+					language = langName;
+					if (!is_finished) code = node._value || node.textContent;
+					is_finished |= node.dataset.finished;
 
-		const loaded = loadLanguage(language);
-		// 纯文本走这里
-		if (!loaded) return true;
+					delete node.dataset.finished;
+					delete node.dataset.processed;
+					callback(code);
+				});
+			}
+		}
 
-		node.dataset.processed = "y";
-		loaded.then((langName) => {
-			delete node.dataset.processed;
-			language = langName;
-			callback(node._value || node.textContent);
-		});
+		return true;
 	} else {
 		callback(code);
 	}

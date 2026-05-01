@@ -1,8 +1,14 @@
 import {URL} from 'node:url';
+import {createZipRouter} from "./utils/zipRouter.js";
 
 export class Router {
-	constructor(init) {
+	constructor(init, zip) {
 		this.init = init;
+		if (zip) {
+			createZipRouter(zip).then(fn => {
+				this.zipRouter = fn;
+			})
+		}
 		this.routes = [];
 		this.prefixes = [];
 	}
@@ -26,8 +32,15 @@ export class Router {
 	}
 
 	async handle(req, res) {
-		const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
-		const path = parsedUrl.pathname.substring(1) || '/';
+		let parsedUrl;
+		try {
+			parsedUrl = new URL(req.url, `http://${req.headers.host}`);
+		} catch {
+			res.end();
+			return;
+		}
+
+		const urlPath = parsedUrl.pathname.substring(1) || '/';
 		const method = req.method.toUpperCase();
 
 		// CORS headers
@@ -44,7 +57,7 @@ export class Router {
 		// Find matching route
 		for (const route of this.routes) {
 			if (route.method !== method) continue;
-			const match = path.match(route.regex);
+			const match = urlPath.match(route.regex);
 			if (!match) continue;
 
 			const params = {};
@@ -54,7 +67,7 @@ export class Router {
 
 			const ctx = {
 				url: parsedUrl,
-				path,
+				path: urlPath,
 				req,
 				res,
 				params,
@@ -77,10 +90,27 @@ export class Router {
 			if (typeof init === "function") init(ctx);
 
 			try {
-				await route.handler(ctx);
+				const p = route.handler(ctx);
+				if (p instanceof Promise) await p;
 				return;
 			} catch (err) {
+				console.error(err);
 				ctx.send(500, { error: err.message });
+				return;
+			}
+		}
+
+		if (this.zipRouter) {
+			try {
+				const ok = await this.zipRouter({
+					path: urlPath,
+					req,
+					res,
+				});
+				if (ok) return;
+			} catch (err) {
+				console.error(err);
+				res.end();
 				return;
 			}
 		}
