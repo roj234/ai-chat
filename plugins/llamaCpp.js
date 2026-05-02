@@ -64,7 +64,7 @@ const isLLaMACppRouter = $asyncState(({url, token}) => {
 	setIsLlamaCppBackend(false, false);
 	if (!url) return false;
 	return jsonFetch(url+"props", { authorization: token }).then(json => {
-		setIsLlamaCppBackend(true, json.build_info.startsWith("b114514"));
+		setIsLlamaCppBackend(true, json.build_info.startsWith("bB"));
 		return json.role === "router";
 	});
 }, _endpoint);

@@ -28,9 +28,10 @@ const _presetRemap = {
  * @return {AiChat.DnD.MyPreset}
  */
 export function convertSTPreset(inp, fileName) {
+	const end = fileName.lastIndexOf('.');
 	/** @type {AiChat.DnD.MyPreset} */
 	const out = {
-		name: fileName,
+		name: fileName.slice(0, end < 0 ? fileName.length : end),
 		time: Date.now(),
 		prompts: [],
 		regexps: []
@@ -39,7 +40,8 @@ export function convertSTPreset(inp, fileName) {
 	const by_index = {};
 	inp.prompts.forEach(item => by_index[item.identifier] = item);
 
-	for (let {identifier, enabled} of inp.prompt_order[0].order) {
+	const orders = inp.prompt_order.find(item => item.character_id === 100001) || inp.prompt_order[0];
+	for (let {identifier, enabled} of orders.order) {
 		let {name, role, content, system_prompt, marker} = by_index[identifier] || {};
 		if (!name) {
 			showToast("找不到内置对象："+identifier, "error", 0);
@@ -49,6 +51,7 @@ export function convertSTPreset(inp, fileName) {
 			if (!marker) continue;
 			content = _presetRemap[identifier] || identifier;
 		}
+		content = content.replaceAll("<user>", "{{user}}").replaceAll("<char>", "{{char}}");
 
 		out.prompts.push({
 			name,

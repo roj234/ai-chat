@@ -5,25 +5,22 @@ import {$state, $update, $watchWithCleanup} from 'unconscious';
 import {deleteConversation, getMessages, updateConversation} from "../database.js";
 import {conversations, isMobile, messages, runningConversations, selectedConversation} from "../states.js";
 import SimpleModal from "./SimpleModal.jsx";
-import {BM, convertToBranchMessage} from "../utils/BranchManager.js";
+import {BM, enableBranches} from "../utils/BranchManager.js";
 import {exportConversation} from "../data-exchange.js";
 import {onLoad} from "../plugin.js";
 import "/plugins/st/STTagList.css";
 
-//const searchText = $state("");
-
 export const updateConversationListUI = $state();
 
-let currentTarget;
-
-const closeHoverMenu = ({target}) => {
-	if (currentTarget !== target) {
-		hoverMenu.replaceWith(currentTarget);
-		currentTarget = null;
+const closeHoverMenu = (e) => {
+	if (hoverMenu.isConnected) {
+		requestAnimationFrame(() => hoverMenu.remove());
+		if (e.target.closest('.tag-dropdown') !== hoverMenu)
+			e.stopPropagation();
 	}
-}
+};
 
-const hoverMenu = <div className={"tag-dropdown"} style={"position:absolute"}>
+const hoverMenu = <div className={"tag-dropdown"} style={"position:fixed"}>
 	<div className="list" style={"display:block;left:-50%"}>
 		<label data-action={"edit"}>编辑标题</label>
 		<label data-action={"export"}>导出</label>
@@ -33,7 +30,7 @@ const hoverMenu = <div className={"tag-dropdown"} style={"position:absolute"}>
 
 onLoad((app) => {
 	if (!isMobile) hoverMenu.addEventListener("mouseleave", closeHoverMenu);
-	app.addEventListener("click", closeHoverMenu);
+	app.addEventListener("click", closeHoverMenu, {capture: true});
 });
 
 // 分组逻辑：基于时间戳计算相对日期
@@ -154,10 +151,11 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 	}
 
 	const mouseHandler = (e) => {
-		closeHoverMenu(e);
-		const {target} = e;
-		currentTarget = target;
-		target.replaceWith(hoverMenu);
+		if (e.target.closest('.tag-dropdown') === hoverMenu) return;
+		hoverMenu.style.left = e.pageX+"px";
+		hoverMenu.style.top = e.pageY+"px";
+		e.target.append(hoverMenu);
+		e.stopPropagation();
 	};
 
 	const list = <div className="sidebar-list scroll" id="chatList" onClick={eventHandler}></div>;
@@ -216,7 +214,7 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 				if (selectedConversation.value === conv) {
 					dontUpdateFlag = conv;
 					$update(selectedConversation);
-					messages.value = conv.branches ? convertToBranchMessage(conv, data) : data;
+					messages.value = conv.branches ? enableBranches(conv, data) : data;
 				}
 			});
 		}
@@ -247,7 +245,7 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 				conversations.unshift(conv);
 			}
 
-			updateConversation(conv, conv.branches ? [...conv[BM]] : messages.value);
+			updateConversation(conv, conv.branches ? conv[BM].messages : messages.value);
 		}
 	}, false);
 

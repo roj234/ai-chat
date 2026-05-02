@@ -1,6 +1,6 @@
 import './ToolCallCard.css';
 import {runTools, toolScriptRegistry} from "../skills.js";
-import {config, messages} from "../states.js";
+import {config, messages, selectedConversation} from "../states.js";
 import {$state, $update, $watch, appendChildren, isReactive} from "unconscious";
 import {MORPH_CHILD_FUNCTION} from "../utils/utils.js";
 import morphdom from "morphdom";
@@ -41,13 +41,13 @@ export function ToolCallCard(props) {
                     <div className="args-title">返回值
                         {isReactive(tool)/* || (message !== messages[messages.length-1] && !config.debug)*/ ? null : <button className={"rerun-btn"} onClick={({target}) => {
                             target.disabled = true;
-                            runTools(message, idx).then(() => {
+                            runTools(message, idx, true).then(() => {
                                 $update(messages);
                             }).finally(() => {
                                 target.disabled = false;
                             });
                         }} title={"执行该工具，返回值可能改变\n警告：无法撤销工具导致的外部更改"}>
-                        </button>}
+                        重新执行</button>}
                     </div>
                     <pre ref={output} className="args" dangerouslySetInnerHTML={highlightJsonLike(response_content.value ?? "/* 尚未运行 */")}></pre>
                     {() => Array.isArray(response_content.value) ? <div className="gallery">{response_content.value.map(part => {
@@ -95,7 +95,7 @@ export function ToolCallCard(props) {
  * @param {HTMLDetailsElement} element
  */
 const morphToolCallCard = ({tool, message, idx}, element) => {
-    const {success, content, time} = message.tool_responses[idx] || {};
+    const {success, content, time, tool_name} = message.tool_responses[idx] || {};
     const is_errored = false === success;
 
     element.classList.toggle("tool-error", is_errored);
@@ -103,9 +103,42 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
     const interactive = toolScriptRegistry[tool.function.name]?.interactive;
     let pending = interactive === "secure" && null == time;
     element.classList.toggle("tool-pending", pending);
+
+    function setAuditState(target, allowUnsafe) {
+        runTools(message, idx, allowUnsafe).then(() => {
+            $update(messages);
+        });
+
+        target.closest(".tool-body").remove();
+    }
+
     if (pending) {
         element.open = true;
         element.click();
+        element.append(<div className={"tool-body"}>
+            <div className="args-title">敏感操作需要批准</div>
+            <div style={"display:flex;gap:8px"}>
+                <button className={"btn warning"} onClick={({target}) => {
+                    setAuditState(target, true);
+                }}>
+                    允许一次
+                </button>
+                <button className={"btn primary"} onClick={({target}) => {
+                    target.previousElementSibling.click();
+
+                    const grantedTools = selectedConversation.grantedTools;
+                    if (grantedTools) selectedConversation.grantedTools = new Set([tool_name]);
+                    else grantedTools.add(tool_name);
+                }} title={"在该对话中一直允许"}>
+                    一直允许
+                </button>
+                <button className={"btn danger"} onClick={({target}) => {
+                    setAuditState(target, false);
+                }}>
+                    拒绝
+                </button>
+            </div>
+        </div>)
         return;
     }
 

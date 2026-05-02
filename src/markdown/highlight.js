@@ -90,7 +90,7 @@ function getOrCreateVL(node) {
  */
 export function highlight(code, language, node, is_finished) {
 	if (!code) return true;
-	node.className = "hljs";
+	if (!node.className) node.className = "hljs";
 
 	if (is_finished) {
 		requestAnimationFrame(() => {

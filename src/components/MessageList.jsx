@@ -3,7 +3,7 @@ import {ToolCallCard} from "./ToolCallCard.jsx";
 import {$computed, $foreach, $state, $update, $watch, AppendObserver, debugSymbol, unconscious} from "unconscious";
 import {formatDate} from "unconscious/ext/Utils.js";
 import {copyCodeEventHandler, renderMarkdownToElement, renderMarkdownToString} from "../markdown/markdown.js";
-import {abortCompletion, isMobile, MessageRoles, messages, selectedConversation} from "../states.js";
+import {abortCompletion, config, isMobile, MessageRoles, messages, selectedConversation} from "../states.js";
 import {sendUserChatMessage} from "../api-request.js";
 import {
 	copyButtonAnimation,
@@ -18,13 +18,14 @@ import "./MessageList.css";
 import {toolScriptRegistry} from "../skills.js";
 import {getBillingLog} from "../database.js";
 import {MultiKeyMap} from "../utils/MultiKeyMap.js";
-import {getBranchIndexCount, setBranchIndex} from "../utils/BranchManager.js";
+import {copyBranchAt, getBranchIndexCount, setBranchIndex, setLastMessage} from "../utils/BranchManager.js";
 import {ITEM_KEY, PINNED, VirtualList} from "unconscious/ext/VirtualList.js";
 import {EditWidget} from "./EditWidget.jsx";
 import {AudioPlayer} from "./AudioPlayer.jsx";
 
 import "./MyLoading.jsx";
 import morphdom from "morphdom";
+import SimpleModal from "./SimpleModal.jsx";
 
 // region AiChat.ResponseContentPart[] 的生成和渲染函数
 /**
@@ -55,7 +56,7 @@ function chunkRenderer(m) {
 			}
 			case "text": {
 				const {text} = item;
-				if (m.key[IN_EDIT_MODE]) {
+				if (isEditing(m.key)) {
 					return <EditWidget value={text} onChange={value => {
 						item.text = value;
 						const message = m.key;
@@ -75,7 +76,7 @@ function chunkRenderer(m) {
 					return url && <img src={typeof url === "string" ? url : url.toUrl()}/>;
 				})}</div>;
 			case "think":
-				return <ThinkBlock message={item} edit={m.key[IN_EDIT_MODE]}/>;
+				return <ThinkBlock message={item} edit={isEditing(m.key)}/>;
 			case "tool_call":
 				return <ToolCallCard {...item} />;
 			case "tool":
@@ -280,7 +281,7 @@ function chunkKeyFunc(message, chunk) {
 	}
 
 	if (type === "text" || type === "think") {
-		if (message.key[IN_EDIT_MODE]) keys.push(1);
+		if (isEditing(message.key)) keys.push(1);
 	}
 
 	//console.log(chunk, " => ", keys);
@@ -294,13 +295,15 @@ const editableRoles = new Set(EDITABLE_ROLES);
 let hoveringElement;
 let hoveringMessage;
 
-const regenBtn = <button data-action="regen" title="重新生成" className="ri-loop-right-line ghost"></button>;
-const deleteBtn = <button data-action="del" title="删除" className="ri-delete-bin-line ghost"></button>;
-const undoBtn = <button data-action="undo" title="步退" className="ri-arrow-go-back-line ghost"></button>;
-const copyBtn = <button data-action="copy" title="复制内容" className="ri-file-copy-line ghost"></button>;
-const editBtn = <button data-action="edit" title="编辑" className="ri-pencil-line ghost"></button>;
-const saveBtn = <button data-action="edit" title="保存" className="ri-check-line ghost"></button>;
-const insertThinkBtn = <button data-action="think" title="插入思考块" className="ri-ai-generate-text ghost"></button>;
+const regenBtn = <button data-action="regen" title="重新生成" className="ri-loop-right-line ghost" />;
+const deleteBtn = <button data-action="del" title="删除" className="ri-delete-bin-line ghost" />;
+const undoBtn = <button data-action="undo" title="撤销最后一步" className="ri-arrow-go-back-line ghost" />;
+const copyBtn = <button data-action="copy" title="复制" className="ri-file-copy-line ghost" />;
+const editBtn = <button data-action="edit" title="编辑" className="ri-pencil-line ghost" />;
+const saveBtn = <button data-action="edit" title="保存" className="ri-check-line ghost" />;
+const insertThinkBtn = <button data-action="think" title="插入思考块" className="ri-ai-generate-text ghost" />;
+
+const orderedButtons = [editBtn, saveBtn, insertThinkBtn, copyBtn, undoBtn, regenBtn, deleteBtn];
 
 /**
  * 更新悬浮按钮
@@ -309,6 +312,7 @@ const insertThinkBtn = <button data-action="think" title="插入思考块" class
  */
 function updateButtons(m, container) {
 	if (hoveringElement && hoveringElement !== container) {
+		hoveringElement.className = "";
 		hoveringElement.replaceChildren();
 	}
 
@@ -319,35 +323,45 @@ function updateButtons(m, container) {
 
 	const {index, end_index, content, role} = m;
 
-	const buttons = new Set();
+	const haveBranches = selectedConversation.branches;
+	const buttons = [];
 	const notGenerating = abortCompletion.value == null;
-	const isEditing = m.key[IN_EDIT_MODE];
-	const isNotLast = (end_index ? end_index !== messages.length : index !== messages.length-1);
-	const mayChange = (isNotLast || notGenerating) && editableRoles.has(role);
+	const isEditing_ = isEditing(m.key);
+	const isLast = (end_index ? end_index === messages.length : index === messages.length-1);
+	const mayChange = (!isLast || notGenerating) && editableRoles.has(role);
 	const isComposite = end_index > index + 1;
 	// 不支持编辑组合消息（工具调用）
-	if (mayChange && !isComposite) buttons.add(isEditing ? saveBtn : editBtn);
-	if (!isEditing) {
+	if (mayChange && !isComposite) buttons.push(isEditing_ ? saveBtn : editBtn);
+	if (!isEditing_) {
 		// 有内容才能复制
-		if ((isNotLast || notGenerating) && unconscious(content).find(item => item.text)) buttons.add(copyBtn);
-		if (end_index === messages.length && notGenerating) {
-			// TODO 之前也能regen，要加分叉功能
-			if (end_index !== 1) buttons.add(regenBtn);
-			if (isComposite) buttons.add(undoBtn);
+		if ((!isLast || notGenerating) && unconscious(content).find(item => item.text)) buttons.push(copyBtn);
+		if (notGenerating) {
+			// 最后一条助手消息，而不是最后一条消息，只有助手消息才有end_index
+			if (end_index && isLast) {
+				if (end_index !== 1) buttons.push(regenBtn);
+				if (isComposite) buttons.push(undoBtn);
+			} else if (haveBranches) {
+				if (role === 'assistant') {
+					buttons.push(regenBtn);
+				}
+			}
 		}
-		if (mayChange) buttons.add(deleteBtn);
+		if (mayChange) buttons.push(deleteBtn);
 	} else {
 		if (m.role === "assistant" && !m.key.think) {
-			buttons.add(insertThinkBtn);
+			buttons.push(insertThinkBtn);
 		}
 	}
 
-	for (let child of container.children) {
-		if (!buttons.has(child)) child.remove();
-	}
+	hoveringElement.className = buttons.length ? "buttons" : "";
 
 	let anchorNode = null;
-	for (const element of buttons) {
+	for (const element of orderedButtons) {
+		if (!buttons.includes(element)) {
+			element.remove();
+			continue;
+		}
+
 		if (element.parentElement === container) {
 			anchorNode = element;
 			continue; // 未变化则跳过
@@ -365,7 +379,7 @@ function updateButtons(m, container) {
 }
 
 const buttonHandler = (e) => {
-	const btn = e.target.closest(".line button[data-action]");
+	const btn = e.target.closest(".btn-line button[data-action]");
 	if (!btn) return;
 
 	/**
@@ -386,13 +400,17 @@ const buttonHandler = (e) => {
 					'text/plain': new Blob([m], {type: 'text/plain'})
 				})], btn);
 			} else {
-				// FUCK HTTPS
+				// FUCK Secure Context
 				copyButtonAnimation(m, btn);
 			}
 		}
 		break;
 		case "regen": {
-			deleteMessage(messages.length-1, messages.length);
+			if (selectedConversation.branches) {
+				setLastMessage(messages.at(-2));
+			} else {
+				deleteMessage(messages.length-1, messages.length);
+			}
 			sendUserChatMessage();
 		}
 		break;
@@ -404,31 +422,79 @@ const buttonHandler = (e) => {
 		break;
 		case "del": {
 			if (isMobile && !clickTwice(btn)) return;
-			deleteMessage(self.index, self.end_index || (self.index + 1));
+			const end = self.end_index || (self.index + 1);
+			if (selectedConversation.branches && (end !== messages.length)) {
+				SimpleModal({
+					title: "删除警告",
+					message: "在分支模式下，删除一条消息将导致该消息和它之后的所有消息被永久移除。",
+					onConfirm() {
+						deleteMessage(self.index, messages.length);
+					}
+				});
+				return;
+			}
+			deleteMessage(self.index, end);
 		}
 		break;
 		case "think": {
 			self.key.think = {
 				title: "手动插入的思考",
-				content: "a",
+				content: "",
 				format: "rc"
 			};
 			$update(updateMessageUI);
 		}
 		break;
 		case "edit": {
-			const inEdit = self.key[IN_EDIT_MODE];
-			self.key[IN_EDIT_MODE] = !inEdit;
-			if (inEdit) {
-				if (self.key.think && !self.key.think.content) {
-					delete self.key.think;
-				}
-				$update(messages);
-			}
+			let message = self.key;
+			const currentEditing = getEditing(message);
+			const inEdit = currentEditing === message;
+			if (currentEditing && !inEdit) {
+				selectedConversation[IN_EDIT_MODE] = null;
 
-			// 爷不管了，直接更新HTML
-			vl.setItem(vl.findIndex(self), self);
+				const currentRef = combinedMessages.find(item => item.key === currentEditing);
+				vl.setItem(vl.findIndex(currentRef), currentRef);
+			}
+			const updateSelf = () => {
+				if (selectedConversation.branches) {
+					selectedConversation[IN_EDIT_MODE] = inEdit ? null : message;
+
+					if (inEdit && message.id === -1) delete message.id;
+				} else {
+					message[IN_EDIT_MODE] = !inEdit;
+				}
+
+				// 爷不管了，直接更新HTML
+				vl.setItem(vl.findIndex(self), self);
+			};
+
+			if (inEdit) {
+				if (message.think && !message.think.content) delete message.think;
+
+				$update(messages);
+				updateSelf();
+			} else {
+				// 如果编辑最后一条，并且是用户消息，那么不弹窗
+				if (selectedConversation.branches && (message !== messages.at(-1) || self.role !== "user")) {
+					const newBranch = () => selectedConversation[IN_EDIT_MODE] = copyBranchAt(message);
+
+					if (config.branchEditHistory) {
+						SimpleModal({
+							title: "选择分支历史编辑模式？",
+							message: "确认：从此处创建一个新分支并编辑\n取消：直接修改历史对话\n该弹窗是您在 '设置 > 自定义' 中开启的高级选项",
+							onConfirm: newBranch,
+							onCancel:updateSelf
+						});
+					} else {
+						newBranch();
+					}
+
+					return;
+				}
+				updateSelf();
+			}
 		}
+		break;
 	}
 };
 
@@ -479,6 +545,24 @@ export const updateMessageUI = $state();
  */
 let vl;
 
+function isEditing(message) {
+	return selectedConversation.branches ? (selectedConversation[IN_EDIT_MODE] === message) : (message[IN_EDIT_MODE]);
+}
+function getEditing(message) {
+	return selectedConversation.branches ? selectedConversation[IN_EDIT_MODE] : message[IN_EDIT_MODE] && message;
+}
+
+function getBranchChunk(message, chunks) {
+	const [branchIndex, branchCount] = getBranchIndexCount(message);
+	if (branchCount > 1) {
+		chunks.push({
+			type: "branch",
+			current: branchIndex,
+			total: branchCount
+		});
+	}
+}
+
 const combinedMessages = $computed((oldMessages) => {
 	const byIndex = new Map;
 	if (oldMessages) {
@@ -518,6 +602,7 @@ const combinedMessages = $computed((oldMessages) => {
 		out.push(ref);
 
 		if (!isReactiveElement) {
+			getBranchChunk(message, chunks);
 			ref.time = ref.key.time;
 			continue;
 		}
@@ -538,22 +623,14 @@ const combinedMessages = $computed((oldMessages) => {
 			ref.end_index = i;
 
 			generationEnded = message.finish_reason;
-			ref[PINNED] = !generationEnded || message[IN_EDIT_MODE];
+			ref[PINNED] = !generationEnded || isEditing(message);
 			if (!generationEnded) {
 				if (!message.time) chunks.push({ type: "loading" });
 			}
 			// show token usage & billing
 			else {
 				chunks.push({type: "usage"});
-
-				const [branchIndex, branchCount] = getBranchIndexCount(message);
-				if (branchCount > 1) {
-					chunks.push({
-						type: "branch",
-						current: branchIndex,
-						total: branchCount
-					});
-				}
+				getBranchChunk(message, chunks);
 			}
 		}
 
@@ -610,9 +687,10 @@ export function MessageList() {
 		const {role, time} = m;
 
 		const callback = () => updateButtons(m, buttons);
-		const div = <div onMouseEnter={callback} onTouchStart.passive={callback} onMouseLeave={() => updateButtons()} className={`msg`} _identity={m}>
-			<div className={"line"+(isMobile?"":" sticky")}>
-				{m.key[IN_EDIT_MODE] ? <select onChange={e => {
+		const buttonDiv = <div className={"btn-line"}><span ref={buttons}></span></div>;
+		const div = <div onMouseEnter={callback} onTouchStart.passive={callback} className={`msg ${role}`} _identity={m}>
+			<div className={"line"}>
+				{isEditing(m.key) ? <select onChange={e => {
 					m.role = m.key.role = e.target.selectedOptions[0].value;
 				}}>
 					{["system", "user", "assistant"].map(name =>
@@ -621,10 +699,12 @@ export function MessageList() {
 				</select> : <b>{roleName(m)}</b>}
 				<span className='time'>{formatDate('Y-m-d H:i:s', time || 0)}</span>
 				<span className='spacer'></span>
-				<span className='buttons' ref={buttons}></span>
 			</div>
-			<div className={`body ${role}`}>{chunkRenderer(m)}</div>
+			{isMobile ? null : buttonDiv}
+			<div className="body">{chunkRenderer(m)}</div>
+			{!isMobile ? null : buttonDiv}
 		</div>;
+
 		if (hoveringMessage === m) updateButtons(m, buttons);
 		return div;
 	};

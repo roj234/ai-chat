@@ -2,7 +2,7 @@
 .branch-selector {
     position: absolute;
     right: 0;
-    bottom: -24px;
+    bottom: -22px;
 
     display: inline-flex;
     align-items: center;

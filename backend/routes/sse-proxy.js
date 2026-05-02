@@ -108,6 +108,7 @@ function authorize(ctx) {
 		if (backend.authorization) authorization = backend.authorization;
 	}
 
+	if (!url) return ctx.send(403, { error: 'unknown key' });
 	return [url, authorization];
 }
 

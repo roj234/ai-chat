@@ -6,7 +6,7 @@ export function MobileTitleEdit() {
 	const input = <input />;
 	const title = <b>{() => selectedConversation.title || '无标题'}</b>;
 	const isEditing = $state(false);
-	const editBtn = <button className={"ri-pencil-line"} style={"font-size: 12px; color: var(--muted)"} onClick={() => {
+	const editBtn = <button className={"ri-pencil-line btn ghost"} title={"编辑"} style={"font-size:smaller;color:var(--muted)"} onClick={() => {
 		const after = isEditing.value ^= true;
 		const conv = selectedConversation.value;
 		if (!after) {

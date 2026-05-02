@@ -2,7 +2,7 @@
 /* 侧边栏样式 */
 .sidebar {
     position: fixed;
-    height: 100%;
+    height: 100vh;
     width: 300px;
     background: var(--panel);
     border-right: 1px solid var(--border);

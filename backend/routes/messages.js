@@ -10,15 +10,10 @@ export function registerMessageRoutes(router) {
 	// 增加新对话
 	router.post('/conversations', async (ctx) => {
 		const body = await ctx.readBody();
-		body.time = body.time || Date.now();
-		delete body.id;
-
-		const data = { ...body };
-		delete data.title;
-		delete data.time;
+		const { id, title = '', time = Date.now(), ...data } = body;
 
 		const stmt = ctx.db.prepare('INSERT INTO conversations (title, time, data) VALUES (?, ?, ?)');
-		const info = stmt.run(body.title || '', body.time, JSON.stringify(data));
+		const info = stmt.run(title, time, JSON.stringify(data));
 		ctx.send(201, { success: true, id: Number(info.lastInsertRowid) });
 	});
 
@@ -27,13 +22,11 @@ export function registerMessageRoutes(router) {
 		const id = Number(ctx.params.id);
 		const body = await ctx.readBody();
 
-		const data = { ...body };
-		delete data.id;
-		delete data.title;
-		delete data.time;
+		const { id: _id, title = '', time = Date.now(), ...data } = body;
+		if (_id && id !== _id) return ctx.send(400, { error: 'bad id' });
 
 		ctx.db.prepare('UPDATE conversations SET title = ?, time = ?, data = ? WHERE id = ?')
-			.run(body.title, body.time, JSON.stringify(data), id);
+			.run(title, time, JSON.stringify(data), id);
 
 		ctx.send(200, { success: true });
 	});
@@ -82,26 +75,25 @@ export function registerMessageRoutes(router) {
 	router.post('/messages', async (ctx) => {
 		const body = await ctx.readBody();
 
-		let {id, owner, content, time = null} = body;
+		let {id, owner, content, time = null, ...data} = body;
 		if (owner == null) return ctx.send(400, { error: 'missing conversation id' });
 
-		delete body.id;
-		delete body.owner;
-		delete body.time;
-
-		if (Array.isArray(content)) {
-			const strContent = content.findIndex(item => item.type === "text");
-			if (strContent < 0) {
-				content = null;
+		if (typeof content !== "string") {
+			data.content = content;
+			if (Array.isArray(content)) {
+				const strContent = content.findIndex(item => item.type === "text");
+				if (strContent < 0) {
+					content = null;
+				} else {
+					content = data.content[strContent].text;
+				}
+				data.content[strContent] = { type: 'row' };
 			} else {
-				content = body.content[strContent].text;
+				content = null;
 			}
-			body.content[strContent] = { type: 'row' };
-		} else {
-			delete body.content;
 		}
 
-		const serializedData = JSON.stringify(body);
+		const serializedData = JSON.stringify(data);
 
 		if (id && !isNaN(id)) {
 			ctx.db.prepare('UPDATE messages SET data = ?, content = ?, time = ? WHERE id = ?').run(serializedData, content, time, id);
@@ -114,11 +106,11 @@ export function registerMessageRoutes(router) {
 			id = Number(info.lastInsertRowid);
 		}
 
-		if ((body.role === "user" || body.role === "assistant") && ctx.vectorDB) {
+		if ((data.role === "user" || data.role === "assistant") && ctx.vectorDB) {
 			if (content)
 				ctx.vectorDB.set('m#'+id.toString(36), content);
-			if (body.think?.content)
-				ctx.vectorDB.set('M#'+id.toString(36), body.think.content);
+			if (data.think?.content)
+				ctx.vectorDB.set('M#'+id.toString(36), data.think.content);
 		}
 
 		ctx.send(200, { success: true, id });

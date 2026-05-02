@@ -1,28 +1,37 @@
-import {SETTINGS} from "../src/settings.js";
 import {searchMessages} from "../src/database.js";
 
 import "./search.css";
 import {formatDate} from "unconscious/ext/Utils.js";
 import {selectedConversation} from "../src/states.js";
+import {onLoad} from "../src/plugin.js";
 
-SETTINGS.push({
-	name: "搜索对话内容",
-	type: "element",
-	_tab: ["general", "data"],
-	element: <div className="input-warp"><input className="text-input" type="text" placeholder="关键词或语义描述" onChange={({target}) => {
+const searchBtn = <button className={"ri-search-line btn ghost"} title={"搜索对话"} onClick={() => {
+	searchBtn.replaceWith(searchInput);
+	searchInput.firstElementChild.focus();
+}}></button>;
+
+const searchInput = <div style={"position:absolute;z-index:20;background:var(--bg);width:calc(100% - 20px)"} className="input-warp">
+	<input className="text-input" type="text" placeholder="关键词或语义描述" onBlur={() => {
+		searchInput.replaceWith(searchBtn);
+	}}
+	onChange={({target}) => {
 		const str = target.value;
 		target.value = "";
 
 		searchMessages(str).then(convs => {
-			const handleClose = () => {element.remove();};
+			const handleClose = () => {
+				element.remove();
+			};
 			const element = (
 				<div className="modal-overlay" style={"background:transparent;pointer-events:none"}>
-					<div className="modal" style={"max-width:60vw;pointer-events:all"} onClick={(e) => e.stopPropagation()}>
+					<div className="modal" style={"max-width:60vw;pointer-events:all"}
+						 onClick={(e) => e.stopPropagation()}>
 						<div className="header"><b>{str}的搜索结果</b>
 							<button className="btn ghost" onClick={handleClose}>关闭</button>
 						</div>
 						<div style={"padding:0;overflow:auto"}>
-							{convs?.length ? convs.map(AccordionItem) : <div className="no-results">没有找到相关对话</div>}
+							{convs?.length ? convs.map(AccordionItem) :
+								<div className="no-results">没有找到相关对话</div>}
 						</div>
 					</div>
 				</div>
@@ -31,7 +40,11 @@ SETTINGS.push({
 			document.body.append(element);
 		});
 
-	}} /></div>
+		target.blur();
+	}}/></div>;
+
+onLoad((app) => {
+	app.querySelector(".sidebar-header").prepend(searchBtn);
 })
 
 

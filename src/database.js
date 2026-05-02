@@ -6,6 +6,7 @@ import * as idb from "./database/db-indexeddb.js";
 import * as remote from "./database/db-remote.js";
 import {showToast} from "./components/Toast.js";
 import {SETTINGS} from "./settings.js";
+import {BM} from "./utils/BranchManager.js";
 
 const MESSAGE_IN_DB = debugSymbol("MESSAGE_IN_DB");
 const CONVERSATION_IN_DB = debugSymbol("CONVERSATION_IN_DB");
@@ -88,6 +89,7 @@ export async function newConversation() {
 		time: Date.now(),
 		[MESSAGE_IN_DB]: new Map
 	};
+	if (config.branchModeDefault) conversation.branches = 1;
 
 	if (config.debugDatabase) {
 		conversation.id = -1;
@@ -99,9 +101,9 @@ export async function newConversation() {
 	return conversation;
 }
 
-const IGNORE_ID = new Set(["id"]);
+const IGNORE_ID = new Set(["id", "parent", "branches"]);
 
-export const CONVERSATION_KEYS = ["id", "title", "time", "allowedTools", "activatedModules"];
+export const CONVERSATION_KEYS = ["id", "title", "time", "allowedTools", "activatedModules", "branches"];
 
 function serializeConversation(data) {
 	return cloneNamed(data, CONVERSATION_KEYS);
@@ -117,7 +119,7 @@ function serializeConversation(data) {
 export function updateConversation(data, messages, keepTime) {
 	if (config.debugDatabase) return DONE;
 
-	const promises = [];
+	let serial = DONE;
 	let changed;
 
 	if (messages) {
@@ -129,6 +131,10 @@ export function updateConversation(data, messages, keepTime) {
 		 * @type {Map<number, AiChat.Message>}
 		 */
 		const messagesInMemory = new Map();
+
+		const pendingAdd = [];
+
+		if (data[BM]) messages = data[BM].messages;
 
 		for (let i = 0; i < messages.length; i++){
 			const message = messages[i];
@@ -164,11 +170,16 @@ export function updateConversation(data, messages, keepTime) {
 					if (message.time !== value.time) return save();
 				})
 			}
-			promises.push(save());
+			pendingAdd.push(save);
 		}
 
-		if (messagesInDB)
-			messagesInDB.forEach((value, id) => promises.push(db.deleteMessage(id)));
+		if (messagesInDB) {
+			const deletePromises = [];
+			messagesInDB.forEach((value, id) => deletePromises.push(db.deleteMessage(id)));
+			serial = Promise.all(deletePromises);
+		}
+
+		for (let save of pendingAdd) serial = serial.then(save);
 
 		data[MESSAGE_IN_DB] = messagesInMemory;
 	}
@@ -177,10 +188,10 @@ export function updateConversation(data, messages, keepTime) {
 	if (changed || !isEqual(data[CONVERSATION_IN_DB], serializedForm, IGNORE_ID)) {
 		if (changed) serializedForm.time = data.time = Date.now();
 		data[CONVERSATION_IN_DB] = serializedForm;
-		promises.push(db.updateConversation(serializedForm));
+		serial = serial.then(() => db.updateConversation(serializedForm));
 	}
 
-	return Promise.all(promises).catch(databaseError);
+	return serial.catch(databaseError);
 }
 
 /**

@@ -24,7 +24,7 @@ async function decodeDollar(val, zr) {
 export async function decodeObjects(input, zr) {
 	if (input?.$) return decodeDollar(input, zr);
 	for (const [val, own, key] of deepEntries(input)) {
-		if (val.$) own[key] = await decodeDollar(val, zr);
+		if (val?.$) own[key] = await decodeDollar(val, zr);
 	}
 	return input;
 }

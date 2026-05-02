@@ -1,9 +1,12 @@
 import {clearDatabase, duplicateConversation, exportConversation, importConversation} from "./data-exchange.js";
 import {createPreset} from "./components/PresetDropdown.jsx";
-import {config, isMobile} from "./states.js";
+import {config, isMobile, messages, selectedConversation} from "./states.js";
 import defaultCoTPrompt from "../media/thinkPrompt.txt?raw";
+import SimpleModal from "./components/SimpleModal.jsx";
+import {disableBranches, enableBranches, setLastMessage} from "./utils/BranchManager.js";
+import {showToast} from "./components/Toast.js";
 
-const defaultSystemPrompt =`You are a helpful assistant.
+const defaultSystemPrompt = `You are a helpful assistant.
 {{think}}
 
 <markdown-tools>
@@ -21,6 +24,52 @@ const defaultSystemPrompt =`You are a helpful assistant.
 </information>`;
 
 export {defaultSystemPrompt, defaultCoTPrompt};
+
+/**
+ *
+ * @type {JSX.Element[]}
+ */
+export const CUSTOM_CONTROLS = <>
+	<button className="ri-lightbulb-flash-line chip ghost" class:active={() => config.think}
+			onClick={() => {
+				config.think ^= true;
+			}}>
+		<div className="tooltip">深度思考：先思考后回答，解决复杂问题</div>
+	</button>
+	<button className="ri-robot-2-line chip" class:active={() => config.tools}
+			onClick={() => {
+				config.tools ^= true;
+			}}>
+		<div className="tooltip">工具调用：使用工具绘制图表、进行计算</div>
+	</button>
+	<button className="ri-git-fork-line chip" class:active={() => selectedConversation.branches}
+			onClick={() => {
+				if (!selectedConversation.value) {
+					showToast("你只能在对话内修改这个选项\n要改变默认值,请前往设置", "error");
+					return;
+				}
+				if (!selectedConversation.branches) {
+					SimpleModal({
+						title: "是否为当前对话启用分支功能？",
+						message: "启用后，部分功能将会与之前版本的预期行为不同\n- 您将无法同时进行多个编辑操作\n- 您将无法删除对话中间的消息\n- 编辑操作将创建新的分支（可在设置中修改）\n- 当前版本和上下文管理（技能、变量等）存在一些兼容性问题",
+						onConfirm() {
+							messages.value = enableBranches(selectedConversation, messages);
+							setLastMessage(messages.at(-1));
+						}
+					});
+				} else {
+					SimpleModal({
+						title: "是否为当前对话关闭分支功能？",
+						message: "关闭后，当前未显示的其它分支对话将被彻底删除，无法撤销",
+						onConfirm() {
+							messages.value = disableBranches(selectedConversation);
+						}
+					});
+				}
+			}}>
+		<div className="tooltip">对话分支（实验性）：保存并探索对话的不同走向</div>
+	</button>
+</>;
 
 export const SETTINGS = [
 	{
@@ -338,6 +387,18 @@ export const SETTINGS = [
 		choices: {
 			"思考": "expandThinkBlock",
 			"工具调用": "expandToolCall"
+		}
+	},
+	{
+		_tab: "customize",
+		name: "分支对话模式 (实验性)",
+		type: "multiple",
+		choices: {
+			"新对话自动开启": "branchModeDefault",
+			"允许编辑消息历史": "branchEditHistory"
+		},
+		title: {
+			"允许编辑消息历史": "点击编辑时弹窗询问是否直接编辑消息历史，而不是创建分支"
 		}
 	},
 	{

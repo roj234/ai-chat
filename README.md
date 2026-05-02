@@ -1,6 +1,6 @@
 # AiChat - 爱聊天
 
-#### 当前版本 2.4.0
+#### 当前版本 2.5.0
 - 警告：2.0.0的数据格式与之前版本不兼容
 
 AiChat 是一个现代化的高性能**纯 Web** AI 聊天前端，基于 [Unconscious](https://github.com/Roj234/unconscious) 响应式框架构建，支持 OpenAI-兼容 API，提供流畅的聊天体验。
@@ -50,7 +50,7 @@ AiChat 是一个现代化的高性能**纯 Web** AI 聊天前端，基于 [Uncon
 > 随便哪个2026年的LLM（例如DeepSeek V4P or Gemini3F）都能在一轮对话内按照这些API规范生成实现
 
 - **多模态支持**：文本、图片、音频输入
-- **对话管理**：支持并发对话、自动标题生成，采用 IndexedDB + 索引存储，不浪费内存
+- **对话管理**：支持并发对话、对话分支、生成标题，采用 IndexedDB/SQLite + 索引存储，不浪费内存
   - 不浪费内存指不会在每次打开网页时将所有对话读取到内存
   - 你说什么这不是编程常识吗？不好意思真有人的前端会一次读取所有历史对话
 - **深度思考**：先思考后回答，解决复杂问题（可以简单开关），支持手动CoT
@@ -180,7 +180,7 @@ npm run preview
 - 支持在思考中使用AntiSlop约束采样 (`thinking-prefill`分支) （预览版）
 - 支持OpenRouter规范的思考开关和思考预算 (`openrouter-compatible-reasoning`分支)
 - 支持设置API密钥的同时提供静态文件服务 (`static_files`分支)
-- 该项目识别我的llama.cpp分支是通过检查 `/props` API 返回的 `build_info` 字段前缀是否为 `b114514`
+- 该项目识别我的llama.cpp分支是通过检查 `/props` API 返回的 `build_info` 字段是否为 `bB` 开头
 
 - 我把部分依赖直接放在 vendor/public 文件夹而不是 package.json 里
     - Mermaid: 否则你会收获一个200MB的node_modules，另外Mermaid.js占据本项目打包体积的80%

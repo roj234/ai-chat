@@ -97,7 +97,7 @@ button {
 }
 
 button[class^="ri-"] {
-    padding: 0.5rem;
+    padding: 0.375rem;
     font-size: 1rem;
 }
 
@@ -232,10 +232,8 @@ button[class^="ri-"] {
         z-index: 10;
 
         & .time { color: var(--muted); }
-    }
 
-    &:not(:hover) > .line .buttons {
-        display: none;
+        .user & { flex-direction: row-reverse; }
     }
 
     /* 内容 */
@@ -250,9 +248,9 @@ button[class^="ri-"] {
         display: grid;
         gap: var(--spacing-sm);
 
-        &.user { border-right: 6px solid var(--user); }
-        &.assistant { border-left: 6px solid var(--assistant); }
-        &.system { border-left: 6px solid var(--system); }
+        .user & { border-right: 6px solid var(--user); }
+        .assistant & { border-left: 6px solid var(--assistant); }
+        .system & { border-left: 6px solid var(--system); }
 
         /* 修复溢出问题 */
         & > * { min-width: 0; }
@@ -346,13 +344,14 @@ button[class^="ri-"] {
     display: block;
     position: absolute;
     top: -100%;
-    left: -100%;
+    font-size: smaller;
+    transform: translateX(-50%);
     width: max-content;
     padding: var(--spacing-xs) var(--spacing-md);
     background: rgba(0,0,0,0.8);
     border-radius: var(--border-radius-sm);
     text-align: center;
-    z-index: 999;
+    z-index: 99;
 }
 
 /* 输入框 */
@@ -371,6 +370,7 @@ button[class^="ri-"] {
 .composer .controls {
     display: flex; gap: var(--spacing-md); flex-wrap: wrap; align-items: center;
     user-select: none;
+    justify-content: space-between;
 }
 .query {
     position: relative;
@@ -600,29 +600,31 @@ kbd {
     }
 }
 
+.bar {
+    display: grid;
+    /* 关键：三列布局。左右两列设为 1fr（等比例平分剩余空间），中间自适应内容 */
+    /* 这样无论右侧按钮多宽，中间永远是视口中心 */
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+
+    & > div {
+        display: flex;
+        gap: 10px;
+    }
+    & .btn { padding: var(--spacing-sm); border: none; }
+}
+
 @media screen and (min-width: 768px) {
     .bar {
-        position: fixed;
-        top: var(--spacing-sm);
-        left: var(--spacing-lg);
-        display: flex;
-        gap: 8px;
-        z-index: 15;
+        width: calc(50% - var(--panel-width) / 2 - 8px);
+        margin: 0 auto;
         padding: var(--spacing-xs);
-        border-radius: var(--border-radius-md);
-
-        & .btn { background: var(--bg); }
+        position: absolute;
     }
 
-    .header.closed > .bar :not(:first-child) {
-        display: none !important;
-    }
-
-    @keyframes is-not-sticky {
-        0%, 100% {
-            border-bottom: none;
-            background: transparent;
-        }
+    .header.closed > .bar {
+        margin: 0;
+        & :not(:first-child) { display: none !important; }
     }
 
     /* branch */
@@ -630,22 +632,26 @@ kbd {
         margin-top: 20px;
     }
 
-    .msg > .line {
-        border-bottom: 1px solid var(--border);
-        background: var(--card);
-
-        top: -0.1px;
-        view-timeline-name: --nav;
-        animation: is-not-sticky linear;
-        animation-timeline: --nav;
-        animation-range: entry 100% exit 0%;
-    }
-
-    .code-header {
-        top: 31px;
-    }
-
     .hljs {max-height: calc(40vh);}
+
+    .msg > .btn-line {
+        position: sticky;
+        top: 12px;
+
+        & > .buttons {
+            position: absolute;
+            right: -8px;
+            transform: translateX(100%);
+
+            display: flex;
+            gap: 8px;
+            padding: 6px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+    }
 }
 
 @media (hover: none) {
@@ -654,7 +660,7 @@ kbd {
         100% { pointer-events: auto; }
     }
 
-    .msg:hover > .line .buttons {
+    .msg:hover > .btn-line .buttons {
         animation: preventClick 40ms forwards;
     }
 }
@@ -673,9 +679,10 @@ kbd {
         }
     }
 
-    .sidebar .ri-wrench-line {
-        z-index: 1;
+    .bar {
+        border-bottom: 1px solid var(--border);
     }
+
     .sidebar {
         width: 80vw !important;
 
@@ -697,22 +704,6 @@ kbd {
     }
 
     .hljs {max-height: calc(20vh);}
-
-    .bar {
-        display: grid;
-        /* 关键：三列布局。左右两列设为 1fr（等比例平分剩余空间），中间自适应内容 */
-        /* 这样无论右侧按钮多宽，中间永远是视口中心 */
-        grid-template-columns: 1fr auto 1fr;
-        align-items: center;
-
-        border-bottom: 1px solid var(--border);
-
-        & > div {
-            display: flex;
-            gap: 10px;
-        }
-        & .btn { padding: var(--spacing-sm); border: none; }
-    }
 
     .header.closed {
         overflow: hidden;
@@ -736,12 +727,25 @@ kbd {
     }
 
     .msg {
-        flex-direction: column-reverse;
+        position: relative;
 
         & > .body {
             padding: var(--spacing-md);
         }
+
+        & > .btn-line {
+            display: flex;
+            align-items: center;
+            height: 32px;
+
+            .user & {
+                flex-direction: row-reverse;
+            }
+        }
     }
+
+    .msg { margin-top: 0; }
+    .composer { padding-top: 0; }
 
     .filter-label:not(.tooltip) {
         color: var(--text);

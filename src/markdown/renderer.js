@@ -10,7 +10,7 @@ const customCodeRenderer = {};
 /**
  *
  * @param {string} type
- * @param {function(code: string, language: string, node: HTMLElement, is_finished: boolean | undefined): void} htmlGenerator
+ * @param {function(code: string, language: string, node: HTMLElement, is_finished: boolean): void} htmlGenerator
  */
 export function registerCodeBlockRenderer(type, htmlGenerator) {
 	customCodeRenderer[type] = htmlGenerator;

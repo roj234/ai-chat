@@ -481,10 +481,11 @@ export function runAllTools(conversation, messages, isImporting) {
 /**
  *
  * @param {AiChat.AssistantMessage} response
- * @param {true|number=undefined} permitState
+ * @param {boolean|number=false} forceRerun
+ * @param {boolean=} allowUnsafe
  * @return {Promise<boolean>}
  */
-export async function runTools(response, permitState) {
+export async function runTools(response, forceRerun, allowUnsafe) {
 	const tool_responses = response.tool_responses;
 	let autoNext = true;
 	const globalStorage = selectedConversation.value;
@@ -494,7 +495,7 @@ export async function runTools(response, permitState) {
 		const tc = response.tool_calls[i];
 
 		if (msg?.success != null) {
-			if (permitState !== i) continue;
+			if (forceRerun !== i) continue;
 			toolScriptRegistry[msg.tool_name].removed?.(msg, globalStorage);
 		}
 		msg = tool_responses[i] = {};
@@ -515,9 +516,15 @@ export async function runTools(response, permitState) {
 						interactive = interactive(parameters);
 					}*/
 					if (interactive === "secure") {
-						if (!config.permitAllTools) {
+						if (!config.permitAllTools && !selectedConversation.grantedTools?.has(name)) {
 							autoNext = false;
-							if (permitState !== true && permitState !== i) {
+							if (forceRerun === true || (forceRerun === i && !allowUnsafe)) {
+								msg.success = false;
+								msg.content = "User doesn't permit this call";
+								continue;
+							}
+
+							if (forceRerun !== i) {
 								delete msg.time;
 								continue;
 							}

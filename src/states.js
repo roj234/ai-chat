@@ -1,8 +1,18 @@
 import {$asyncState, $state, $store, $update, $watch} from 'unconscious';
 import {jsonFetch} from "./utils/utils.js";
 import {isEqual} from "../vendor/equals.js";
+import {onLoad} from "./plugin.js";
 
-export const isMobile = matchMedia('(max-width: 768px)').matches;
+/**
+ * @type {boolean}
+ */
+export let isMobile ;
+
+const mobileCheck = () => isMobile = matchMedia('(max-width: 768px)').matches;
+mobileCheck();
+onLoad(() => {
+	window.addEventListener('resize', mobileCheck);
+});
 
 /**
  *

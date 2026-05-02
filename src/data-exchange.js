@@ -9,7 +9,7 @@ import {
 	newConversation,
 	updateConversation
 } from "./database.js";
-import {prettyError} from "./utils/utils.js";
+import {cloneNamed, prettyError} from "./utils/utils.js";
 import {runAllTools} from "./skills.js";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {openZip, ZipWriter} from "../vendor/jszip.js";
@@ -206,12 +206,12 @@ export async function exportConversation(isConfig, _conv) {
 	} else {
 		const conv = _conv || selectedConversation.value;
 		if (conv) {
-			data = {
-				//spec: "roj234:aichat:conversation",
-				title: conv.title,
-				time: conv.time,
-				messages: cleanMessages(/*messages.value || */await getMessages(conv))
-			};
+			data = cloneNamed(conv, CONVERSATION_KEYS);
+			let messagePromise = messages.value;
+			try {
+				messagePromise = await getMessages(conv);
+			} catch {}
+			data.messages = cleanMessages(messagePromise);
 			await encodeObjects(data.messages, mapping, zw);
 
 			const jsonData = JSON.stringify(data, replacer, 2);
@@ -233,8 +233,7 @@ export async function exportConversation(isConfig, _conv) {
 			for (const conv of conversations) {
 				const index = callbacks.length;
 
-				const copy = {...conv};
-				delete copy.id;
+				const { id, ...copy } = cloneNamed(conv, CONVERSATION_KEYS);
 
 				callbacks.push(getMessages(conv).then(messages => {
 					copy.messages = cleanMessages(messages);

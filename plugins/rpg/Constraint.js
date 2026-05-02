@@ -4,7 +4,7 @@ import {$update, isReactive} from "unconscious";
 import {updateMessageUI} from "/src/components/MessageList.jsx";
 import {messages} from "/src/states.js";
 
-export async function jsonPrompt(messages_, body) {
+export async function jsonPrompt(messages_, body, custom_renderer_id = 'json') {
 	messages.value = messages_;
 
 	const api = new APIRequest(messages, null, body);
@@ -15,7 +15,8 @@ export async function jsonPrompt(messages_, body) {
 		const currentIsThink = isReactive(content.think);
 		const container = getMarkdownContainer(currentIsThink);
 		if (!container) return true;
-		markdownRenderer(currentIsThink ? content.think.content : "```json\n" + content.content, container);
+		markdownRenderer(currentIsThink ? content.think.content : `\`\`\`${custom_renderer_id}
+` + content.content, container);
 	}
 
 	const response = await api.call(null, (type, content) => {
@@ -29,8 +30,10 @@ export async function jsonPrompt(messages_, body) {
 	});
 
 	const data = JSON.parse(response.content);
+	response.content = `\`\`\`${custom_renderer_id}
+` + response.content + "\n```";
 	$update(messages);
-	response.content = "```json\n" + response.content + "\n```";
+
 	return data;
 }
 

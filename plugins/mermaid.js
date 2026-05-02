@@ -30,7 +30,7 @@ registerCodeBlockRenderer("mermaid", (code, language, node, is_finished) => {
 				await mermaid.run({ nodes: [node] });
 				node.className = "mermaid";
 			} catch (err) {
-				node.className = "error";
+				node.className = "hljs error";
 				node.textContent = err.message;
 			}
 		}

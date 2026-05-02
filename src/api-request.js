@@ -117,7 +117,7 @@ async function composeMessages(conversation, messages, allowTools, additionalBod
 			if (format === "rc") json_msg.reasoning_content = content;
 			if (format[0] === "m" && config.trimCoT !== "m") {
 				const tag = think.format.substring(1);
-				json_msg.content = "<"+tag+">" + content + "</"+tag+">\n" + json_msg.content;
+				json_msg.content = "<"+tag+">" + content + (json_msg.content ? "</"+tag+">\n" + json_msg.content : "");
 			}
 		} else {
 			delete json_msg.reasoning_details;
@@ -402,10 +402,12 @@ export function getMarkdownContainer(think) {
 	if (bodyNode) {
 		const children = bodyNode.children;
 		const element = children[children.length - 1];
-		if (think) {
-			if (element.matches(".think")) return element.lastElementChild;
-		} else {
-			if (element.matches(".content")) return element;
+		if (element) {
+			if (think) {
+				if (element.matches(".think")) return element.lastElementChild;
+			} else {
+				if (element.matches(".content")) return element;
+			}
 		}
 	}
 }
@@ -868,11 +870,10 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 				billingLog.message_id = assistantMessage.id;
 			}
 		} else {
-			billingLog.message_id = "T_"+Date.now();
+			billingLog.message_id = "T$"+Date.now();
 		}
-		if (has_resp) {
-			await appendBillingLog(billingLog);
-		}
+		// 不等了 fire and forgot
+		if (has_resp) appendBillingLog(billingLog);
 	}
 
 	return finishReason;

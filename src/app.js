@@ -2,7 +2,7 @@ import {$state, $unwatch, $watch, appendChildren} from 'unconscious';
 import Filter from 'unconscious/ext/components/Filter.jsx';
 import {ConversationList} from "./components/ConversationList.jsx";
 import {listConversations, newConversation} from "./database.js";
-import {SETTINGS} from "./settings.js";
+import {CUSTOM_CONTROLS, SETTINGS} from "./settings.js";
 import {bind, jsHide, prettyError} from "./utils/utils.js";
 import {MessageList} from "./components/MessageList.jsx";
 import {
@@ -39,7 +39,7 @@ function createApp() {
 	let messagesPanel,
 		userInput, sendBtn,
 		statusBadge, sidebar,
-		thinkBtn, toolCallBtn, scroller;
+		scroller, backToBottomBtn;
 
 	const SettingUI = <Filter config={SETTINGS} choices={config} onChange={onSettingChanged} showTitle={isMobile} />;
 	const newSettingUI = SettingDialog(SettingUI);
@@ -176,10 +176,19 @@ function createApp() {
 						}} className="ri-chat-smile-ai-fill"></span>
 					</div>
 					{/*我们可能很快不再需要这个了（或者仅用于调试？）*/}
-					<div className="controls"><span ref={statusBadge}></span></div>
+					<div className="controls">
+						<span ref={statusBadge}></span>
+						<button className={"btn ghost"} style={"display:none"} ref={backToBottomBtn} onClick={() => {
+							scroller.scrollTo({
+								top: scroller.scrollHeight,
+								behavior: "smooth",
+							})
+						}}>返回底部</button>
+						<span></span>
+					</div>
 					<div className="query">
 						<textarea placeholder="今天有什么能帮到你？" id="userInput" ref={userInput}
-							onInput={() => {
+								  onInput={() => {
 								// Auto resize when typing
 								userInput.style.height = '';
 								userInput.style.height = (userInput.scrollHeight) + 'px';
@@ -194,20 +203,7 @@ function createApp() {
 						></textarea>
 						{_InputAttachment(attachments)}
 						<div className="controls">
-							<button className="chip" class:active={() => config.think} ref={thinkBtn}
-									onClick={() => {
-										config.think ^= true;
-									}}>
-								<div className="tooltip">先思考后回答，解决复杂问题</div>
-								深度思考
-							</button>
-							<button className="chip" class:active={() => config.tools} ref={toolCallBtn}
-									onClick={() => {
-										config.tools ^= true;
-									}}>
-								<div className="tooltip">使用工具绘制图表、进行计算</div>
-								工具调用
-							</button>
+							{CUSTOM_CONTROLS}
 							<div className="spacer"></div>
 							<button className="ri-attachment-2 btn ghost" title="上传附件"
 									onClick={() => fileInput.click()}></button>
@@ -215,14 +211,18 @@ function createApp() {
 						</div>
 
 					</div>
-					<div className="hint"
-						 style="text-align:center">{() => messages.length ? "内容由AI生成，可能包含错误，请仔细甄别" : isMobile ? "欢迎使用" : "Shift+Enter 换行"}</div>
 				</div>
 			</div>
 		</div>
 	</>);
 
 	bind(userInput, inputText);
+
+	scroller.addEventListener("scroll", () => {
+		const top = scroller.scrollTop;
+		const b = scroller.scrollHeight - scroller.offsetHeight - top > 250;
+		backToBottomBtn.style.display = b ? "" : "none";
+	});
 
 	Shared.scroller = scroller;
 	Shared.statusBadge = statusBadge;
