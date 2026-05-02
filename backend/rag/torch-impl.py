@@ -1,16 +1,12 @@
+import asyncio
+import os
+import socket
+import threading
+import time
+import uvicorn
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-import asyncio
-import uvicorn
-import threading
-import socket
-
-import json
-import sys
-import time
-
-import os
 from loguru import logger
 
 # 最大队列长度：控制总并发（适当限制，防止堆太多请求）
@@ -78,17 +74,17 @@ def last_token_pool(
 ) -> Tensor:
     """
     提取每个序列的最后一个有效 token 的隐藏状态
-    
+
     Args:
         last_hidden_states: [batch_size, seq_len, hidden_dim]
         attention_mask: [batch_size, seq_len]
     """
     # 计算每个序列的有效长度（非 padding token 数量）
     sequence_lengths = attention_mask.sum(dim=1) - 1  # [batch_size]
-    
+
     batch_size = last_hidden_states.shape[0]
     device = last_hidden_states.device
-    
+
     # 使用 gather 提取最后一个有效 token
     # 方法1：使用高级索引（推荐，更清晰）
     batch_indices = torch.arange(batch_size, device=device)
@@ -121,7 +117,6 @@ class EmbeddingResponse(BaseModel):
 # --------- 批处理/并发控制相关全局对象 --------- #
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
 import queue
 
 @dataclass

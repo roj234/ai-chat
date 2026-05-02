@@ -1,6 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+
+const execFilePromise = promisify(execFile);
 
 // ---------- 工具函数（直接从原 fs-api.js 迁移） ----------
 
@@ -66,7 +70,7 @@ async function readLines(filePath) {
 
 // ---------- 路由注册 ----------
 
-export function registerFsRoutes(router) {
+export function registerFsRoutes(router, allowExec) {
 	// 辅助：发送非 JSON 响应（如图片、文本）
 	function sendRaw(res, status, contentType, data) {
 		res.writeHead(status, { 'Content-Type': contentType });
@@ -74,7 +78,7 @@ export function registerFsRoutes(router) {
 	}
 
 	// 1. 读取文件或目录内容
-	router.post('read', async (ctx) => {
+	router.post('/read', async (ctx) => {
 		const { path: filePath, begin, end, max_chars = 10000 } = await ctx.readBody();
 		const safePath = pathFilter(ctx, filePath);
 		const stats = await fs.stat(safePath);
@@ -114,7 +118,7 @@ export function registerFsRoutes(router) {
 	});
 
 	// 2. 替换文件内容（按标签）
-	router.post('replace', async (ctx) => {
+	router.post('/replace', async (ctx) => {
 		const { path: filePath, start_tag, end_tag, lines: newLines } = await ctx.readBody();
 		const safePath = pathFilter(ctx, filePath);
 		const lines = await readLines(safePath);
@@ -131,7 +135,7 @@ export function registerFsRoutes(router) {
 	});
 
 	// 3. 写入文件（创建/覆写）
-	router.post('write', async (ctx) => {
+	router.post('/write', async (ctx) => {
 		const { path: filePath, lines } = await ctx.readBody();
 		const safePath = pathFilter(ctx, filePath);
 		await fs.mkdir(path.dirname(safePath), { recursive: true });
@@ -145,14 +149,14 @@ export function registerFsRoutes(router) {
 	});
 
 	// 4. 创建目录
-	router.post('mkdir', async (ctx) => {
+	router.post('/mkdir', async (ctx) => {
 		const { path: filePath } = await ctx.readBody();
 		await fs.mkdir(pathFilter(ctx, filePath), { recursive: true });
 		ctx.send(200, { success: true });
 	});
 
 	// 5. 复制/移动
-	router.post('copy', async (ctx) => {
+	router.post('/copy', async (ctx) => {
 		const { src, dest, move } = await ctx.readBody();
 		const safeSrc = pathFilter(src);
 		const safeDest = pathFilter(dest);
@@ -165,7 +169,7 @@ export function registerFsRoutes(router) {
 	});
 
 	// 6. 文件/目录信息
-	router.post('stat', async (ctx) => {
+	router.post('/stat', async (ctx) => {
 		const { path: filePath } = await ctx.readBody();
 		const stats = await fs.stat(pathFilter(ctx, filePath));
 		ctx.send(200, {
@@ -180,7 +184,7 @@ export function registerFsRoutes(router) {
 	});
 
 	// 7. 删除
-	router.post('delete', async (ctx) => {
+	router.post('/delete', async (ctx) => {
 		const { path: filePath } = await ctx.readBody();
 		const safePath = pathFilter(ctx, filePath);
 		if (safePath === ctx.sandboxRoot) {
@@ -192,7 +196,7 @@ export function registerFsRoutes(router) {
 	});
 
 	// 8. 列表
-	router.post('list', async (ctx) => {
+	router.post('/list', async (ctx) => {
 		const { path: filePath, glob } = await ctx.readBody();
 		const safePath = pathFilter(ctx, filePath);
 		const entries = glob
@@ -218,4 +222,20 @@ export function registerFsRoutes(router) {
 		}
 		ctx.send(200, items);
 	});
+
+	if (allowExec) {
+		router.post('/spawn', async (ctx) => {
+			const { program, arguments: args, directory, timeout = 10 } = await ctx.readBody();
+			const safeCwd = pathFilter(ctx, directory);
+			const result = await execFilePromise(program, args, {
+				cwd: safeCwd,
+				timeout: timeout * 1000
+			}).catch(err => ({
+				code: err.code,
+				stdout: err.stdout,
+				stderr: err.stderr
+			}));
+			ctx.send(200, result);
+		});
+	}
 }

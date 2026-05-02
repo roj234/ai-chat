@@ -1,19 +1,17 @@
 import {DatabaseSync} from 'node:sqlite';
 import {Router} from "./router.js";
-import {registerConversationRoutes} from "./routes/conversation.js";
 import {registerMessageRoutes} from "./routes/messages.js";
-import {registerKvRoutes} from "./routes/kv.js";
-import {registerKvsRoutes} from "./routes/kvs.js";
+import {registerKVRoutes} from "./routes/kv.js";
 import {registerSearchRoutes} from "./routes/search.js";
-import {registerBillingRoutes} from "./routes/log.js";
+import {registerLogRoutes} from "./routes/log.js";
 import {registerDatabaseRoutes} from "./routes/database.js";
 import {registerFsRoutes} from "./routes/fs.js";
-import {registerFsExecRoutes} from "./routes/fs-exec.js";
 import {registerBlobRoutes} from "./routes/blob-storage.js";
 
 import path from 'node:path';
 import {VectorDB} from "./rag/VectorDB.js";
 import {SEMANTIC_SEARCH_ENABLE, WEBSOCKET_SYNC_BASE, WEBSOCKET_SYNC_ENABLE} from "./config.js";
+import {registerSSEProxyRoutes} from "./routes/sse-proxy.js";
 
 
 export function initServer(dataPath, basePath = "aichat/v2", zipBlob) {
@@ -37,29 +35,29 @@ export function initServer(dataPath, basePath = "aichat/v2", zipBlob) {
 
 	router.push(basePath);
 
+	router.push("sse/v1");
+	registerSSEProxyRoutes(router);
+	router.pop();
+
+	router.push("fs");
+	registerFsRoutes(router, true);
+	router.pop();
+
 	router.push(':userId');
 
-	router.get("props", ctx => {
+	router.get("/props", ctx => {
 		ctx.send(200, {
 			version: 2,
 			sync: WEBSOCKET_SYNC_ENABLE ? WEBSOCKET_SYNC_BASE(ctx) : undefined,
 		});
 	});
 
-	registerConversationRoutes(router);
 	registerMessageRoutes(router);
-	registerKvRoutes(router);
-	registerKvsRoutes(router);
+	registerKVRoutes(router);
 	registerSearchRoutes(router);
-	registerBillingRoutes(router);
+	registerLogRoutes(router);
 	registerDatabaseRoutes(router);
 	registerBlobRoutes(router, ROOT_DIR+'/blobs');
-
-	router.pop();
-	router.push("fs");
-
-	registerFsRoutes(router);
-	registerFsExecRoutes(router);
 
 	router.pop();
 	router.pop();

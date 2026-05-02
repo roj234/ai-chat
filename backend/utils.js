@@ -12,18 +12,7 @@ export function jsonParse(str, extra) {
 	}
 }
 
-export function getTextContent(message) {
-	if (typeof message.content === 'string') return message.content;
-	if (Array.isArray(message.content)) {
-		return message.content.map(part => {
-			if (part.type === 'text') return part.text;
-			return '';
-		}).join('');
-	}
-	return '';
-}
-
-export function serializeConversation(conv) {
-	const { id, title, time, data } = conv;
-	return { id, title, time, ...jsonParse(data) };
+export function deserializeRow(row) {
+	const { data, ...rest } = row;
+	return jsonParse(data, rest);
 }

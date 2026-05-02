@@ -102,14 +102,35 @@ function float32ToBf16(value) {
 // ---------- 原业务代码（已修改为 bf16 存储） ----------
 
 /**
+ * 根据配置截取文本
+ * @param {string} text 原始文本
+ * @returns {string} 处理后的文本
+ */
+function chunkText(text) {
+	const { type, length } = SEMANTIC_SEARCH_CHUNK_MODE;
+
+	// 如果文本长度未超限，直接返回
+	if (text.length <= length) return text;
+
+	if (type === "head-tail") {
+		// 头尾模式：取前一半和后一半
+		const half = Math.floor(length / 2);
+		const head = text.substring(0, half);
+		const tail = text.substring(text.length - half);
+		return head + "\n...\n" + tail;
+	} else {
+		// 默认 head 模式：只取开头
+		return text.substring(0, length);
+	}
+}
+
+/**
  * @param {string} text
  * @return {Promise<Float32Array>}
  */
 export async function getEmbedding(text) {
 	text = removeMd(text);
-	if (text.length > SEMANTIC_SEARCH_CHUNK_MODE.length) {
-		text = text.substring(0, SEMANTIC_SEARCH_CHUNK_MODE.length);
-	}
+	text = chunkText(text);
 
 	const response = await fetch(SEMANTIC_SEARCH_API_BASE, {
 		method: 'POST',
@@ -144,6 +165,9 @@ export class VectorDB {
 		this.index = new Map();
 		// 维护一个空闲槽位队列 (文件偏移量)
 		this.freeSlots = [];
+
+		// 版本号机制
+		this.pending = new Map;
 
 		this._loadOrCreateFile();
 	}
@@ -204,9 +228,27 @@ export class VectorDB {
 	 * @param {string} text
 	 */
 	set(id, text) {
-		// TODO 在这里做版本机制，只保留最新的
+		const stamp = (this.pending.get(id) || 0) + 1;
+		this.pending.set(id, stamp);
+
 		return getEmbedding(text).then(embedding => {
-			return this.upsert(id, embedding);
+			if (this.pending.get(id) === stamp) {
+				this.pending.delete(id);
+				return this.upsert(id, embedding);
+			}
+		}).catch(e => {
+			if (this.pending.get(id) === stamp) {
+				this.pending.delete(id);
+				console.error("Embedding生成失败");
+				if (e.message === "fetch failed") {
+					e = e.cause;
+				}
+				if (e.code === "ECONNREFUSED") {
+					console.error("与Embedding API的连接未成功，请检查API地址");
+				} else {
+					console.error(e);
+				}
+			}
 		});
 	}
 

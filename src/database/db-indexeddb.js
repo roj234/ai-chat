@@ -1,6 +1,5 @@
 import {getTextContent} from "../utils/utils.js";
 import {DONE} from "../database.js";
-import {AS_IS} from "unconscious";
 
 
 const DB_NAME = 'AiChat';

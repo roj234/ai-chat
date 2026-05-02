@@ -23,7 +23,7 @@ export class Router {
 
 	_add(method, path, handler) {
 		const paramNames = [];
-		const regexStr = (this.prefixes.join("/")+"/"+path).replace(/:(\w+)/g, (_, name) => {
+		const regexStr = (this.prefixes.join("/")+path).replace(/:(\w+)/g, (_, name) => {
 			paramNames.push(name);
 			return '([^/]+)';
 		}) + '/?$';
@@ -65,6 +65,7 @@ export class Router {
 				params[name] = match[i + 1];
 			});
 
+			/** @type {AIChatBackend.RouteContext} */
 			const ctx = {
 				url: parsedUrl,
 				path: urlPath,

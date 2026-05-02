@@ -1,7 +1,7 @@
-import {jsonParse, serializeConversation} from '../utils.js';
+import {deserializeRow, jsonParse} from '../utils.js';
 
 export function registerSearchRoutes(router) {
-	router.get('search', async (ctx) => {
+	router.get('/search', async (ctx) => {
 		const keyword = ctx.query.keyword;
 		if (!keyword) return ctx.send(400, { error: 'keyword required' });
 
@@ -107,7 +107,7 @@ export function registerSearchRoutes(router) {
 
 		for (const row of rows) {
 			if (!conversations.has(row.id)) {
-				const conv = serializeConversation(row);
+				const conv = deserializeRow(row);
 				conv.messages = [];
 				conversations.set(row.id, conv);
 			}

@@ -7,6 +7,7 @@ import OklchToRgb from "unconscious/postcss/oklch-to-rgb.js";
 import InlineVars from "unconscious/postcss/inline-vars.js";
 import { viteFontMinify } from 'unconscious/vite/font-minify.js';
 import {serverDevPlugin} from "./backend/server-dev.js";
+import {SSE_RESUME_TIMEOUT} from "./backend/config.js";
 
 import packageInfo from "./package.json";
 
@@ -16,7 +17,9 @@ export default {
         APP_NAME: JSON.stringify(packageInfo.name),
         APP_VERSION: JSON.stringify(packageInfo.version),
         DB_SERVER: JSON.stringify(""), // https://nas.lan/aichat/v2/{{user}}
-        DB_MODE: JSON.stringify('mixed') // local remote mixed
+        DB_MODE: JSON.stringify('mixed'), // local remote mixed
+        DEFAULT_LLM_ENDPOINT: JSON.stringify(""),
+        RESUME_TIMEOUT: JSON.stringify(SSE_RESUME_TIMEOUT),
     },
 
     plugins: [

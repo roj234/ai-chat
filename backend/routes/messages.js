@@ -1,15 +1,71 @@
-import {jsonParse} from '../utils.js';
+import {deserializeRow} from '../utils.js';
 
 export function registerMessageRoutes(router) {
-	// GET conversations/:id/messages
-	router.get('conversations/:id/messages', (ctx) => {
-		const ownerId = Number(ctx.params.id);
-		const messages = ctx.db.prepare('SELECT id, content, time, data FROM messages WHERE owner = ? ORDER BY id').all(ownerId);
-		const parsed = messages.map(row => {
-			const str = row.data;
-			delete row.data;
+	// 列出对话简单数据，每条可能就几十字节，没什么好分页的
+	router.get('/conversations', (ctx) => {
+		const rows = ctx.db.prepare('SELECT id, title, time FROM conversations ORDER BY time DESC').all();
+		ctx.send(200, rows);
+	});
 
-			const msg = jsonParse(str, row);
+	// 增加新对话
+	router.post('/conversations', async (ctx) => {
+		const body = await ctx.readBody();
+		body.time = body.time || Date.now();
+		delete body.id;
+
+		const data = { ...body };
+		delete data.title;
+		delete data.time;
+
+		const stmt = ctx.db.prepare('INSERT INTO conversations (title, time, data) VALUES (?, ?, ?)');
+		const info = stmt.run(body.title || '', body.time, JSON.stringify(data));
+		ctx.send(201, { success: true, id: Number(info.lastInsertRowid) });
+	});
+
+	// 更新对话
+	router.put('/conversations/:id', async (ctx) => {
+		const id = Number(ctx.params.id);
+		const body = await ctx.readBody();
+
+		const data = { ...body };
+		delete data.id;
+		delete data.title;
+		delete data.time;
+
+		ctx.db.prepare('UPDATE conversations SET title = ?, time = ?, data = ? WHERE id = ?')
+			.run(body.title, body.time, JSON.stringify(data), id);
+
+		ctx.send(200, { success: true });
+	});
+
+	// 删除对话
+	router.delete('/conversations/:id', (ctx) => {
+		const id = Number(ctx.params.id);
+		const deletedRows = ctx.db.prepare('DELETE FROM messages WHERE owner = ? RETURNING id').all(id);
+		if (ctx.vectorDB) {
+			deletedRows.forEach(({id}) => {
+				ctx.vectorDB.delete('m#'+id.toString(36));
+				ctx.vectorDB.delete('M#'+id.toString(36));
+			});
+		}
+		ctx.db.prepare('DELETE FROM conversations WHERE id = ?').run(id);
+		ctx.send(200, { success: true });
+	});
+
+	// 读取对话完整元数据
+	router.get('/conversations/:id', (ctx) => {
+		const id = Number(ctx.params.id);
+		const conv = ctx.db.prepare('SELECT * FROM conversations WHERE id = ?').get(id);
+		if (!conv) return ctx.send(404, { error: 'Not found' });
+		ctx.send(200, deserializeRow(conv));
+	});
+
+	// 列出对话的消息
+	router.get('/conversations/:id/messages', (ctx) => {
+		const id = Number(ctx.params.id);
+		const messages = ctx.db.prepare('SELECT id, content, time, data FROM messages WHERE owner = ? ORDER BY id').all(id);
+		ctx.send(200, messages.map(row => {
+			const msg = deserializeRow(row);
 
 			const content = msg.content;
 			if (Array.isArray(content)) {
@@ -19,20 +75,11 @@ export function registerMessageRoutes(router) {
 				};
 			}
 			return msg;
-		});
-		// 仅兼容性？实际上应该永远用不到
-		parsed.sort((a, b) => {
-			const b1 = a.role === "system";
-			const b2 = b.role === "system";
-			if (b1 !== b2) return b2 - b1;
-
-			return a.time - b.time;
-		});
-		ctx.send(200, parsed);
+		}));
 	});
 
-	// POST messages (create or update)
-	router.post('messages', async (ctx) => {
+	// 创建或更新消息
+	router.post('/messages', async (ctx) => {
 		const body = await ctx.readBody();
 
 		let {id, owner, content, time = null} = body;
@@ -61,7 +108,7 @@ export function registerMessageRoutes(router) {
 		} else {
 			const conversation = ctx.db.prepare(`SELECT time from conversations WHERE id = ?`).get(owner);
 			if (conversation == null) return ctx.send(400, { error: 'unknown conversation id' });
-			//if (time == null) time = conversation.time;
+			if (time == null) time = Date.now();
 
 			const info = ctx.db.prepare('INSERT INTO messages (owner, data, content, time) VALUES (?, ?, ?, ?)').run(owner, serializedData, content, time);
 			id = Number(info.lastInsertRowid);
@@ -77,8 +124,8 @@ export function registerMessageRoutes(router) {
 		ctx.send(200, { success: true, id });
 	});
 
-	// DELETE messages/:id
-	router.delete('messages/:id', (ctx) => {
+	// 删除消息
+	router.delete('/messages/:id', (ctx) => {
 		const id = Number(ctx.params.id);
 		if (ctx.vectorDB) {
 			ctx.vectorDB.delete('m#'+id.toString(36));

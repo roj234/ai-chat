@@ -1,8 +1,8 @@
 import http from 'node:http';
 import {openZip} from "../../vendor/jszip.js";
 import {MIME_TYPES} from "./mime.js";
-import { pipeline } from 'node:stream/promises';
-import { Readable } from 'node:stream'
+import {pipeline} from 'node:stream/promises';
+import {Readable} from 'node:stream'
 
 
 function getContentType(filename) {

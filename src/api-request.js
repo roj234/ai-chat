@@ -9,6 +9,7 @@ import {
 	lastScrollDirection,
 	MessageRoles,
 	messages,
+	resumableCompletions,
 	runningConversations,
 	selectedConversation,
 	Shared,
@@ -63,11 +64,12 @@ async function composeMessages(conversation, messages, allowTools, additionalBod
 	/**
 	 * @type {AiChat.AssistantMessage}
 	 */
-	let assistantMessage = messages.at(-1);
-	if (!assistantMessage) throw "No message to continue";
-	else if (assistantMessage.role !== 'assistant') assistantMessage = null;
+	let initialAssistantMessage= messages.at(-1);
+	if (!initialAssistantMessage) throw "No message to continue";
+	else if (initialAssistantMessage.role !== 'assistant') initialAssistantMessage = null;
 
-	if (assistantMessage) {
+	let assistantMessage = initialAssistantMessage;
+	if (initialAssistantMessage) {
 		const isAutomatic = assistantMessage.finish_reason === "tool_calls";
 
 		if (isAutomatic) assistantMessage = null;
@@ -130,6 +132,21 @@ async function composeMessages(conversation, messages, allowTools, additionalBod
 		'Authorization': `Bearer ${config.accessToken}`
 	};
 	let path = '/chat/completions';
+
+	const resumeObj = resumableCompletions[conversation.id];
+	if (resumeObj) {
+		delete resumableCompletions[conversation.id];
+		if (Date.now() - resumeObj.time < RESUME_TIMEOUT) {
+			return {
+				url: config.endpoint+'/resume/'+resumeObj.id,
+				data: { headers },
+				antiSlop,
+				assistantMessage,
+				initialAssistantMessage
+			};
+		}
+	}
+
 	/**
 	 * @type {Partial<OpenAI.ChatCompletionRequest>}
 	 */
@@ -304,6 +321,8 @@ function processSystemPrompt(conversation, prompt) {
 
 function applyDelta(chunk, delta) {
 	for (const item in delta) {
+		if (delta[item] == null) continue;
+
 		if (typeof(delta[item]) === "object") {
 			if (!chunk[item])
 				chunk[item] = Array.isArray(delta[item]) ? [] : {};
@@ -475,6 +494,25 @@ export async function sendUserChatMessage(userText, antiSlop) {
 		let finishReason = await _ApiRequest(conversation, messages_, config.tools, state.additionalBody, abortCompletion, callback, antiSlop);
 		const assistantMessage = messages_.at(-1);
 
+		const resumeObj = resumableCompletions[conversation.id];
+		if (finishReason !== 'error' || assistantMessage.error !== "network error\n") {
+			if (resumeObj) {
+				try {
+					const result = await jsonFetch(config.endpoint+"/abort/"+resumeObj.id, {
+						authorization: config.accessToken,
+						method: 'POST'
+					});
+				} catch (e) {
+					showToast("Abort接口调用失败\n"+e, 'error');
+				}
+				delete resumableCompletions[conversation.id];
+			}
+		} else {
+			if (resumeObj) {
+				showToast("连接意外中止\n在"+(RESUME_TIMEOUT/60000)+"分钟内点击重试按钮可以无缝继续对话", 'error');
+			}
+		}
+
 		let needSave;
 
 		const tone = finish_reason_tone[finishReason];
@@ -551,7 +589,7 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 		 */
 		data,
 		/** @type {AiChat.AssistantMessage} */
-		assistantMessage,
+		assistantMessage, initialAssistantMessage,
 		/** @type {string | Error} */
 		error,
 		/** @type {AntiSlop} */
@@ -620,6 +658,7 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 
 	// Request
 	try {
+		let resumeObj;
 		await streamFetch(url, {
 			...data,
 			authorization: config.accessToken,
@@ -650,7 +689,12 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 				billingLog.request_id = json.id;
 				billingLog.model = json.model;
 				billingLog.ttft = billingLog.latency;
+
+				if (json.resumable) {
+					resumeObj = resumableCompletions[conversation.id] = { id: json.id };
+				}
 			}
+			if (resumeObj) resumeObj.time = Date.now();
 
 			/**
 			 * @type {OpenAI.ChatChoice | OpenAI.TextChoice}
@@ -659,7 +703,7 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 			if (config.debug) console.log("SSE response", chunk);
 
 			if (!finishReason) finishReason = chunk?.finish_reason;
-			if (finishReason) {getStats(json, billingLog);return;}
+			if (finishReason) {getStats(json, billingLog);}
 
 			let text;
 			let reasoning_text;
@@ -670,7 +714,9 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 			}
 
 			if (config.mode === 'chat') {
-				const delta = chunk.delta;
+				const {delta} = chunk;
+				if (!delta) return;
+
 				if (delta.role) assistantMessage.role = delta.role;
 				if (delta.images) genImages.push(...delta.images);
 				text = delta.content;
@@ -715,6 +761,7 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 				}
 			} else {
 				text = chunk.text;
+				if (!text) return;
 			}
 
 			let content = assistantMessage.content + (text || "");
@@ -785,8 +832,14 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 			setStatus('已取消');
 			finishReason = "interrupt";
 		} else {
+			finishReason = 'error';
 			abortCompletion.abort();
 			if (err !== "loop") {
+				// 即便服务端Session过期了，也不要清除已经生成的内容
+				if (typeof err === 'string' && initialAssistantMessage) {
+					assistantMessage = messages[messages.length-1] = initialAssistantMessage;
+				}
+
 				if (config.sound) failure();
 				setStatus('错误', 'error');
 				console.error(err);
@@ -798,20 +851,28 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 	} finally {
 		streamResponseCompleted(assistantMessage, genImages);
 
-		if (!finishReason) finishReason = 'error';
+		if (!finishReason) {
+			finishReason = 'error';
+			assistantMessage.error = "network error\n";
+		}
 		assistantMessage.finish_reason = finishReason;
 		billingLog.finish_reason = finishReason;
 
 		onProgress?.(MD_END);
 
+		const has_resp = billingLog.request_id;
 		if (finishReason !== 'loop' && conversation.id) {
 			// wait for database update (billingLog requires message id), this should be fast
-			await updateConversation(conversation, unconscious(messages));
-			billingLog.message_id = assistantMessage.id;
+			if (has_resp) {
+				await updateConversation(conversation, unconscious(messages));
+				billingLog.message_id = assistantMessage.id;
+			}
 		} else {
 			billingLog.message_id = "T_"+Date.now();
 		}
-		await appendBillingLog(billingLog);
+		if (has_resp) {
+			await appendBillingLog(billingLog);
+		}
 	}
 
 	return finishReason;

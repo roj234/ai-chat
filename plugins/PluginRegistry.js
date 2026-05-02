@@ -4,7 +4,12 @@ import {registerDefaultTools, registerSkill} from "/src/skills.js";
 // 下面的静态导入完全可以变成动态导入，就看我愿不愿意了
 export const onPluginLoaded = Promise.resolve();
 
+// 搜索消息
 import "./search.js";
+// 切换数据库服务器时同步本地配置
+import "./configSync.js";
+// 支持后端的流式继续功能
+import "./SseResume.js";
 
 // 文件系统和Agent工具组 (use:fs)
 import "./tools/filesystem.js";

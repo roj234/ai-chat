@@ -27,9 +27,7 @@ export const inputText = $state("");//$store("inputText", "", {persist: true});
  * @type {import("unconscious").Reactive<AiChat.Preset>}
  */
 export const config = $store("config", {
-	name: "default",
-
-	endpoint: 'http://localhost:8080/v1',
+	endpoint: DEFAULT_LLM_ENDPOINT,
 	mode: 'chat',
 
 	reasoning: 'medium',
@@ -135,3 +133,5 @@ export const runningConversations = new Map;
 $watch(selectedConversation, () => {
 	abortCompletion.value = runningConversations.get(selectedConversation.id)?.abort;
 });
+
+export const resumableCompletions = $store("resumableCompletions", {}, {persist: true, deep: false});

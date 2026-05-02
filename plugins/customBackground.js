@@ -32,8 +32,8 @@ onLoad(() => {
 			document.querySelector("#custFont")?.remove();
 		} else {
 			document.head.insertAdjacentHTML("beforeend", `<style id="custFont">
-@font-face {font-family:'CUST';src:url(${JSON.stringify(url = blob.toUrl())})}
-.panel > ._vl > .msg > .body {font-family: 'CUST'}
+@font-face {font-family:'CUST';font-display:swap;src:url(${JSON.stringify(url = blob.toUrl())})}
+.panel > ._vl > .msg > .body {font-family:'CUST';}
 </style>`);
 		}
 

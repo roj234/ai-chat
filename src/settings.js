@@ -52,7 +52,7 @@ export const SETTINGS = [
 		_tab: "model",
 		name: "API 地址 (OpenAI 兼容)",
 		type: "input",
-		pattern: /^https?:\/\/.+\/v1$/,
+		pattern: /^(\/|https?:\/\/).+\/v1$/,
 		warning: "必须以 http(s):// 开头并以 /v1 结尾",
 		placeholder: "https://api.openai.com/v1",
 		_group: 'model'

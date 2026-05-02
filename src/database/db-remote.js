@@ -3,6 +3,7 @@ import {decodeObjects, encodeObjects} from "../utils/marshal.js";
 import {initSync} from "./SyncManager.js";
 import SimpleModal from "../components/SimpleModal.jsx";
 import {showToast} from "../components/Toast.js";
+import {DONE} from "../database.js";
 
 let sync;
 
@@ -197,7 +198,7 @@ export function kvListDel(key) {
 }
 
 export function appendBillingLog(log) {
-	if (log.message_id == null) return Promise.resolve(); // 原行为直接返回DONE
+	if (log.message_id <= 0) return DONE;
 	return request('log', {
 		method: 'POST',
 		body: JSON.stringify(log),
@@ -205,7 +206,7 @@ export function appendBillingLog(log) {
 }
 
 export function getBillingLog(message_id) {
-	if (message_id == null) return Promise.resolve(); // 原行为返回DONE? 但原函数返回DONE也不是null，这里应该返回null或空？原函数：getBillingLog(message_id) { if (message_id == null) return DONE; ...} DONE是Promise.resolve()，那么返回就是Promise<undefined>。为了类型兼容，可以返回Promise.resolve(null)。
+	if (message_id <= 0) return DONE;
 	return request(`log/${message_id}`);
 }
 

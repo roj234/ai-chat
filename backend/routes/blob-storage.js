@@ -14,7 +14,7 @@ export function registerBlobRoutes(router, blobDir) {
 	});
 
 	// 下载 Blob
-	router.get('blob/:hash', async (ctx) => {
+	router.get('/blob/:hash', async (ctx) => {
 		const { dataPath, metaPath } = getPaths(ctx.params.hash);
 
 		try {
@@ -40,6 +40,7 @@ export function registerBlobRoutes(router, blobDir) {
 
 			ctx.res.writeHead(200, {
 				'Content-Type': contentType,
+				'Content-Length': stats.size,
 				'Cache-Control': 'public, max-age=31536000, immutable',
 				'Last-Modified': lastModified
 			});
@@ -55,7 +56,7 @@ export function registerBlobRoutes(router, blobDir) {
 	});
 
 	// 上传 Blob
-	router.post('blob/:hash', async (ctx) => {
+	router.post('/blob/:hash', async (ctx) => {
 		const hash = ctx.params.hash;
 		const contentType = ctx.req.headers['content-type'] || 'application/octet-stream';
 		const { dataPath, metaPath } = getPaths(hash);

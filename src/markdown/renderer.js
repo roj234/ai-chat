@@ -128,7 +128,7 @@ export function fmdHTMLRenderer(root, options = {}) {
 
 			if (undo) {
 				node.remove();
-				return node._value || node.textContent;
+				return node._value || node.innerHTML;
 			}
 
 			if (token_id === fastmd.CODE_FENCE) {

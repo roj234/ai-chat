@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Chat - 请求日志监控</title>
+    <link rel="stylesheet" href="style.css" />
+    <script type="module" src="script.js"></script>
+</head>
+<body>
+
+    <!-- Navigation -->
+    <nav class="nav">
+        <a href="#" class="nav-brand">
+            <div class="logo-icon">⚡</div>
+            AI Chat Logs
+        </a>
+        <div class="nav-actions">
+            <button class="btn btn-sm" onclick="refreshData()" title="刷新数据">
+                <span>🔄</span> 刷新
+            </button>
+            <button class="btn btn-sm btn-ghost" onclick="toggleAutoRefresh()" id="autoRefreshBtn" title="自动刷新">
+                <span>⏱️</span> 自动
+            </button>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="main-container">
+        <!-- Time Range Selector -->
+        <div class="top-bar">
+            <span class="top-bar-label">时间范围</span>
+            <div class="btn-group" id="presetBtns">
+                <button class="btn btn-sm" data-range="1h">最近1小时</button>
+                <button class="btn btn-sm" data-range="24h">24小时</button>
+                <button class="btn btn-sm btn-active" data-range="7d">7天</button>
+                <button class="btn btn-sm" data-range="30d">30天</button>
+                <button class="btn btn-sm" data-range="custom">自定义</button>
+            </div>
+            <input type="datetime-local" class="date-input" id="startDate" title="开始时间">
+            <span class="date-separator">—</span>
+            <input type="datetime-local" class="date-input" id="endDate" title="结束时间">
+            <span class="top-bar-spacer"></span>
+            <span class="refresh-indicator" id="refreshIndicator">
+                <span class="refresh-dot"></span> 数据就绪
+            </span>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card">
+                <div class="stat-icon stat-icon-blue">📊</div>
+                <div class="stat-label">总请求数</div>
+                <div class="stat-value" id="statTotalRequests">—</div>
+                <div class="stat-sub">所选时间范围内</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon stat-icon-green">📥</div>
+                <div class="stat-label">总输入 Tokens</div>
+                <div class="stat-value" id="statInputTokens">—</div>
+                <div class="stat-sub" id="statInputTokensSub"></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon stat-icon-purple">📤</div>
+                <div class="stat-label">总输出 Tokens</div>
+                <div class="stat-value" id="statOutputTokens">—</div>
+                <div class="stat-sub" id="statOutputTokensSub"></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon stat-icon-cyan">💰</div>
+                <div class="stat-label">总成本</div>
+                <div class="stat-value" id="statTotalCost">—</div>
+                <div class="stat-sub" id="statTotalCostSub"></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon stat-icon-orange">⏳</div>
+                <div class="stat-label">平均延迟</div>
+                <div class="stat-value" id="statAvgLatency">—</div>
+                <div class="stat-sub" id="statAvgLatencySub"></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon stat-icon-pink">⚡</div>
+                <div class="stat-label">平均 TTFT</div>
+                <div class="stat-value" id="statAvgTTFT">—</div>
+                <div class="stat-sub" id="statAvgTTFTSub"></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon stat-icon-yellow">💾</div>
+                <div class="stat-label">缓存命中 Tokens</div>
+                <div class="stat-value" id="statCachedTokens">—</div>
+                <div class="stat-sub" id="statCachedTokensSub"></div>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="charts-row">
+            <div class="chart-card">
+                <div class="chart-header">
+                    <div>
+                        <div class="chart-title">Token 使用趋势</div>
+                        <div class="chart-subtitle" id="chartTokenSubtitle">按时间段聚合</div>
+                    </div>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="tokenChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-card">
+                <div class="chart-header">
+                    <div>
+                        <div class="chart-title">成本 & 请求趋势</div>
+                        <div class="chart-subtitle" id="chartCostSubtitle">按时间段聚合</div>
+                    </div>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="costChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="filters-row" id="filtersRow">
+            <span class="filter-label">筛选：</span>
+            <select class="filter-select" id="filterProvider" onchange="applyFilters()">
+                <option value="">全部 Provider</option>
+            </select>
+            <select class="filter-select" id="filterPreset" onchange="applyFilters()">
+                <option value="">全部 Preset</option>
+            </select>
+            <select class="filter-select" id="filterFinishReason" onchange="applyFilters()">
+                <option value="">全部状态</option>
+            </select>
+            <span class="results-count" id="resultsCount"></span>
+        </div>
+
+        <!-- Table -->
+        <div class="table-container">
+            <div class="table-scroll" id="tableScroll">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="sortable" data-sort="time" style="min-width:140px">时间 <span class="sort-arrow">▾</span></th>
+                            <th class="sortable" data-sort="provider">Provider <span class="sort-arrow">▾</span></th>
+                            <th class="sortable" data-sort="preset_id">Preset ID <span class="sort-arrow">▾</span></th>
+                            <th class="sortable" data-sort="input_tokens" style="text-align:right">Input Tokens <span class="sort-arrow">▾</span></th>
+                            <th class="sortable" data-sort="output_tokens" style="text-align:right">Output Tokens <span class="sort-arrow">▾</span></th>
+                            <th class="sortable" data-sort="total_tokens" style="text-align:right">总计 Tokens <span class="sort-arrow">▾</span></th>
+                            <th style="text-align:right">缓存</th>
+                            <th class="sortable" data-sort="cost" style="text-align:right">成本 <span class="sort-arrow">▾</span></th>
+                            <th class="sortable" data-sort="latency" style="text-align:right">延迟 <span class="sort-arrow">▾</span></th>
+                            <th class="sortable" data-sort="ttft" style="text-align:right">TTFT <span class="sort-arrow">▾</span></th>
+                            <th class="sortable" data-sort="finish_reason">状态 <span class="sort-arrow">▾</span></th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody">
+                        <tr>
+                            <td colspan="11">
+                                <div class="state-message">
+                                    <div class="spinner"></div>
+                                    <div class="state-title">加载中...</div>
+                                    <div class="state-desc">正在获取请求日志数据</div>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="pagination-row" id="paginationRow">
+                <span class="pagination-info" id="paginationInfo">—</span>
+                <div class="pagination-btns" id="paginationBtns"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+</body>
+</html>
