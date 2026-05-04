@@ -1,7 +1,7 @@
 import {$state, unconscious} from "unconscious";
 
 import "./SafeImage.css";
-import {isLanAddress} from "../utils/isLanAddress.js";
+import {isLanAddress} from "/common/isLanAddress.js";
 import {loadingBlock} from "../utils/utils.js";
 
 const whiteList = new Set([

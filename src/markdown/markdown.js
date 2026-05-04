@@ -5,7 +5,7 @@ import {fmdHTMLRenderer} from "./renderer.js";
 import {FastMDParser} from "fastmd";
 
 const mdParserOptions = {
-	allowedTags: ["details", "summary", "b", "em", "kbd", "!-- --"],
+	allowedTags: ["details", "summary", "b", "em", "kbd", "q", "!-- --"],
 	parseQuotes: true,
 	preserveLineBreaks: true
 }
@@ -99,9 +99,17 @@ export const copyCodeEventHandler = (e) => {
 	}
 };
 
-export function markdownStreamParser() {
+const rendererOptions = { stream: true };
+
+/**
+ *
+ * @param {HTMLElement} output
+ * @return {import("fastmd").Parser}
+ */
+export function createMarkdownParser(output) {return new FastMDParser(new fmdHTMLRenderer(output, rendererOptions), mdParserOptions);;}
+
+export function createMarkdownStream() {
 	let parser;
-	let rendererOptions = { stream: true };
 	let prevOutput;
 	let bufferIndex;
 
@@ -109,26 +117,20 @@ export function markdownStreamParser() {
 	 * @param {string} buffer
 	 * @param {HTMLElement} output
 	 */
-	function render(buffer, output) {
+	return (buffer, output) => {
 		if (prevOutput !== output) {
 			if (parser) parser.end();
 			if (!(prevOutput = output)) return;
 
 			// 给AntiSlop的重试循环用
 			output.replaceChildren();
-			parser = new FastMDParser(new fmdHTMLRenderer(output, rendererOptions), mdParserOptions);
+			parser = createMarkdownParser(output);
 			bufferIndex = 0;
 			rendererOptions.noHighlight = false;
 		}
 		if (!buffer || !parser) return;
 
-		const renderStart = Date.now();
 		parser.write(buffer.substring(bufferIndex));
 		bufferIndex = buffer.length;
-
-		// 卡顿时自动禁用语法高亮
-		if (Date.now() - renderStart > 30) rendererOptions.noHighlight = true;
-	}
-
-	return render;
+	};
 }

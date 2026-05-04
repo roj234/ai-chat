@@ -1,4 +1,10 @@
-import {deserializeRow} from '../utils.js';
+import {
+	compressConversation,
+	compressMessage,
+	decompressConversation,
+	decompressMessage,
+	deserializeRow
+} from "../utils/compression.js";
 
 export function registerMessageRoutes(router) {
 	// 列出对话简单数据，每条可能就几十字节，没什么好分页的
@@ -13,7 +19,7 @@ export function registerMessageRoutes(router) {
 		const { id, title = '', time = Date.now(), ...data } = body;
 
 		const stmt = ctx.db.prepare('INSERT INTO conversations (title, time, data) VALUES (?, ?, ?)');
-		const info = stmt.run(title, time, JSON.stringify(data));
+		const info = stmt.run(title, time, compressConversation(data));
 		ctx.send(201, { success: true, id: Number(info.lastInsertRowid) });
 	});
 
@@ -26,7 +32,7 @@ export function registerMessageRoutes(router) {
 		if (_id && id !== _id) return ctx.send(400, { error: 'bad id' });
 
 		ctx.db.prepare('UPDATE conversations SET title = ?, time = ?, data = ? WHERE id = ?')
-			.run(title, time, JSON.stringify(data), id);
+			.run(title, time, compressConversation(data), id);
 
 		ctx.send(200, { success: true });
 	});
@@ -50,15 +56,15 @@ export function registerMessageRoutes(router) {
 		const id = Number(ctx.params.id);
 		const conv = ctx.db.prepare('SELECT * FROM conversations WHERE id = ?').get(id);
 		if (!conv) return ctx.send(404, { error: 'Not found' });
-		ctx.send(200, deserializeRow(conv));
+		ctx.send(200, deserializeRow(conv, decompressConversation));
 	});
 
 	// 列出对话的消息
 	router.get('/conversations/:id/messages', (ctx) => {
 		const id = Number(ctx.params.id);
 		const messages = ctx.db.prepare('SELECT id, content, time, data FROM messages WHERE owner = ? ORDER BY id').all(id);
-		ctx.send(200, messages.map(row => {
-			const msg = deserializeRow(row);
+		const parsed = messages.map(row => {
+			const msg = deserializeRow(row, decompressMessage);
 
 			const content = msg.content;
 			if (Array.isArray(content)) {
@@ -68,7 +74,14 @@ export function registerMessageRoutes(router) {
 				};
 			}
 			return msg;
-		}));
+		});
+		parsed.sort((a, b) => {
+			const b1 = a.role === "system";
+			const b2 = b.role === "system";
+			if (b1 !== b2) return b2 - b1;
+			return 0;
+		});
+		ctx.send(200, parsed);
 	});
 
 	// 创建或更新消息
@@ -89,11 +102,11 @@ export function registerMessageRoutes(router) {
 				}
 				data.content[strContent] = { type: 'row' };
 			} else {
-				content = null;
+				content = '';
 			}
 		}
 
-		const serializedData = JSON.stringify(data);
+		const serializedData = compressMessage(data);
 
 		if (id && !isNaN(id)) {
 			ctx.db.prepare('UPDATE messages SET data = ?, content = ?, time = ? WHERE id = ?').run(serializedData, content, time, id);
@@ -103,7 +116,7 @@ export function registerMessageRoutes(router) {
 			if (time == null) time = Date.now();
 
 			const info = ctx.db.prepare('INSERT INTO messages (owner, data, content, time) VALUES (?, ?, ?, ?)').run(owner, serializedData, content, time);
-			id = Number(info.lastInsertRowid);
+			id = info.lastInsertRowid;
 		}
 
 		if ((data.role === "user" || data.role === "assistant") && ctx.vectorDB) {

@@ -1,5 +1,5 @@
 import './ToolCallCard.css';
-import {runTools, toolScriptRegistry} from "../skills.js";
+import {runTools, TOOL_NAME, toolScriptRegistry} from "../skills.js";
 import {config, messages, selectedConversation} from "../states.js";
 import {$state, $update, $watch, appendChildren, isReactive} from "unconscious";
 import {MORPH_CHILD_FUNCTION} from "../utils/utils.js";
@@ -95,13 +95,14 @@ export function ToolCallCard(props) {
  * @param {HTMLDetailsElement} element
  */
 const morphToolCallCard = ({tool, message, idx}, element) => {
-    const {success, content, time, tool_name} = message.tool_responses[idx] || {};
+    const {success, content, time, [TOOL_NAME]: tool_name} = message.tool_responses[idx] || {};
     const is_errored = false === success;
 
     element.classList.toggle("tool-error", is_errored);
 
     const interactive = toolScriptRegistry[tool.function.name]?.interactive;
     let pending = interactive === "secure" && null == time;
+    const alreadyHasFlag = element.classList.contains("tool-pending");
     element.classList.toggle("tool-pending", pending);
 
     function setAuditState(target, allowUnsafe) {
@@ -112,7 +113,7 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
         target.closest(".tool-body").remove();
     }
 
-    if (pending) {
+    if (pending && !alreadyHasFlag) {
         element.open = true;
         element.click();
         element.append(<div className={"tool-body"}>

@@ -47,10 +47,8 @@ function openDb() {
 					const newMsgStore = db.createObjectStore('messages', { keyPath: 'id', autoIncrement: true });
 					newMsgStore.createIndex('owner', 'owner');
 
-					// 替代 localStorage 放置 $store ?
 					db.createObjectStore('kv');
-					const kvs = db.createObjectStore("kvs", { keyPath: 'id', autoIncrement: true });
-					kvs.createIndex('name', ['type', 'name']);
+					db.createObjectStore("kvs", { keyPath: ['type', 'name'] });
 
 					// 计费日志, 插入顺序就是时间顺序
 					db.createObjectStore('statistics', { keyPath: 'message_id' });
@@ -111,8 +109,7 @@ export function getMessages(conversation) {
 				const b1 = a.role === "system";
 				const b2 = b.role === "system";
 				if (b1 !== b2) return b2 - b1;
-
-				return a.time - b.time
+				return 0;
 			});
 
 			resolve(messages);
@@ -278,7 +275,7 @@ export function setKV(key, value) {
  * @returns {Promise<(Object & AiChat.IDBKVList)[]>}
  */
 export function kvListGetValues(type) {
-	return transaction('kvs', tx => tx.objectStore('kvs').index('name').getAll(IDBKeyRange.bound([type], [type, '\uffff'])));
+	return transaction('kvs', tx => tx.objectStore('kvs').getAll(type === '*' ? null : IDBKeyRange.bound([type], [type, '\uffff'])));
 }
 
 /**
@@ -290,12 +287,11 @@ export function kvListGetKeys(type) {
 	return transaction('kvs', (tx, resolve) => {
 		const results = [];
 
-		tx.objectStore('kvs').index('name').openCursor(IDBKeyRange.bound([type], [type, '\uffff'])).onsuccess = (event) => {
+		tx.objectStore('kvs').openCursor(IDBKeyRange.bound([type], [type, '\uffff'])).onsuccess = (event) => {
 			const cursor = event.target.result;
 			if (cursor) {
 				const [type, name] = cursor.key;
 				results.push({
-					id: cursor.primaryKey,
 					//type,
 					name
 				});
@@ -309,21 +305,12 @@ export function kvListGetKeys(type) {
 
 /**
  * 获取一项
- * @param {number} key
- * @returns {Promise<Object & AiChat.IDBKVList>}
- */
-export function kvListGet(key) {
-	return transaction('kvs', tx => tx.objectStore('kvs').get(key));
-}
-
-/**
- * 获取一项
  * @param {IDBValidKey} type
  * @param {IDBValidKey} name
  * @returns {Promise<Object & AiChat.IDBKVList>}
  */
-export function kvListGetByName(type, name) {
-	return transaction('kvs', tx => tx.objectStore('kvs').index("name").get([type, name]));
+export function kvListGet(type, name) {
+	return transaction('kvs', tx => tx.objectStore('kvs').get([type, name]));
 }
 
 
@@ -342,11 +329,12 @@ export function kvListSet(value, type, name) {
 
 /**
  * 删除KV存储列表
- * @param {number} key
+ * @param {string} type
+ * @param {string} name
  * @returns {Promise<void>}
  */
-export function kvListDel(key) {
-	return transaction('kvs', tx => tx.objectStore('kvs').delete(key), true);
+export function kvListDel(type, name) {
+	return transaction('kvs', tx => tx.objectStore('kvs').delete([type, name]), true);
 }
 
 /**

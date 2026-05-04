@@ -20,6 +20,7 @@ function databaseError(err) {
 if (DB_MODE !== 'local') {
 	SETTINGS.push({
 		id: "db_server",
+		_tab: ["general", "data"],
 		name: "数据库服务器",
 		title: "提供文件管理、消息搜索、多租户等功能\n修改后需要刷新页面"+(DB_MODE === "mixed" ? "\n填写 :idb: 使用本地数据库" : ""),
 		type: "input",
@@ -33,7 +34,7 @@ const db = DB_MODE === 'remote' || (DB_MODE === "mixed" && config.db_server !== 
 export const {
 	deleteDatabase,
 	getKV, setKV,
-	kvListGetValues, kvListSet, kvListDel, kvListGetKeys, kvListGet, kvListGetByName,
+	kvListGetValues, kvListSet, kvListDel, kvListGetKeys, kvListGet,
 	searchMessages,
 	updateBlob, getBlob
 } = db;

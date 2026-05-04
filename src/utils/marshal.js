@@ -1,17 +1,26 @@
 import {getBlob, updateBlob} from "../database.js";
-import {deepEntries} from "../../vendor/jsonSchema.js";
+import {deepEntries} from "/common/jsonSchema.js";
 
-async function decodeDollar(val, zr) {
-	switch (val.$) {
-		case "Blob":
-			if (!zr) throw "找不到引用的 Blob 对象";
-			const data = await zr.get("blobs/" + val.index);
-			if (!data) throw "找不到引用的 Blob 对象";
-			return new Blob([data], {type: val.type});
-		case "BlobH":return await getBlob(val);
-		case "Map":return new Map(val.value);
-		case "Set":return new Set(val.value);
-		default: throw "不支持的数据类型:"+val.$;
+async function decodeDollar(v, zr) {
+	const v1 = v.v;
+	switch (v.$) {
+		case "Blob": {
+			if (zr) {
+				const data = await zr.get("blobs/"+v.index);
+				if (data) return new Blob([data], {type: v.type});
+			}
+			throw "找不到引用的 Blob 对象";
+		}
+		case "BlobH":return await getBlob(v);
+		case "Map":return new Map(v1);
+		case "Set":return new Set(v1);
+		case "Date":return new Date(v1);
+		case "RegExp": {
+			const pos = v1.lastIndexOf('/');
+			return new RegExp(v1.slice(1, pos), v1.substring(pos+1));
+		}
+		case "BigInt":return BigInt(v1);
+		default: return v;
 	}
 }
 
@@ -31,62 +40,57 @@ export async function decodeObjects(input, zr) {
 
 /**
  *
- * @param {Object} messages
- * @param {Map<any, Object>} mapping
- * @param {ZipWriter=} zw
+ * @param {Object} input
+ * @param {Map<any, Object>} replacer
+ * @param {ZipWriter=} zipWriter
  * @return {Promise<void>}
  */
-export function encodeObjects(messages, mapping, zw) {
+export function encodeObjects(input, replacer, zipWriter) {
 	const promises = [];
-	for (const [val, own, key] of deepEntries(messages)) {
-		if (val instanceof Blob) {
-			if (zw) {
-				promises.push(val.arrayBuffer().then(ab => {
-					const blobName = zw.fileCount();
+	for (const [val] of deepEntries(input)) {
+		const fn = val?.constructor;
+		switch (fn) {
+			case Blob:
+			case File:
+				promises.push(zipWriter ? val.arrayBuffer().then(ab => {
+					const blobIndex = zipWriter.fileCount();
 
-					mapping.set(val, {
+					replacer.set(val, {
 						$: "Blob",
 						type: val.type,
-						index: blobName
+						name: val.name,
+						index: blobIndex
 					});
 
-					return zw.add("blobs/"+blobName, new Uint8Array(ab));
-				}));
-			} else {
-				promises.push(updateBlob(val).then(hash => {
-					mapping.set(val, {
+					return zipWriter.add("blobs/"+blobIndex, new Uint8Array(ab));
+				}): updateBlob(val).then(hash => {
+					replacer.set(val, {
 						$: "BlobH",
 						hash,
 						name: val.name
 					});
 				}));
-			}
-		} else {
-			if (import.meta.env.DEV && key === "url") {
-				promises.push(fetch(val).then(r => r.blob()).then(async ab => {
-					const blobName = zw.fileCount();
-
-					mapping.set(val, {
-						$: "Blob",
-						type: ab.type,
-						index: blobName
-					});
-
-					return zw.add("blobs/"+blobName, new Uint8Array(await ab.arrayBuffer()));
-				}));
-			}
-
-			if (val instanceof Map) {
-				mapping.set(val, {
-					$: "Map",
-					value: [...val]
+			break;
+			case Map:
+			case Set:
+				replacer.set(val, {
+					$: fn.name,
+					v: [...val]
 				});
-			} else if (val instanceof Set) {
-				mapping.set(val, {
-					$: "Set",
-					value: [...val]
+			break;
+			case Date:
+				replacer.set(val, {
+					$: fn.name,
+					v: val.getTime()
 				});
-			}
+			break;
+			case RegExp:
+			case BigInt:
+				replacer.set(val, {
+					$: fn.name,
+					v: val.toString()
+				});
+			break;
 		}
 	}
 	return Promise.all(promises);

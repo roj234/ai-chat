@@ -1,4 +1,4 @@
-import {jsonPathOp, volatileEnvironment} from "/src/skills.js";
+import {jsonPathOp, TOOL_NAME, volatileEnvironment} from "/src/skills.js";
 import {$computed, $disposable, $state, $watch, debugSymbol} from "unconscious";
 import morphdom from "morphdom";
 import {messages} from "/src/states.js";
@@ -29,13 +29,13 @@ export const dashboard = {
 		volatileEnvironment.dashboard = html;
 		self[HTML] = html;
 	},
-	removed() {
+	undo() {
 		for (let i = messages.length - 1; i >= 0; i--) {
 			let {tool_responses} = messages.value[i];
 			if (tool_responses) {
 				for (let j = tool_responses.length - 1; j >= 0; j--) {
 					let response = tool_responses[j];
-					if (response.tool_name === "init_dashboard") {
+					if (response[TOOL_NAME] === "init_dashboard") {
 						volatileEnvironment.dashboard = response[HTML];
 						return;
 					}

@@ -6,7 +6,7 @@ import json from 'highlight.js/lib/languages/json';
 import {VirtualList} from "unconscious/ext/VirtualList.js";
 import {$disposable} from "unconscious";
 import {onLoad} from "../plugin.js";
-import {selectableVirtualListMixin} from "/vendor/selectableVirtualListMixin.js";
+import {selectableVirtualListMixin} from "/common/selectableVirtualListMixin.js";
 
 hljs.registerLanguage('json', json);
 
@@ -20,7 +20,7 @@ function light(newCode, language) {
 	});
 }
 
-function lightSync(newCode, language) {
+export function lightSync(newCode, language) {
 	const gen = light(newCode, language);
 	let result;
 	while (!(result = gen.next()).done) ;
@@ -116,6 +116,7 @@ export function highlight(code, language, node, is_finished) {
 				if (!result.done) {
 					requestAnimationFrame(highlightReallyFast);
 				} else {
+					node.style.height = node.offsetHeight + 'px';
 					node.replaceChildren(virtualList.dom);
 					virtualList.attach(node);
 					selectableVirtualListMixin(virtualList, (line) => lines[line]);
@@ -123,7 +124,9 @@ export function highlight(code, language, node, is_finished) {
 					// noinspection JSPrimitiveTypeWrapperUsage
 					virtualList.items = processLines(result.value.value, []).map(s => new String(s));
 					virtualList.scrollToBottom();
-					virtualList.resize();
+					virtualList.render();
+					node.style.height = '';
+					virtualList.render();
 					node._value = code;
 				}
 			};

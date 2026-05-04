@@ -4,50 +4,61 @@ import {config, isMobile, messages, selectedConversation} from "./states.js";
 import defaultCoTPrompt from "../media/thinkPrompt.txt?raw";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {disableBranches, enableBranches, setLastMessage} from "./utils/BranchManager.js";
-import {showToast} from "./components/Toast.js";
 
 const defaultSystemPrompt = `You are a helpful assistant.
 {{think}}
 
+<tools>
+{{tools}}
 <markdown-tools>
-- 指定代码块下载时的文件名：
+- Specify file name when download code fence:
    \`\`\`language:filename
    [content]
    \`\`\`
-- 渲染 Mermaid 图表：
+- Render mermaid:
    \`\`\`mermaid
    [content]
    \`\`\`
 </markdown-tools>
+</tools>
 <information>
-- 现在是${new Date().toLocaleDateString()}
+- Current date: ${new Date().toLocaleDateString()}
 </information>`;
 
-export {defaultSystemPrompt, defaultCoTPrompt};
+const defaultTitlePrompt = `基于以下用户-LLM对话内容，生成一个**20字以内**的中文标题，用于对话前端展示。标题需简洁、吸引人、概括核心主题。
+
+要求：
+- 标题长度：严格≤20字。
+- 风格：中性、专业，避免剧透或偏见。
+- 示例：如果对话是“教我做蛋糕”，标题可为“蛋糕制作教程/指南”。`;
+
+export {defaultSystemPrompt, defaultCoTPrompt, defaultTitlePrompt};
 
 /**
  *
  * @type {JSX.Element[]}
  */
 export const CUSTOM_CONTROLS = <>
-	<button className="ri-lightbulb-flash-line chip ghost" class:active={() => config.think}
+	<button className="ri-lightbulb-flash-line chip ghost"
+			style:display={() => config.forceThink == null ? "" : "none"}
+			class:active={() => config.think}
 			onClick={() => {
 				config.think ^= true;
 			}}>
 		<div className="tooltip">深度思考：先思考后回答，解决复杂问题</div>
 	</button>
-	<button className="ri-robot-2-line chip" class:active={() => config.tools}
+	<button className="ri-robot-2-line chip"
+			style:display={() => config.modalities?.includes("tool") ? "" : "none"}
+			class:active={() => config.tools}
 			onClick={() => {
 				config.tools ^= true;
 			}}>
 		<div className="tooltip">工具调用：使用工具绘制图表、进行计算</div>
 	</button>
-	<button className="ri-git-fork-line chip" class:active={() => selectedConversation.branches}
+	<button className="ri-git-fork-line chip"
+			style:display={() => selectedConversation.value ? "" : "none"}
+			class:active={() => selectedConversation.branches}
 			onClick={() => {
-				if (!selectedConversation.value) {
-					showToast("你只能在对话内修改这个选项\n要改变默认值,请前往设置", "error");
-					return;
-				}
 				if (!selectedConversation.branches) {
 					SimpleModal({
 						title: "是否为当前对话启用分支功能？",
@@ -75,6 +86,7 @@ export const SETTINGS = [
 	{
 		id: "generateTitle",
 		name: "总结对话并生成标题",
+		_group: "title",
 		type: "radio",
 		required: true,
 		choices: {
@@ -86,8 +98,16 @@ export const SETTINGS = [
 	{
 		id: "titleModel",
 		name: "标题总结模型",
+		_group: "title",
 		type: "input",
-		placeholder: "留空使用主模型"
+		placeholder: "留空使用相同模型"
+	},
+	{
+		id: "titlePrompt",
+		name: "标题总结提示词",
+		_group: "title",
+		type: "textbox",
+		placeholder: defaultTitlePrompt
 	},
 	{
 		name: "个人自用95新项目，欢迎提交bug和功能建议",
@@ -101,8 +121,8 @@ export const SETTINGS = [
 		_tab: "model",
 		name: "API 地址 (OpenAI 兼容)",
 		type: "input",
-		pattern: /^(\/|https?:\/\/).+\/v1$/,
-		warning: "必须以 http(s):// 开头并以 /v1 结尾",
+		pattern: /^(\/|https?:\/\/)/,
+		warning: "请输入正确的API地址",
 		placeholder: "https://api.openai.com/v1",
 		_group: 'model'
 	},
@@ -186,12 +206,30 @@ export const SETTINGS = [
 		id: "modalities",
 		_tab: "model",
 		_group: 'model',
-		name: "多模态输入限制 (未实现)",
+		name: "模型能力支持",
 		type: "multiple",
 		choices: {
 			"图像": 'image',
 			"音频": 'audio',
+			"工具": "tool",
+			//"思考": "reasoning",
 		}
+	},
+/*	{
+		id: "modelPrice",
+		_tab: "model",
+		_group: 'model',
+		name: "模型价格",
+		title: "在服务商未提供usage字段时向日志API传入原始字符数，并乘以该系数估算价格",
+	},*/
+	{
+		id: "additionalBody#",
+		_tab: 'model',
+		_group: 'model',
+		name: "自定义请求体",
+		title: "以 JSON 格式添加额外请求体参数，将覆盖其它设置。",
+		type: "textbox",
+		placeholder: "{\n  \"chat_template_kwargs\": {},\n}"
 	},
 /*	{
 		id: "prefillKVCache",
@@ -209,7 +247,7 @@ export const SETTINGS = [
 	{
 		id: "systemPrompt",
 		_tab: 'prompt',
-		_group: 'preset',
+		_group: 'prompt',
 		name: "系统提示词",
 		title: "留空使用默认提示词。\n若想完全禁用，请填入 \"---\\n---\"",
 		type: "textbox",
@@ -218,7 +256,7 @@ export const SETTINGS = [
 	{
 		id: "reasoning",
 		_tab: 'prompt',
-		_group: 'preset',
+		_group: 'prompt',
 		name: "推理预算",
 		type: "radio",
 		choices: {
@@ -240,16 +278,16 @@ export const SETTINGS = [
 	{
 		id: "CoTPrompt",
 		_tab: 'prompt',
-		_group: 'preset',
+		_group: 'prompt',
 		name: "CoT 提示词 (手动)",
 		title: "手动注入的思维链提示，在系统提示中使用 {{think}} 引用。",
 		type: "textbox",
 		placeholder: defaultCoTPrompt
 	},
 	{
-		id: "trimCoT",
+		id: "stripCoT",
 		_tab: 'prompt',
-		_group: 'preset',
+		_group: 'prompt',
 		name: "移除历史思维链",
 		type: "radio",
 		choices: {
@@ -262,7 +300,7 @@ export const SETTINGS = [
 	{
 		id: "temperature",
 		_tab: 'sampling',
-		_group: 'preset',
+		_group: 'sampling',
 		name: "Temperature",
 		title: "控制生成的随机性。值越低回答越严谨，值越高越具创意。\n设为 1 使用服务商默认值。",
 		type: "number",
@@ -274,7 +312,7 @@ export const SETTINGS = [
 	{
 		id: "top_p",
 		_tab: 'sampling',
-		_group: 'preset',
+		_group: 'sampling',
 		name: "Top-P",
 		title: "核采样 (Nucleus Sampling)。仅从累积概率达到 P 的词元中选择，平衡连贯性与多样性。\n设为 1 使用服务商默认值。\n推荐值 0.95。",
 		type: "number",
@@ -286,7 +324,7 @@ export const SETTINGS = [
 	{
 		id: "top_k",
 		_tab: 'sampling',
-		_group: 'preset',
+		_group: 'sampling',
 		name: "Top-K",
 		title: "仅从概率最高的前 K 个词元中采样。防止模型产生生僻词。\n设为 0 使用服务商默认值。\n推荐值 5-20。",
 		type: "number",
@@ -298,7 +336,7 @@ export const SETTINGS = [
 	{
 		id: "min_p",
 		_tab: 'sampling',
-		_group: 'preset',
+		_group: 'sampling',
 		name: "Min-P",
 		title: "仅保留概率 ≥ 最高概率 × P 的词元，效果比 Top-P 更自然。\n设为 0 使用服务商默认值。\n推荐值 0.1-0.2。",
 		type: "number",
@@ -310,7 +348,7 @@ export const SETTINGS = [
 	{
 		id: "frequency_penalty",
 		_tab: 'sampling',
-		_group: 'preset',
+		_group: 'sampling',
 		name: "频率惩罚",
 		title: "基于词元已出现的次数进行惩罚，降低重复用词，防止重复短语，但过高的值可能导致模型胡言乱语。\n范围：-2.0 到 2.0。\n设为 0 使用服务商默认值。",
 		type: "number",
@@ -322,7 +360,7 @@ export const SETTINGS = [
 	{
 		id: "presence_penalty",
 		_tab: 'sampling',
-		_group: 'preset',
+		_group: 'sampling',
 		name: "存在惩罚",
 		title: "基于词元是否出现过进行惩罚（出现即罚），鼓励模型谈论新话题，增加输出内容的广泛性。\n范围：-2.0 到 2.0。\n设为 0 使用服务商默认值。",
 		type: "number",
@@ -334,7 +372,7 @@ export const SETTINGS = [
 	{
 		id: "stop#",
 		_tab: 'sampling',
-		_group: 'preset',
+		_group: 'sampling',
 		name: "停止序列",
 		title: "生成过程中遇到这些字符立即停止。填写 JSON 数组格式。",
 		type: "input",
@@ -343,7 +381,7 @@ export const SETTINGS = [
 	{
 		id: "antiSlop#",
 		_tab: 'sampling',
-		_group: 'preset',
+		_group: 'sampling',
 		name: "反语法约束",
 		title: "通过正则表达式禁止模型生成特定文本。填写 JSON 格式。\n比 logit_bias 更强大，支持递归回退。\n通常仅支持 vLLM / llama.cpp 等本地后端。\n暂不支持工具调用。",
 		type: "textbox",
@@ -352,20 +390,11 @@ export const SETTINGS = [
 	{
 		id: "logit_bias#",
 		_tab: 'sampling',
-		_group: 'preset',
+		_group: 'sampling',
 		name: "词元偏置 (Logit Bias)",
 		title: "手动调整特定词元的概率。设置 100 会强制输出该词，-100 会完全禁用该词。通常用于引导模型使用或避开特定词汇。\n警告：先问 LLM 这个参数的具体含义，切勿直接修改，否则你会后悔的",
 		placeholder: "{\n  \"\\n\\n\": -100\n}",
 		type: "textbox"
-	},
-	{
-		id: "additionalBody#",
-		_tab: 'sampling',
-		_group: 'preset',
-		name: "自定义请求体",
-		title: "以 JSON 格式添加额外请求体参数，将覆盖其它设置。",
-		type: "textbox",
-		placeholder: "{\n  \"chat_template_kwargs\": {},\n}"
 	},
 	// sampling
 	// customize
@@ -394,11 +423,25 @@ export const SETTINGS = [
 		name: "分支对话模式 (实验性)",
 		type: "multiple",
 		choices: {
-			"新对话自动开启": "branchModeDefault",
+			"新对话默认开启": "branchModeDefault",
 			"允许编辑消息历史": "branchEditHistory"
 		},
 		title: {
 			"允许编辑消息历史": "点击编辑时弹窗询问是否直接编辑消息历史，而不是创建分支"
+		}
+	},
+	{
+		_tab: "customize",
+		name: "界面高级选项",
+		type: "multiple",
+		choices: {
+			"上滑隐藏输入框": "uiAutoHideInput",
+			"MD图片引用": "interleavedImageTag",
+			"合并连续的工具调用": "combineToolCalls"
+		},
+		title: {
+			"MD图片引用": "在消息中使用单行 ![imageN] 插入第N个附件 (N从1开始)",
+			"合并连续的工具调用": "将多条工具调用消息合并为一条 (仅影响渲染, 需要重载对话)\n开启后无法编辑合并的对话"
 		}
 	},
 	{
@@ -435,15 +478,16 @@ export const SETTINGS = [
 	},
 	{
 		type: "element",
-		//_tab: "data",
+		_tab: "data",
 		name: "复制选中的对话",
+		title: "项目已支持对话分支，功能不再建议使用",
 		element: <div className={"choice-scroll"}>
 			<button className="btn ghost" onClick={duplicateConversation}>另存为</button>
 		</div>
 	},
 	{
 		type: "element",
-		_tab: "data",
+		_tab: ["general", "data"],
 		name: "将当前配置保存为新预设",
 		element: <div className={"choice-scroll"}>
 			<button className="btn ghost" onClick={() => createPreset()}>新预设</button>
@@ -465,11 +509,13 @@ export const SETTINGS = [
 			"请求调试": "debugRequest",
 			"响应调试": "debug",
 			"数据库只读": "debugDatabase",
+			"延迟提交消息": "uiDelaySubmit",
 		},
 		title: {
 			"请求调试": "预览发送到API的原始请求体",
 			"响应调试": "在控制台打印SSE流，手动执行工具调用",
 			"数据库只读": "数据库修改在刷新后重置",
+			"延迟提交消息": "点击发送按钮仅追加用户消息，第二次点击时请求LLM",
 		}
 	},
 	{
@@ -520,35 +566,39 @@ if (isMobile) {
 export const BODY_PARAMETERS = SETTINGS.filter(({id = "", _tab}) => (_tab === "sampling" && !id.endsWith("#")) || id === "max_tokens");
 BODY_PARAMETERS.forEach(item => item.body_id = item.id.replaceAll(/[^a-zA-Z09-_]/g, '').trim());
 
-// 三个等级：Config Model Preset 虽然还没怎么实装
-const modelKeys = [];
-const presetKeys = ["name", "think", "tools"];
-const configKeys = [];
-const FLAG = true;
-
-SETTINGS.forEach(({id, _group, choices}) => {
-	if (!id) {
-		if (_group) for (const [k, v] of Object.entries(_group)) {
-			(v === 'preset' || FLAG ? presetKeys : modelKeys).push(k);
-		}
-		if (choices) configKeys.push(...Object.values(choices));
-	} else {
-		if (_group) {
-			(_group === 'preset' || FLAG ? presetKeys : modelKeys).push(id);
-		}
-		configKeys.push(id);
+export const presetKeysAlways = ["name", "think", "tools"];
+export const presetKeys = {};
+for (const [k, v] of [
+	["title", "标题生成参数"],
+	["model", "模型API和配置"],
+	["prompt", "系统提示词"],
+	["sampling", "采样参数"]
+]) {
+	presetKeys[k] = {
+		id: k,
+		name: v,
+		keys: []
 	}
-});
-
-/** @type {Set<string>} */
-export const
-	MODEL_KEYS = new Set(modelKeys),
-	PRESET_KEYS = new Set(presetKeys),
-	CONFIG_KEYS = new Set(configKeys.filter(name => !modelKeys.includes(name) && !presetKeys.includes(name)));
+}
 
 // 删除过时的配置项
 requestIdleCallback(() => {
-	const keys = new Set(["name", "think", "tools"]);
+	SETTINGS.forEach(({id, _group, choices}) => {
+		if (!id) {
+			if (_group) for (const [k, v] of Object.entries(_group)) {
+				presetKeys[v].keys.push(k);
+			}
+			// TODO schema 验证？
+			//if (choices) configKeys.push(...Object.values(choices));
+		} else {
+			if (_group) {
+				presetKeys[_group].keys.push(id);
+			}
+			//configKeys.push(id);
+		}
+	});
+
+	const keys = new Set(presetKeysAlways);
 	for (let el of SETTINGS) {
 		if (el.id) {
 			keys.add(el.id);

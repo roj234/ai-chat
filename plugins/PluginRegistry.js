@@ -4,6 +4,16 @@ import {registerDefaultTools, registerSkill} from "/src/skills.js";
 // 下面的静态导入完全可以变成动态导入，就看我愿不愿意了
 export const onPluginLoaded = Promise.resolve();
 
+import "./BlobManager.js";
+
+import "./ModelFastSwitch.js";
+
+import "./tools/memory.js";
+
+// 默认折叠系统消息
+import "./collapseSystemMessageByDefault.js";
+import "./tools/followupSuggestions.js";
+
 // 搜索消息
 import "./search.js";
 // 切换数据库服务器时同步本地配置
@@ -48,7 +58,7 @@ import testSkill from "/media/TEST.md?raw";
 
 if (import.meta.env.DEV) {
 	// 测试 skills
-	registerSkill(testSkill);
+	// registerSkill(testSkill);
 	// 这个大概是不会完工？
 	import ("./rpg/RPG.js");
 }

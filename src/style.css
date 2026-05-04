@@ -185,6 +185,12 @@ button[class^="ri-"] {
     top: 0;
 }
 
+.ellipsis {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
 /* 主聊天布局 - 响应式 */
 .chat {
     display: flex;
@@ -218,7 +224,6 @@ button[class^="ri-"] {
 .msg {
     display: flex;
     flex-direction: column;
-    margin-top: 20px; /* 写死在JS里了，最好别用变量 */
 
     /* 角色行 */
     & > .line {
@@ -228,8 +233,6 @@ button[class^="ri-"] {
         gap: var(--spacing-sm);
         height: 32px;
         padding: 0 var(--spacing-sm);
-
-        z-index: 10;
 
         & .time { color: var(--muted); }
 
@@ -265,20 +268,6 @@ button[class^="ri-"] {
         padding: 0;
         width: 22px;
         height: 22px;
-    }
-}
-
-.content {
-    overflow-wrap: break-word;
-    hyphens: auto;
-    line-height: var(--md-line-height);
-
-    & > :first-child {
-        margin-top: 0;
-    }
-
-    & > :last-child {
-        margin-bottom: 0;
     }
 }
 
@@ -338,8 +327,10 @@ button[class^="ri-"] {
 }
 
 /* 工具调用按钮 */
-.chip { position: relative; }
-.chip .tooltip { display: none; }
+.chip {
+    position: relative;
+    & .tooltip { display: none; }
+}
 .chip:hover .tooltip {
     display: block;
     position: absolute;
@@ -351,54 +342,78 @@ button[class^="ri-"] {
     background: rgba(0,0,0,0.8);
     border-radius: var(--border-radius-sm);
     text-align: center;
-    z-index: 99;
 }
 
 /* 输入框 */
 .composer {
     position: sticky;
     bottom: 0;
-    display: grid; gap: var(--spacing-sm);
 
-    background: linear-gradient(0deg, var(--bg) 90%, transparent 100%);
+    background: linear-gradient(0deg, var(--bg) 0, var(--bg) var(--spacing-sm), transparent 12%);
     padding: var(--spacing-sm) 0;
 
-    z-index: 12;
-    /* 貌似可以不让它漏出底下._vl的字 */
-    will-change: transform;
-}
-.composer .controls {
-    display: flex; gap: var(--spacing-md); flex-wrap: wrap; align-items: center;
-    user-select: none;
-    justify-content: space-between;
+    & .controls {
+        display: flex; gap: var(--spacing-md); flex-wrap: wrap; align-items: center;
+        user-select: none;
+        justify-content: space-between;
+    }
+    & .f-controls {
+        position: absolute;
+        top: 0;
+        height: 0;
+        display: flex;
+        width: 100%;
+        justify-content: space-between;
+        padding: 0 12px;
+        align-items: flex-end;
+    }
 }
 .query {
     position: relative;
     display: flex;
     flex-direction: column;
+
+    /* 使用伪元素做背景 */
+    .no-messages & {
+        background: transparent;
+        border-color: transparent;
+
+        &::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+
+            /* 将模糊和半透明背景放在这里 */
+            background: rgba(32, 32, 32, 0.5);
+            backdrop-filter: blur(5px);
+
+            z-index: -1; /* 确保它在文字下方 */
+            border-radius: inherit; /* 如果父元素有圆角 */
+        }
+    }
+
     background: var(--panel-2);
     border: 1px solid var(--border);
     border-radius: var(--border-radius-lg);
     transition: border 0.1s linear;
-}
-.query .btn {
-    border-radius: 100%;
-}
-.query > .controls {
-    width: 100%;
-    padding: 0 var(--spacing-md) var(--spacing-md);
+
+    & .btn { border-radius: 100%; }
+    & > .controls {
+        width: 100%;
+        padding: 0 var(--spacing-md) var(--spacing-md);
+    }
+    &:has(textarea:focus) { border-color: var(--accent); }
+    & textarea {
+        width: 100%;
+        max-height: 50vh;
+        background: transparent;
+        border: none;
+        color: var(--text);
+        padding: var(--spacing-md);
+        font-size: 14px;
+    }
 }
 
-.query:has(textarea:focus) { border-color: var(--accent); }
-.query textarea {
-    width: 100%;
-    max-height: 50vh;
-    background: transparent;
-    border: none;
-    color: var(--text);
-    padding: var(--spacing-md);
-    font-size: 14px;
-}
 .spacer { flex: 1; }
 
 /* Badge & 通知 */
@@ -421,6 +436,11 @@ button[class^="ri-"] {
     border-radius: var(--border-radius-md);
     margin: var(--spacing-md) 0;
     font-size: 0.875rem;
+
+    & > code {
+        display: block;
+        padding: 1em 0 1em 1em;
+    }
 }
 .code-header {
     display: flex;
@@ -435,14 +455,6 @@ button[class^="ri-"] {
 }
 code, kbd {
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-    &.hljs {
-        scrollbar-gutter: stable;
-
-        line-height: 1.3;
-        .line {
-            min-height: 1.3em;
-        }
-    }
 
     &.mermaid {
         display: flex;
@@ -459,13 +471,18 @@ kbd {
     word-break: break-word;
 }
 
+q:before, q:after { content: none; }
+
 .content {
-    & em {
-        color: rgb(145,145,145,1);
-    }
-    & .q, & .q em {
-        color: rgb(228,138,36,1);
-    }
+    overflow-wrap: break-word;
+    hyphens: auto;
+    line-height: var(--md-line-height);
+
+    & > :first-child { margin-top: 0; }
+    & > :last-child { margin-bottom: 0; }
+
+    & em { color: rgb(145,145,145,1); }
+    & q, & q em { color: rgb(228,138,36,1); }
     & hr {
         border: none;
         height: 1px;
@@ -601,58 +618,71 @@ kbd {
 }
 
 .bar {
-    display: grid;
-    /* 关键：三列布局。左右两列设为 1fr（等比例平分剩余空间），中间自适应内容 */
-    /* 这样无论右侧按钮多宽，中间永远是视口中心 */
-    grid-template-columns: 1fr auto 1fr;
+    display: flex;
     align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(5px);
 
     & > div {
         display: flex;
-        gap: 10px;
+        justify-content: center;
+        flex-grow: 1;
+        align-items: center;
     }
     & .btn { padding: var(--spacing-sm); border: none; }
 }
 
 @media screen and (min-width: 768px) {
-    .bar {
-        width: calc(50% - var(--panel-width) / 2 - 8px);
-        margin: 0 auto;
-        padding: var(--spacing-xs);
+    .header.closed {
         position: absolute;
     }
 
     .header.closed > .bar {
-        margin: 0;
+        left: 5px;
+        border-bottom: none;
         & :not(:first-child) { display: none !important; }
     }
 
-    /* branch */
-    .composer {
-        margin-top: 20px;
+    .bar {
+        position: relative;
+        left: -5px; /* 滚动条和flex的奇怪问题 */
+
+        width: var(--panel-width);
+        margin: 0 auto;
+        height: 40px;
     }
 
     .hljs {max-height: calc(40vh);}
 
-    .msg > .btn-line {
-        position: sticky;
-        top: 12px;
+    .msg {
+        :not(:first-child) & {
+            padding-bottom: 20px;
+        }
 
-        & > .buttons {
-            position: absolute;
-            right: -8px;
-            transform: translateX(100%);
+        & > .btn-line {
+            position: sticky;
+            top: 12px;
 
-            display: flex;
-            gap: 8px;
-            padding: 6px;
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 20px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            & > .buttons {
+                position: absolute;
+                right: -8px;
+                transform: translateX(100%);
+
+                display: flex;
+                gap: 8px;
+                padding: 6px;
+                background: var(--card);
+                border: 1px solid var(--border);
+                border-radius: 20px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            }
         }
     }
 }
+
+.composer { transition: bottom 0.3s ease; }
+.composer.hidden { bottom: -200px; }
 
 @media (hover: none) {
     @keyframes preventClick {
@@ -679,10 +709,6 @@ kbd {
         }
     }
 
-    .bar {
-        border-bottom: 1px solid var(--border);
-    }
-
     .sidebar {
         width: 80vw !important;
 
@@ -696,21 +722,15 @@ kbd {
         }
     }
 
-    .composer {
-        transition: bottom 0.3s ease;
-    }
-    .composer.hidden {
-        bottom: -200px;
-    }
-
     .hljs {max-height: calc(20vh);}
 
     .header.closed {
-        overflow: hidden;
-        height: 0;
+        position: fixed;
+        top: -10vh;
 
         & > div > :first-child {
-            position: absolute;
+            position: fixed;
+            top: 10vh;
         }
     }
 
@@ -735,25 +755,25 @@ kbd {
 
         & > .btn-line {
             display: flex;
+            flex-direction: row-reverse;
             align-items: center;
             height: 32px;
 
-            .user & {
+            /*.user & {
                 flex-direction: row-reverse;
-            }
+            }*/
         }
     }
 
-    .msg { margin-top: 0; }
+    .branch-selector {
+        left: 0;
+        right: unset !important;
+    }
+
     .composer { padding-top: 0; }
 
     .filter-label:not(.tooltip) {
         color: var(--text);
-    }
-
-    .branch-selector {
-        bottom: unset !important;
-        top: -24px;
     }
 }
 

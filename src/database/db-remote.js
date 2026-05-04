@@ -161,19 +161,40 @@ export async function setKV(key, value) {
 }
 
 export function kvListGetValues(type) {
-	return request(`kvs?type=${encodeURIComponent(type)}`).then(decodeObjects);
+	return request(`kvs/values?type=${encodeURIComponent(type)}`).then(decodeObjects);
 }
 
 export function kvListGetKeys(type) {
 	return request(`kvs/keys?type=${encodeURIComponent(type)}`);
 }
 
-export function kvListGet(key) {
-	return request(`kvs/${key}`).then(decodeObjects);
-}
 
-export function kvListGetByName(type, name) {
-	return request(`kvs/by-name?type=${encodeURIComponent(type)}&name=${encodeURIComponent(name)}`).then(decodeObjects);
+/** @type {Map<string, WeakRef<AiChat.IDBKVList & Object>>} */
+const kvListCache = new Map;
+
+/**
+ * @param {string} type
+ * @param {string} name
+ * @return {Promise<Object>}
+ */
+export async function kvListGet(type, name) {
+	if (!name) return;
+
+	const cacheKey = type+":"+name;
+	const ref = kvListCache.get(cacheKey);
+	let val = ref?.deref();
+	if (!val) {
+		if (ref) {
+			kvListCache.forEach((value, key) => {
+				if (!value.deref()) kvListCache.delete(key);
+			});
+		}
+
+		val = await request(`kvs?type=${encodeURIComponent(type)}&name=${encodeURIComponent(name)}`).then(decodeObjects);
+		delete val.type;
+		if (val) kvListCache.set(cacheKey, new WeakRef(val));
+	}
+	return val;
 }
 
 export async function kvListSet(value, type, name) {
@@ -181,20 +202,11 @@ export async function kvListSet(value, type, name) {
 	if (name) value.name = name;
 
 	const body = await serializeJSON(value);
-
-	if (value.id != null) {
-		// 有id则更新
-		await request(`kvs/${value.id}`, { method: 'PUT', body });
-		return value.id;
-	} else {
-		// 无id则创建
-		const newItem = await request('kvs', { method: 'POST', body });
-		return newItem.id;
-	}
+	await request('kvs', { method: 'POST', body });
 }
 
-export function kvListDel(key) {
-	return request(`kvs/${key}`, { method: 'DELETE' });
+export function kvListDel(type, name) {
+	return request(`kvs?type=${encodeURIComponent(type)}&name=${encodeURIComponent(name)}`, { method: 'DELETE' });
 }
 
 export function appendBillingLog(log) {

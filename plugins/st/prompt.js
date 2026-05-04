@@ -19,9 +19,10 @@ const COMPILED = debugSymbol("REGEXP");
  * @param {AiChat.DnD.MyRegexp[]} regexps
  * @param {Record<string, string>} ctx
  * @param {OpenAI.Message[]} jsonMessages
+ * @param {boolean} prefill
  * @return {OpenAI.Message[]}
  */
-export function applyPreset({prompts, regexps}, ctx, jsonMessages) {
+export function applyPreset({prompts, regexps}, ctx, jsonMessages, prefill) {
 	let first = '';
 	/** @type {OpenAI.Message[]} */
 	const messages = [{
@@ -34,8 +35,10 @@ export function applyPreset({prompts, regexps}, ctx, jsonMessages) {
 	let currentMessage;
 
 	if (jsonMessages[0].role === "system") {
-		first = jsonMessages.shift().content;
+		first = applyMacro(jsonMessages.shift().content, ctx);
 	}
+
+	let prefillMessage= prefill && jsonMessages.pop();
 
 	let message ;
 	for (;;) {
@@ -52,7 +55,9 @@ export function applyPreset({prompts, regexps}, ctx, jsonMessages) {
 	if (message.role === "user") {
 		lastUserMessage = message.content;
 		// 酒馆并没有把最后一条消息去掉
-		chatHistory = jsonMessages.slice(0, jsonMessages.length-1);
+		chatHistory = jsonMessages;
+		if (config.removeLastUserMessage)
+			chatHistory = jsonMessages.slice(0, jsonMessages.length-1);
 	} else {
 		chatHistory = jsonMessages;
 	}
@@ -191,13 +196,13 @@ export function applyPreset({prompts, regexps}, ctx, jsonMessages) {
 				}
 
 				content = replaceString(content, re, regexp.replace);
-				//console.log("regexp", re, regexp.replace);
 			}
 
 			message.content = content;
 		}
 	}
 
+	if (prefillMessage) messages.push(prefillMessage);
 	return messages;
 }
 
@@ -205,7 +210,7 @@ export function applyPreset({prompts, regexps}, ctx, jsonMessages) {
 export function createDefaultCtx(char) {
 	return {
 		char: char.name,
-		user: config.st_username || DEFAULT_USER_NAME
+		user: char.user || config.st_username || DEFAULT_USER_NAME
 	}
 }
 

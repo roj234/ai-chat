@@ -10,7 +10,15 @@ import {registerBlobRoutes} from "./routes/blob-storage.js";
 
 import path from 'node:path';
 import {VectorDB} from "./rag/VectorDB.js";
-import {SEMANTIC_SEARCH_ENABLE, WEBSOCKET_SYNC_BASE, WEBSOCKET_SYNC_ENABLE} from "./config.js";
+import {
+	ALLOW_USER_NAMES,
+	RESTRICT_USER_CREATION,
+	SEMANTIC_SEARCH_ENABLE,
+	SHUTDOWN_SQL,
+	STARTUP_SQL,
+	WEBSOCKET_SYNC_BASE,
+	WEBSOCKET_SYNC_ENABLE
+} from "./config.js";
 import {registerSSEProxyRoutes} from "./routes/sse-proxy.js";
 
 
@@ -21,6 +29,11 @@ export function initServer(dataPath, basePath = "aichat/v2", zipBlob) {
 	const router = new Router((ctx) => {
 		ctx.sandboxRoot = workspace;
 		const userId = ctx.params.userId;
+		if (RESTRICT_USER_CREATION && !ALLOW_USER_NAMES.has(userId)) {
+			ctx.send(403, { error: "no such user" });
+			return true;
+		}
+
 		if (userId) {
 			const getData = () => ctx._db || (ctx._db = getUserData(dataPath, userId));
 
@@ -70,6 +83,19 @@ const MAX_CONNECTIONS = 4;
 const connections = new Map();
 const usageTimestamps = new Map();
 
+function closeConnection(value) {
+	const {sqlite, vector} = value;
+
+	sqlite.exec(SHUTDOWN_SQL);
+	sqlite.close();
+}
+
+export function closeAllConnections() {
+	for (const value of connections.values()) {
+		closeConnection(value);
+	}
+}
+
 function getUserData(dbPath, userId) {
 	usageTimestamps.set(userId, Date.now());
 
@@ -82,10 +108,8 @@ function getUserData(dbPath, userId) {
 				oldestUser = id;
 			}
 		}
-		if (oldestUser) {
-			const {sqlite, vector} = connections.get(oldestUser);
-			sqlite.close();
-			vector.save();
+		if (oldestUser && Date.now() - oldestTime > 5000) {
+			closeConnection(connections.get(oldestUser));
 			connections.delete(oldestUser);
 			usageTimestamps.delete(oldestUser);
 		}
@@ -102,36 +126,36 @@ function getUserData(dbPath, userId) {
 function initDB(dbPath) {
 	const db = new DatabaseSync(dbPath);
 	db.exec(`
-    CREATE TABLE IF NOT EXISTS conversations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT DEFAULT '',
-      time INTEGER NOT NULL,
-      data TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS messages (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      owner INTEGER NOT NULL,
-      time INTEGER,
-	  content TEXT NOT NULL,
-      data TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS kv (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS kvs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      type TEXT NOT NULL,
-      name TEXT NOT NULL,
-      data TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_messages_owner ON messages(owner);
-    CREATE INDEX IF NOT EXISTS idx_kvs_type_name ON kvs(type, name);
-    CREATE TABLE IF NOT EXISTS statistics (
-      message_id INTEGER PRIMARY KEY,
-      time INTEGER NOT NULL,
-      data TEXT NOT NULL
-    );
-  `);
+CREATE TABLE IF NOT EXISTS conversations (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	title TEXT DEFAULT '',
+	time INTEGER NOT NULL,
+	data BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS messages (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	owner INTEGER NOT NULL,
+	time INTEGER,
+	content TEXT NOT NULL,
+	data BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS kv (
+	key TEXT PRIMARY KEY,
+	value BLOB NOT NULL
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS kvs (
+	type TEXT NOT NULL,
+    name TEXT NOT NULL,
+    data BLOB NOT NULL,
+    PRIMARY KEY (type, name)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_messages_owner ON messages(owner);
+CREATE TABLE IF NOT EXISTS statistics (
+	message_id INTEGER PRIMARY KEY,
+	time INTEGER NOT NULL,
+	data BLOB NOT NULL
+);
+`);
+	db.exec(STARTUP_SQL);
 	return db;
 }

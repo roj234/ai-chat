@@ -2,7 +2,7 @@ import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs/promises';
 import {parseArgs} from 'node:util';
-import {initServer} from './init.js';
+import {closeAllConnections, initServer} from './init.js';
 import {createSyncManager} from "./sync.js";
 import {WebSocketServer} from "ws";
 import {WEBSOCKET_SYNC_ENABLE} from "./config.js";
@@ -48,4 +48,21 @@ server.listen(PORT, () => {
 	console.log(`Server running at http://localhost:${PORT}/`);
 	console.log(`Data Path: ${data === '' ? 'In-Memory' : data}`);
 	console.log(`Zip Path: ${zipPath}`);
+});
+
+// 封装一个优雅退出的函数
+function gracefulShutdown() {
+	console.log('正在关闭数据库...');
+	closeAllConnections();
+	process.exit(0);
+}
+
+// 监听 Ctrl+C (SIGINT)
+process.on('SIGINT', gracefulShutdown);
+// 监听 Kill 命令 (SIGTERM)
+process.on('SIGTERM', gracefulShutdown);
+// screen4w
+process.on('message', (m) => {
+	console.log("IPC message", m);
+	if (m === "shutdown") gracefulShutdown();
 });

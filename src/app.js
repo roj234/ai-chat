@@ -18,17 +18,16 @@ import {
 	Shared,
 	state
 } from "./states.js";
-import {sendUserChatMessage} from "./api-request.js";
+import {sendUserChatMessage, statusBadge} from "./api-request.js";
 import {showToast} from "./components/Toast.js";
 import {handleCommand} from "./commands.js";
-import {MobileTitleEdit} from "./components/MobileTitleEdit.jsx";
+import {TitleEditor} from "./components/TitleEditor.jsx";
 
 import {SettingDialog} from "./components/SettingDialog.jsx";
 import {onPluginLoaded} from "/plugins/PluginRegistry.js";
 import {callOnLoadHandler} from "./plugin.js";
-import {_InputAttachment, FILE_NAME} from "./components/InputAttachment.jsx";
-import {readAsString} from "/vendor/chardet.js";
-import {formatSize} from "unconscious/ext/Utils.js";
+import {createAttachmentGallery, createFileUploader} from "./components/InputAttachment.jsx";
+import {createSendButton} from "./components/SendButton.jsx";
 
 const $ = sel => document.getElementById(sel);
 
@@ -37,9 +36,10 @@ function createApp() {
 	 * @type {HTMLElement}
 	 */
 	let messagesPanel,
-		userInput, sendBtn,
-		statusBadge, sidebar,
-		scroller, backToBottomBtn;
+		userInput,
+		sidebar,
+		scroller,
+		backToBottomBtn;
 
 	const SettingUI = <Filter config={SETTINGS} choices={config} onChange={onSettingChanged} showTitle={isMobile} />;
 	const newSettingUI = SettingDialog(SettingUI);
@@ -49,50 +49,15 @@ function createApp() {
 	 */
 	const rootStyle = document.querySelector(":root").style;
 
-	/**
-	 *
-	 * @type {OpenAI.ContentPart[]}
-	 */
+	/** @type {import("unconscious").Reactive<OpenAI.ContentPart[]>} */
 	const attachments = $state([]);
+	const fileInput = createFileUploader(attachments);
 
 	const toggleSidebar = () => {
 		if (!newSettingUI.style.display) jsHide(newSettingUI);
 		jsHide(sidebar);
 	};
 
-	const fileInput = <input type="file" accept="image/png,image/jpeg,image/bmp,image/gif,audio/wav,audio/mp3,audio/flac,text/plain" multiple onChange={({target}) => {
-		for (const file of target.files) {
-			if (file.size > 104857600) {
-				showToast("文件 "+file.name+" 过大, 仅允许10MB以内的文件", "error");
-				continue;
-			}
-
-			if (file.type.startsWith('image')) {
-				attachments.push({
-					type: "image_url",
-					image_url: { url: file }
-				});
-			} else if (file.type.startsWith('audio')) {
-				attachments.push({
-					type: "input_audio",
-					input_audio: {
-						data: file,
-						format: file.type.substring(file.type.indexOf('/')+1)
-					}
-				});
-			} else if (file.type.startsWith('text')) {
-				readAsString(file).then(text => {
-					attachments.push({
-						type: "text",
-						[FILE_NAME]: file.name+"\n"+formatSize(file.size),
-						text
-					});
-				})
-			}
-		}
-
-		target.value = '';
-	}} />;
 
 	let touchStartY = 0;
 	const markdownTableScrollHandler = (event) => {
@@ -121,17 +86,13 @@ function createApp() {
 	const App = (<>
 		<header className={"header"} class:closed={() => !selectedConversation.value}>
 			<div className="bar">
-				<div style={"justify-self: start"}>
-					<button className="ri-menu-line btn ghost" title="展开侧边栏" onClick={toggleSidebar}></button>
-				</div>
-				<MobileTitleEdit/>
-				<div style={"justify-self: end"}>
-					<button className="ri-add-line btn ghost" title="开启新对话" onClick={beginConversation}></button>
-				</div>
+				<button className="ri-menu-line btn ghost" title="展开侧边栏" onClick={toggleSidebar}></button>
+				<TitleEditor/>
+				<button className="ri-add-line btn ghost" title="开启新对话" onClick={beginConversation}></button>
 			</div>
 		</header>
 		{newSettingUI}
-		<aside ref={sidebar} className="sidebar hide" style={isMobile?"display:none;left:-100%":undefined}>
+		<aside ref={sidebar} className="sidebar hide" style={isMobile ? "display:none;left:-100%":undefined}>
 			<div className="sidebar-header">
 				<button className="btn secondary" style="flex: 1" onClick={beginConversation}><i
 					className="ri-add-line"></i>开启新对话
@@ -162,7 +123,7 @@ function createApp() {
 		>
 			<div ref={messagesPanel} className="panel no-messages">
 				<MessageList/>
-				<div className="composer" class:hidden={() => isMobile && lastScrollDirection.value}>
+				<div className="composer" class:hidden={() => config.uiAutoHideInput && lastScrollDirection.value}>
 					<div className="logo">
 					<span style={{
 						display: "flex",
@@ -175,16 +136,14 @@ function createApp() {
 							color: "var(--accent)"
 						}} className="ri-chat-smile-ai-fill"></span>
 					</div>
-					{/*我们可能很快不再需要这个了（或者仅用于调试？）*/}
-					<div className="controls">
-						<span ref={statusBadge}></span>
-						<button className={"btn ghost"} style={"display:none"} ref={backToBottomBtn} onClick={() => {
+					<div className={"f-controls"}>
+						{statusBadge}
+						<button className={"ri-arrow-down-s-line chip"} style={"display:none"} ref={backToBottomBtn} onClick={() => {
 							scroller.scrollTo({
 								top: scroller.scrollHeight,
 								behavior: "smooth",
 							})
-						}}>返回底部</button>
-						<span></span>
+						}} title={"返回底部"} />
 					</div>
 					<div className="query">
 						<textarea placeholder="今天有什么能帮到你？" id="userInput" ref={userInput}
@@ -201,15 +160,14 @@ function createApp() {
 								}
 							}}
 						></textarea>
-						{_InputAttachment(attachments)}
+						{createAttachmentGallery(attachments)}
 						<div className="controls">
 							{CUSTOM_CONTROLS}
 							<div className="spacer"></div>
 							<button className="ri-attachment-2 btn ghost" title="上传附件"
 									onClick={() => fileInput.click()}></button>
-							<button ref={sendBtn} onClick={onSend}></button>
+							{createSendButton(attachments, onSend)}
 						</div>
-
 					</div>
 				</div>
 			</div>
@@ -225,7 +183,6 @@ function createApp() {
 	});
 
 	Shared.scroller = scroller;
-	Shared.statusBadge = statusBadge;
 	Shared.SettingUI = SettingUI;
 	Shared.toggleSidebar = toggleSidebar;
 
@@ -336,68 +293,14 @@ function createApp() {
 			toggleSettingUI('CoTPrompt', !isTextCompletion && config.reasoning === false);
 		}
 		if (id === 'reasoning') toggleSettingUI('CoTPrompt', newValue === false);
-		if (id === 'generateTitle') toggleSettingUI('titleModel', newValue === true);
+		if (id === 'generateTitle') toggleSettingUI('title', newValue === true);
 
 		if (id === 'width') rootStyle.setProperty("--panel-width", newValue + "px");
 	}
 
-	/**
-	 *
-	 * @param {number} state
-	 */
-	function setSendBtnIcon(state) {
-		const x = ["发送", "中止", "继续", "重试", "执行工具"];
-		const y = ["ri-send-plane-fill", "ri-square-fill", "ri-play-large-fill", "ri-loop-right-line", "ri-function-ai-line"/* ri-check-double-line */];
-		sendBtn.className = y[state]+" btn primary";
-		sendBtn.title = x[state];
-	}
-	const button_state_map = {
-		stop: 0,
-		interrupt: 2,
-		length: 2,
-		error: 3,
-		tool_calls: 4
-	};
+	async function onSend() {
+		if (await handleCommand(userInput)) return;
 
-	function hasOtherSendBtnAction() {
-		const value = abortCompletion.value;
-		setSendBtnIcon(value ? 1 : 0);
-		if (value) return true;
-
-		const length = messages.length;
-		if (!length) return false;
-
-		/**
-		 * @type {AiChat.Message}
-		 */
-		const last = messages[length - 1];
-
-		if (last.role === "system") return false;
-
-		if (last.role === "tool") {
-			for (let i = length - 2; i >= 0; i--) {
-				const message = messages[i];
-				if (message.role === 'assistant' && message.tool_responses) {
-					for (let response of message.tool_responses) {
-						if (!(response.content || response.error))
-							return false;
-					}
-					break;
-				}
-			}
-		}
-
-		if (last.role === 'assistant') {
-			const state = button_state_map[last.finish_reason] ?? 3;
-			if (!state) return false;
-			setSendBtnIcon(state);
-			return true;
-		}
-
-		return last.role === "user";
-	}
-
-	function onSend() {
 		// Abort previous if any
 		if (abortCompletion.value) {
 			try {
@@ -406,13 +309,8 @@ function createApp() {
 			return;
 		}
 
-		if (handleCommand(userInput)) return;
-
-		const text = inputText.trim();
-		const hasOtherAction = hasOtherSendBtnAction();
-		if (!hasOtherAction && !text) return;
-
 		if (!selectedConversation.ready) {
+			// 创建新对话
 			if (null == selectedConversation.value) {
 				newConversation().then(data => {
 					conversations.unshift(data);
@@ -433,42 +331,75 @@ function createApp() {
 			return;
 		}
 
+		const text = inputText.trim();
 		inputText.value = '';
 		userInput.style.height = '';
 
-		let promise;
+		let input;
 		// in order to generate image:
 		// modalities: ['image', 'text'],
+
+		// Syntax: 单行 ![image1]
+		const imageRegex = /^!\[(?:image|attach(?:ment)?)(\d+)]$/gm;
 		if (attachments.length) {
-			promise = sendUserChatMessage([
-				{
-					type: "text",
-					text
-				},
-				...attachments
-			]);
-			attachments.length = 0;
+			if (config.interleavedImageTag) {
+				const parts = [];
+				let lastIndex = 0;
+				let match;
+				const usedIndices = new Set();
+
+				// 1. 寻找匹配的标签并插入图片
+				while ((match = imageRegex.exec(text)) !== null) {
+					const imageIdx = parseInt(match[1], 10) - 1;
+
+					const before = text.substring(lastIndex, match.index).trim();
+					if (before) parts.push({ type: "text", text: before });
+
+					if (attachments[imageIdx]) {
+						parts.push(attachments[imageIdx]);
+						usedIndices.add(imageIdx);
+					} else {
+						// 如果索引越界，保留原标签作为文本，或者报错
+						parts.push({ type: "text", text: match[0] });
+					}
+
+					lastIndex = imageRegex.lastIndex;
+				}
+
+				const after = text.substring(lastIndex).trim();
+				if (after) parts.push({ type: "text", text: after });
+
+				attachments.forEach((attachment, index) => {
+					if (!usedIndices.has(index)) parts.push(attachment);
+				});
+
+				input = parts;
+			} else {
+				input = [
+					{
+						type: "text",
+						text
+					},
+					...attachments
+				];
+			}
+
+			attachments.length = 0; // 清空附件
 		} else {
-			promise = sendUserChatMessage(text || null);
+			input = text || null;
 		}
 
-		const repeater = result => {
-			// 自动执行非交互式工具调用
-			if (result === 'tool_calls') sendUserChatMessage().then(repeater);
-			/*else if (result === 'stop' && isLlamaCppBackend && config.reasoning && config.prefillKVCache) {
-				jsonSchemaPrefixResponse([...messages.value], "", {
-					...state.additionalBody,
-					max_tokens: 0,
-					stream: false
-				}, null);
-			}*/
-		};
-		promise.then(repeater);
-	}
+		if (config.uiDelaySubmit && input) {
+			messages.push({role: 'user', content: input, time: Date.now()});
+			return;
+		}
 
-	$watch([messages, abortCompletion, attachments, inputText], () => {
-		sendBtn.disabled = !hasOtherSendBtnAction() && !inputText.trim() && !attachments.length;
-	});
+		for (;;) {
+			const result = await sendUserChatMessage(input);
+			if (result !== 'tool_calls') break;
+			input = null;
+		}
+	}
 
 	$watch(messages, () => {
 		messagesPanel.classList.toggle("no-messages", messages.length === 0);
@@ -477,7 +408,7 @@ function createApp() {
 	return [
 		App,
 		() => {
-			SettingUI.onSettingsUpdated(true);
+			SettingUI.sync(true);
 
 			listConversations().then(arr => {
 				const loading = $("loading");
@@ -494,9 +425,7 @@ function createApp() {
 				const hash = location.hash.substring(1);
 				if (hash.startsWith("!chat/")) {
 					const chatId = parseInt(hash.substring(6));
-					selectedConversation.value = arr.find(t => {
-						return t.id === chatId;
-					})
+					selectedConversation.value = arr.find(t => t.id === chatId);
 				}
 
 				let prevId;
@@ -527,7 +456,7 @@ window.addEventListener("load", () => {
 		const APP = $("app");
 		appendChildren(APP, app_);
 
-		onLoad_();
 		callOnLoadHandler(APP);
+		onLoad_();
 	});
 })

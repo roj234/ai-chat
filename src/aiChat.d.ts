@@ -55,7 +55,6 @@ declare namespace AiChat {
     }
 
     type ToolResponse = {
-        tool_name: string;
         time: number;
         content?: string | OpenAI.ContentPart[];
         success?: boolean;
@@ -93,6 +92,9 @@ declare namespace AiChat {
         allowContinue: boolean,
         maxToolTurns: number
         sound: false | 'always' | 'background',
+
+        forceThink: boolean | null,
+        modalities: ('image' | 'audio' | 'tool')[]
 
         // UI
         think: boolean,
@@ -180,7 +182,7 @@ declare namespace AiChat {
         autorun?: boolean | "on_import";
 
         script: (parameters: Record<string, any>, response: ToolResponse & Payload, global_storage: Conversation) => any | Promise<any>;
-        removed?: (context: ToolResponse & Payload, global_storage: Conversation) => void;
+        undo?: (context: ToolResponse & Payload, global_storage: Conversation) => void;
 
         renderer?: (context: ToolResponse & Payload, has_successor: boolean) => HTMLElement;
         /**
@@ -353,12 +355,12 @@ declare namespace AiChat {
         interface CustomMessageRole {
             name: string;
             reactive?: boolean;
-            compose?(message: Message, output: OpenAI.Message[], callbacks: MessageComposedCallback[]);
-            getChunks(message: Message, chunks: ResponseContentPart[], index: number);
+            compose?(message: Message, output: OpenAI.Message[], callbacks: MessageComposedCallback[], index: number, length: number);
+            getChunks(message: Message, chunks: ResponseContentPart[], index: number, isEditing: function(Message): boolean);
             keyFunc?(chunk: ResponseContentPart): any[];
         }
 
-        type MessageComposedCallback = (messages: Message[], output: OpenAI.Message[], body: Record<string, any>) => void;
+        type MessageComposedCallback = (messages: Message[], output: OpenAI.Message[], body: Record<string, any>, is_prefill: boolean) => void;
 
         type MyCharacter = IDBKVList & {
             type: "st|char",
@@ -373,6 +375,10 @@ declare namespace AiChat {
             personality: string;
             scenario: string;
             dialogueExamples: string[];
+
+            //override default st_user
+            user?: string;
+            userdesc?: string;
 
             greetings: string[];
             lorebook: MyLorebookPage[];
@@ -431,11 +437,8 @@ declare namespace AiChat {
         interface MyCharConversation extends BaseMessage {
             role: "st|char";
             content: {
-                id: number;
                 name: string;
-                lorebooks: number[];
                 lorebookNames?: string[];
-                preset: number;
                 presetName?: string;
                 greeting: number;
                 activatedLorebookItems: Set<string>;
@@ -494,19 +497,5 @@ declare namespace AiChat {
          * @param {number} messageId - 要删除的消息 ID
          */
         remove(messageId: number);
-    }
-
-    type ProviderKV = IDBKVList & {
-        type: 'provider',
-
-        baseUrl: string,
-        apiKey: string,
-        models: ModelKV[]
-    }
-
-    type ModelKV = {
-        id: string,
-        abilities: Set<'tool' | 'audio' | 'image' | 'video' | 'completion' | 'reasoning'>,
-        context: number
     }
 }

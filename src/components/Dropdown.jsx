@@ -1,7 +1,10 @@
 import "./Dropdown.css";
 
-import {$foreach} from "unconscious";
+import {$disposable, $foreach} from "unconscious";
 import {indexInParent} from "../utils/utils.js";
+import {onLoad} from "../plugin.js";
+
+let instances = new Set;
 
 /**
  * 注意：如果传对象，必须是inline key
@@ -45,26 +48,33 @@ export function Dropdown({items, selection, onChanged, dir = 'down'}) {
 			onChanged('s', indexInParent(target));
 		}}>
 			{$foreach(items, (item) =>
-				<li class:selected={selection.value === item.name}>{item.name} <span>
+				<li class:selected={selection.value === item.name} title={item.name}>{item.name}
 					<i className={"ri-delete-bin-line"} title={"删除"}></i>
-				</span></li>, (item) => item.name)}
+				</li>, (item) => item.name)}
 		</ul>
 	</div>;
 
 	main.setSelection = updateHighlight_;
-	main.onInserted = (id, name) => {
+	main.onInserted = (type, name) => {
 		let index = items.findIndex(value => value.name === name);
-		if (index >= 0) {
-			items[index].id = id;
-		} else {
+		if (index < 0) {
 			items.unshift({
-				id,
-				//type: "preset",
+				type,
 				name,
 			});
 		}
 		updateHighlight_(index);
 	};
 
+	instances.add(main);
+	$disposable(main, () => instances.delete(main));
+
 	return main;
 }
+
+onLoad((app) => {
+	app.querySelectorAll(".pretty-select").forEach(el => instances.add(el));
+	addEventListener("click", () => {
+		instances.forEach(el => el.classList.remove("open"));
+	})
+})

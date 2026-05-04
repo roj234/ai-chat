@@ -1,4 +1,4 @@
-import {deserializeRow, jsonParse} from '../utils.js';
+import {decompressMessage, deserializeRow} from "../utils/compression.js";
 
 export function registerSearchRoutes(router) {
 	router.get('/search', async (ctx) => {
@@ -27,7 +27,7 @@ export function registerSearchRoutes(router) {
 				if (rows.length === 0) break;
 
 				for (const row of rows) {
-					const body = jsonParse(row.data);
+					const body = deserializeRow(row, decompressMessage);
 					const idStr = row.id.toString(36);
 
 					// 索引内容
@@ -59,11 +59,11 @@ export function registerSearchRoutes(router) {
 		const sql = `
             WITH MatchedSet AS (
                 -- 找出所有命中的消息及其所属对话
-                SELECT m.id AS msg_id, 
+                SELECT m.id, 
                        m.owner AS conv_id, 
-                       m.data AS msg_data,
-                       m.content AS msg_content,
-                       m.time AS msg_time
+                       m.data,
+                       m.content,
+                       m.time
                 FROM messages m
                 WHERE m.id IN (${placeholders})
                    OR m.content LIKE ?
@@ -72,7 +72,7 @@ export function registerSearchRoutes(router) {
                 -- 对命中的消息按对话分组，并给每一行编个号
                 SELECT 
                     *, 
-                    ROW_NUMBER() OVER (PARTITION BY conv_id ORDER BY msg_id) as rn
+                    ROW_NUMBER() OVER (PARTITION BY conv_id ORDER BY id) as rn
                 FROM MatchedSet
             ),
             FilteredConvs AS (
@@ -81,16 +81,15 @@ export function registerSearchRoutes(router) {
             )
             -- 最终查询：取出这些对话及其实际命中的那几条消息
             SELECT 
-                c.*, 
-                rm.msg_id, 
-                rm.msg_data,
-                rm.msg_content,
-                rm.msg_time
+                c.id as conv_id,
+                c.title as conv_title,
+                c.time as conv_time,
+                rm.*
             FROM FilteredConvs fc
             JOIN conversations c ON c.id = fc.conv_id
             JOIN RankedMatches rm ON rm.conv_id = fc.conv_id
             WHERE rm.rn <= ?  -- 每个对话只取前 5 条命中的消息
-            ORDER BY c.id DESC, rm.msg_id
+            ORDER BY c.id DESC, rm.id
         `;
 
 		const rows = ctx.db.prepare(sql).all(
@@ -106,18 +105,20 @@ export function registerSearchRoutes(router) {
 		const conversations = new Map();
 
 		for (const row of rows) {
-			if (!conversations.has(row.id)) {
-				const conv = deserializeRow(row);
-				conv.messages = [];
-				conversations.set(row.id, conv);
+			const conv_id = row.conv_id;
+			if (!conversations.has(conv_id)) {
+				conversations.set(conv_id, {
+					id: conv_id,
+					title: row.conv_title,
+					time: row.conv_time,
+					messages: []
+				});
 			}
+			delete row.conv_id;
+			delete row.conv_title;
+			delete row.conv_time;
 
-			const msg = jsonParse(row.msg_data, {
-				id: row.msg_id,
-				content: row.msg_content,
-				time: row.msg_time
-			});
-
+			const msg = deserializeRow(row, decompressMessage);
 			const score = vectorKeys.get(msg.id);
 			if (score != null) msg.cossim = score;
 
@@ -125,7 +126,7 @@ export function registerSearchRoutes(router) {
 			delete msg.tool_calls;
 			delete msg.reasoning_details;
 
-			conversations.get(row.id).messages.push(msg);
+			conversations.get(conv_id).messages.push(msg);
 		}
 
 		ctx.send(200, Array.from(conversations.values()));

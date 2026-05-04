@@ -29,6 +29,7 @@ export const state = {};
  * @type {Record<string, AiChat.DnD.CustomMessageRole>}
  */
 export const MessageRoles = {};
+export const EditableMessageRoles = new Set(["system", "user", "assistant"]);
 
 export const inputText = $state("");//$store("inputText", "", {persist: true});
 
@@ -114,7 +115,6 @@ export function updateModels(force) {
  *     scroller: HTMLElement,
  *     sendBtn: HTMLButtonElement,
  *     SettingUI: HTMLElement,
- *     statusBadge: HTMLElement,
  * }}
  */
 export const Shared = {}

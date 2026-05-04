@@ -15,12 +15,12 @@ import {SETTINGS} from "/src/settings.js";
 import {updateMessageUI} from "/src/components/MessageList.jsx";
 
 import {cloneNamed, getTextContent} from "/src/utils/utils.js";
-import {readPNG} from "/vendor/upng.js";
-import {kvListDel, kvListGet, kvListGetByName, kvListGetKeys, kvListSet} from "/src/database.js";
+import {readPNG} from "/common/upng.js";
+import {kvListDel, kvListGet, kvListGetKeys, kvListSet} from "/src/database.js";
 import {onConversationChanged, registerTools} from "/src/skills.js";
 import {showToast} from "/src/components/Toast.js";
 import {Dropdown} from "/src/components/Dropdown.jsx";
-import {COMMANDS} from "/src/commands.js";
+import {COMMAND_REGISTRY} from "/src/commands.js";
 import {createTab} from "/src/components/SettingDialog.jsx";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {_CharacterEditor, _LorebookEditor, _PresetEditor, createPanel} from "./STPresetPanel.jsx";
@@ -28,7 +28,7 @@ import {convertSTCharacter, convertSTLorebook, convertSTPreset, normalizeCRLF, u
 import {applyMacro, applyPreset, createDefaultCtx, DEFAULT_USER_NAME, makeStory} from "./prompt.js";
 import {LorebookList, PresetList} from "./STTagList.jsx";
 import schema from "./schema.json";
-import {compileSchema, validate} from "/vendor/jsonSchema.js";
+import {compileSchema, validate} from "/common/jsonSchema.js";
 
 compileSchema(schema);
 
@@ -52,25 +52,6 @@ const definition = {
 const _FetchFromDB = debugSymbol("MCI_READY");
 
 //region misc 初始化 & 状态管理
-/** @type {Map<number, WeakRef<AiChat.IDBKVList & Object>>} */
-const cache = new Map;
-/**
- * @param {number} id
- * @return {Promise<object>}
- * @private
- */
-async function _kvListGetCached(id) {
-	// 同时检查Null
-	if (id <= 0) return Promise.resolve();
-
-	let val = cache.get(id)?.deref();
-	if (!val) {
-		val = await kvListGet(id);
-		if (val) cache.set(id, new WeakRef(val));
-	}
-	return val;
-}
-
 function showOverwriteConfirm(item, typeStr, callback) {
 	if (item._dirty) {
 		SimpleModal({
@@ -122,11 +103,9 @@ function _SchemaEditorImpl(typeId, template, editorConstructor) {
 		onChanged={(type, index) => {
 			if (type === 'd') {
 				const [key] = items.splice(index, 1);
-				kvListDel(key.id);
+				kvListDel(typeId, key.name);
 			} else {
-				showOverwriteConfirm(selectedItem, typeStr, () => _kvListGetCached(items[index].id).then(value => {
-					delete value.type;
-
+				showOverwriteConfirm(selectedItem, typeStr, () => kvListGet(typeId, items[index].name).then(value => {
 					selectedItem.value = value;
 					delete selectedItem._dirty;
 					$update(selectedItem);
@@ -140,7 +119,7 @@ function _SchemaEditorImpl(typeId, template, editorConstructor) {
 
 	const element = <>
 		<div className={"choice-scroll"}>
-			<button className={"btn ghost"} onClick={openEditor}>编辑</button>
+			<button className={"btn ghost"} onClick={openEditor} disabled={() => !selectedItem.value}>编辑</button>
 			<button className={"btn ghost"} onClick={() => {
 				showOverwriteConfirm(selectedItem, typeStr, () => {
 					selectedItem.value = structuredClone(template);
@@ -157,9 +136,8 @@ function _SchemaEditorImpl(typeId, template, editorConstructor) {
 						if (name && name !== oldName) delete selectedItem.id; // 在数据库里创建新项目
 						else name = oldName;
 
-						kvListSet(selectedItem.value, typeId, name).then(id => {
-							onInserted(id, name);
-							selectedItem.id = id;
+						kvListSet(selectedItem.value, typeId, name).then(() => {
+							onInserted(typeId, name);
 						});
 					}
 				})
@@ -168,7 +146,6 @@ function _SchemaEditorImpl(typeId, template, editorConstructor) {
 			<button className={"btn ghost"} disabled={() => !selectedItem.value} onClick={() => {
 				const value = structuredClone(unconscious(selectedItem));
 				value.type = typeId;
-				delete value.id;
 				downloadFile(new Blob([JSON.stringify(value)]), "json");
 			}}>导出
 			</button>
@@ -192,13 +169,13 @@ const [presetBar, openPresetPanel, presetList, currentPreset] = _SchemaEditorImp
 const [charBar, openCharPanel, characterList, currentCharacter] = _SchemaEditorImpl("st|char", {name: "新角色"}, _CharacterEditor);
 const [lorebookBar, openLorebookPanel, lorebookList, currentLorebook] = _SchemaEditorImpl("st|lorebook", {name: "新的世界"}, _LorebookEditor);
 
-charBar[0].append(<button className={"btn ghost"} title={"请先保存再创建故事"} disabled={() => !currentCharacter.id} onClick={() => {
+charBar[0].append(<button className={"btn ghost"} title={"请先保存再创建故事"} disabled={() => !currentCharacter.description} onClick={() => {
 	createConversation(unconscious(currentCharacter));
 }}>创建故事</button>);
 
-COMMANDS["stpreset"] = openPresetPanel;
-COMMANDS["stchar"] = openCharPanel;
-COMMANDS["stlorebook"] = openLorebookPanel;
+COMMAND_REGISTRY["stpreset"] = [openPresetPanel, "打开补全配置编辑器"];
+COMMAND_REGISTRY["stchar"] = [openCharPanel, "打开角色编辑器"];
+COMMAND_REGISTRY["stlorebook"] = [openLorebookPanel, "打开世界书编辑器"];
 
 createTab("character", "角色", "ri-user-heart-line");
 SETTINGS.filter((item) => item._id === "import").forEach((item) => {
@@ -228,7 +205,7 @@ SETTINGS.push(
 		name: "[ST] 世界书模式",
 		title: "基于工具调用的世界书和变量系统\n刷新对话生效",
 		type: "radio",
-		_tab: ["character", "tools"],
+		_tab: "character",
 		choices: {
 			"正则匹配": false,
 			"工具调用(实验性)": true,
@@ -236,7 +213,7 @@ SETTINGS.push(
 		}
 	},
 	{
-		name: "[ST] 预设/模板",
+		name: "[ST] 预设/补全配置",
 		title: "用指令 /stpreset 打开",
 		_tab: ["character", "prompt"],
 		type: "element",
@@ -383,50 +360,34 @@ onConversationChanged((conv, messages) => {
 
 	const data = charInstance.content;
 	let {
-		id = -1,
 		name,
-		preset = -1,
 		presetName,
-		lorebooks ,
-		lorebookNames,
+		lorebookNames = [],
 	} = data;
-	if (!lorebooks) {
-		lorebooks = data.lorebooks = [];
-		lorebookNames = data.lorebookNames = [];
-	}
+	data.lorebookNames = lorebookNames;
 
-	const lorebookSize = lorebooks.length;
+	const lorebookSize = lorebookNames.length;
 	const readyObj = $state({
 		activatedLorebookItems: $state([]),
 		lorebooks: $state(Array(lorebookSize))
 	});
 
-	const promises = [_kvListGetCached(id).then(item => {
+	const promises = [kvListGet("st|char", name).then(item => {
 		readyObj.character = item;
-		if (name && (!item || item.name !== name)) return kvListGetByName("st|char", name).then(item => {
-			readyObj.character = item;
-			data.id = item.id;
-		});
 	})];
-	if (preset >= 0) promises.push(_kvListGetCached(preset).then(item => {
+	if (presetName) promises.push(kvListGet("st|preset", presetName).then(item => {
 		readyObj.preset = item;
-		if (presetName && (!item || item.name !== presetName)) return kvListGetByName("st|preset", presetName).then(item => {
-			readyObj.preset = item;
-			data.preset = item.id;
-		});
 	}));
 
 	if (lorebookSize) {
 		for (let i = 0; i < lorebookSize; i++) {
 			const j = i;
-			promises.push(_kvListGetCached(lorebooks[i]).then(item => {
-				readyObj.lorebooks[j] = item;
-				const lbName = lorebookNames?.[j];
-				if (lbName && (!item || item.name !== presetName)) return kvListGetByName("st|lorebook", lbName).then(item => {
+			const lorebookName = lorebookNames[i];
+			if (lorebookName !== "") {
+				promises.push(kvListGet("st|lorebook", lorebookName).then(item => {
 					readyObj.lorebooks[j] = item;
-					data.lorebooks[j] = item.id;
-				});
-			}));
+				}));
+			}
 		}
 	}
 
@@ -456,8 +417,8 @@ onConversationChanged((conv, messages) => {
  */
 function importObject(typeId, json) {
 	const [typeStr, names, callback] = definition[typeId];
-	return kvListSet(cloneNamed(json, ["name", "time", ...names]), typeId).then(id => {
-		callback(id, json.name);
+	return kvListSet(cloneNamed(json, ["name", "time", ...names]), typeId).then(() => {
+		callback(typeId, json.name);
 		showToast(typeStr+" "+json.name+" 导入成功", 'ok');
 		return true;
 	});
@@ -518,9 +479,8 @@ async function createConversation(char) {
 				content: {
 					id: char.id,
 					name: char.name,
-					// 第一个-1是给嵌入世界书（若存在）保留的
-					lorebooks: [-1],
-					preset: -1,
+					// ""为嵌入世界书（若存在）保留
+					lorebookNames: [""],
 					activatedLorebookItems: new Set,
 					greeting: 0
 				}
@@ -551,8 +511,8 @@ function insertAfter(text, msg) {
  * @constructor
  */
 function StoryConfigPanel(self) {
-	const selectedLorebooks = $state(self.content.lorebooks);
-	const selectedPreset = $state(self.content.preset);
+	const selectedLorebooks = $state(self.content.lorebookNames);
+	const selectedPreset = $state(self.content.presetName);
 
 	const update = () => {
 		self[_FetchFromDB].stable = false;
@@ -561,30 +521,25 @@ function StoryConfigPanel(self) {
 	};
 
 	$watch(selectedPreset, () => {
-		const id = selectedPreset.value;
-		_kvListGetCached(id).then(item => {
-			self.content.preset = id;
-			self.content.presetName = item?.name;
+		const name = selectedPreset.value;
+		kvListGet("st|preset", name).then(item => {
+			self.content.presetName = name;
 			self[_FetchFromDB].preset = item;
-
 			update();
 		});
 	}, false);
 
 	$watch(selectedLorebooks, () => {
-		const ids = selectedLorebooks.value;
-		const valueArr = Array(ids.length);
-		const nameArr = Array(ids.length);
+		const nameArr = selectedLorebooks.value;
+		const valueArr = Array(nameArr.length);
 		self[_FetchFromDB].lorebooks.value = valueArr;
-		self.content.lorebookNames = nameArr;
 
 		const promises = [];
 
-		for (let i = 0; i < ids.length; i++){
+		for (let i = 0; i < nameArr.length; i++){
 			const j = i;
-			promises.push(_kvListGetCached(ids[i]).then(item => {
+			promises.push(kvListGet("st|lorebook", nameArr[i]).then(item => {
 				valueArr[j] = item;
-				nameArr[j] = item?.name;
 			}));
 		}
 
@@ -609,7 +564,7 @@ MessageRoles["st|char"] = {
 	 * @param callbacks
 	 */
 	compose(self, output, callbacks) {
-		callbacks.push((input, output) => {
+		callbacks.push((input, output, body, prefill) => {
 			const {
 				/** @type {AiChat.DnD.MyCharacter} */
 				character: char,
@@ -689,17 +644,19 @@ MessageRoles["st|char"] = {
 			}
 			//endregion
 
+			const macro = createDefaultCtx(char);
+
 			let prefix = '';
 			const hasSystemMessage = output[0].role === "system";
-			if (hasSystemMessage) prefix = applyMacro(output[0].content)+"\n\n";
+			if (hasSystemMessage) prefix = applyMacro(output[0].content, macro)+"\n\n";
 
 			if (preset.prompts?.length) {
 				const content = applyPreset(preset, {
-					...createDefaultCtx(char),
-					personaDescription: config.st_userdesc,
+					...macro,
+					personaDescription: char.userdesc || config.st_userdesc,
 					worldInfoBefore: lbBefore,
 					worldInfoAfter: lbAfter
-				}, output);
+				}, output, prefill);
 
 				output.length = 0;
 				output.push(...content);
@@ -742,12 +699,12 @@ MessageRoles["st|char"] = {
 		if (!char) {
 			chunks.push({
 				type: "error",
-				error: "致命错误\n引用的角色 "+self.content.name+"(#"+self.content.id+") 不存在"
+				error: "致命错误\n引用的角色 "+self.content.name+" 不存在"
 			});
 			return;
 		}
 
-		const number = self.content.lorebooks.indexOf(-1);
+		const number = self.content.lorebookNames.indexOf("");
 		if (number >= 0 && char.lorebook?.length) {
 			lorebooks[number] = {
 				name: "角色卡内置",
@@ -789,16 +746,16 @@ MessageRoles["st|char"] = {
 
 		// 这里需要存放名字来提供用户友好的错误提示吗？
 		// 或者我们可以直接用name做key？
-		// 这个要 kvListGetByName(type, name); 走不了现在的 id 缓存
+		// 这个要 kvListGet(type, name); 走不了现在的 id 缓存
 		// 反正覆盖不会导致ID变更，只有删除才会，用ID应该问题不大
 		// 另外这个要搞成响应式的
 		for (let i = 0; i < lorebooks.length; i++){
 			let lorebook = lorebooks[i];
 			if (lorebook?.pages == null) {
-				if (self.content.lorebooks[i] !== -1) {
+				if (self.content.lorebookNames[i] !== "") {
 					chunks.push({
 						type: "error",
-						error: "错误\n引用的世界书 "+self.content.lorebookNames?.[i]+"(#"+self.content.lorebooks[i]+") 不存在"
+						error: "错误\n引用的世界书 "+self.content.lorebookNames?.[i]+" 不存在"
 					});
 				}
 			} else {
@@ -818,10 +775,10 @@ MessageRoles["st|char"] = {
 			}
 		}
 
-		if (!preset && self.content.preset !== -1) {
+		if (!preset && self.content.presetName) {
 			chunks.push({
 				type: "error",
-				error: "错误\n引用的预设 "+self.content.presetName+"(#"+self.content.preset+") 不存在"
+				error: "错误\n引用的预设 "+self.content.presetName+" 不存在"
 			});
 		}
 

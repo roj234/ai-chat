@@ -15,7 +15,7 @@
     border-radius: var(--border-radius-md);
     border: 1px solid var(--border);
     box-shadow: 0 4px 12px var(--bg);
-    max-width: 500px;
+    max-width: 768px;
     width: 90%;
     max-height: 80vh;
     animation: bounceIn 0.3s ease-out;
@@ -35,7 +35,7 @@
 
     & .body {
         color: var(--muted);
-        overflow: auto;
+        /*overflow: auto;*/
 
         /* For input mode, ensure the body has space for the input */
         &:has(.modal-input) {
@@ -49,7 +49,7 @@
             white-space: pre-wrap;
         }
 
-        & input, textarea {
+        & input[type="text"], textarea {
             width: 100%;
             padding: 12px;
             border: 1px solid var(--border);

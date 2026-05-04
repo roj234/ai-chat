@@ -72,7 +72,7 @@ export function SettingDialog(oldUI) {
 
 	let header;
 	let body;
-	let dialog = <div className="modal-overlay hide" id={"settingDialog"} style={"display:none;z-index:"+(isMobile?16:15)}>
+	let dialog = <div className="modal-overlay hide" id={"settingDialog"} style={"display:none;z-index:"+(isMobile?3:2)}>
 		<div ref={header} className="modal ntp">
 			<div className="sidebar-list scroll">
 				<div className={"_vl"} onClick.delegate{".chat-item"}={({delegateTarget}) => {

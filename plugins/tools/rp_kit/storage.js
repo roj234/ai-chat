@@ -1,6 +1,6 @@
 import {$state, $update, debugSymbol, unconscious} from "unconscious";
 import {jsonPathOp, volatileEnvironment} from "/src/skills.js";
-import {parseJsonPath} from "/vendor/jsonSchema.js";
+import {parseJsonPath} from "/common/jsonSchema.js";
 
 const actionLabels = {
 	set: '更新', add: '数值变动', append: '获得物品', merge: '属性修正', delete: '移除'
@@ -108,7 +108,7 @@ export const storage = {
 			</div>
 		);
 	},
-	removed(response) {
+	undo(response) {
 		const data = response[NOT_PERSIST_DATA];
 		if (!data) return;
 		const { key, action, undo } = data;

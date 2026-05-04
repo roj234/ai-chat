@@ -1,6 +1,6 @@
 import {showToast} from "./components/Toast.js";
 import {sendUserChatMessage} from "./api-request.js";
-import {config} from "./states.js";
+import {abortCompletion, config} from "./states.js";
 import {debugSymbol, isReactive} from "unconscious";
 
 const RAW_MESSAGE = debugSymbol("RAW_MESSAGE");
@@ -145,7 +145,7 @@ export class AntiSlop {
 
 						last.token = nextBest.token;
 						last.end = last.start + nextBest.token.length;
-						const newPrefix = content.substring(0, start) + nextBest.token;
+						let newPrefix = content.substring(0, start) + nextBest.token;
 
 						this.pattern.lastIndex = matchStartIdx - match[0].length;
 						if (this.pattern.exec(newPrefix)) continue;
@@ -156,6 +156,11 @@ export class AntiSlop {
 						// prefill
 						message[RAW_MESSAGE] = newPrefix;
 						if (message.think) {
+							const format = message.think.format;
+							if (format.startsWith("m")) {
+								newPrefix = newPrefix.slice(format.length+1);
+							}
+
 							if (isThinking) {
 								message.think.content = newPrefix;
 							} else {
@@ -173,7 +178,9 @@ export class AntiSlop {
 							message.content = newPrefix;
 						}
 
-						requestIdleCallback(() => {
+						setTimeout(() => {
+							// 异步操作，轻而易举啊
+							abortCompletion.value = null;
 							// 小机灵鬼把它又给关闭了？
 							config.allowContinue = true;
 							sendUserChatMessage(null, this);

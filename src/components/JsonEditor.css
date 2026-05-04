@@ -1,0 +1,50 @@
+
+.CodeEditor {
+    --padding: 10px;
+    --font-size: 14px;
+    --line-height: 1.5;
+
+    position: relative;
+    height: 400px;
+
+    /* 统一 textarea 和 pre 的样式 */
+    & > * {
+        position: absolute;
+        inset: 0;
+        padding: var(--padding);
+        font-size: var(--font-size);
+        line-height: var(--line-height);
+        font-family: monospace;
+        /*white-space: pre;*/
+        overflow: auto;
+        border: none;
+        outline: none;
+    }
+
+    & > textarea {
+        background: transparent;
+        color: transparent; /* 文字透明 */
+        caret-color: white; /* 光标可见 */
+        resize: none;
+    }
+
+    & > div {
+        pointer-events: none;
+    }
+
+    & .cursor {
+        position: relative;
+        &:before {
+            position: absolute;
+            content: "";
+            border: 1px solid red;
+            height: calc(var(--font-size) * var(--line-height));
+        }
+    }
+}
+
+/* 简单的语法高亮颜色 */
+.token-keyword { color: #c678dd; }
+.token-string { color: #98c379; }
+.token-comment { color: #5c6370; font-style: italic; }
+.token-number { color: #d19a66; }

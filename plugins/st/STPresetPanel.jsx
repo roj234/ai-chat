@@ -59,7 +59,7 @@ function createList(dirtyHandle, config, onUpdate) {
 			}
 			onUpdate?.(k, v, obj, el);
 		}} showTitle={true} fillPlaceholder={false} />;
-		filter.onSettingsUpdated(true);
+		filter.sync(true);
 		return filter;
 	}
 
@@ -529,6 +529,18 @@ export function _CharacterEditor(char, isOpen, close) {
 			id: "scenario",
 			placeholder: "旧字段，可以留空",
 			type: "textbox"
+		},
+		{
+			name: "你的名字",
+			id: "user",
+			placeholder: "填写以覆盖默认设置",
+			type: "input"
+		},
+		{
+			name: "自我介绍",
+			id: "userdesc",
+			placeholder: "填写以覆盖默认设置",
+			type: "textbox"
 		}
 	];
 	const charOptions = <Filter choices={char} config={config} showTitle={true} onChange={(k, v, chr) => {
@@ -576,7 +588,7 @@ export function _CharacterEditor(char, isOpen, close) {
 	const newItem = (listener, item, index) => $state({ content: item }, false, listener);
 
 	$watchWithCleanup($computed(() => char.value), () => {
-		charOptions.onSettingsUpdated(false, true);
+		charOptions.sync(false, true);
 		greetingVL.setItems((char.greetings || (char.greetings = [])).map(newItem.bind(null, greetingListener)));
 		expMsgVL.setItems((char.dialogueExamples || (char.dialogueExamples = [])).map(newItem.bind(null, expMsgListener)));
 		const arr = char.lorebook || (char.lorebook = []);

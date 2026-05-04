@@ -47,6 +47,11 @@ export const WEBSOCKET_SYNC_BASE = (ctx) => {
 	return "ws://"+ctx.req.headers.host+"/aichat/v2/sync?user="+encodeURIComponent(userId);
 };
 
+// 是否限制用户名
+export const RESTRICT_USER_CREATION = false;
+// 允许使用的用户名列表
+export const ALLOW_USER_NAMES = new Set(['admin', 'user']);
+
 /**
  * 数据库安全配置
  */
@@ -81,3 +86,32 @@ export const SSE_PROXY_BACKEND = {
 		authorization: 'Bearer xxx'
 	}
 };
+
+/**
+ * 启动时执行的额外 SQLite 语句
+ *
+ * 你可以新建索引
+ * 或者像默认实现一样开启WAL日志以优化磁盘写入（并非减少）
+ */
+export const STARTUP_SQL = `
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+`;
+/**
+ * 停止时执行的额外 SQLite 语句
+ */
+export const SHUTDOWN_SQL = ``;
+
+/**
+ * 使用 Msgpack schema 而不是 JSON 序列化扩展字段
+ */
+export const COMPRESSION_MSGPACK_SCHEMA = true;
+/**
+ * 对长度超过 1KB 的扩展字段进行 brotli 压缩
+ */
+export const COMPRESSION_START_SIZE = 1024;
+/**
+ * 建议设为 4 或 5
+ * 11 是最高压缩但极慢，4 是性能与体积的平衡点
+ */
+export const COMPRESSION_LEVEL = 4;

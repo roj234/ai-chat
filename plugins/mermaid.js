@@ -23,14 +23,13 @@ registerCodeBlockRenderer("mermaid", (code, language, node, is_finished) => {
 
 	renderQueue = renderQueue.then(async () => {
 		if (node.isConnected) {
-			node.className = "";
 			delete node.dataset.processed;
 
 			try {
 				await mermaid.run({ nodes: [node] });
 				node.className = "mermaid";
 			} catch (err) {
-				node.className = "hljs error";
+				node.className = "error";
 				node.textContent = err.message;
 			}
 		}

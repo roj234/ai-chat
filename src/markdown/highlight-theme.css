@@ -1,7 +1,11 @@
 pre code.hljs {
-    display: block;
     overflow-x: auto;
-    padding: 1em 0 1em 1em;
+    scrollbar-gutter: stable;
+
+    line-height: 1.3;
+    .line {
+        min-height: 1.3em;
+    }
 
     &::-webkit-scrollbar-thumb {
         background: rgba(171, 178, 191, 0.4);

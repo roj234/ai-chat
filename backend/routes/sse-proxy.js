@@ -1,4 +1,5 @@
 import {SSE_PROXY_BACKEND} from "../config.js";
+import {EventEmitter} from "node:events";
 
 /**
  *
@@ -6,8 +7,6 @@ import {SSE_PROXY_BACKEND} from "../config.js";
  */
 const activeRequests = new Map;
 
-
-import {EventEmitter} from "node:events";
 
 /**
  *

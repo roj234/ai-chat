@@ -1,6 +1,6 @@
 import {config, isLlamaCppBackend, models, setIsLlamaCppBackend, updateModels} from "/src/states.js";
 import {$asyncState, $computed, $disposable, $foreach, $state, $unwatch, $update, $watch} from "unconscious";
-import {isLanAddress} from "/src/utils/isLanAddress.js";
+import {isLanAddress} from "/common/isLanAddress.js";
 import "./llamaCpp.css";
 import {jsonFetch, prettyError, throttled} from "/src/utils/utils.js";
 import {SETTINGS} from "/src/settings.js";

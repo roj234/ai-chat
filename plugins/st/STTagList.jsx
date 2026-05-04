@@ -17,21 +17,21 @@ export function LorebookList({items, selection}) {
 	return <div className="tag-dropdown">
 		<button className="btn ghost">+ 已选择 {() => selection.length} 个世界书</button>
 		<div className="list" onClick.delegate{"input"}={({delegateTarget}) => {
-			toggleLorebook(parseInt(delegateTarget.dataset.id));
+			toggleLorebook(delegateTarget.dataset.id);
 		}}>
 			<label>
 				<input
-					data-id={-1}
+					data-id={""}
 					type="checkbox"
-					checked={selection.includes(-1)}
+					checked={selection.includes("")}
 				/> 内置
 			</label>
-			{$foreach(items, ({id, name}) => (
+			{$foreach(items, ({name}) => (
 				<label>
 					<input
-						data-id={id}
+						data-id={name}
 						type="checkbox"
-						checked={selection.includes(id)}
+						checked={selection.includes(name)}
 					/> {name}
 				</label>
 			))}
@@ -52,15 +52,15 @@ export function PresetList({items, selection}) {
 	}
 
 	return <div className="tag-dropdown">
-		<button className="btn ghost">{() => selection.value === -1 ? "跟随当前预设" : "锁定预设"}</button>
+		<button className="btn ghost">{() => !selection.value ? "跟随当前预设" : "锁定 "+selection.value+" 预设"}</button>
 		<div className="list" onClick.delegate{"label"}={({delegateTarget}) => {
 			delegateTarget.parentElement.querySelector(".selected")?.classList.remove("selected");
 			delegateTarget.classList.add("selected");
-			toggleLorebook(parseInt(delegateTarget.dataset.id));
+			toggleLorebook(delegateTarget.dataset.id);
 		}}>
-			<label data-id={-1} className={selection.value === -1 ? "selected" : null}>不指定</label>
-			{$foreach(items, ({id, name}) => (
-				<label data-id={id} className={selection.value === id ? "selected" : null}>{name}</label>
+			<label data-id={""} className={selection.value == null ? "selected" : null}>不指定</label>
+			{$foreach(items, ({name}) => (
+				<label data-id={name} className={selection.value === name ? "selected" : null}>{name}</label>
 			))}
 		</div>
 	</div>;

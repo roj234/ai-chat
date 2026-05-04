@@ -13,6 +13,7 @@ import {
 	Title,
 	Tooltip
 } from "chart.js";
+
 Chart.register(
 	BarController,
 	BarElement,

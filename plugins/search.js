@@ -10,7 +10,7 @@ const searchBtn = <button className={"ri-search-line btn ghost"} title={"搜索�
 	searchInput.firstElementChild.focus();
 }}></button>;
 
-const searchInput = <div style={"position:absolute;z-index:20;background:var(--bg);width:calc(100% - 20px)"} className="input-warp">
+const searchInput = <div style={"position:absolute;z-index:1;background:var(--bg);width:calc(100% - 20px)"} className="input-warp">
 	<input className="text-input" type="text" placeholder="关键词或语义描述" onBlur={() => {
 		searchInput.replaceWith(searchBtn);
 	}}

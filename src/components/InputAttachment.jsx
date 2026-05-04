@@ -1,7 +1,59 @@
 import {indexInParent} from "../utils/utils.js";
 import {$foreach, debugSymbol} from "unconscious";
+import {showToast} from "./Toast.js";
+import {config} from "../states.js";
+import {readAsString} from "/common/chardet.js";
+import {formatSize} from "unconscious/ext/Utils.js";
 
-export const FILE_NAME = debugSymbol("FILE_NAME");
+const FILE_NAME = debugSymbol("FILE_NAME");
+
+/**
+ * @param {import("unconscious").Reactive<OpenAI.ContentPart[]>} attachments
+ * @return {JSX.Element}
+ */
+export function createFileUploader(attachments) {
+	return <input type="file" accept="image/png,image/jpeg,image/bmp,image/gif,audio/wav,audio/mp3,audio/flac,text/plain" multiple onChange={({target}) => {
+		for (const file of target.files) {
+			if (file.size > 104857600) {
+				showToast("文件 "+file.name+" 过大, 仅允许10MB以内的文件", "error");
+				continue;
+			}
+
+			if (file.type.startsWith('image')) {
+				if (!config.modalities?.includes("image")) {
+					showToast("模型不支持图片，无法上传 "+file.name);
+					continue;
+				}
+				attachments.push({
+					type: "image_url",
+					image_url: { url: file }
+				});
+			} else if (file.type.startsWith('audio')) {
+				if (!config.modalities?.includes("audio")) {
+					showToast("模型不支持音频，无法上传 "+file.name);
+					continue;
+				}
+				attachments.push({
+					type: "input_audio",
+					input_audio: {
+						data: file,
+						format: file.type.substring(file.type.indexOf('/')+1)
+					}
+				});
+			} else if (file.type.startsWith('text')) {
+				readAsString(file).then(text => {
+					attachments.push({
+						type: "text",
+						[FILE_NAME]: file.name+"\n"+formatSize(file.size),
+						text
+					});
+				})
+			}
+		}
+
+		target.value = '';
+	}} />;
+}
 
 /**
  *
@@ -9,7 +61,7 @@ export const FILE_NAME = debugSymbol("FILE_NAME");
  * @return {JSX.Element}
  * @constructor
  */
-export function _InputAttachment(attachments) {
+export function createAttachmentGallery(attachments) {
 	return <div className="attachments" onClick.delegate{".attachment button"}={(e) => {
 		const element = e.target.closest('.attachment');
 		const index = indexInParent(element);

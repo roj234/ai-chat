@@ -1,6 +1,9 @@
 import {isEqual} from "/vendor/equals.js";
 import {isPureObject} from "unconscious";
 
+// llama.cpp的value替换为 type: SCHEMA_VALUES 可以吗
+export const SCHEMA_VALUES = ["string", "number", "boolean", "object", "array", "null"];
+
 /**
  *
  * @param {Object} obj

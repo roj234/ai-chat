@@ -4,8 +4,44 @@ import {loadingBlock, prettyError} from "./utils/utils.js";
 
 import "./skills.css";
 import {updateMessageUI} from "./components/MessageList.jsx";
-import {parseJsonPath} from "/vendor/jsonSchema.js";
+import {parseJsonPath} from "/common/jsonSchema.js";
+import {onLoad} from "./plugin.js";
+import {COMMAND_REGISTRY} from "./commands.js";
+import {showToast} from "./components/Toast.js";
 
+export const TOOL_NAME = debugSymbol("TOOL_NAME");
+
+/**
+ * @type {Record<string, string | function(): string>}
+ */
+export const PLACEHOLDERS = {};
+
+onLoad(() => {
+	COMMAND_REGISTRY.tools = [
+		(args, params, element) => {
+			element.value = "/### 当前注册的工具\n"+(Object.entries(optionalTools).map(([k, v]) => "名称："+k+"\n描述："+v.description+"\n工具："+v.allowedTools+"\n隐藏："+v.hidden).join("\n\n"));
+			element.dispatchEvent(new InputEvent("input"));
+		},
+		"列出可用的工具"
+	];
+	COMMAND_REGISTRY.use_tools = [
+		async (args, params, element) => {
+			if (!selectedConversation.value) throw "不在对话中";
+			await toolScriptRegistry.use.script({modules: args}, {[TOOL_NAME]:"use"}, selectedConversation.value);
+			selectedConversation.activatedModules.add("use");
+			showToast("已启用，请注意这将会禁用模型手动启用工具的能力");
+		},
+		"启用工具组"
+	];
+	COMMAND_REGISTRY.revoke_tools = [
+		async (args, params, element) => {
+			if (!selectedConversation.value) throw "不在对话中";
+			await toolScriptRegistry.use.undo({newModules: args}, selectedConversation.value);
+			showToast("已禁用");
+		},
+		"禁用工具组"
+	];
+});
 
 /**
  *
@@ -20,7 +56,7 @@ export const volatileEnvironment = $state({});
 const defaultTools = [];
 /**
  * 工具/技能摘要，在调用后激活其它工具或返回技能内容
- * @type {Record<string, {description: string, allowedTools: string[], skill?: string, hidden: boolean}>}
+ * @type {Record<string, {description: string, allowedTools: string[], skill?: string, hidden: boolean | 'manual', systemPrompt: string}>}
  */
 const optionalTools = {};
 /**
@@ -173,7 +209,7 @@ toolScriptRegistry["use"] = {
 			globalStorage.activatedModules = activatedModules;
 		}
 
-		this.removed(response, globalStorage);
+		this.undo(response, globalStorage);
 
 		const newToolNames = [];
 		for (const moduleName of modules) {
@@ -182,8 +218,7 @@ toolScriptRegistry["use"] = {
 			let {allowedTools: allowedToolsArr, onActivated: dynamicCallback} = optionalTools[moduleName];
 
 			if (dynamicCallback) {
-				allowedToolsArr = dynamicCallback(allowedToolsArr);
-				if (allowedToolsArr instanceof Promise) allowedToolsArr = await allowedToolsArr;
+				allowedToolsArr = await dynamicCallback(allowedToolsArr);
 				allowedToolsArr = allowedToolsArr.map(t => t.name || t);
 			}
 
@@ -198,7 +233,7 @@ toolScriptRegistry["use"] = {
 		response.newModules = modules;
 		response.newTools = newToolNames;
 
-		if (response.tool_name.startsWith("use:skill:")) {
+		if (response[TOOL_NAME].startsWith("use:skill:")) {
 			response.isSkill = true;
 			return optionalTools[modules[0]].skill;
 		}
@@ -208,7 +243,7 @@ toolScriptRegistry["use"] = {
 	},
 
 	renderer(context) {
-		if (context.success === false || !context.time) return;
+		if (context.success === false) return;
 		if (!context.newTools) return loadingBlock("等待调用结果……");
 
 		const isRevoked = !context.content.startsWith("You");
@@ -236,7 +271,7 @@ toolScriptRegistry["use"] = {
 					<button className="revoke-btn" onClick={() => {
 						context[use_isRevoked].value = true;
 						context.content = "Not allowed";
-						this.removed(context, selectedConversation);
+						this.undo(context, selectedConversation);
 						$update(messages);
 					}}>
 						撤销
@@ -245,11 +280,11 @@ toolScriptRegistry["use"] = {
 			</div>
 		);
 	},
-	removed(message, {allowedTools, activatedModules}) {
-		if (!allowedTools || !message.newModules) return;
+	undo({newModules}, {allowedTools, activatedModules}) {
+		if (!allowedTools || !newModules) return;
 
 		allowedTools.clear();
-		for (const moduleName of message.newModules) {
+		for (const moduleName of newModules) {
 			activatedModules.delete(moduleName);
 		}
 		activatedModules.forEach(name => optionalTools[name]?.allowedTools.forEach(name => allowedTools.add(name)));
@@ -259,14 +294,17 @@ toolScriptRegistry["use"] = {
 /**
  *
  * @param {{allowedTools: Set<string>, activatedModules: Set<string>}} conversation
+ * @param {boolean} allowNewSkills
+ * @return {[OpenAI.Tool[], string]}
  */
-export function getTools(conversation) {
+export function getTools(conversation, allowNewSkills) {
 	const {allowedTools, activatedModules} = conversation;
 
 	// 隐藏工具必须通过系统提示开启
 	let usableOptTools = Object.keys(optionalTools).filter(name => !optionalTools[name].hidden);
 	let usableDefTools = defaultTools;
 
+	let systemPrompt = [];
 	if (activatedModules) {
 		const disableAll = activatedModules.has('*');
 		if (disableAll) {
@@ -275,10 +313,14 @@ export function getTools(conversation) {
 			usableOptTools = usableOptTools.filter(name => !activatedModules.has(name));
 			usableDefTools = usableDefTools.filter(tool => !activatedModules.has(tool.function.name));
 		}
+		for (const name of activatedModules) {
+			const prompt = optionalTools[name]?.systemPrompt;
+			if (prompt) systemPrompt.push(prompt);
+		}
 	}
 
 	let tools_ = [];
-	if (usableOptTools.length && !activatedModules?.has("use")) {
+	if (usableOptTools.length && !activatedModules?.has("use") && allowNewSkills) {
 		tools_.push({
 			type: "function",
 			function: {
@@ -302,8 +344,11 @@ export function getTools(conversation) {
 	}
 
 	tools_.push(...usableDefTools);
-	if (allowedTools) tools_.push(...allowedTools.values().map(name => tools[name]));
-	return tools_;
+
+	if (allowedTools) {
+		for (const name of allowedTools) tools_.push(tools[name]);
+	}
+	return [tools_, systemPrompt.join("\n\n")];
 }
 
 function convertToCamelCase(str) {
@@ -402,10 +447,11 @@ function registerTool(tool) {
  * @param {Partial<AiChat.FunctionTool>[]} toolDefs
  * @param {Partial<{
  *     onActivated: function(): AiChat.FunctionTool[],
- *     hidden: boolean
+ *     hidden: boolean | 'manual',
+ *     systemPrompt: string
  * }>} extra
  */
-export function registerTools(name, description, toolDefs, {onActivated, hidden} = {}) {
+export function registerTools(name, description, toolDefs, {onActivated, hidden, systemPrompt} = {}) {
 	const toolNames = [];
 	for (const toolDef of toolDefs) {
 		const tool = registerTool(toolDef);
@@ -417,7 +463,8 @@ export function registerTools(name, description, toolDefs, {onActivated, hidden}
 		description,
 		allowedTools: toolNames,
 		onActivated,
-		hidden
+		hidden,
+		systemPrompt
 	};
 }
 
@@ -463,13 +510,15 @@ export function runAllTools(conversation, messages, isImporting) {
 	for (const {tool_calls, tool_responses} of messages) {
 		if (tool_calls)
 		for (let i = 0; i < tool_calls.length; i++) {
-			const tc = tool_calls[i];
+			const {name, arguments: args} = tool_calls[i].function;
 
-			const data = toolScriptRegistry[tc.function.name];
-			const autorun = data?.autorun;
+			const impl = toolScriptRegistry[name];
+			if (tool_responses?.[i]) tool_responses[i][TOOL_NAME] = name;
+
+			const autorun = impl?.autorun;
 			if (isImporting ? autorun === "on_import" : autorun === true) {
 				try {
-					data.script(JSON.parse(tc.function.arguments || "null"), tool_responses[i], conversation);
+					impl.script(JSON.parse(args || "null"), tool_responses[i], conversation);
 				} catch (e) {
 					console.error("Execute autorun tool", e);
 				}
@@ -496,16 +545,15 @@ export async function runTools(response, forceRerun, allowUnsafe) {
 
 		if (msg?.success != null) {
 			if (forceRerun !== i) continue;
-			toolScriptRegistry[msg.tool_name].removed?.(msg, globalStorage);
+			toolScriptRegistry[msg[TOOL_NAME]].undo?.(msg, globalStorage);
 		}
 		msg = tool_responses[i] = {};
 
 		if (tc.type === "function") {
 			let {name} = tc.function;
-			msg.tool_name = name;
+			msg[TOOL_NAME] = name;
 			msg.time = Date.now();
 
-			let isPromise;
 			try {
 				const parameters = JSON.parse(tc.function.arguments);
 
@@ -537,12 +585,13 @@ export async function runTools(response, forceRerun, allowUnsafe) {
 				let result = fn.script(parameters, msg, globalStorage);
 				if (result instanceof Promise) {
 					$update(updateMessageUI);
-					isPromise = true;
 					result = await result;
 				}
 				if (typeof result !== "string") result = result instanceof ContentPart ? result.content : JSON.stringify(result);
-				msg.success = true;
-				msg.content = result || "";
+				if (interactive !== 'uionly') {
+					msg.success = true;
+					msg.content = result || "";
+				}
 			} catch (e) {
 				console.error(e);
 				msg.success = false;
@@ -550,13 +599,16 @@ export async function runTools(response, forceRerun, allowUnsafe) {
 				autoNext = false;
 			}
 			msg.time = Date.now();
-			if (isPromise) $update(updateMessageUI);
 		}
 	}
 
 	return autoNext;
 }
 
+/**
+ *
+ * @param {string} system_prompt
+ */
 export function setSystemPrompt(system_prompt) {
 	if (system_prompt) {
 		if (messages[0].role === "system") {

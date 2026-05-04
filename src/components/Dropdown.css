@@ -71,7 +71,7 @@
     background-color: var(--chip-bg);
     box-shadow: 0 10px 25px rgba(0,0,0,0.5);
     display: none;
-    z-index: 99;
+    z-index: 1;
 
     max-height: 250px;
     overflow-y: auto;
@@ -79,7 +79,7 @@
 
 /* 选项样式 */
 .pretty-select li {
-    padding-left: 12px;
+    padding: 4px 10px;
     color: var(--muted);
     font-size: 13px;
     border: 1px solid transparent;
@@ -98,9 +98,6 @@
         color: #c9d1d9;
     }
 
-    & > * {
-        padding: 10px 12px;
-    }
     & i {
         color: var(--muted);
 

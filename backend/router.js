@@ -88,11 +88,12 @@ export class Router {
 			};
 
 			let init = this.init;
-			if (typeof init === "function") init(ctx);
+			if (typeof init === "function" && init(ctx)) {
+				return;
+			}
 
 			try {
-				const p = route.handler(ctx);
-				if (p instanceof Promise) await p;
+				const p = await route.handler(ctx);
 				return;
 			} catch (err) {
 				console.error(err);

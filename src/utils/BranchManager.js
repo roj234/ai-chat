@@ -68,6 +68,11 @@ class BranchManager {
 		let m = this.leaf;
 		while (m !== this.messages[0]) {
 			path.push(m);
+			/*if (m.parent === m[INDEX]) {
+				showToast("检测到循环引用", "error");
+				console.error("循环引用", m);
+				break;
+			}*/
 			m = this.messages[m.parent];
 		}
 

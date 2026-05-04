@@ -4,8 +4,6 @@ import {$state, $watch} from "unconscious";
 import {isMobile} from "/src/states.js";
 import {onLoad} from "/src/plugin.js";
 
-let bgElement;
-
 /** @type {import('unconscious').Reactive<Blob>} */
 const BG_BLOB = $state();
 /** @type {import('unconscious').Reactive<Blob>} */
@@ -15,13 +13,11 @@ onLoad(() => {
 	getKV("chat-background").then(blob => BG_BLOB.value = blob);
 	getKV("chat-font").then(blob => FONT_BLOB.value = blob);
 
-	bgElement = document.querySelector(".chat.scroll");
-
 	$watch(BG_BLOB, () => {
 		const blob = BG_BLOB.value;
 
 		let url;
-		bgElement.style.background = !blob ? '' : `url("${url = blob.toUrl()}") center `+(isMobile?'top':'center')+` / cover`;
+		document.body.style.background = !blob ? '' : `url("${url = blob.toUrl()}") center `+(isMobile?'top':'center')+` / cover`;
 		return url && (() => URL.revokeObjectURL(url));
 	});
 

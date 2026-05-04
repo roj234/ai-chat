@@ -311,7 +311,7 @@ export async function openZip(blob) {
 			const entry = entries.get(name);
 			if (!entry) return null;
 
-			const rawData = this.getRaw(entry);
+			const rawData = await this.getRaw(entry);
 
 			if (entry.method === 8) { // Deflate
 				return await decompressData(rawData);

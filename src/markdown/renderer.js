@@ -118,7 +118,7 @@ export function fmdHTMLRenderer(root, options = {}) {
 					slot = document.createElement(__element_id);
 					break;
 				case fastmd.QUOTE:
-					slot = <span className={"q"} />
+					slot = <q />
 			}
 
 			nodes.push(parent.appendChild(slot));

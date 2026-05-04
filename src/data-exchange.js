@@ -12,7 +12,7 @@ import {
 import {cloneNamed, prettyError} from "./utils/utils.js";
 import {runAllTools} from "./skills.js";
 import SimpleModal from "./components/SimpleModal.jsx";
-import {openZip, ZipWriter} from "../vendor/jszip.js";
+import {openZip, ZipWriter} from "/common/jszip.js";
 import {$computed, $state, $update} from "unconscious";
 import {reloadPresetList} from "./components/PresetDropdown.jsx";
 import {decodeObjects, encodeObjects} from "./utils/marshal.js";
@@ -30,7 +30,10 @@ export async function importConversationData({messages: messages_, ...rest}, bat
 	}
 
 	if (messages_) {
-		messages_.forEach(message => {
+		messages_.sort((a, b) => {
+			if (a.time && b.time) return a.time - b.time;
+			return 0;
+		}).forEach(message => {
 			delete message.id;
 		});
 		runAllTools(newConv, messages_, true);
@@ -58,14 +61,14 @@ async function loadBackupZip(file) {
 
 	config.debugDatabase = 0;
 
-	const presets = await zipFile.getText("presets.json");
-	if (presets) {
-		for (const preset of JSON.parse(presets)) {
-			await decodeObjects(preset, null);
-			await kvListSet(preset, "preset");
+	const kvList = await zipFile.getText("kvList.json");
+	if (kvList) {
+		for (const item of JSON.parse(kvList)) {
+			await decodeObjects(item, null);
+			await kvListSet(item, item.type);
 		}
 		reloadPresetList();
-		showToast('预设已导入');
+		showToast('导入了KV列表，可能需要刷新网页');
 	}
 
 	const message = $state("导入中");
@@ -100,7 +103,7 @@ async function loadBackupZip(file) {
 		await decodeObjects(data, null);
 		Object.assign(config.value, data);
 		$update(config);
-		Shared.SettingUI.onSettingsUpdated();
+		Shared.SettingUI.sync();
 		showToast('配置已导入');
 	}
 }
@@ -182,6 +185,8 @@ function cleanMessages(messages) {
 }
 
 export async function exportConversation(isConfig, _conv) {
+	const includePlugins = import.meta.env.DEV;
+
 	const mapping = new Map;
 	const replacer = (_, value) => {
 		return mapping.get(value) ?? value;
@@ -196,11 +201,7 @@ export async function exportConversation(isConfig, _conv) {
 		await zw.add("config.json", JSON.stringify(config.value), {
 			compress: true
 		});
-		await zw.add("presets.json", JSON.stringify((await kvListGetValues("preset")).map(item => {
-			delete item.id;
-			delete item.type;
-			return item;
-		})), {
+		await zw.add("kvList.json", JSON.stringify((await kvListGetValues(includePlugins ? "*" : "preset"))), {
 			compress: true
 		});
 	} else {

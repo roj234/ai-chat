@@ -245,6 +245,7 @@ declare namespace OpenAI {
         maximum?: number;
         exclusiveMinimum?: number;
         exclusiveMaximum?: number;
+        multipleOf?: number;
     }
     type Schema = BaseSchema | ObjectSchema | ArraySchema | StringSchema | IntegerSchema;
     //endregion

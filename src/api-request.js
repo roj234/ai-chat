@@ -1,5 +1,5 @@
 // API request
-import {markdownStreamParser} from "./markdown/markdown.js";
+import {createMarkdownStream} from "./markdown/markdown.js";
 import {cloneNamed, getTextContent, jsonFetch, prettyError, streamFetch} from "./utils/utils.js";
 import {
 	abortCompletion,
@@ -15,7 +15,7 @@ import {
 	Shared,
 	state
 } from "./states.js";
-import {getTools, parseSkillMetadata, runTools, set_title_body} from "./skills.js";
+import {getTools, parseSkillMetadata, PLACEHOLDERS, runTools, set_title_body} from "./skills.js";
 import {$stampLock, $state, $update, isReactive, unconscious} from "unconscious";
 import {showToast} from "./components/Toast.js";
 import {mergeReasoningDetails} from "./components/ThinkBlock.jsx";
@@ -23,17 +23,18 @@ import failure from "../media/failure.js";
 import complete from "../media/complete.js";
 import {appendBillingLog, updateConversation} from "./database.js";
 import {updateMessageUI} from "./components/MessageList.jsx";
-import {BODY_PARAMETERS, defaultCoTPrompt, defaultSystemPrompt} from "./settings.js";
-import {jsonEncode} from "/vendor/stream-json.js";
+import {BODY_PARAMETERS, defaultCoTPrompt, defaultSystemPrompt, defaultTitlePrompt} from "./settings.js";
+import {jsonEncode} from "/common/StreamJsonStringifier.js";
 import {AntiSlop} from "./antiSlop.js";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {highlightJsonLike} from "./markdown/highlight.js";
 import {updateConversationListUI} from "./components/ConversationList.jsx";
-import {deepEntries} from "../vendor/jsonSchema.js";
+import {deepEntries} from "/common/jsonSchema.js";
 
+export const statusBadge = <span />;
 export function setStatus(text, tone = '') {
-	Shared.statusBadge.textContent = text;
-	Shared.statusBadge.className = 'badge ' + tone;
+	statusBadge.textContent = text;
+	statusBadge.className = 'badge ' + tone;
 }
 
 function isThinkingEnabled() {
@@ -54,12 +55,6 @@ async function composeMessages(conversation, messages, allowTools, additionalBod
 	 * @type {OpenAI.Message[]}
 	 */
 	const json_messages = [];
-
-	let systemPrompt;
-	if ((systemPrompt = processSystemPrompt(conversation, config.systemPrompt || defaultSystemPrompt)).prompt) {
-		if (messages[0]?.role !== 'system')
-			json_messages.push({role: 'system', content: systemPrompt.prompt});
-	}
 
 	/**
 	 * @type {AiChat.AssistantMessage}
@@ -82,10 +77,12 @@ async function composeMessages(conversation, messages, allowTools, additionalBod
 
 	let toolsUsed = conversation.activatedModules?.size > 0;
 	let callbacks = [];
-	for (const m of messages) {
+	for (let j = 0; j < messages.length; j++){
+		const m = messages[j];
+
 		const customHandler = MessageRoles[m.role];
 		if (customHandler) {
-			customHandler.compose?.(m, json_messages, callbacks);
+			customHandler.compose?.(m, json_messages, callbacks, j, messages.length);
 			continue;
 		}
 
@@ -109,15 +106,16 @@ async function composeMessages(conversation, messages, allowTools, additionalBod
 			}
 		}
 
+		const isPrefill = antiSlop && m === messages.at(-1);
 		const think = m.think;
 		const format = think?.format;
-		if (format && config.trimCoT !== true) {
+		if (format && (config.stripCoT !== true || isPrefill)) {
 			const content = think.content;
 			if (format === "r") json_msg.reasoning = content;
 			if (format === "rc") json_msg.reasoning_content = content;
-			if (format[0] === "m" && config.trimCoT !== "m") {
+			if (format[0] === "m" && (config.stripCoT !== "m" || isPrefill)) {
 				const tag = think.format.substring(1);
-				json_msg.content = "<"+tag+">" + content + (json_msg.content ? "</"+tag+">\n" + json_msg.content : "");
+				json_msg.content = "<"+tag+">" + content + (m.content ? "</"+tag+">\n" + m.content : "");
 			}
 		} else {
 			delete json_msg.reasoning_details;
@@ -155,10 +153,17 @@ async function composeMessages(conversation, messages, allowTools, additionalBod
 		stream: true
 	};
 
-	for (const callback of callbacks) {
-		callback(messages, json_messages, body);
+	for (const {id, body_id, _omit} of BODY_PARAMETERS) {
+		const v = config[id];
+		if (v !== undefined && v !== _omit) {
+			body[body_id] = v;
+		}
+	}
+	for (const key of ["stop", "logit_bias"]) {
+		if (state[key]) body[key] = state[key];
 	}
 
+	let toolPrompt;
 	if (config.mode === 'completions') {
 		path = '/completions';
 		// Build a single prompt from conversation (with roles)
@@ -166,15 +171,20 @@ async function composeMessages(conversation, messages, allowTools, additionalBod
 	} else {
 		body.messages = json_messages;
 
-		if (allowTools || toolsUsed) {
-			body.tools = getTools(conversation);
-			// is this default=true for llama.cpp ?
-			body.parallel_tool_calls = true;
-			if (!allowTools) body.tool_choice = "none";
-			else if (allowTools !== true) body.tool_choice = allowTools;
-		} else if (config.generateTitle === "tool" && !selectedConversation.title) {
-			//body.tool_choice = {type: "function", function: {name: "set_title"}};
-			body.tools = [set_title_body];
+		if (config.modalities?.includes("tool")) {
+			if (config.generateTitle === "tool" && !selectedConversation.title) {
+				// TODO allow set_title tool and provide system prompt ?
+				body.tools = [set_title_body];
+			}
+
+			// TODO use allowTools / allowNewTools or just provide?
+			if (allowTools || toolsUsed) {
+				[body.tools, toolPrompt] = getTools(conversation, allowTools);
+				// is this default=true for llama.cpp ?
+				body.parallel_tool_calls = true;
+				if (!allowTools) body.tool_choice = "none";
+				else if (allowTools !== true) body.tool_choice = allowTools;
+			}
 		}
 
 		const shouldThink = isThinkingEnabled() && config.reasoning;
@@ -192,18 +202,18 @@ async function composeMessages(conversation, messages, allowTools, additionalBod
 			}
 		}
 	}
-
-	for (const {id, body_id, _omit} of BODY_PARAMETERS) {
-		const v = config[id];
-		if (v !== undefined && v !== _omit) {
-			body[body_id] = v;
-		}
-	}
-	for (const key of ["stop", "logit_bias"]) {
-		if (state[key]) body[key] = state[key];
-	}
-	if (systemPrompt) Object.assign(body, systemPrompt.body);
 	if (additionalBody) Object.assign(body, additionalBody);
+
+	let [systemPrompt, systemBody] = makeSystemPrompt(conversation, config.systemPrompt || defaultSystemPrompt, toolPrompt);
+	if (systemPrompt) {
+		if (json_messages[0]?.role !== 'system')
+			json_messages.unshift({role: 'system', content: systemPrompt});
+	}
+	if (systemBody) Object.assign(body, systemBody);
+
+	for (const callback of callbacks) {
+		callback(messages, json_messages, body, !!antiSlop);
+	}
 
 	block:
 	if (state.antiSlop) {
@@ -279,7 +289,14 @@ async function composeMessages(conversation, messages, allowTools, additionalBod
 	};
 }
 
-function processSystemPrompt(conversation, prompt) {
+/**
+ *
+ * @param {AiChat.Conversation} conversation
+ * @param {string} prompt
+ * @param {string} toolPrompt
+ * @return {[prompt: string, body: {}]}
+ */
+export function makeSystemPrompt(conversation, prompt, toolPrompt) {
 	let body = {};
 
 	if (prompt.startsWith("---\n")) {
@@ -308,15 +325,25 @@ function processSystemPrompt(conversation, prompt) {
 		prompt = content;
 	}
 
-	prompt = prompt.replaceAll(/\{\{(.+?)}}/g, (text, match) => {
-		switch (match) {
+	const transform = (prompt) => prompt.replaceAll(/\{\{(.+?)}}/g, (text, id) => {
+		switch (id) {
 			case "think":
 				return isThinkingEnabled() && config.reasoning === false ? (config.CoTPrompt || defaultCoTPrompt) : "";
+			case "tools":
+				return transform(toolPrompt || "");
 		}
+
+		let val = PLACEHOLDERS[id];
+		if (val != null) {
+			if (typeof val === "function")
+				val = val();
+			return val;
+		}
+
 		return text;
 	}).trim();
 
-	return {prompt, body};
+	return [transform(prompt), body];
 }
 
 function applyDelta(chunk, delta) {
@@ -422,7 +449,7 @@ export async function sendUserChatMessage(userText, antiSlop) {
 	if (abortCompletion.value) return "error";
 	abortCompletion.value = new AbortController();
 
-	let markdownRenderer = markdownStreamParser();
+	let markdownRenderer = createMarkdownStream();
 	const {scroller} = Shared;
 	let updateCount = 0;
 	let content_;
@@ -433,7 +460,11 @@ export async function sendUserChatMessage(userText, antiSlop) {
 
 		const currentIsThink = isReactive(content.think);
 		const container = getMarkdownContainer(currentIsThink);
-		if ((waitingForContent = !container)) return true;
+		if (!container) {
+			waitingForContent = currentIsThink;
+			return true;
+		}
+		waitingForContent = 0;
 
 		if (!force) {
 			const details = container.closest("details:not([open])");
@@ -469,7 +500,7 @@ export async function sendUserChatMessage(userText, antiSlop) {
 			case MD_APPEND:
 				// noinspection UnnecessaryLocalVariableJS
 				const flag = waitingForContent;
-				if (updateMarkdown(content) && !flag) break;
+				if (updateMarkdown(content) && waitingForContent !== flag) break;
 			return;
 			case MD_END: {
 				if (content_) {
@@ -484,8 +515,9 @@ export async function sendUserChatMessage(userText, antiSlop) {
 
 	const messages_ = $stampLock(messages);
 	const conversation = unconscious(selectedConversation);
+	const abortCompletion1 = unconscious(abortCompletion);
 	runningConversations.set(conversation.id, {
-		abort: abortCompletion.value,
+		abort: abortCompletion1,
 		messages: messages_
 	});
 	$update(updateConversationListUI);
@@ -493,7 +525,7 @@ export async function sendUserChatMessage(userText, antiSlop) {
 	if (userText) messages_.push({role: 'user', content: userText, time: Date.now()});
 
 	try {
-		let finishReason = await _ApiRequest(conversation, messages_, config.tools, state.additionalBody, abortCompletion, callback, antiSlop);
+		let finishReason = await _ApiRequest(conversation, messages_, config.tools, state.additionalBody, abortCompletion1, callback, antiSlop);
 		const assistantMessage = messages_.at(-1);
 
 		const resumeObj = resumableCompletions[conversation.id];
@@ -539,6 +571,7 @@ export async function sendUserChatMessage(userText, antiSlop) {
 				// 如果存在可能需要批准的工具调用
 				finishReason = 'interrupt';
 			}
+			$update(updateMessageUI);
 			needSave = true;
 		}
 
@@ -557,7 +590,8 @@ export async function sendUserChatMessage(userText, antiSlop) {
 	} finally {
 		runningConversations.delete(conversation.id);
 		$update(updateConversationListUI);
-		abortCompletion.value = null;
+		if(abortCompletion.value === abortCompletion1)
+			abortCompletion.value = null;
 	}
 }
 
@@ -652,7 +686,12 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 		let thinkState;
 		if ((thinkState = assistantMessage.think)) {
 			thinkState.start = startTime;
+			const format = thinkState.format;
+			manualCoTCloseTag = format.startsWith("m") && "</"+format.slice(1)+">\n";
 			assistantMessage.think = $state(thinkState);
+			requestAnimationFrame(() => {
+				onProgress?.(MD_APPEND, assistantMessage);
+			});
 		}
 	}
 
@@ -820,10 +859,12 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 					}
 				}
 
-				thinkState.duration += Date.now() - thinkState.start;
-				delete thinkState.start;
-				delete thinkState.index;
-				assistantMessage.think = { ... thinkState };
+				if (content) {
+					thinkState.duration += Date.now() - thinkState.start;
+					delete thinkState.start;
+					delete thinkState.index;
+					assistantMessage.think = { ... thinkState };
+				}
 			}
 
 			assistantMessage.content = content;
@@ -862,7 +903,7 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 
 		onProgress?.(MD_END);
 
-		const has_resp = billingLog.request_id;
+		const has_resp = billingLog.request_id && (finishReason !== 'error' || billingLog.input_tokens);
 		if (finishReason !== 'loop' && conversation.id) {
 			// wait for database update (billingLog requires message id), this should be fast
 			if (has_resp) {
@@ -947,12 +988,7 @@ function generateDescription(conversation, messages) {
 		model: config.titleModel,
 		messages: [{
 			role: "system",
-			content: `基于以下用户-LLM对话内容，生成一个**20字以内**的中文标题，用于对话前端展示。标题需简洁、吸引人、概括核心主题。
-
-要求：
-- 标题长度：严格≤20字。
-- 风格：中性、专业，避免剧透或偏见。
-- 示例：如果对话是“教我做蛋糕”，标题可为“蛋糕制作教程/指南”。`
+			content: config.titlePrompt || defaultTitlePrompt,
 		}, {
 			role: "user",
 			content: "对话摘要：\n用户:\n" + s1 + "\nLLM:\n" + s2
@@ -1017,7 +1053,8 @@ export class APIRequest {
 		this.abort = new AbortController();
 
 		try {
-			const messages = isReactive(this.messages) ? this.messages : [...this.messages];
+			const msg = this.messages;
+			const messages = isReactive(msg) ? msg : [...msg];
 			if (typeof last_message === "string") messages.push({role: 'user', content: userText, time: Date.now()});
 			else if (Array.isArray(last_message)) messages.push(...last_message);
 			else if (last_message) messages.push(last_message);
