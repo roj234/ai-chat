@@ -180,7 +180,7 @@ const generate_image = {
 
 		context.prompt = prompt;
 
-		const seed = parseInt(Math.random().toString(36).substring(2), 36);
+		const seed = parseInt(Math.random().toString(36).slice(2), 36);
 		return generateImage(config.api_img_endpoint, {
 			batch_size: 1,
 			sampler_name: "Euler",

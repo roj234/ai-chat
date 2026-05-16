@@ -22,7 +22,6 @@ onLoad(reloadPresetList);
  * @template {Object & AiChat.IDBKVList} T
  * @param {import("unconscious").Reactive<T[]>} items
  * @param {import("unconscious").Reactive<number[]>} selection
- * @constructor
  */
 function LorebookList({items, selection}) {
 	function toggleLorebook(id) {
@@ -50,8 +49,8 @@ function LorebookList({items, selection}) {
 }
 
 
-export function createPreset(name, categories) {
-	if (!name) {
+export const createPreset = (name, categories) => {
+	if (null == name) {
 		const selection = $state([]);
 		SimpleModal({
 			type: 'input',
@@ -68,7 +67,8 @@ export function createPreset(name, categories) {
 		return;
 	}
 
-	config.name = name;
+	if (name) config.name = name;
+	else name = config.name;
 
 	const keysToClone = [...presetKeysAlways];
 	if (!categories.length) categories = Object.keys(presetKeys);
@@ -82,9 +82,9 @@ export function createPreset(name, categories) {
 	kvListSet(clonedObject, "preset", name).then(() => {
 		_dropdown.onInserted("preset", name);
 	})
-}
+};
 
-async function setPreset(i) {
+const setPreset = async i => {
 	const presetKey = presets[i];
 	const item = await kvListGet("preset", presetKey.name);
 	delete item.type;
@@ -93,20 +93,17 @@ async function setPreset(i) {
 	$update(config);
 	Shared.SettingUI.sync();
 	_dropdown.setSelection(i);
-}
+};
 
 let _dropdown;
 
-export function loadPreset(name) {
+export const loadPreset = name => {
 	const id = presets.findIndex(s => s.name === name);
 	if (id < 0) return false;
 	setPreset(id);
 	return true;
-}
+};
 
-/**
- * @constructor
- */
 export function PresetDropdown() {
 	const selectedPreset = $computed(() => config.name);
 	const element = <Dropdown items={presets} selection={selectedPreset} dir={'up'}

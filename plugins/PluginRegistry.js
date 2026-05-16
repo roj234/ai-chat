@@ -1,25 +1,24 @@
-import {registerDefaultTools, registerSkill} from "/src/skills.js";
-// 插件注册表
+import {registerDefaultTools} from "/src/skills.js";
+// 故事机 (预览版)
+import "./rpg/example/StoryEngine.js";
+import "./cmdSetPrompt.js";
 
-// 下面的静态导入完全可以变成动态导入，就看我愿不愿意了
-export const onPluginLoaded = Promise.resolve();
+// JSON对话编辑器
+import "./conversationEditor.js";
 
+// Blob管理器
 import "./BlobManager.js";
-
+// 预设快速切换菜单
 import "./ModelFastSwitch.js";
-
+// 记忆工具
 import "./tools/memory.js";
-
-// 默认折叠系统消息
-import "./collapseSystemMessageByDefault.js";
+// 对话建议工具
 import "./tools/followupSuggestions.js";
 
 // 搜索消息
 import "./search.js";
 // 切换数据库服务器时同步本地配置
 import "./configSync.js";
-// 支持后端的流式继续功能
-import "./SseResume.js";
 
 // 文件系统和Agent工具组 (use:fs)
 import "./tools/filesystem.js";
@@ -48,13 +47,15 @@ import "./customBackground.js";
 // 自动补全模型ID
 import "./modelIdCompletion.js";
 
-// SillyTavern-兼容 角色扮演插件 支持导入预设和角色卡
-import "./st/SillyTavern.js";
+// 角色扮演插件 支持导入预设和角色卡
+import "./rp_basic/BasicRoleplay.js";
 
 // 项目管理工具，让模型安排并完成任务 (未实现)
 //import "./TodoList.js";
+// 插件注册表
 
-import testSkill from "/media/TEST.md?raw";
+// 下面的静态导入完全可以变成动态导入，就看我愿不愿意了
+export const onPluginLoaded = Promise.resolve();
 
 if (import.meta.env.DEV) {
 	// 测试 skills

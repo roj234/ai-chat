@@ -2,7 +2,8 @@ import './Toast.css';
 import {onLoad} from "../plugin.js";
 
 const container = <div className="toasts" />;
-onLoad(() => document.body.append(container));
+
+onLoad((app) => app.append(container));
 
 /**
  *
@@ -10,23 +11,21 @@ onLoad(() => document.body.append(container));
  * @param [type='' | 'error' | 'ok']
  * @param {number} timeout
  */
-export function showToast(message, type='', timeout = 3000) {
-	function onClose() {
+export const showToast = (message, type='', timeout = 3000) => {
+	const closeToast = () => {
 		clearTimeout(timer);
 		elm.classList.add("closing");
 		setTimeout(() => elm.remove(), 300);
-	}
+	};
 
-	const timer = timeout && setTimeout(onClose, timeout);
+	const timer = timeout && setTimeout(closeToast, timeout);
 
 	const elm = <div className={"toast "+type}>
 		<div className="content">
 			<span>{message}</span>
-			<button className="close" onClick={onClose}>&times;</button>
+			<button className="close" onClick={closeToast}>&times;</button>
 		</div>
 	</div>;
-
 	container.append(elm);
-
-	return onClose;
-}
+	return closeToast;
+};

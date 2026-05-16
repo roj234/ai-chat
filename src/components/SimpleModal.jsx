@@ -12,7 +12,6 @@ import './SimpleModal.css';
  * @param {function(string): void = } onConfirm
  * @param {function(string): void = } onCancel
  * @returns {HTMLDivElement}
- * @constructor
  */
 const SimpleModal = ({
 		type = 'info', // 'info' or 'input'
@@ -54,13 +53,14 @@ const SimpleModal = ({
 				</div>
 				<div className="footer">
 					<button className={"btn " + accent} onClick={handleConfirm}>{confirmMessage}</button>
-					<button className="btn ghost" onClick={handleClose}>取消</button>
+					{onConfirm && <button className="btn ghost" onClick={handleClose}>取消</button>}
 				</div>
 			</div>
 		</div>
 	);
 
 	document.body.append(element);
+	return element;
 };
 
 export default SimpleModal;

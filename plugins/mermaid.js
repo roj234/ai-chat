@@ -5,7 +5,7 @@ let renderQueue;
 
 registerCodeBlockRenderer("mermaid", (code, language, node, is_finished) => {
 	if (!renderQueue) {
-		const moduleUrl = import.meta.env.DEV ? new URL('/mermaid.esm.min.mjs', import.meta.url).href : './mermaid.esm.min.mjs';
+		const moduleUrl = import.meta.env.DEV ? new URL('/assets/mermaid.esm.min.js', import.meta.url).href : './mermaid.esm.min.js';
 		renderQueue = import(/* @vite-ignore */moduleUrl).then(module => {
 			mermaid = module.default;
 			mermaid.initialize({

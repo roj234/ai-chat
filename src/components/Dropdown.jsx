@@ -16,18 +16,17 @@ let instances = new Set;
  * @return {JSX.Element & {
  *     setSelection(number): void
  * }}
- * @constructor
  */
 export function Dropdown({items, selection, onChanged, dir = 'down'}) {
-	function updateHighlight_(i) {
+	const updateHighlight_ = i => {
 		options.querySelector(".selected")?.classList.remove("selected");
 		options.children[i]?.classList.add("selected");
 		main.classList.remove("open");
-	}
+	};
 
 	let options;
 	const main = <div className={"pretty-select "+dir}>
-		<div className="input" onClick={() => main.classList.toggle("open")}>
+		<div className="input" onClick.stop={() => main.classList.toggle("open")}>
 			<span>{() => selection.value ?? "default"}</span>
 			<span className={"arrow-icon ri-arrow-down-s-line"}></span>
 		</div>

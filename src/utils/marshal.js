@@ -1,13 +1,13 @@
 import {getBlob, updateBlob} from "../database.js";
-import {deepEntries} from "/common/jsonSchema.js";
+import {deepEntries} from "unconscious/common/json-schema-utils.js";
 
-async function decodeDollar(v, zr) {
+const decodeDollar = async (v, zr) => {
 	const v1 = v.v;
 	switch (v.$) {
 		case "Blob": {
 			if (zr) {
 				const data = await zr.get("blobs/"+v.index);
-				if (data) return new Blob([data], {type: v.type});
+				if (data) return new File([data], v.name, {type: v.type});
 			}
 			throw "找不到引用的 Blob 对象";
 		}
@@ -17,26 +17,26 @@ async function decodeDollar(v, zr) {
 		case "Date":return new Date(v1);
 		case "RegExp": {
 			const pos = v1.lastIndexOf('/');
-			return new RegExp(v1.slice(1, pos), v1.substring(pos+1));
+			return new RegExp(v1.slice(1, pos), v1.slice(pos+1));
 		}
 		case "BigInt":return BigInt(v1);
 		default: return v;
 	}
-}
+};
 
 /**
  * @template {Object} T
  * @param {T} input
- * @param {openZip=} zr
+ * @param {ZipReader=} zr
  * @return {Promise<T>}
  */
-export async function decodeObjects(input, zr) {
+export const decodeObjects = async (input, zr) => {
 	if (input?.$) return decodeDollar(input, zr);
 	for (const [val, own, key] of deepEntries(input)) {
 		if (val?.$) own[key] = await decodeDollar(val, zr);
 	}
 	return input;
-}
+};
 
 /**
  *
@@ -45,7 +45,7 @@ export async function decodeObjects(input, zr) {
  * @param {ZipWriter=} zipWriter
  * @return {Promise<void>}
  */
-export function encodeObjects(input, replacer, zipWriter) {
+export const encodeObjects = (input, replacer, zipWriter) => {
 	const promises = [];
 	for (const [val] of deepEntries(input)) {
 		const fn = val?.constructor;
@@ -53,7 +53,7 @@ export function encodeObjects(input, replacer, zipWriter) {
 			case Blob:
 			case File:
 				promises.push(zipWriter ? val.arrayBuffer().then(ab => {
-					const blobIndex = zipWriter.fileCount();
+					const blobIndex = zipWriter.fileCount().toString(36);
 
 					replacer.set(val, {
 						$: "Blob",
@@ -94,4 +94,10 @@ export function encodeObjects(input, replacer, zipWriter) {
 		}
 	}
 	return Promise.all(promises);
-}
+};
+
+export const serializeJSON = async (obj, space, zipWriter) => {
+	const mapping = new Map;
+	await encodeObjects(obj, mapping, zipWriter);
+	return JSON.stringify(obj, mapping.size ? (_, value) => mapping.get(value) ?? value : null, space);
+};

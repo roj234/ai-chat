@@ -1,173 +1,166 @@
 import {config} from "../states.js";
-import {decodeObjects, encodeObjects} from "../utils/marshal.js";
-import {initSync} from "./SyncManager.js";
-import SimpleModal from "../components/SimpleModal.jsx";
-import {showToast} from "../components/Toast.js";
-import {DONE} from "../database.js";
+import {decodeObjects, encodeObjects, serializeJSON} from "../utils/marshal.js";
+import {initSync, SYNC_CONVERSATION, SYNC_MESSAGE} from "./SyncManager.js";
+import {decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
+import {c2s_schema, c2s_schema_version, s2c_schema, s2c_schema_version} from "/common/MsgpackSchema.js";
 
 let sync;
 
 /** @type {string} */
 let dbUrl = config.db_server;
 
-async function request(path, options = {}) {
+let serverAcceptMsgpack;
+
+export const serializeMsgpack = async (obj) => {
+	const mapping = new Map;
+	await encodeObjects(obj, mapping);
+	return encodeMsg(obj, c2s_schema, mapping.size ? (value) => mapping.get(value) ?? value : null);
+};
+
+const request = async (path, {body, method} = {}) => {
 	if (!dbUrl.endsWith('/')) dbUrl += '/';
 	const res = await fetch(dbUrl+path, {
-		headers: { 'Content-Type': 'application/json' },
-		...options,
+		headers: {
+			'Accept': 'application/vnd.msgpack,application/json',
+			'x-schema-version': s2c_schema_version,
+			'Content-Type': serverAcceptMsgpack ? 'application/vnd.msgpack' : 'application/json'
+		},
+		method,
+		body: body && await (serverAcceptMsgpack ? serializeMsgpack(body) : serializeJSON(body)),
 		referrerPolicy: "no-referrer"
 	});
-	if (!res.ok) {
-		const text = await res.text();
-		throw new Error(`HTTP ${res.status}: ${text}`);
-	}
-	const contentType = res.headers.get('Content-Type');
-	if (contentType && contentType.includes('application/json')) {
-		return res.json();
-	}
-	return res.text();
-}
 
-export async function serializeJSON(obj) {
-	const mapping = new Map;
-	const replacer = (_, value) => {
-		return mapping.get(value) ?? value;
-	};
-	await encodeObjects(obj, mapping);
-	return JSON.stringify(obj, replacer);
-}
-
-export function getMessages(conversation) {
-	return request(`conversations/${conversation.id}`).then(async json => {
-		Object.assign(conversation, await decodeObjects(json));
-		return request(`conversations/${conversation.id}/messages`).then(decodeObjects);
-	});
-}
-
-export async function newConversation(conversation) {
-	const body = await serializeJSON(conversation);
-
-	const result = await request('conversations', {
-		method: 'POST',
-		body,
-	});
-
-	conversation.id = result.id;
-	sync?.on('update', conversation);
-	return conversation;
-}
-
-export async function updateConversation(conversation) {
-	sync?.on('update', conversation);
-	const body = await serializeJSON(conversation);
-
-	return await request(`conversations/${conversation.id}`, {
-		method: 'PUT',
-		body,
-	});
-}
-
-export async function updateMessage(message) {
-	const body = await serializeJSON(message);
-	const result = await request('messages', {
-		method: 'POST',
-		body,
-	});
-
-	message.id = result.id;
-	return message;
-}
-
-export function deleteMessage(id) {
-	return request(`messages/${id}`, { method: 'DELETE' });
-}
-
-export function deleteConversation(id) {
-	sync?.on('delete', id);
-	return request(`conversations/${id}`, { method: 'DELETE' });
-}
-
-export function listConversations() {
-	const next = () => {
-		request("props").then(data => {
-			let syncServer = data.sync;
-			if (syncServer) {
-				if (syncServer.startsWith("/")) {
-					syncServer = (<a href={syncServer} />).href;
-				}
-				sync = initSync(syncServer.replace(/^http/, "ws"));
-			}
-		});
-		return request('conversations').then(decodeObjects);
-	};
-
-	if (config.db_server && (DB_MODE !== 'remote' || config.db_server !== ':idb:')) return next();
-
-	return new Promise(resolve => {
-		SimpleModal({
-			type: "input",
-			title: "登录",
-			message: "请输入"+(DB_SERVER?"用户名或":"")+"数据库服务器地址\n之后也可以在设置页面修改"+(DB_MODE === "mixed" ? "\n您也可以点击取消使用本地数据库": ""),
-			placeholder: (DB_SERVER?"新用户将直接注册":"")+(import.meta.env.DEV?"\n留空使用开发服务器调试账户":""),
-			confirmMessage: "登录",
-			onConfirm(value) {
-				if (!value) {
-					if (import.meta.env.DEV) {
-						value = "/aichat/v2/user";
-						showToast("您正使用开发服务器调试账户");
-					} else {
-						return false;
-					}
-				}
-
-				if (!value.toLowerCase().startsWith("http") && !value.startsWith("/")) {
-					if (DB_SERVER) {
-						value = DB_SERVER.replace("{{user}}", encodeURIComponent(value));
-					} else {
-						return false;
-					}
-				}
-				config.db_server = dbUrl = value;
-				location.reload();
-			},
-			onCancel(value) {
-				if (DB_MODE !== 'mixed') return false;
-				config.db_server = ':idb:';
-				location.reload();
-			}
-		});
+	const decode = () => {
+		const contentType = res.headers.get('Content-Type');
+		if (contentType === 'application/json') return res.json();
+		if (contentType === 'application/vnd.msgpack') {
+			return res.arrayBuffer().then(ab => {
+				return decodeMsg(new DataView(ab), {
+					//multiple: true,
+					bigint: true,
+					schema: s2c_schema
+				});
+			});
 		}
-	);
-}
+		return res.text();
+	};
 
-export function searchMessages(keyword) {
-	return request(`search?keyword=${encodeURIComponent(keyword)}`);
-}
-
-export function getKV(key) {
-	return request(`kv?key=${encodeURIComponent(key)}`).then(decodeObjects);
-}
-
-export async function setKV(key, value) {
-	if (value === undefined) {
-		return request(`kv?key=${encodeURIComponent(key)}`, { method: 'DELETE' });
+	if (!res.ok) {
+		let text = await decode();
+		if (typeof text !== "string") {
+			text = JSON.stringify(text);
+		}
+		throw `HTTP ${res.status}\n${text}`;
 	}
+	return decode();
+};
 
-	const body = await serializeJSON({ key, value });
-	return request('kv', {
-		method: 'PUT',
-		body: body,
+/**
+ * @type {Array}
+ */
+let batchQueue;
+
+const runBatch = () => {
+	const queue = batchQueue;
+	batchQueue = null;
+
+	request('batch', {
+		method: "POST",
+		body: queue.map(q => q[0])
+	}).then(items => {
+		for (let i = 0; i < queue.length; i++){
+			const item = items[i];
+			queue[i][item?.error ? 2 : 1](item);
+		}
+	}).catch(err => {
+		for (let q of queue) q[2](err);
 	});
-}
+};
 
-export function kvListGetValues(type) {
-	return request(`kvs/values?type=${encodeURIComponent(type)}`).then(decodeObjects);
-}
+/**
+ * @param {string} key
+ * @param {boolean=false} unmarshal
+ * @return {(function(*): Promise<any>)}
+ */
+const makeBatch = (key, unmarshal) => value => {
+	const promise = new Promise((resolve, reject) => {
+		const data = [ [key, value], resolve, reject ];
+		if (!batchQueue) {
+			batchQueue = [data];
+			setTimeout(runBatch);
+		} else {
+			batchQueue.push(data);
+		}
+	});
+	return unmarshal ? promise.then(decodeObjects) : promise;
+};
 
-export function kvListGetKeys(type) {
-	return request(`kvs/keys?type=${encodeURIComponent(type)}`);
-}
+const u_upsertConversation = makeBatch("conversation/upsert");
+const u_deleteConversation = makeBatch("conversation/delete");
 
+export const upsertConversation = async conversation => {
+	const id = conversation.id = await u_upsertConversation(conversation);
+	sync?.on(SYNC_CONVERSATION, conversation);
+	return id;
+};
+export const deleteConversation = id => {
+	sync?.on(SYNC_CONVERSATION, {id});
+	return u_deleteConversation(id);
+};
+
+const u_getConversation = makeBatch("conversation", true);
+const u_messages = makeBatch("messages", true);
+const u_upsertMessage = makeBatch("message/upsert");
+const u_deleteMessage = makeBatch("message/delete");
+
+export const getMessages = conversation => {
+	const id = conversation.id;
+	const messages = u_messages(id);
+	return u_getConversation(id).then(json => {
+		for (const key of Object.keys(conversation)) delete conversation[key];
+		Object.assign(conversation, json);
+		return messages;
+	});
+};
+
+export const upsertMessage = async message => {
+	const id = message.id = await u_upsertMessage(message);
+	sync?.on(SYNC_MESSAGE, message);
+	return id;
+};
+
+export const deleteMessage = id => {
+	sync?.on(SYNC_MESSAGE, {id});
+	return u_deleteMessage(id);
+};
+
+export const listConversations = () => {
+	makeBatch("sync")().then(syncServer => {
+		if (syncServer) {
+			if (syncServer.startsWith("/")) {
+				syncServer = (<a href={syncServer} />).href;
+			}
+			sync = initSync(syncServer.replace(/^http/, "ws"));
+		}
+	});
+	makeBatch("msgpack")().then(version => serverAcceptMsgpack = version === c2s_schema_version);
+	return makeBatch("conversations")();
+};
+
+export const searchMessages = keyword => request(`search?keyword=${encodeURIComponent(keyword)}`);
+
+export const getKV = makeBatch("kv", true);
+const u_setKV = makeBatch("kv/set");
+const u_deleteKV = makeBatch("kv/delete");
+
+export const setKV = async (key, value) => value === undefined ? u_deleteKV(key) : u_setKV([key, value]);
+
+// values这个接口主要是给备份(导出)用的
+export const kvListGetValues = makeBatch("kvs/values", true);
+export const kvListGetKeys = makeBatch("kvs");
+const u_getKVList = makeBatch("kvs/value", true);
+const u_upsertKVList = makeBatch("kvs/upsert");
+const u_deleteKVList = makeBatch("kvs/delete");
 
 /** @type {Map<string, WeakRef<AiChat.IDBKVList & Object>>} */
 const kvListCache = new Map;
@@ -177,7 +170,7 @@ const kvListCache = new Map;
  * @param {string} name
  * @return {Promise<Object>}
  */
-export async function kvListGet(type, name) {
+export const kvListGet = async (type, name) => {
 	if (!name) return;
 
 	const cacheKey = type+":"+name;
@@ -190,41 +183,25 @@ export async function kvListGet(type, name) {
 			});
 		}
 
-		val = await request(`kvs?type=${encodeURIComponent(type)}&name=${encodeURIComponent(name)}`).then(decodeObjects);
+		val = await u_getKVList([type, name]);
 		delete val.type;
 		if (val) kvListCache.set(cacheKey, new WeakRef(val));
 	}
 	return val;
-}
+};
 
-export async function kvListSet(value, type, name) {
+export const kvListSet = async (value, type, name) => {
 	if (type) value.type = type;
 	if (name) value.name = name;
+	return u_upsertKVList(value);
+};
 
-	const body = await serializeJSON(value);
-	await request('kvs', { method: 'POST', body });
-}
+export const kvListDel = (type, name) => u_deleteKVList([type, name]);
 
-export function kvListDel(type, name) {
-	return request(`kvs?type=${encodeURIComponent(type)}&name=${encodeURIComponent(name)}`, { method: 'DELETE' });
-}
+export const appendBillingLog = makeBatch("log/insert");
+export const getBillingLog = makeBatch("log");
 
-export function appendBillingLog(log) {
-	if (log.message_id <= 0) return DONE;
-	return request('log', {
-		method: 'POST',
-		body: JSON.stringify(log),
-	});
-}
-
-export function getBillingLog(message_id) {
-	if (message_id <= 0) return DONE;
-	return request(`log/${message_id}`);
-}
-
-export async function deleteDatabase() {
-	return request('database', { method: 'DELETE' });
-}
+export const deleteDatabase = async () => request('database', {method: 'DELETE'});
 
 const URLSAFE = {
 	'+': '-',
@@ -238,41 +215,62 @@ const URLSAFE = {
  * @param {Blob} blob
  * @returns {Promise<string>}
  */
-export async function sha256(blob) {
+export const sha256 = async blob => {
 	// Web Crypto 好垃圾哦
 	const buffer = await blob.arrayBuffer();
 	const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
 	return btoa(String.fromCharCode(...new Uint8Array(hashBuffer))).replaceAll(/[+\/=]/g, match => URLSAFE[match]);
+};
+
+const BLOB = Symbol();
+
+function _FakeBlob(hash, type, name, size) {
+	this.hash = hash;
+	this.type = type;
+	this.name = name;
+	this.size = size;
 }
+_FakeBlob.prototype = {
+	constructor: File,
+	toUrl() {return dbUrl+`blob/`+this.hash;},
+	async _fetch() {return this[BLOB] || (this[BLOB] = await (await fetch(this.toUrl())).blob());},
+	async toDataURL() {return (await this._fetch()).toDataURL();},
+	async arrayBuffer() {return (await this._fetch()).arrayBuffer();},
+	async bytes() {return (await this._fetch()).bytes();},
+	async text() {return (await this._fetch()).text();},
+};
+
+const u_blob = makeBatch("blob");
 
 /**
  *
- * @param {Blob} blob
+ * @param {Blob|_FakeBlob} blob
  * @return {Promise<string>}
  */
-export async function updateBlob(blob) {
+export const updateBlob = async blob => {
+	const existingHash = blob.hash;
+	if (existingHash) return existingHash;
+
 	const hash = await sha256(blob);
-	let resp = await fetch(dbUrl+`blob/`+hash);
-	if (!resp.ok) {
-		resp = await fetch(dbUrl+`blob/`+hash, {
+	try {
+		await u_blob(hash);
+	} catch {
+		const resp = await fetch(dbUrl+`blob/`+hash+"?name="+encodeURIComponent(blob.name||""), {
 			method: 'POST',
 			headers: { 'Content-Type': blob.type },
 			body: blob
 		});
-		if (!resp.ok) {
-			throw await resp.text();
-		}
+		if (!resp.ok) throw await resp.text();
 	}
 	return hash;
-}
+};
 
 /**
  *
  * @param {{hash: string, name: string}} obj
  * @return {Promise<Blob>}
  */
-export async function getBlob({hash, name}) {
-	const blob = await (await fetch(dbUrl+`blob/`+hash)).blob();
-	if (name) blob.name = name;
-	return blob;
-}
+export const getBlob = async ({hash, name}) => {
+	const { name: serverName, type, size } = await u_blob(hash);
+	return new _FakeBlob(hash, type || "application/octet-stream", name, size);
+};

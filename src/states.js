@@ -1,6 +1,6 @@
-import {$asyncState, $state, $store, $update, $watch} from 'unconscious';
+import {$asyncState, $state, $store, $watch, debugSymbol} from 'unconscious';
 import {jsonFetch} from "./utils/utils.js";
-import {isEqual} from "../vendor/equals.js";
+import {deepEqual} from "unconscious/common/deepEqual.js";
 import {onLoad} from "./plugin.js";
 
 /**
@@ -10,9 +10,7 @@ export let isMobile ;
 
 const mobileCheck = () => isMobile = matchMedia('(max-width: 768px)').matches;
 mobileCheck();
-onLoad(() => {
-	window.addEventListener('resize', mobileCheck);
-});
+onLoad(() => window.addEventListener('resize', mobileCheck));
 
 /**
  *
@@ -25,13 +23,17 @@ onLoad(() => {
  */
 export const state = {};
 
+
+export const MessageCopyHandler = debugSymbol("MessageCopy");
+
 /**
  * @type {Record<string, AiChat.DnD.CustomMessageRole>}
  */
 export const MessageRoles = {};
 export const EditableMessageRoles = new Set(["system", "user", "assistant"]);
 
-export const inputText = $state("");//$store("inputText", "", {persist: true});
+// 虽然记住是挺好的，但是自动同步功能会导致每一个页面的输入框内容都相同，有些离谱
+export const inputText = $state("");//$store("inputText", "", {persist: true, ser: AS_IS, deser: AS_IS});
 
 
 /**
@@ -43,11 +45,12 @@ export const config = $store("config", {
 
 	reasoning: 'medium',
 
-	maxToolTurns: 10,
+	maxToolTurns: 1,
 	sound: false,
 
 	generateTitle: false,
 
+	jsonSupport: 0,
 	max_tokens: 10000,
 	top_p: 1,
 	top_k: 0,
@@ -83,31 +86,30 @@ const _modelEndpoint = $state();
  */
 export let isLlamaCppBackend, isMyLlamaCppBackend;
 
-export function setIsLlamaCppBackend(b, b2) {
+export const setIsLlamaCppBackend = (b, b2) => {
 	isLlamaCppBackend = b;
 	isMyLlamaCppBackend = b2;
-}
+};
 
 /**
  * @type {import("unconscious").ReactivePromise<AiChat.ApiModel[]>}
  */
 export const models = $asyncState(endpoint => {
-	return !endpoint?.url ? [] : jsonFetch(endpoint.url + "/models", { authorization: endpoint.token }).then(({data}) => data);
+	return endpoint?.url ? jsonFetch(endpoint.url + "/models", {key: endpoint.key}).then(({data}) => data) : [];
 }, _modelEndpoint);
 
 /**
  * @param {boolean=} force
  * @return {import("unconscious").ReactivePromise<AiChat.ApiModel[]>}
  */
-export function updateModels(force) {
+export const updateModels = force => {
 	const value = {
 		url: config.endpoint,
-		token: config.accessToken
+		key: config.accessToken
 	};
-	if (!isEqual(value, _modelEndpoint.value)) _modelEndpoint.value = value;
-	if (force) $update(_modelEndpoint);
+	if (force || !deepEqual(value, _modelEndpoint.value)) _modelEndpoint.value = value;
 	return models;
-}
+};
 
 /**
  *
@@ -144,4 +146,7 @@ $watch(selectedConversation, () => {
 	abortCompletion.value = runningConversations.get(selectedConversation.id)?.abort;
 });
 
-export const resumableCompletions = $store("resumableCompletions", {}, {persist: true, deep: false});
+export const resumableCompletions = $store("resumable", {}, {persist: true, deep: false, ser: (value) => {
+	const s = JSON.stringify(value);
+	return s.length > 2 ? s : null;
+}});

@@ -1,21 +1,15 @@
 import {config, conversations, messages, selectedConversation, Shared} from "./states.js";
 import {showToast} from "./components/Toast.js";
-import {
-	CONVERSATION_KEYS,
-	deleteDatabase,
-	getMessages,
-	kvListGetValues,
-	kvListSet,
-	newConversation,
-	updateConversation
-} from "./database.js";
-import {cloneNamed, prettyError} from "./utils/utils.js";
+import {deleteDatabase, getMessages, kvListGetValues, kvListSet, updateConversation} from "./database.js";
+import {prettyError} from "./utils/utils.js";
 import {runAllTools} from "./skills.js";
 import SimpleModal from "./components/SimpleModal.jsx";
-import {openZip, ZipWriter} from "/common/jszip.js";
-import {$computed, $state, $update} from "unconscious";
+import {ZipReader, ZipWriter} from "unconscious/common/zip-io.js";
+import {$computed, $state, $update, unconscious} from "unconscious";
 import {reloadPresetList} from "./components/PresetDropdown.jsx";
-import {decodeObjects, encodeObjects} from "./utils/marshal.js";
+import {decodeObjects, serializeJSON} from "./utils/marshal.js";
+
+const sleep = () => new Promise(resolve => setTimeout(resolve));
 
 /**
  *
@@ -23,11 +17,9 @@ import {decodeObjects, encodeObjects} from "./utils/marshal.js";
  * @param {boolean=false} batch
  * @return {Promise<AiChat.Conversation>}
  */
-export async function importConversationData({messages: messages_, ...rest}, batch) {
-	const newConv = await newConversation();
-	for (const name of CONVERSATION_KEYS) {
-		if (name !== "id" && name in rest) newConv[name] = rest[name];
-	}
+export const importConversationData = async ({messages: messages_, id, ...conv}, batch) => {
+	if (!Number.isFinite(conv.time)) conv.time = Date.now();
+	if (typeof conv.title !== "string") conv.title = "";
 
 	if (messages_) {
 		messages_.sort((a, b) => {
@@ -36,21 +28,21 @@ export async function importConversationData({messages: messages_, ...rest}, bat
 		}).forEach(message => {
 			delete message.id;
 		});
-		runAllTools(newConv, messages_, true);
+		runAllTools(conv, messages_, true);
 	}
 
-	await updateConversation(newConv, messages_, true);
+	await updateConversation(conv, messages_, true);
 	if (!batch) {
-		newConv.ready = true;
-		conversations.unshift(newConv);
-		selectedConversation.value = newConv;
+		conv.ready = true;
+		conversations.unshift(conv);
+		selectedConversation.value = conv;
 		messages.value = messages_;
 	}
-	return newConv;
-}
+	return conv;
+};
 
-async function loadBackupZip(file) {
-	const zipFile = await openZip(file);
+const loadBackupZip = async file => {
+	const zipFile = await ZipReader(file);
 
 	const data = await zipFile.getText(APP_NAME);
 	if (data !== '1') {
@@ -63,10 +55,11 @@ async function loadBackupZip(file) {
 
 	const kvList = await zipFile.getText("kvList.json");
 	if (kvList) {
+		const promises = [];
 		for (const item of JSON.parse(kvList)) {
-			await decodeObjects(item, null);
-			await kvListSet(item, item.type);
+			promises.push(decodeObjects(item, null).then(() => kvListSet(item, item.type)));
 		}
+		await Promise.all(promises);
 		reloadPresetList();
 		showToast('导入了KV列表，可能需要刷新网页');
 	}
@@ -75,18 +68,24 @@ async function loadBackupZip(file) {
 	const close = showToast(message, '', 0);
 
 	const new_convs = [];
+	const promises = [];
+	let size = 0;
 	for (const [name] of zipFile.entries()) {
 		if (name.startsWith("conversations/") && name.endsWith(".json")) {
-			message.value = "正在导入 "+name;
-			try {
-				const conv = JSON.parse(await zipFile.getText(name));
-				await decodeObjects(conv, zipFile);
-				new_convs.push(await importConversationData(conv, true));
-			} catch (e) {
+			promises.push(zipFile.getText(name).then(async (text) => {
+				if (size + text.length > 1048576) {
+					await sleep();
+					size = 0;
+				}
+				size += text.length;
+
+				new_convs.push(await importConversationData(await decodeObjects(JSON.parse(text), zipFile), true));
+			}).catch(e => {
 				showToast(name+": 导入失败\n"+prettyError(e), 'error');
-			}
+			}));
 		}
 	}
+	await Promise.all(promises);
 
 	if (new_convs.length) {
 		conversations.unshift(...new_convs);
@@ -101,12 +100,12 @@ async function loadBackupZip(file) {
 	if (preset) {
 		const data = JSON.parse(preset);
 		await decodeObjects(data, null);
-		Object.assign(config.value, data);
+		Object.assign(unconscious(config), data);
 		$update(config);
 		Shared.SettingUI.sync();
 		showToast('配置已导入');
 	}
-}
+};
 
 /**
  * @type {Record<string, (function(Object, boolean, string): Promise<void> | false)[]>}
@@ -118,13 +117,13 @@ const dataImportHandlers = {};
  * @param {string | "application/json"} type
  * @param {function(jsonData: Object, batch: boolean, fileName: string): Promise<void> | false} callback
  */
-export function registerDataImportHandler(type, callback) {
+export const registerDataImportHandler = (type, callback) => {
 	const dataImportHandler = dataImportHandlers[type];
 	if (dataImportHandler) dataImportHandler.push(callback);
 	else dataImportHandlers[type] = [callback];
-}
+};
 
-export async function importConversation(e) {
+export const importConversation = async e => {
 	const files = Array.from(e.target.files);
 	e.target.value = '';
 
@@ -162,10 +161,10 @@ export async function importConversation(e) {
 
 		if (files.length > 1) $update(conversations);
 	}
-}
+};
 
-export async function duplicateConversation() {
-	const conv = selectedConversation.value;
+export const duplicateConversation = async () => {
+	const conv = unconscious(selectedConversation);
 	if (!conv?.ready) {
 		showToast('无对话选中', 'error');
 		return;
@@ -173,18 +172,18 @@ export async function duplicateConversation() {
 
 	await importConversationData({
 		...conv,
-		messages: messages.value
+		messages: unconscious(messages).filter(item => item.id >= 0)
 	});
 
 	showToast('已将当前对话另存为', 'ok');
-}
+};
 
-function cleanMessages(messages) {
+const cleanMessages = messages => {
 	for (const message of messages) delete message.id;
 	return messages;
-}
+};
 
-export async function exportConversation(isConfig, _conv) {
+export const exportConversation = async (isConfig, _conv) => {
 	const includePlugins = import.meta.env.DEV;
 
 	const mapping = new Map;
@@ -195,27 +194,27 @@ export async function exportConversation(isConfig, _conv) {
 	const zw = ZipWriter();
 	await zw.add(APP_NAME, "1");
 
-	let data;
-
 	if (isConfig) {
-		await zw.add("config.json", JSON.stringify(config.value), {
-			compress: true
-		});
-		await zw.add("kvList.json", JSON.stringify((await kvListGetValues(includePlugins ? "*" : "preset"))), {
-			compress: true
-		});
+		const compression = {compress: true};
+
+		await zw.add("config.json", JSON.stringify(config), compression);
+
+		const kvList = await kvListGetValues(includePlugins ? "*" : "preset");
+		const jsonData = await serializeJSON(kvList, 0, zw);
+
+		await zw.add("kvList.json", jsonData, compression);
 	} else {
-		const conv = _conv || selectedConversation.value;
+		const conv = _conv || unconscious(selectedConversation);
 		if (conv) {
-			data = cloneNamed(conv, CONVERSATION_KEYS);
-			let messagePromise = messages.value;
+			const { id: _a, ready: _b, ...data } = conv;
+
+			let messagePromise = unconscious(messages);
 			try {
 				messagePromise = await getMessages(conv);
 			} catch {}
 			data.messages = cleanMessages(messagePromise);
-			await encodeObjects(data.messages, mapping, zw);
 
-			const jsonData = JSON.stringify(data, replacer, 2);
+			const jsonData = await serializeJSON(data.messages, 0, zw);
 			if (zw.fileCount() === 1) {
 				downloadFile(new Blob([jsonData], { type: "application/json" }), "json");
 				return;
@@ -227,41 +226,32 @@ export async function exportConversation(isConfig, _conv) {
 			});
 		} else {
 			const successed = $state(0);
-			let close = showToast($computed(() => '已导出 '+successed.value+'/'+conversations.length+' 条数据…'), '', 0);
+			const conversations1 = unconscious(conversations);
+			let close = showToast($computed(() => '已导出 '+unconscious(successed)+'/'+conversations1.length+' 条数据…'), '', 0);
 
 			const callbacks = [];
-			const my_conversations = [];
-			for (const conv of conversations) {
-				const index = callbacks.length;
+			for (let i = 0; i < conversations1.length; i++) {
+				const conv = conversations1[i];
+				const reversedIndex = conversations1.length - 1 - i;
 
-				const { id, ...copy } = cloneNamed(conv, CONVERSATION_KEYS);
+				const { id: _a, ready: _b, ...data } = conv;
+
+				if (((i+1) & 15) === 0) await sleep();
 
 				callbacks.push(getMessages(conv).then(messages => {
-					copy.messages = cleanMessages(messages);
-					my_conversations[index] = copy;
-					return encodeObjects(messages, mapping, zw).then(() => {
+					data.messages = cleanMessages(messages);
+					return serializeJSON(data, 0, zw).then(text => {
 						successed.value ++;
+						return zw.add(`conversations/${reversedIndex}.json`, text, {
+							timestamp: data.time,
+							compress: true
+						});
 					});
 				}));
 			}
 
 			await Promise.all(callbacks);
 			close();
-
-			close = showToast($computed(() => '已压缩 '+successed.value+'/'+conversations.length+' 条数据…'), '', 0);
-
-			my_conversations.sort((a, b) => a.time - b.time);
-			for (let i = 0; i < my_conversations.length; i++) {
-				successed.value = i;
-
-				const conv = my_conversations[i];
-				await zw.add(`conversations/${i}.json`, JSON.stringify(conv, replacer), {
-					timestamp: conv.time,
-					compress: true
-				});
-			}
-
-			setTimeout(close, 3000);
 		}
 	}
 
@@ -271,18 +261,18 @@ export async function exportConversation(isConfig, _conv) {
 		console.error(e);
 		showToast('导出失败: ' + prettyError(e), 'error');
 	}
-}
+};
 
-export function downloadFile(blob, ext) {
+export const downloadFile = (blob, ext) => {
 	const url = URL.createObjectURL(blob);
 	const a = document.createElement('a');
 	a.href = url;
 	a.download = `${APP_NAME}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${ext}`;
 	a.click();
 	URL.revokeObjectURL(url);
-}
+};
 
-export function clearDatabase() {
+export const clearDatabase = () => {
 	SimpleModal({
 		message: '删除所有数据（对话、预设、历史记录）？',
 		accent: 'danger',
@@ -292,4 +282,4 @@ export function clearDatabase() {
 			})
 		}
 	});
-}
+};

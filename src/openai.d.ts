@@ -1,6 +1,8 @@
 // openai.d.ts
 // OpenRouter OpenAI-compatible API TypeScript 类型定义
 
+import * as JsonSchemaUtils from "unconscious/common/json-schema-utils";
+
 declare namespace OpenAI {
     // 模型名称
     type Model = string;
@@ -49,7 +51,7 @@ declare namespace OpenAI {
 
     interface BaseReasoningDetail {
         id: string;
-        format: 'unknown' | 'openai-responses-v1' | 'xai-responses-v1' | 'anthropic-claude-v1';
+        format: 'unknown' | 'openai-responses-v1' | 'xai-responses-v1' | 'anthropic-claude-v1' | 'google-gemini-v1';
         index?: number;
     }
 
@@ -201,54 +203,9 @@ declare namespace OpenAI {
         parameters: ObjectSchema;
     }
 
-    //region JSON Schemas
-    type ParameterType = 'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array' | 'null';
-    type StringFormat = 'date' | 'time' | 'date-time' | 'uri' | 'email' | 'hostname' | 'ipv4' | 'ipv6' | 'uuid'/* | /^uuid[1-5]/*/;
+    type Schema = JsonSchemaUtils.Schema;
+    type ObjectSchema = JsonSchemaUtils.ObjectSchema;
 
-    type BaseSchema = {
-        type: ParameterType | ParameterType[] | 'value';
-        description?: string;
-        example?: string;
-        default?: any;
-
-        enum?: (string | number)[];
-        const?: string | number;
-
-        $ref?: string;
-        oneOf?: Schema[];
-        anyOf?: Schema[];
-        allOf?: Schema[];
-    }
-    type ObjectSchema = BaseSchema & {
-        type: 'object';
-        properties?: Record<string, Schema>;
-        required?: string[];
-        additionalProperties?: boolean | Schema;
-    }
-    type ArraySchema = BaseSchema & {
-        type: 'array';
-        items?: Schema;
-        //prefixItems?: Schema;
-        minItems?: number;
-        maxItems?: number;
-    }
-    type StringSchema = BaseSchema & {
-        type: 'string';
-        pattern?: string;
-        format?: StringFormat;
-        minLength?: number;
-        maxLength?: number;
-    }
-    type IntegerSchema = BaseSchema & {
-        type: 'integer';
-        minimum?: number;
-        maximum?: number;
-        exclusiveMinimum?: number;
-        exclusiveMaximum?: number;
-        multipleOf?: number;
-    }
-    type Schema = BaseSchema | ObjectSchema | ArraySchema | StringSchema | IntegerSchema;
-    //endregion
     // region Choice
     type Choice = {
         index: number;

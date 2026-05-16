@@ -6,137 +6,143 @@ import {
 	deserializeRow
 } from "../utils/compression.js";
 
-export function registerMessageRoutes(router) {
-	// 列出对话简单数据，每条可能就几十字节，没什么好分页的
-	router.get('/conversations', (ctx) => {
-		const rows = ctx.db.prepare('SELECT id, title, time FROM conversations ORDER BY time DESC').all();
-		ctx.send(200, rows);
-	});
+/**
+ * @param {Record<string, function(body: any, ctx: Partial<AiChatBackend.RouteContext>): any>} batcher
+ */
+export function registerMessageRoutes(batcher) {
+	// 列出对话
+	batcher["conversations"] = (_, {db}) => {
+		return db.prepare('SELECT id, title, time FROM conversations ORDER BY time DESC').all();
+	};
 
-	// 增加新对话
-	router.post('/conversations', async (ctx) => {
-		const body = await ctx.readBody();
-		const { id, title = '', time = Date.now(), ...data } = body;
+	// 增加或修改对话
+	batcher["conversation/upsert"] = async ({ id, title = '', time = Date.now(), ...data }, ctx) => {
+		const setConversationId = ctx.setVariable("conversationId");
 
-		const stmt = ctx.db.prepare('INSERT INTO conversations (title, time, data) VALUES (?, ?, ?)');
-		const info = stmt.run(title, time, compressConversation(data));
-		ctx.send(201, { success: true, id: Number(info.lastInsertRowid) });
-	});
+		if (Number.isFinite(id)) {
+			ctx.db.prepare('UPDATE conversations SET title = ?, time = ?, data = ? WHERE id = ?')
+				.run(title, time, await compressConversation(data), id);
+		} else {
+			if (id !== undefined) return { error: "illegal id type" };
 
-	// 更新对话
-	router.put('/conversations/:id', async (ctx) => {
-		const id = Number(ctx.params.id);
-		const body = await ctx.readBody();
+			const info = ctx.db.prepare('INSERT INTO conversations (title, time, data) VALUES (?, ?, ?)')
+				.run(title, time, await compressConversation(data));
 
-		const { id: _id, title = '', time = Date.now(), ...data } = body;
-		if (_id && id !== _id) return ctx.send(400, { error: 'bad id' });
-
-		ctx.db.prepare('UPDATE conversations SET title = ?, time = ?, data = ? WHERE id = ?')
-			.run(title, time, compressConversation(data), id);
-
-		ctx.send(200, { success: true });
-	});
+			id = Number(info.lastInsertRowid);
+		}
+		setConversationId(id);
+		return id;
+	};
 
 	// 删除对话
-	router.delete('/conversations/:id', (ctx) => {
-		const id = Number(ctx.params.id);
-		const deletedRows = ctx.db.prepare('DELETE FROM messages WHERE owner = ? RETURNING id').all(id);
-		if (ctx.vectorDB) {
+	batcher["conversation/delete"] = (id, {db, vectorDB}) => {
+		if (!Number.isFinite(id)) return { error: 'illegal id' };
+
+		const deletedRows = db.prepare('DELETE FROM messages WHERE owner = ? RETURNING id').all(id);
+		if (vectorDB) {
 			deletedRows.forEach(({id}) => {
-				ctx.vectorDB.delete('m#'+id.toString(36));
-				ctx.vectorDB.delete('M#'+id.toString(36));
+				vectorDB.delete('m#'+id.toString(36));
+				vectorDB.delete('M#'+id.toString(36));
 			});
 		}
-		ctx.db.prepare('DELETE FROM conversations WHERE id = ?').run(id);
-		ctx.send(200, { success: true });
-	});
+		const info = db.prepare('DELETE FROM conversations WHERE id = ?').run(id);
+		return info.changes > 0;
+	};
 
-	// 读取对话完整元数据
-	router.get('/conversations/:id', (ctx) => {
-		const id = Number(ctx.params.id);
-		const conv = ctx.db.prepare('SELECT * FROM conversations WHERE id = ?').get(id);
-		if (!conv) return ctx.send(404, { error: 'Not found' });
-		ctx.send(200, deserializeRow(conv, decompressConversation));
-	});
+	// 读取对话元数据
+	batcher["conversation"] = (id, {db}) => {
+		if (!Number.isFinite(id)) return { error: 'illegal id' };
 
-	// 列出对话的消息
-	router.get('/conversations/:id/messages', (ctx) => {
-		const id = Number(ctx.params.id);
-		const messages = ctx.db.prepare('SELECT id, content, time, data FROM messages WHERE owner = ? ORDER BY id').all(id);
-		const parsed = messages.map(row => {
+		const conv = db.prepare('SELECT * FROM conversations WHERE id = ?').get(id);
+		return conv ? deserializeRow(conv, decompressConversation) : { error: 'not found' };
+	}
+
+	// 列出对话消息
+	batcher["messages"] = (id, {db}) => {
+		if (!Number.isFinite(id)) return { error: 'illegal id' };
+
+		const messages = db.prepare('SELECT id, content, time, data FROM messages WHERE owner = ? ORDER BY id').all(id);
+		return messages.map(row => {
 			const msg = deserializeRow(row, decompressMessage);
 
 			const content = msg.content;
 			if (Array.isArray(content)) {
-				content[content.findIndex(item => item.type === 'row')] = {
-					type: "text",
-					text: row.content
-				};
+				const index = content.findIndex(item => item.type === 'row');
+				if (index >= 0) content[index] = { type: "text", text: row.content };
 			}
 			return msg;
-		});
-		parsed.sort((a, b) => {
+		}).sort((a, b) => {
 			const b1 = a.role === "system";
 			const b2 = b.role === "system";
 			if (b1 !== b2) return b2 - b1;
 			return 0;
 		});
-		ctx.send(200, parsed);
-	});
+	}
 
 	// 创建或更新消息
-	router.post('/messages', async (ctx) => {
-		const body = await ctx.readBody();
+	batcher["message/upsert"] = async ({id, owner, content, time = null, ...data}, ctx) => {
+		const {db, vectorDB} = ctx;
+		owner = owner ?? await ctx.getVariable("conversationId");
+		if (owner == null) return { error: 'missing owner' };
 
-		let {id, owner, content, time = null, ...data} = body;
-		if (owner == null) return ctx.send(400, { error: 'missing conversation id' });
+		const setMessageId = ctx.setVariable("messageId");
 
 		if (typeof content !== "string") {
 			data.content = content;
 			if (Array.isArray(content)) {
 				const strContent = content.findIndex(item => item.type === "text");
 				if (strContent < 0) {
-					content = null;
+					content = '';
 				} else {
 					content = data.content[strContent].text;
+					data.content[strContent] = { type: 'row' };
 				}
-				data.content[strContent] = { type: 'row' };
 			} else {
 				content = '';
 			}
 		}
 
-		const serializedData = compressMessage(data);
+		const serializedData = await compressMessage(data);
 
-		if (id && !isNaN(id)) {
-			ctx.db.prepare('UPDATE messages SET data = ?, content = ?, time = ? WHERE id = ?').run(serializedData, content, time, id);
+		if (Number.isFinite(id)) {
+			const result = db.prepare('UPDATE messages SET data = ?, content = ?, time = ? WHERE id = ? AND owner = ?').run(serializedData, content, time, id, owner);
+			if (!result.changes) return { error: 'no such id' };
 		} else {
-			const conversation = ctx.db.prepare(`SELECT time from conversations WHERE id = ?`).get(owner);
-			if (conversation == null) return ctx.send(400, { error: 'unknown conversation id' });
-			if (time == null) time = Date.now();
+			if (id !== undefined) return { error: 'illegal id type' };
 
-			const info = ctx.db.prepare('INSERT INTO messages (owner, data, content, time) VALUES (?, ?, ?, ?)').run(owner, serializedData, content, time);
+			const conversation = db.prepare(`SELECT id from conversations WHERE id = ?`).get(owner);
+			if (conversation == null) return { error: 'no such owner' };
+			//if (time == null) time = Date.now();
+
+			const info = db.prepare('INSERT INTO messages (owner, data, content, time) VALUES (?, ?, ?, ?)').run(owner, serializedData, content, time);
 			id = info.lastInsertRowid;
 		}
 
-		if ((data.role === "user" || data.role === "assistant") && ctx.vectorDB) {
-			if (content)
-				ctx.vectorDB.set('m#'+id.toString(36), content);
-			if (data.think?.content)
-				ctx.vectorDB.set('M#'+id.toString(36), data.think.content);
+		if (vectorDB) {
+			const isSearchable = data.role === "user" || data.role === "assistant";
+
+			if (isSearchable && content) vectorDB.set('m#'+id.toString(36), content);
+			else vectorDB.delete('m#'+id.toString(36));
+
+			if (isSearchable && data.think?.content) vectorDB.set('M#'+id.toString(36), data.think.content);
+			else vectorDB.delete('M#'+id.toString(36));
 		}
 
-		ctx.send(200, { success: true, id });
-	});
+		setMessageId(id);
+		return id;
+	};
 
 	// 删除消息
-	router.delete('/messages/:id', (ctx) => {
-		const id = Number(ctx.params.id);
-		if (ctx.vectorDB) {
-			ctx.vectorDB.delete('m#'+id.toString(36));
-			ctx.vectorDB.delete('M#'+id.toString(36));
+	batcher["message/delete"] = (id, {db, vectorDB}) => {
+		if (!Number.isFinite(id)) return { error: 'illegal id' };
+
+		const result = db.prepare('DELETE FROM messages WHERE id = ?').run(id);
+		if (!result.changes) return false;
+
+		if (vectorDB) {
+			vectorDB.delete('m#'+id.toString(36));
+			vectorDB.delete('M#'+id.toString(36));
 		}
-		ctx.db.prepare('DELETE FROM messages WHERE id = ?').run(id);
-		ctx.send(200, { success: true });
-	});
+		return true;
+	};
 }

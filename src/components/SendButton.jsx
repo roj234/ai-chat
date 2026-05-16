@@ -1,5 +1,5 @@
 import {abortCompletion, inputText, messages} from "../states.js";
-import {$watch} from "unconscious";
+import {$watch, unconscious} from "unconscious";
 
 const x = ["发送", "中止", "继续", "重试", "执行工具"];
 const y = ["ri-send-plane-fill", "ri-square-fill", "ri-play-large-fill", "ri-loop-right-line", "ri-function-ai-line"/* ri-check-double-line */];
@@ -16,21 +16,17 @@ const button_state_map = {
  * @param {function(Event): void} onSend
  * @return {JSX.Element}
  */
-export function createSendButton(attachments, onSend) {
+export const createSendButton = (attachments, onSend) => {
 	const sendBtn = <button onClick={onSend} />;
 
-	$watch([messages, abortCompletion, attachments, inputText], () => {
-		sendBtn.disabled = !hasOtherSendBtnAction() && !inputText.trim() && !attachments.length;
-	});
-
 	/** @param {number} state */
-	function setSendBtnIcon(state) {
+	const setSendBtnIcon = state => {
 		sendBtn.className = y[state]+" btn primary";
 		sendBtn.title = x[state];
-	}
+	};
 
-	function hasOtherSendBtnAction() {
-		const value = abortCompletion.value;
+	const hasOtherSendBtnAction = () => {
+		const value = unconscious(abortCompletion);
 		setSendBtnIcon(value ? 1 : 0);
 		if (value) return true;
 
@@ -52,7 +48,11 @@ export function createSendButton(attachments, onSend) {
 		}
 
 		return last.role === "user";
-	}
+	};
+
+	$watch([messages, abortCompletion, attachments, inputText], () => {
+		sendBtn.disabled = !hasOtherSendBtnAction() && !inputText.trim() && !attachments.length;
+	});
 
 	return sendBtn;
-}
+};

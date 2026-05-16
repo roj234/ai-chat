@@ -5,7 +5,7 @@ import {SETTINGS} from "../settings.js";
 import "./SettingDialog.css";
 import {PresetDropdown} from "./PresetDropdown.jsx";
 import {isMobile} from "../states.js";
-import {ITEM_KEY} from "unconscious/ext/VirtualList.js";
+import {ITEM_KEY} from "unconscious/common/VirtualList.js";
 
 let currentTab = $state("general");
 /**
@@ -25,13 +25,13 @@ let tabs = {};
  * @param {string} icon
  * @param {string=} after 未实现
  */
-export function createTab(id, name, icon, after) {
+export const createTab = (id, name, icon, after) => {
 	if (id in tabs) return;
 	tabs[id] = {
 		name: <span className={"group "+icon}>{name}</span>,
 		elements: []
 	};
-}
+};
 
 createTab("general", "通用", "ri-wrench-line");
 createTab("model", "模型", "ri-key-line");
@@ -42,9 +42,7 @@ createTab("appearance", "外观", "ri-brush-line");
 createTab("data", "数据管理", "ri-database-2-line");
 createTab("tools", "工具调用", "ri-server-line");
 
-function setTransparent(f) {
-	document.body?.classList.toggle("tr", f);
-}
+const setTransparent = f => document.body?.classList.toggle("tr", f);
 
 export function SettingDialog(oldUI) {
 	const elements = Array.from(oldUI.children);

@@ -8,171 +8,128 @@ const INDEX = debugSymbol("INDEX");
 const CHILDREN = debugSymbol("CHILDREN");
 const NO_BRANCHES = [0, 1];
 
-class BranchManager {
-	/**
-	 * @param {AiChat.Conversation} conv
-	 * @param {AiChat.Message[]} messages
-	 */
-	constructor(conv, messages) {
-		// 占位符节点
-		messages.unshift({
-			id: -1 // 不保存到数据库
-		});
+/**
+ * 创建分支管理器
+ * @param {AiChat.Conversation} conv
+ * @param {AiChat.Message[]} messages
+ * @returns {AiChat.BranchManager}
+ */
+function createBranchManager(conv, messages) {
+	// ---------- 构造阶段 ----------
+	messages.unshift({
+		id: -1 // 不保存到数据库
+	});
 
-		messages.forEach((m, index) => {
-			m[INDEX] = index;
+	if (conv.bm_dummy) {
+		for (const id of conv.bm_dummy) {
+			messages.splice(id, 0, { id: -1, hidden: true });
+		}
+	}
 
-			if (index > 0) {
-				let {parent} = m;
-				if (null == parent) m.parent = parent = index - 1;
+	const dynamic = [];
+	messages.forEach((m, index) => {
+		m[INDEX] = index;
 
-				const parentMessage = messages[parent];
-				if (!parentMessage) {
-					showToast(`分支对话参数错误
+		if (index > 0) {
+			if (m.id === -1) dynamic.push(index);
+
+			let {parent} = m;
+			if (null == parent) m.parent = parent = index - 1;
+
+			const parentMessage = messages[parent];
+			if (!parentMessage) {
+				showToast(`分支对话参数错误
 找不到子节点 #${index} 引用的父节点 #${parent}`, "error");
-					return;
-				}
-
-				let children = parentMessage[CHILDREN];
-				if (!children) parentMessage[CHILDREN] = [m];
-				else children.push(m);
+				return;
 			}
-		});
-		this.conversation = conv;
-		this.messages = messages;
 
-		this.leaf = messages[conv.branches] || this._findDefaultLeaf();
-		conv.branches = this.leaf[INDEX];
-	}
+			let children = parentMessage[CHILDREN];
+			if (!children) parentMessage[CHILDREN] = [m];
+			else children.push(m);
+		}
+	});
 
-	_findDefaultLeaf() {
-		return this.messages.findLast(item => !(item[CHILDREN]?.length));
-	}
+	if (dynamic.length) conv.bm_dummy = dynamic;
 
-	toArray() {
-		const messages = this.getMessages();
-		for (const message of messages) {
+	const findDefaultLeaf = () => messages.findLast(item => !(item[CHILDREN]?.length));
+
+	const leafMessage = messages[conv.bm_leaf];
+	let leaf = leafMessage && !leafMessage[CHILDREN]?.length ? leafMessage : findDefaultLeaf();
+	conv.bm_leaf = leaf[INDEX];
+
+	// ---------- 私有辅助函数 ----------
+	const _updateIndices = newMessages => {
+		const idChanges = new Map();
+		for (let i = 0; i < newMessages.length; i++) {
+			idChanges.set(newMessages[i][INDEX], i);
+			newMessages[i][INDEX] = i;
+		}
+		for (let i = 1; i < newMessages.length; i++) {
+			newMessages[i].parent = idChanges.get(newMessages[i].parent);
+		}
+	};
+
+	// ---------- 公开方法 ----------
+	const toArray = () => {
+		const msgs = getMessages();
+		for (const message of msgs) {
 			delete message[INDEX];
 			delete message[CHILDREN];
 			delete message.parent;
 		}
-		return messages;
-	}
+		return msgs;
+	};
 
-	/**
-	 * 获取当前分支的所有消息
-	 * @return {AiChat.Message[]}
-	 */
-	getMessages() {
+	const getMessages = () => {
 		const path = [];
-		let m = this.leaf;
-		while (m !== this.messages[0]) {
+		let m = leaf;
+		while (m !== messages[0]) {
 			path.push(m);
-			/*if (m.parent === m[INDEX]) {
-				showToast("检测到循环引用", "error");
-				console.error("循环引用", m);
+
+			let {parent} = m;
+			// 正常情况下是不会出现的，但是如果有人动原始的消息数组
+			if (import.meta.env.DEV && parent === m[INDEX]) {
+				path.length = 0;
+				Array.prototype.push.apply(path, messages.slice(1).reverse());
 				break;
-			}*/
-			m = this.messages[m.parent];
+			}
+			m = messages[parent];
 		}
 
-		const self = this;
-
-		Object.defineProperties(path, {
-			push: {
-				value: function(...items) {
-					for (const item of items) self.branchAt(self.leaf, item);
-					return Array.prototype.push.apply(this, items);
-				},
-				configurable: true
-			},
-			pop: {
-				value: function() {
-					const last = this.at(-1);
-					if (last) {
-						self.remove(last);
-						return Array.prototype.pop.apply(this);
-					}
-				},
-				configurable: true
-			},
-			splice: {
-				value: function(start, deleteCount, ...items) {
-					if (items.length || start+deleteCount !== this.length)
-						throw new Error("无法部分修改分支消息");
-
-					const last = this.at(-deleteCount);
-					if (last) {
-						const [id, total] = self.getBranchInfo(last);
-						self.remove(last);
-						if (total > 1) {
-							self.switchBranch(self.messages[last.parent], id === 0 ? total - 1 : id - 1);
-						}
-
-						const removed = Array.prototype.splice.call(this, start, deleteCount);
-						this.length = 0;
-						Array.prototype.push.apply(this, self.getMessages());
-						return removed;
-					}
-				},
-				configurable: true
-			}
-		});
-
 		return path.reverse();
-	}
+	};
 
-	/**
-	 * 在指定消息处创建新分支
-	 * @param {AiChat.Message} parent 父消息
-	 * @param {AiChat.Message} message 子消息
-	 */
-	branchAt(parent, message) {
-		const index = this.messages.length;
-		this.messages.push(message);
+	const branchAt = (parent, message) => {
+		const index = messages.length;
+		messages.push(message);
 		message[INDEX] = index;
 
 		message.parent = parent[INDEX];
 		if (!parent[CHILDREN]) parent[CHILDREN] = [message];
 		else parent[CHILDREN].push(message);
 
-		this.leaf = message;
-		this.conversation.branches = index;
-	}
+		leaf = message;
+		conv.bm_leaf = index;
+	};
 
-	/**
-	 * 切换分支：当某个父节点有多个子节点时，选择其中一个
-	 * @param {AiChat.Message} parent 分支发生点
-	 * @param {number} index 选择第几个分支
-	 */
-	switchBranch(parent, index) {
+	const switchBranch = (parent, index) => {
 		let msg = parent[CHILDREN][index];
 		while (true) {
 			const child = msg[CHILDREN]?.at(-1);
 			if (!child) break;
 			msg = child;
 		}
-		this.leaf = msg;
-		//不更新，省的老写数据库
-		//this.conversation.branches = msg[INDEX];
-	}
+		leaf = msg;
+		conv.bm_leaf = msg[INDEX];
+	};
 
-	/**
-	 * 获取对应消息的分支状态
-	 * @param {AiChat.Message} message
-	 * @returns {[number, number]} [当前索引, 总分支数]
-	 */
-	getBranchInfo(message) {
-		const siblings = this.messages[message.parent]?.[CHILDREN];
+	const getBranchInfo = message => {
+		const siblings = messages[message.parent]?.[CHILDREN];
 		return !siblings ? NO_BRANCHES : [siblings.indexOf(message), siblings.length];
-	}
+	};
 
-	/**
-	 * 删除指定消息及其所有子孙节点，并回退当前叶子到父节点
-	 * @param {AiChat.Message} message - 要删除的消息
-	 */
-	remove(message) {
-		const parent = this.messages[message.parent];
+	const remove = message => {
+		const parent = messages[message.parent];
 		if (!parent) throw "cannot delete first message";
 
 		const toDelete = new Set();
@@ -182,18 +139,9 @@ class BranchManager {
 		};
 		collect(message);
 
-		const newMessages = this.messages.filter(m => !toDelete.has(m));
-
-		const idChanges = new Map;
-		for (let i = 0; i < newMessages.length; i++) {
-			idChanges.set(newMessages[i][INDEX], i);
-			newMessages[i][INDEX] = i;
-		}
-		for (let i = 1; i < newMessages.length; i++) {
-			newMessages[i].parent = idChanges.get(newMessages[i].parent);
-		}
-
-		this.messages = newMessages;
+		const newMessages = messages.filter(m => !toDelete.has(m));
+		_updateIndices(newMessages);
+		messages = newMessages;
 
 		const siblings = parent[CHILDREN];
 		if (siblings) {
@@ -201,9 +149,79 @@ class BranchManager {
 			if (!siblings.length) delete parent[CHILDREN];
 		}
 
-		this.leaf = parent;
-		this.conversation.branches = parent[INDEX];
-	}
+		leaf = parent;
+		conv.bm_leaf = parent[INDEX];
+	};
+
+	// ---------- 返回闭包对象 ----------
+	return {
+		get messages() { return messages; },
+		setLeaf(v) { leaf = v; },
+		getMessages() {
+			const path = getMessages();
+			Object.defineProperties(path, {
+				push: {
+					value(...items) {
+						for (const item of items) branchAt(leaf, item);
+						return Array.prototype.push.apply(path, items);
+					},
+					configurable: true
+				},
+				pop: {
+					value() {
+						const last = path.at(-1);
+						if (last) {
+							remove(last);
+							return Array.prototype.pop.apply(path);
+						}
+					},
+					configurable: true
+				},
+				splice: {
+					value(start, deleteCount, ...addItems) {
+						if (deleteCount) {
+							if (start + deleteCount !== this.length)
+								throw new Error("无法部分修改分支消息");
+
+							const last = path.at(-deleteCount);
+							if (last) {
+								const [id, total] = getBranchInfo(last);
+								remove(last);
+								if (total > 1) {
+									switchBranch(messages[last.parent], id === 0 ? total - 2 : id - 1);
+								}
+								this.push(...addItems);
+							}
+						} else {
+							const allMessages = messages;
+							for (let i = 0; i < addItems.length; i++) {
+								const prev = allMessages[i + start + 1];
+								if (prev.role) throw new Error("无法部分修改分支消息");
+
+								const curr = addItems[i];
+								for (const key of [CHILDREN, INDEX, "parent"]) {
+									curr[key] = prev[key];
+								}
+								allMessages[i + start + 1] = curr;
+							}
+						}
+
+						const removed = Array.prototype.splice.call(path, start, deleteCount);
+						path.length = 0;
+						Array.prototype.push.apply(path, getMessages());
+						return removed;
+					},
+					configurable: true
+				}
+			});
+			return path;
+		},
+		branchAt,
+		switchBranch,
+		getBranchInfo,
+		remove,
+		toArray
+	};
 }
 
 /**
@@ -212,7 +230,9 @@ class BranchManager {
  * @param {AiChat.Message[]} messages
  */
 export function enableBranches(conv, messages) {
-	return (conv[BM] = new BranchManager(conv, unconscious(messages))).getMessages();
+	const bm = createBranchManager(conv, unconscious(messages));
+	conv[BM] = bm;
+	return bm.getMessages();
 }
 
 /**
@@ -222,7 +242,8 @@ export function enableBranches(conv, messages) {
  */
 export function disableBranches(conv) {
 	const bm = conv[BM];
-	delete conv.branches;
+	delete conv.bm_leaf;
+	delete conv.bm_dummy;
 	delete conv[BM];
 	return bm.toArray();
 }
@@ -248,7 +269,7 @@ export function copyBranchAt(message) {
 export function setLastMessage(message) {
 	/** @type {AiChat.BranchManager} */
 	const branchManager = selectedConversation[BM];
-	branchManager.leaf = message;
+	branchManager.setLeaf(message);
 	messages.value = branchManager.getMessages();
 }
 

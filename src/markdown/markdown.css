@@ -1,0 +1,98 @@
+
+/* 统一代码块 */
+.code-block {
+    background: #242a36;
+    border-radius: var(--border-radius-md);
+    margin: var(--spacing-md) 0;
+    font-size: 0.875rem;
+
+    & > code {
+        display: block;
+        padding: 1em 0 1em 1em;
+    }
+}
+.code-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: smaller;
+    padding: 3px var(--spacing-sm);
+    background: #4a5568;
+    color: #e2e8f0;
+    /*border-bottom: 1px solid #718096;*/
+    border-radius: var(--border-radius-md) var(--border-radius-md) 0 0;
+}
+code, kbd {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+
+    &.mermaid {
+        display: flex;
+        justify-content: center;
+    }
+}
+
+q:before, q:after { content: none; }
+
+.md {
+    overflow-wrap: break-word;
+    hyphens: auto;
+    line-height: var(--md-line-height);
+
+    & em { color: rgb(145,145,145,1); }
+    & q, & q em { color: rgb(228,138,36,1); }
+    & hr {
+        border: none;
+        height: 1px;
+        background: var(--muted);
+    }
+    & kbd {
+        border: 1px solid #4a5568;
+        padding: 2px;
+        border-radius: var(--border-radius-sm);
+        color: oklch(0.6 0.18 18deg);
+        margin: 0 var(--spacing-xs);
+        word-break: break-word;
+    }
+    /* 统一表格 */
+    & table {
+        display: block;
+        border-collapse: collapse;
+        font-size: 14px;
+        background: var(--chip-bg);
+        border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0;
+        overflow-x: auto;
+        margin: var(--spacing-md) 0;
+        word-break: break-all;
+        table-layout: fixed;
+        width: fit-content;
+        max-width: 100%;
+
+        & thead {
+            background: linear-gradient(135deg, var(--chip-active) 0%, rgba(0,0,0,0.02) 100%);
+        }
+        & th {
+            font-weight: 600;
+            padding: var(--spacing-lg) var(--spacing-xl);
+            border-bottom: 2px solid var(--chip-active-border);
+            position: relative;
+            font-size: 13px;
+            letter-spacing: 0.5px;
+        }
+        & td {
+            padding: var(--spacing-md) var(--spacing-xl);
+        }
+        & tr:not(:last-child) {
+            border-bottom: 1px solid var(--muted);
+        }
+        & tbody tr:nth-child(even) {
+            background-color: var(--chip-active);
+        }
+    }
+
+    & blockquote {
+        border-left: 3px solid var(--accent);
+        background: rgba(74, 144, 226, 0.1);
+        padding: 2px 10px;
+        margin: 5px 0;
+    }
+}

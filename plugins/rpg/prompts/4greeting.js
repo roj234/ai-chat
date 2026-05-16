@@ -1,4 +1,4 @@
-import {jsonPrompt, schemaWrapper} from "../Constraint.js";
+import {jsonPrompt, schemaWrapper} from "../core.js";
 
 /** @type {OpenAI.ObjectSchema} */
 const schema = {
@@ -167,7 +167,7 @@ ${world.attribute_schema.map(f => `- **${f.name}**  \n  简介：${f.description
 ${prompt}`.trim()
 		}
 	], {
-		...schemaWrapper("greeting", schema),
+		...schemaWrapper(schema),
 		reasoning: { enabled: false },
 		//min_p: 0.1,
 		//temperature: 1.15,

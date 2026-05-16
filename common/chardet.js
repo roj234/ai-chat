@@ -3,7 +3,7 @@
  * @param {Blob} blob
  * @return {Promise<[string, number]>}
  */
-async function readBOM(blob) {
+export async function readBOM(blob) {
 	const stream = blob.stream();
 	const reader = stream.getReader();
 	try {

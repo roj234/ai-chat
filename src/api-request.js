@@ -1,11 +1,10 @@
 // API request
 import {createMarkdownStream} from "./markdown/markdown.js";
-import {cloneNamed, getTextContent, jsonFetch, prettyError, streamFetch} from "./utils/utils.js";
+import {cloneNamed, getTextContent, jsonFetch, prettyError} from "./utils/utils.js";
 import {
 	abortCompletion,
 	config,
 	isLlamaCppBackend,
-	isMyLlamaCppBackend,
 	lastScrollDirection,
 	MessageRoles,
 	messages,
@@ -15,414 +14,32 @@ import {
 	Shared,
 	state
 } from "./states.js";
-import {getTools, parseSkillMetadata, PLACEHOLDERS, runTools, set_title_body} from "./skills.js";
-import {$stampLock, $state, $update, isReactive, unconscious} from "unconscious";
+import {getTools, jsonPathOp, parseSkillMetadata, PLACEHOLDERS, runTools, set_title_body} from "./skills.js";
+import {$stampLock, $state, $update, $watch, isReactive, unconscious} from "unconscious";
 import {showToast} from "./components/Toast.js";
 import {mergeReasoningDetails} from "./components/ThinkBlock.jsx";
 import failure from "../media/failure.js";
 import complete from "../media/complete.js";
-import {appendBillingLog, updateConversation} from "./database.js";
+import {appendBillingLog, isIDB, updateConversation} from "./database.js";
 import {updateMessageUI} from "./components/MessageList.jsx";
 import {BODY_PARAMETERS, defaultCoTPrompt, defaultSystemPrompt, defaultTitlePrompt} from "./settings.js";
-import {jsonEncode} from "/common/StreamJsonStringifier.js";
-import {AntiSlop} from "./antiSlop.js";
+import {createJsonStream} from "/common/StreamJsonSerializer.js";
+import {createAntiSlopSampler} from "./anti-slop-sampler.js";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {highlightJsonLike} from "./markdown/highlight.js";
 import {updateConversationListUI} from "./components/ConversationList.jsx";
-import {deepEntries} from "/common/jsonSchema.js";
+import {deepEntries} from "unconscious/common/json-schema-utils.js";
+import {applyDelta, streamFetch} from "/common/openai-api-utils.js";
 
 export const statusBadge = <span />;
-export function setStatus(text, tone = '') {
+export const setStatus = (text, tone = '') => {
 	statusBadge.textContent = text;
 	statusBadge.className = 'badge ' + tone;
-}
-
-function isThinkingEnabled() {
-	return (typeof config.forceThink === "boolean" ? config.forceThink : config.think);
-}
-
-/**
- *
- * @param {Partial<AiChat.Conversation>} conversation
- * @param {AiChat.Message[]} messages
- * @param {boolean=} allowTools
- * @param {Record<string, any>=} additionalBody
- * @param {AntiSlop=} antiSlop
- * @return {Promise<{assistantMessage: AiChat.AssistantMessage, data: {headers: {Authorization: string, "Content-Type": string}, body: string | function(): ReadableStream}, url: string, antiSlop: AntiSlop}>}
- */
-async function composeMessages(conversation, messages, allowTools, additionalBody, antiSlop) {
-	/**
-	 * @type {OpenAI.Message[]}
-	 */
-	const json_messages = [];
-
-	/**
-	 * @type {AiChat.AssistantMessage}
-	 */
-	let initialAssistantMessage= messages.at(-1);
-	if (!initialAssistantMessage) throw "No message to continue";
-	else if (initialAssistantMessage.role !== 'assistant') initialAssistantMessage = null;
-
-	let assistantMessage = initialAssistantMessage;
-	if (initialAssistantMessage) {
-		const isAutomatic = assistantMessage.finish_reason === "tool_calls";
-
-		if (isAutomatic) assistantMessage = null;
-		else if (!config.allowContinue || (!isMyLlamaCppBackend && (assistantMessage.think || !assistantMessage.content))) {
-			if (antiSlop) throw "AntiSlop不支持的预填充方式（尝试禁用思考？）";
-			messages.pop();
-			assistantMessage = null;
-		}
-	}
-
-	let toolsUsed = conversation.activatedModules?.size > 0;
-	let callbacks = [];
-	for (let j = 0; j < messages.length; j++){
-		const m = messages[j];
-
-		const customHandler = MessageRoles[m.role];
-		if (customHandler) {
-			customHandler.compose?.(m, json_messages, callbacks, j, messages.length);
-			continue;
-		}
-
-		const json_msg = cloneNamed(m, ["role", "content", "tool_calls", "reasoning_details"]);
-		json_messages.push(json_msg);
-
-		if (m.tool_calls) {
-			toolsUsed = true;
-
-			setStatus("正在执行工具");
-			await runTools(m, true);
-
-			for (let i = 0; i < m.tool_calls.length; i++) {
-				const call = m.tool_calls[i];
-				const resp = m.tool_responses[i];
-				json_messages.push({
-					role: "tool",
-					tool_call_id: call.id,
-					content: resp.content,
-				});
-			}
-		}
-
-		const isPrefill = antiSlop && m === messages.at(-1);
-		const think = m.think;
-		const format = think?.format;
-		if (format && (config.stripCoT !== true || isPrefill)) {
-			const content = think.content;
-			if (format === "r") json_msg.reasoning = content;
-			if (format === "rc") json_msg.reasoning_content = content;
-			if (format[0] === "m" && (config.stripCoT !== "m" || isPrefill)) {
-				const tag = think.format.substring(1);
-				json_msg.content = "<"+tag+">" + content + (m.content ? "</"+tag+">\n" + m.content : "");
-			}
-		} else {
-			delete json_msg.reasoning_details;
-		}
-	}
-
-	// Prepare request body
-	const headers = {
-		//'HTTP-Referer': location.origin,
-		//'X-Title': 'AIChat',
-		'Content-Type': 'application/json',
-		'Authorization': `Bearer ${config.accessToken}`
-	};
-	let path = '/chat/completions';
-
-	const resumeObj = resumableCompletions[conversation.id];
-	if (resumeObj) {
-		delete resumableCompletions[conversation.id];
-		if (Date.now() - resumeObj.time < RESUME_TIMEOUT) {
-			return {
-				url: config.endpoint+'/resume/'+resumeObj.id,
-				data: { headers },
-				antiSlop,
-				assistantMessage,
-				initialAssistantMessage
-			};
-		}
-	}
-
-	/**
-	 * @type {Partial<OpenAI.ChatCompletionRequest>}
-	 */
-	let body = {
-		model: config.model,
-		stream: true
-	};
-
-	for (const {id, body_id, _omit} of BODY_PARAMETERS) {
-		const v = config[id];
-		if (v !== undefined && v !== _omit) {
-			body[body_id] = v;
-		}
-	}
-	for (const key of ["stop", "logit_bias"]) {
-		if (state[key]) body[key] = state[key];
-	}
-
-	let toolPrompt;
-	if (config.mode === 'completions') {
-		path = '/completions';
-		// Build a single prompt from conversation (with roles)
-		body.prompt = state.completionTemplate(json_messages);
-	} else {
-		body.messages = json_messages;
-
-		if (config.modalities?.includes("tool")) {
-			if (config.generateTitle === "tool" && !selectedConversation.title) {
-				// TODO allow set_title tool and provide system prompt ?
-				body.tools = [set_title_body];
-			}
-
-			// TODO use allowTools / allowNewTools or just provide?
-			if (allowTools || toolsUsed) {
-				[body.tools, toolPrompt] = getTools(conversation, allowTools);
-				// is this default=true for llama.cpp ?
-				body.parallel_tool_calls = true;
-				if (!allowTools) body.tool_choice = "none";
-				else if (allowTools !== true) body.tool_choice = allowTools;
-			}
-		}
-
-		const shouldThink = isThinkingEnabled() && config.reasoning;
-		body.reasoning = {enabled: !!shouldThink};
-		if (shouldThink) {
-			if (config.reasoning === "minimal") {
-				body.reasoning.max_tokens = 1024;
-			} else {
-				body.reasoning.effort = config.reasoning;
-				/*body.reasoning.max_tokens = ({
-					"low": 0.2,
-					"medium": 0.5,
-					"high": 0.8,
-				}[config.reasoning]) * body.max_tokens;*/
-			}
-		}
-	}
-	if (additionalBody) Object.assign(body, additionalBody);
-
-	let [systemPrompt, systemBody] = makeSystemPrompt(conversation, config.systemPrompt || defaultSystemPrompt, toolPrompt);
-	if (systemPrompt) {
-		if (json_messages[0]?.role !== 'system')
-			json_messages.unshift({role: 'system', content: systemPrompt});
-	}
-	if (systemBody) Object.assign(body, systemBody);
-
-	for (const callback of callbacks) {
-		callback(messages, json_messages, body, !!antiSlop);
-	}
-
-	block:
-	if (state.antiSlop) {
-		if (conversation.api) {showToast("结构化调用暂不支持AntiSlop采样器"); break block;}
-
-		// 在 llama.cpp 上TPS高得多，而且我本来就只需要采样器最后输出的可能候选
-		if (isLlamaCppBackend) {
-			body.post_sampling_probs = true;
-			body.n_probs = 5;
-		} else {
-			if (!config.allowContinue) throw "模型必须支持预填充和 lobprobs 以使用反语法约束采样";
-			body.logprobs = true;
-			// 不支持的其实也能回滚吧，先不管了
-			body.top_logprobs = 5;
-		}
-
-		if (!antiSlop)
-			antiSlop = new AntiSlop(body.top_p ?? 1, body.min_p ?? 0, state.antiSlop);
-	}
-
-	if (isLlamaCppBackend) {
-		body.return_progress = true;
-		body.timings_per_token = true;
-	}
-
-	let outputBody;
-	const useH2Stream = false && config.useH2Stream ? 'half' : undefined;
-	if (useH2Stream) {
-		// WIP
-		outputBody = () => new ReadableStream({
-			async start(controller) {
-				for await (const chunk of jsonEncode(body)) {
-					controller.enqueue(chunk);
-				}
-				controller.close();
-			}
-		});
-	} else {
-		const promises = [];
-		const mapping = new Map;
-		for (const [val] of deepEntries(body)) {
-			if (val instanceof Blob) {
-				if (val.size === 0) throw "文件数据不完整或已损坏。请尝试重新上传";
-
-				const type = val.type;
-				const isTextFile = type.startsWith("text/") || type === "application/json";
-				promises.push(val[isTextFile?"text":"toDataURL"]().then(str => {
-					if (type.startsWith("audio/")) {
-						str = str.substring(str.indexOf(",")+1);
-					}
-
-					mapping.set(val, str);
-				}));
-			}
-		}
-		await Promise.all(promises);
-
-		outputBody = JSON.stringify(body, (_, value) => {
-			return mapping.get(value) ?? value;
-		});
-	}
-
-	const url = config.endpoint+path;
-	return {
-		url,
-		data: {
-			headers,
-			body: outputBody,
-			duplex: useH2Stream
-		},
-		antiSlop,
-		assistantMessage
-	};
-}
-
-/**
- *
- * @param {AiChat.Conversation} conversation
- * @param {string} prompt
- * @param {string} toolPrompt
- * @return {[prompt: string, body: {}]}
- */
-export function makeSystemPrompt(conversation, prompt, toolPrompt) {
-	let body = {};
-
-	if (prompt.startsWith("---\n")) {
-		const [meta, content] = parseSkillMetadata(prompt);
-
-		let activatedModules = conversation.activatedModules;
-		// only process at initial
-		if (!activatedModules) {
-			const allowedTools = meta.allowedTools;
-			if (allowedTools) {
-				conversation.activatedModules = new Set(allowedTools);
-				conversation.allowedTools = new Set(allowedTools);
-			}
-
-			const disabledTools = meta.disabledTools;
-			if (disabledTools) {
-				if (!conversation.activatedModules) conversation.activatedModules = new Set(disabledTools);
-				else disabledTools.forEach(v => conversation.activatedModules.add(v));
-			}
-		}
-
-		for (const key of ["tool_choice", "reasoning"]) {
-			if (key in meta) body[key] = meta[key];
-		}
-
-		prompt = content;
-	}
-
-	const transform = (prompt) => prompt.replaceAll(/\{\{(.+?)}}/g, (text, id) => {
-		switch (id) {
-			case "think":
-				return isThinkingEnabled() && config.reasoning === false ? (config.CoTPrompt || defaultCoTPrompt) : "";
-			case "tools":
-				return transform(toolPrompt || "");
-		}
-
-		let val = PLACEHOLDERS[id];
-		if (val != null) {
-			if (typeof val === "function")
-				val = val();
-			return val;
-		}
-
-		return text;
-	}).trim();
-
-	return [transform(prompt), body];
-}
-
-function applyDelta(chunk, delta) {
-	for (const item in delta) {
-		if (delta[item] == null) continue;
-
-		if (typeof(delta[item]) === "object") {
-			if (!chunk[item])
-				chunk[item] = Array.isArray(delta[item]) ? [] : {};
-			applyDelta(chunk[item], delta[item]);
-		} else if (null == chunk[item]) {
-			chunk[item] = delta[item];
-		} else {
-			chunk[item] += delta[item];
-		}
-	}
-}
-
-/**
- *
- * @param {OpenAI.BaseResponse} json
- * @param {AiChat.BillingLog} billingLog
- * @return {string}
- */
-function getStats(json, billingLog) {
-	if (json.usage) {
-		let {
-			prompt_tokens, prompt_tokens_details = {},
-			completion_tokens, completion_tokens_details = {},
-			cost
-		} = json.usage;
-
-		const {reasoning_tokens} = completion_tokens_details;
-		const {cached_tokens, cache_write_tokens} = prompt_tokens_details;
-
-		billingLog.provider = json.provider;
-		billingLog.input_tokens = prompt_tokens - cached_tokens;
-		billingLog.output_tokens = completion_tokens;
-
-		if (cached_tokens) {
-			billingLog.cached_tokens = cached_tokens;
-		}
-		if (reasoning_tokens) {
-			billingLog.reasoning_tokens = reasoning_tokens;
-		}
-		if (cache_write_tokens) {
-			billingLog.cache_write_tokens = cache_write_tokens;
-		}
-		if (cost) {
-			billingLog.cost = cost;
-			billingLog.currency = "USD";
-		}
-	}
-
-	if (json.timings) {
-		let {cache_n, prompt_n, predicted_n, predicted_per_second} = json.timings;
-		const input_tokens = prompt_n + cache_n;
-
-		billingLog.provider = 'llama.cpp';
-		billingLog.input_tokens = input_tokens;
-		billingLog.output_tokens = predicted_n;
-		billingLog.cached_tokens = cache_n;
-		billingLog.cost = 0;
-		billingLog.tps = predicted_per_second;
-	}
-}
-
-const finish_reason_names = {
-	'tool_calls': '批准工具调用',
-	'length': '长度限制',
-	'stop': '完成',
-	'error': '错误',
-};
-const finish_reason_tone = {
-	'tool_calls': '',
-	'stop': 'ok',
 };
 
-export function getMarkdownContainer(think) {
+export const MD_APPEND = 2, MD_END = 3;
+
+export const getMarkdownContainer = think => {
 	const scroller = Shared.scroller;
 
 	const bodyNode = scroller.children[0].children[0].lastElementChild?.querySelector(".body");
@@ -433,20 +50,19 @@ export function getMarkdownContainer(think) {
 			if (think) {
 				if (element.matches(".think")) return element.lastElementChild;
 			} else {
-				if (element.matches(".content")) return element;
+				if (element.matches(".md")) return element;
 			}
 		}
 	}
-}
+};
 
 /**
  *
  * @param {string | OpenAI.ContentPart[]=} userText
- * @param {AntiSlop=} antiSlop
  * @return {Promise<string>}
  */
-export async function sendUserChatMessage(userText, antiSlop) {
-	if (abortCompletion.value) return "error";
+export async function sendUserChatMessage(userText) {
+	if (unconscious(abortCompletion)) return "error";
 	abortCompletion.value = new AbortController();
 
 	let markdownRenderer = createMarkdownStream();
@@ -494,7 +110,7 @@ export async function sendUserChatMessage(userText, antiSlop) {
 		if (atBottom < 100 && !lastScrollDirection.value) scroller.vl.scrollTo(scroller.scrollHeight);
 	}
 	function callback(type, content) {
-		if (selectedConversation.id !== conversation.id) return;
+		if (selectedConversation.id !== conversation_.id) return;
 
 		switch (type) {
 			case MD_APPEND:
@@ -508,38 +124,63 @@ export async function sendUserChatMessage(userText, antiSlop) {
 					updateMarkdown(content_, true);
 					markdownRenderer();
 				}
+				if (null === content?.finish_reason) return;
 			}
 		}
 		$update(updateMessageUI);
 	}
 
 	const messages_ = $stampLock(messages);
-	const conversation = unconscious(selectedConversation);
-	const abortCompletion1 = unconscious(abortCompletion);
-	runningConversations.set(conversation.id, {
-		abort: abortCompletion1,
+	const conversation_ = unconscious(selectedConversation);
+	const abort_ = $state(unconscious(abortCompletion));
+	/** @type {AiChat.LLMRequestContext} */
+	const context = {};
+
+	// _ApiRequest 会更新 abortCompletion
+	let oldValue;
+	$watch(abort_, () => {
+		const newValue = unconscious(abort_);
+		if (unconscious(abortCompletion) === oldValue) {
+			abortCompletion.value = newValue;
+		}
+		oldValue = newValue;
+	});
+
+	runningConversations.set(conversation_.id, {
+		abort: abort_,
 		messages: messages_
 	});
 	$update(updateConversationListUI);
 
 	if (userText) messages_.push({role: 'user', content: userText, time: Date.now()});
-
 	try {
-		let finishReason = await _ApiRequest(conversation, messages_, config.tools, state.additionalBody, abortCompletion1, callback, antiSlop);
+		const result = await _ApiRequest(
+			conversation_, messages_,
+			config.tools, state.additionalBody,
+			abort_, callback,
+			context
+		);
+
+		if (!result) return result; // false
+
+		const promises = [];
+
+		let finishReason = result.finish_reason;
+
 		const assistantMessage = messages_.at(-1);
 
-		const resumeObj = resumableCompletions[conversation.id];
+		const resumeObj = resumableCompletions[conversation_.id];
 		if (finishReason !== 'error' || assistantMessage.error !== "network error\n") {
 			if (resumeObj) {
 				try {
-					const result = await jsonFetch(config.endpoint+"/abort/"+resumeObj.id, {
-						authorization: config.accessToken,
+					promises.push(jsonFetch(config.endpoint+"/abort/"+resumeObj.id, {
+						key: config.accessToken,
 						method: 'POST'
-					});
+					}));
 				} catch (e) {
 					showToast("Abort接口调用失败\n"+e, 'error');
 				}
-				delete resumableCompletions[conversation.id];
+				delete resumableCompletions[conversation_.id];
 			}
 		} else {
 			if (resumeObj) {
@@ -547,16 +188,13 @@ export async function sendUserChatMessage(userText, antiSlop) {
 			}
 		}
 
-		let needSave;
-
 		const tone = finish_reason_tone[finishReason];
 		const is_ok = tone != null;
 
 		if ('interrupt' !== finishReason && 'loop' !== finishReason) {
 			if ('error' !== finishReason) {
-				if (!conversation.title) {
-					await generateDescription(conversation, messages_);
-					needSave = true;
+				if (!conversation_.title) {
+					generateTitle(conversation_, messages_);
 				}
 			}
 
@@ -566,42 +204,156 @@ export async function sendUserChatMessage(userText, antiSlop) {
 			}
 		}
 
-		if (is_ok && assistantMessage.tool_calls && !config.debug && (!config.maxToolTurns || countAgentTurns(messages_) < config.maxToolTurns)) {
-			if (!await runTools(assistantMessage)) {
+		if (is_ok && assistantMessage.tool_calls) {
+			if ((config.maxToolTurns && countAgentTurns(messages_) >= config.maxToolTurns) || !await runTools(assistantMessage, conversation_)) {
 				// 如果存在可能需要批准的工具调用
 				finishReason = 'interrupt';
 			}
 			$update(updateMessageUI);
-			needSave = true;
 		}
 
 		setStatus(finish_reason_names[finishReason], tone ?? 'error');
 
-		if (needSave) {
-			await updateConversation(conversation, unconscious(messages_), true);
+		promises.push(updateConversation(conversation_, unconscious(messages_)));
+
+		const has_resp = result.request_id && (finishReason !== 'error' || result.input_tokens);
+		if (has_resp) {
+			isIDB && await promises.at(-1).then(() => result.id = assistantMessage.id);
+			promises.push(appendBillingLog(result));
 		}
 
-		if (selectedConversation.id !== conversation.id) {
+		if (selectedConversation.id !== conversation_.id) {
 			finishReason = 'interrupt'; // 如果不在前台就不自动执行
-			showToast("对话 "+conversation.title+"(#"+conversation.id+") 已完成！", "ok");
+			showToast("对话 "+conversation_.title+"(#"+conversation_.id+") 已完成！", "ok");
 		}
 
+		await Promise.all(promises);
 		return finishReason;
 	} finally {
-		runningConversations.delete(conversation.id);
+		runningConversations.delete(conversation_.id);
 		$update(updateConversationListUI);
-		if(abortCompletion.value === abortCompletion1)
-			abortCompletion.value = null;
+		abort_.value = null;
 	}
 }
 
-export const MD_APPEND = 2, MD_END = 3;
+const finish_reason_names = {
+	'tool_calls': '批准工具调用',
+	'length': '长度限制',
+	'stop': '完成',
+	'error': '错误',
+};
+const finish_reason_tone = {
+	'tool_calls': '',
+	'stop': 'ok',
+};
 
-function scrollToBottom() {
-	requestAnimationFrame(() => {
-		const {scroller} = Shared;
-		scroller.vl.scrollTo(scroller.scrollHeight);
-		lastScrollDirection.value = false;
+/**
+ * @return {number}
+ */
+const countAgentTurns = messages => {
+	const arr = messages.value;
+	let turns = 0;
+	for (let i = arr.length - 1; i >= 0; i--) {
+		if (arr[i].finish_reason !== "tool_calls") {
+			break;
+		}
+		turns++;
+	}
+	return turns;
+};
+
+/**
+ *
+ * @param {AiChat.Conversation} conversation
+ * @param {AiChat.Message[]} messages
+ */
+const generateTitle = (conversation, messages) => {
+	let s1 = getTextContent(messages[0]).slice(0, 512);
+
+	const i = s1.indexOf("\n");
+	conversation.title = i >= 0 && i < 30 ? s1.slice(0, i) : s1.slice(0, Math.min(s1.length, 30));
+
+	let s2 = getTextContent(messages[1]).slice(0, 512);
+	if (config.generateTitle !== true) return;
+
+	setStatus('生成标题');
+
+	jsonFetch(config.endpoint+'/chat/completions', {
+		key: config.accessToken,
+		body: JSON.stringify({
+			model: config.titleModel,
+			messages: [{
+				role: "system",
+				content: config.titlePrompt || defaultTitlePrompt,
+			}, {
+				role: "user",
+				content: "对话摘要：\n用户:\n" + s1 + "\nLLM:\n" + s2
+			}],
+			max_tokens: 30,
+			temperature: 0.7,
+			stop: ["\n"],
+			reasoning: {enabled: false},
+			stream: false
+		})
+	}).then(json => {
+		if (json.choices?.[0].finish_reason !== "stop") throw json;
+		conversation.title = json.choices?.[0].message?.content;
+		updateConversation(conversation);
+	}).catch(err => {
+		console.error(err);
+		showToast("标题生成失败\n"+prettyError(err), 'error');
+	});
+};
+
+/**
+ *
+ * @param {AiChat.Conversation} conversation
+ * @param {AiChat.Message[] | import("unconscious").Reactive<AiChat.Message[]>} messages
+ * @param {boolean=} allowTool
+ * @param {Record<string, any>} additionalBody
+ * @param {import("unconscious").Reactive<AbortController>} abortCompletion
+ * @param {function(type?: number, content?: any): void} onProgress - null: refresh, T=Think, C=Content, E=End
+ * @param {AiChat.LLMRequestContext} context
+ * @return {Promise<false | AiChat.BillingLog>}
+ */
+function _ApiRequest(
+	conversation, messages,
+	allowTool, additionalBody,
+	abortCompletion, onProgress,
+	context
+) {
+	return new Promise((resolve, reject) => {
+		let retryCount = 0;
+		let lastRequest;
+
+		context.retry = () => {
+			abortCompletion.value = new AbortController();
+			retryCount++;
+			lastRequest.then(attempt);
+		};
+
+		const attempt = () => {
+			const currentRetryCount = retryCount;
+			lastRequest = sendRequest(
+				conversation,
+				messages,
+				allowTool,
+				additionalBody,
+				unconscious(abortCompletion),
+				onProgress,
+				context
+			).then((result) => {
+				if (currentRetryCount === retryCount) {
+					resolve(result);
+				}
+			}).catch((err) => {
+				if (currentRetryCount === retryCount) {
+					reject(err);
+				}
+			});
+		};
+
+		attempt();
 	});
 }
 
@@ -610,13 +362,18 @@ function scrollToBottom() {
  * @param {AiChat.Conversation} conversation
  * @param {AiChat.Message[] | import("unconscious").Reactive<AiChat.Message[]>} messages
  * @param {boolean=} allowTool
- * @param {Record<string, any>=} additionalBody
+ * @param {Record<string, any>} additionalBody
  * @param {AbortController} abortCompletion
- * @param {function(type?: number, content?: any): void=} onProgress - null: refresh, T=Think, C=Content, E=End
- * @param {AntiSlop=} antiSlop_
- * @return {Promise<false | string>}
+ * @param {function(type?: number, content?: any): void} onProgress - null: refresh, T=Think, C=Content, E=End
+ * @param {AiChat.LLMRequestContext} context
+ * @return {Promise<false | AiChat.BillingLog>}
  */
-async function _ApiRequest(conversation, messages, allowTool, additionalBody, abortCompletion, onProgress, antiSlop_) {
+async function sendRequest(
+	conversation, messages,
+	allowTool, additionalBody,
+	abortCompletion, onProgress,
+	context
+) {
 	let {
 		/** @type {string} */
 		url,
@@ -628,9 +385,11 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 		assistantMessage, initialAssistantMessage,
 		/** @type {string | Error} */
 		error,
-		/** @type {AntiSlop} */
-		antiSlop
-	} = await composeMessages(conversation, messages, allowTool, additionalBody, antiSlop_).catch(error => {
+	} = await composeMessages(
+		conversation, messages,
+		allowTool, additionalBody,
+		context
+	).catch(error => {
 		return {error};
 	});
 
@@ -649,7 +408,7 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 		});
 	}
 
-	if (config.debugRequest && !error) {
+	if (config.debugRequest && !error && data.body) {
 		error = await new Promise((resolve) => {
 			SimpleModal({
 				title: "预览请求体",
@@ -675,25 +434,30 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 	}
 
 	let finishReason;
-	const startTime = Date.now();
+	let startTime = Date.now();
 	/** @type {Partial<AiChat.BillingLog>} */
-	const billingLog = { time: startTime, preset_id: config.name };
+	const log = { time: startTime/*, preset_id: config.name*/ };
 
 	let genImages = [];
 
 	let manualCoTCloseTag;
-	{
-		let thinkState;
-		if ((thinkState = assistantMessage.think)) {
-			thinkState.start = startTime;
-			const format = thinkState.format;
-			manualCoTCloseTag = format.startsWith("m") && "</"+format.slice(1)+">\n";
-			assistantMessage.think = $state(thinkState);
-			requestAnimationFrame(() => {
-				onProgress?.(MD_APPEND, assistantMessage);
-			});
-		}
+	let thinkState;
+	if ((thinkState = assistantMessage.think) && !assistantMessage.content) {
+		thinkState.start = startTime;
+		const format = thinkState.format;
+		manualCoTCloseTag = format.startsWith("m") && "</"+format.slice(1)+">\n";
+		thinkState = assistantMessage.think = $state(thinkState);
+		requestAnimationFrame(() => {
+			onProgress?.(MD_APPEND, assistantMessage);
+		});
 	}
+
+	const endThinking = () => {
+		thinkState.duration += Date.now() - thinkState.start;
+		delete thinkState.start;
+		delete thinkState.index;
+		thinkState = assistantMessage.think = {...thinkState};
+	};
 
 	setStatus('请求中');
 
@@ -702,9 +466,11 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 		let resumeObj;
 		await streamFetch(url, {
 			...data,
-			authorization: config.accessToken,
+			key: config.accessToken,
 			signal: abortCompletion.signal
 		}, json => {
+			if (config.debug) console.log("SSE response", json);
+
 			if (json.timings) {
 				const {predicted_per_second, predicted_n} = json.timings;
 
@@ -719,43 +485,53 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 				setStatus("生成中, "+predicted_n+" Tokens, "+predicted_per_second.toFixed(2)+"TPS");
 			}
 
-			billingLog.latency = Date.now() - startTime;
-			if (!billingLog.request_id) {
+			if (!log.request_id) {
 				setStatus('生成中');
 
-				assistantMessage.time = Date.now();
-				assistantMessage.model = json.model;
+				const {id, model, resumable} = json;
+
 				onProgress?.();
 
-				billingLog.request_id = json.id;
-				billingLog.model = json.model;
-				billingLog.ttft = billingLog.latency;
+				log.request_id = id;
+				log.model = model;
 
+				let firstTokenTime = Date.now();
 				if (json.resumable) {
-					resumeObj = resumableCompletions[conversation.id] = { id: json.id };
+					startTime = resumable.start;
+					firstTokenTime = resumable.ft;
+
+					if (thinkState) thinkState.start = startTime;
+					if (!resumable.end) resumeObj = resumableCompletions[conversation.id] = { id };
 				}
+
+				log.latency = firstTokenTime - startTime;
+				assistantMessage.time = firstTokenTime;
+				assistantMessage.model = model;
 			}
 			if (resumeObj) resumeObj.time = Date.now();
 
-			/**
-			 * @type {OpenAI.ChatChoice | OpenAI.TextChoice}
-			 */
-			const chunk = json.choices[0];
-			if (config.debug) console.log("SSE response", chunk);
+			const [
+				/** @type {OpenAI.ChatChoice | OpenAI.TextChoice} */
+				chunk
+			] = json.choices;
 
 			if (!finishReason) finishReason = chunk?.finish_reason;
-			if (finishReason) {getStats(json, billingLog);}
-
-			let text;
-			let reasoning_text;
-			let reasoning_format  = 'r';
-
-			if (antiSlop?.sample(chunk, assistantMessage)) {
-				throw finishReason = "loop";
+			if (finishReason) {
+				log.duration = Date.now() - startTime;
+				getStats(json, log);
 			}
 
+			if (!chunk) return;
+
+			/** @type {string} */
+			let text, reasoning_text;
+			let reasoning_format  = 'r';
+
 			if (config.mode === 'chat') {
-				const {delta} = chunk;
+				const {
+					/** @type {Partial<OpenAI.AssistantMessage>} */
+					delta
+				} = chunk;
 				if (!delta) return;
 
 				if (delta.role) assistantMessage.role = delta.role;
@@ -786,7 +562,6 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 
 					let hasNewToolCalls;
 					for (const call of delta.tool_calls) {
-						delete call.index;
 						if (!call.id) {
 							const last = toolCalls[toolCalls.length-1];
 							if (last) {
@@ -795,6 +570,7 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 								continue;
 							}
 						}
+						delete call.index;
 						toolCalls.push($state(call));
 						hasNewToolCalls = true;
 					}
@@ -807,7 +583,7 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 
 			let content = assistantMessage.content + (text || "");
 			if (config.reasoning === false && !manualCoTCloseTag && (manualCoTCloseTag = /^\s*<(thinking|think|thought|reasoning)>/i.exec(content))) {
-				reasoning_text = content.substring(manualCoTCloseTag[0].length);
+				reasoning_text = content.slice(manualCoTCloseTag[0].length);
 				manualCoTCloseTag = manualCoTCloseTag[1];
 				reasoning_format = "m"+manualCoTCloseTag;
 				manualCoTCloseTag = "</"+manualCoTCloseTag+">\n";
@@ -816,17 +592,22 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 				if (pos < 0) {
 					content = "";
 				} else {
-					reasoning_text = reasoning_text.substring(0, pos);
-					content = content.substring(pos + manualCoTCloseTag.length);
+					reasoning_text = reasoning_text.slice(0, pos);
+					content = content.slice(pos + manualCoTCloseTag.length);
 				}
 			}
-
-			const thinkState = assistantMessage.think;
 
 			continueThinking:
 			if (reasoning_text != null) {
 				if (!thinkState) {
-					assistantMessage.think = $state({ start: Date.now(), duration: 0, index: 0, content: reasoning_text, format: reasoning_format });
+					thinkState = assistantMessage.think = $state({
+						start: resumeObj ? (startTime+log.latency) : Date.now(),
+						duration: 0,
+						index: 0,
+						content: reasoning_text,
+						format: reasoning_format
+					});
+					if (assistantMessage.content || assistantMessage.tool_calls) endThinking();
 				} else {
 					thinkState.content += reasoning_text;
 				}
@@ -850,8 +631,8 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 						}
 
 						if (thinkContent.startsWith(manualCoTCloseTag, nextIndex)) {
-							thinkState.content = thinkContent.substring(0, nextIndex);
-							content = thinkContent.substring(nextIndex + manualCoTCloseTag.length);
+							thinkState.content = thinkContent.slice(0, nextIndex);
+							content = thinkContent.slice(nextIndex + manualCoTCloseTag.length);
 							break;
 						}
 
@@ -859,25 +640,30 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 					}
 				}
 
-				if (content) {
-					thinkState.duration += Date.now() - thinkState.start;
-					delete thinkState.start;
-					delete thinkState.index;
-					assistantMessage.think = { ... thinkState };
-				}
+				if (content) endThinking(thinkState);
+			}
+
+			if (context.antiSlop?.sample(chunk, assistantMessage)) {
+				throw "retry";
 			}
 
 			assistantMessage.content = content;
 			if (!assistantMessage.tool_calls) onProgress?.(MD_APPEND, assistantMessage);
 		});
+
+		if (!finishReason) {
+			finishReason = 'error';
+			assistantMessage.error = "network error\n";
+		}
 	} catch (err) {
 		if (err.name === 'AbortError') {
 			setStatus('已取消');
 			finishReason = "interrupt";
 		} else {
-			finishReason = 'error';
 			abortCompletion.abort();
-			if (err !== "loop") {
+			if (err !== "retry") {
+				finishReason = 'error';
+
 				// 即便服务端Session过期了，也不要清除已经生成的内容
 				if (typeof err === 'string' && initialAssistantMessage) {
 					assistantMessage = messages[messages.length-1] = initialAssistantMessage;
@@ -886,66 +672,416 @@ async function _ApiRequest(conversation, messages, allowTool, additionalBody, ab
 				if (config.sound) failure();
 				setStatus('错误', 'error');
 				console.error(err);
-				assistantMessage.error = err.message === "Failed to fetch" ? "API连接失败\n请检查API地址或稍后重试" : prettyError(err);
+				if (err.status) err = `API错误 ${err.status}\n${err.message}`;
+				assistantMessage.error = prettyError(err);
 			}
 		}
-
-		return finishReason;
 	} finally {
 		streamResponseCompleted(assistantMessage, genImages);
 
-		if (!finishReason) {
-			finishReason = 'error';
-			assistantMessage.error = "network error\n";
-		}
 		assistantMessage.finish_reason = finishReason;
-		billingLog.finish_reason = finishReason;
+		log.finish_reason = finishReason;
 
-		onProgress?.(MD_END);
-
-		const has_resp = billingLog.request_id && (finishReason !== 'error' || billingLog.input_tokens);
-		if (finishReason !== 'loop' && conversation.id) {
-			// wait for database update (billingLog requires message id), this should be fast
-			if (has_resp) {
-				await updateConversation(conversation, unconscious(messages));
-				billingLog.message_id = assistantMessage.id;
-			}
-		} else {
-			billingLog.message_id = "T$"+Date.now();
-		}
-		// 不等了 fire and forgot
-		if (has_resp) appendBillingLog(billingLog);
+		onProgress?.(MD_END, assistantMessage);
 	}
 
-	return finishReason;
+	return log;
 }
+
+const scrollToBottom = () => {
+	requestAnimationFrame(() => {
+		const {scroller} = Shared;
+		scroller.vl.scrollTo(scroller.scrollHeight);
+		lastScrollDirection.value = false;
+	});
+};
 
 /**
- * @return {number}
+ *
+ * @param {Partial<AiChat.Conversation>} conversation
+ * @param {AiChat.Message[]} messages
+ * @param {boolean} allowTools
+ * @param {Record<string, any>} additionalBody
+ * @param {AiChat.LLMRequestContext} context
+ * @return {Promise<{assistantMessage: AiChat.AssistantMessage, data: {headers: {Authorization: string, "Content-Type": string}, body: string | function(): ReadableStream}, url: string}>}
  */
-function countAgentTurns(messages) {
-	const arr = messages.value;
-	let turns = 0;
-	for (let i = arr.length - 1; i >= 0; i--) {
-		if (arr[i].finish_reason !== "tool_calls") {
-			break;
+async function composeMessages(
+	conversation, messages,
+	allowTools, additionalBody,
+	context
+) {
+	/**
+	 * @type {OpenAI.Message[]}
+	 */
+	const json_messages = [];
+
+	/**
+	 * @type {AiChat.AssistantMessage}
+	 */
+	let initialAssistantMessage= messages.at(-1);
+	if (!initialAssistantMessage) throw "No message to continue";
+	else if (initialAssistantMessage.role !== 'assistant') initialAssistantMessage = null;
+
+	let assistantMessage = initialAssistantMessage;
+	/** @type {boolean} */
+	let isPrefill;
+	if (initialAssistantMessage) {
+		const isAutomatic = assistantMessage.finish_reason === "tool_calls";
+
+		if (isAutomatic) assistantMessage = null;
+		else if (!config.canPrefill) {
+			messages.pop();
+			assistantMessage = null;
+		} else {
+			isPrefill = true;
 		}
-		turns++;
 	}
-	return turns;
+
+	let toolsUsed = conversation.activatedModules?.size > 0;
+	let callbacks = [];
+	for (let j = 0; j < messages.length; j++){
+		const m = messages[j];
+
+		const compose = MessageRoles[m.role]?.compose;
+		if (compose) {
+			compose(m, json_messages, callbacks, j, messages.length, conversation);
+			continue;
+		}
+
+		const json_msg = cloneNamed(m, ["role", "content", "tool_calls", "reasoning_details"]);
+		json_messages.push(json_msg);
+
+		const {tool_calls, tool_responses, think, finish_reason} = m;
+		if (tool_calls) {
+			toolsUsed = true;
+
+			setStatus("正在执行工具");
+			await runTools(m, conversation, true);
+
+			for (let i = 0; i < tool_calls.length; i++) {
+				json_messages.push({
+					role: "tool",
+					tool_call_id: tool_calls[i].id,
+					content: tool_responses[i].content,
+				});
+			}
+		}
+
+		const isPrefill = m === assistantMessage;
+		const prefillPath = config.prefillPath;
+		if (isPrefill && prefillPath) {
+			const [path, value] = prefillPath.split(",");
+			jsonPathOp(json_msg, path, "set", JSON.parse(value));
+			// json_msg.prefix = true;
+		}
+		const format = think?.format;
+		if (format && (config.stripCoT !== true || isPrefill)) {
+			const content = think.content;
+			if (format === "r") json_msg.reasoning = content;
+			if (format === "rc") json_msg.reasoning_content = content;
+			if (format[0] === "m" && (config.stripCoT !== "m" || isPrefill)) {
+				const tag = think.format.slice(1);
+				json_msg.content = "<"+tag+">" + content + (m.content ? "</"+tag+">\n" + m.content : "");
+			}
+		} else {
+			delete json_msg.reasoning_details;
+		}
+	}
+
+	// Prepare request body
+	const headers = {
+		//'HTTP-Referer': location.origin,
+		//'X-Title': 'AIChat',
+		'Content-Type': 'application/json',
+		'Authorization': `Bearer ${config.accessToken}`
+	};
+	let path = '/chat/completions';
+
+	const resumeObj = resumableCompletions[conversation.id];
+	if (resumeObj) {
+		delete resumableCompletions[conversation.id];
+		if (Date.now() - resumeObj.time < RESUME_TIMEOUT) {
+			return {
+				url: config.endpoint+'/resume/'+resumeObj.id,
+				data: {headers},
+				assistantMessage,
+				initialAssistantMessage
+			};
+		}
+	}
+
+	/**
+	 * @type {Partial<OpenAI.ChatCompletionRequest>}
+	 */
+	let body = {
+		model: config.model,
+		stream: true
+	};
+
+	for (const {id, body_id, _omit} of BODY_PARAMETERS) {
+		const v = config[id];
+		if (v !== undefined && v !== _omit) {
+			body[body_id] = v;
+		}
+	}
+	for (const key of ["stop", "logit_bias"]) {
+		if (state[key]) body[key] = state[key];
+	}
+
+	let toolPrompt;
+	if (config.mode === 'completions') {
+		path = '/completions';
+		// Build a single prompt from conversation (with roles)
+		body.prompt = state.completionTemplate(json_messages);
+	} else {
+		body.messages = json_messages;
+
+		if (config.modalities?.includes("tool")) {
+			if (config.generateTitle === "tool" && !selectedConversation.title) {
+				// TODO allow set_title tool and provide system prompt ?
+				body.tools = [set_title_body];
+			}
+
+			// TODO use allowTools / allowNewTools or just provide?
+			if (allowTools || toolsUsed) {
+				[body.tools, toolPrompt] = await getTools(conversation, allowTools);
+				// is this default=true for llama.cpp ?
+				body.parallel_tool_calls = true;
+				if (!allowTools) body.tool_choice = "none";
+				else if (typeof allowTools === "object") body.tool_choice = allowTools;
+			}
+		}
+
+		const shouldThink = isThinkingEnabled() && config.reasoning;
+		const reasoningPath = (config.reasoningPath||"reasoning.enabled,true,false").split(",");
+		if (reasoningPath.length !== 3) throw "无效的ReasoningPath配置";
+
+		jsonPathOp(body, reasoningPath[0], "set", JSON.parse(reasoningPath[shouldThink?1:2]));
+		if (shouldThink) {
+			if (config.reasoning === "minimal") {
+				body.reasoning.max_tokens = 1024;
+			} else {
+				jsonPathOp(body, config.reasoningEffortPath || "reasoning.effort", "set", config.reasoning);
+				/*body.reasoning.max_tokens = ({
+					"low": 0.2,
+					"medium": 0.5,
+					"high": 0.8,
+				}[config.reasoning]) * body.max_tokens;*/
+			}
+		}
+	}
+	if (additionalBody) Object.assign(body, additionalBody);
+
+	let [systemPrompt, systemBody] = makeSystemPrompt(conversation, config.systemPrompt || defaultSystemPrompt, toolPrompt);
+	if (systemPrompt) {
+		if (json_messages[0]?.role !== 'system')
+			json_messages.unshift({role: 'system', content: systemPrompt});
+	}
+	if (systemBody) Object.assign(body, systemBody);
+
+	for (const callback of callbacks) {
+		callback(messages, json_messages, body, isPrefill);
+	}
+
+	block:
+	if (state.antiSlop) {
+		if (!context.retry) {showToast("这个调用不支持AntiSlop采样"); break block;}
+
+		// 在 llama.cpp 上TPS高得多，而且我本来就只需要采样器最后输出的可能候选
+		if (isLlamaCppBackend) {
+			body.post_sampling_probs = true;
+			body.n_probs = 5;
+		} else {
+			if (!config.canPrefill) throw "模型必须支持预填充和 lobprobs 以使用反语法约束采样";
+			body.logprobs = true;
+			// 不支持的其实也能回滚吧，先不管了
+			body.top_logprobs = 5;
+		}
+
+		if (!context.antiSlop)
+			context.antiSlop = createAntiSlopSampler(body.top_p ?? 1, body.min_p ?? 0, state.antiSlop, context);
+	}
+
+	if (isLlamaCppBackend) {
+		body.return_progress = true;
+		body.timings_per_token = true;
+	}
+
+	let outputBody;
+	const {streamDuplex, sseBlobProxy} = config;
+	const useH2Stream = streamDuplex ? 'half' : undefined;
+	if (useH2Stream) {
+		outputBody = createJsonStream(body, sseBlobProxy);
+	} else {
+		const promises = [];
+		const mapping = new Map;
+		for (const [val] of deepEntries(body)) {
+			const type = val?.constructor;
+			if (type === Blob || type === File) {
+				const {name, type, size, hash} = val;
+				const isTextFile = type.startsWith("text/") || type === "application/json";
+				const isAudio = type.startsWith("audio/");
+
+				if (size === 0) throw "文件"+name+"的数据不完整或已损坏。请尝试重新上传";
+				/*if (hash && sseBlobProxy && DB_MODE !== "local") {
+					path += "?blobProxy";
+					mapping.set(val, {
+						$: "Blob"+(isTextFile? "Raw" : isAudio ? "RawDataURL" : "DataURL"),
+						url: val.toUrl(),
+						type
+					});
+					continue;
+				}*/
+
+				promises.push(val[isTextFile?"text":"toDataURL"]().then(str => {
+					if (isAudio) str = str.slice(str.indexOf(",")+1);
+					mapping.set(val, str);
+				}));
+			}
+		}
+		await Promise.all(promises);
+
+		outputBody = JSON.stringify(body, (_, value) => mapping.get(value) ?? value);
+	}
+
+	const url = config.endpoint+path;
+	return {
+		url,
+		data: {
+			headers,
+			body: outputBody,
+			duplex: useH2Stream
+		},
+		assistantMessage
+	};
 }
 
-function streamResponseCompleted(assistantMessage, genImages) {
+const isThinkingEnabled = () => (typeof config.forceThink === "boolean" ? config.forceThink : config.think);
+
+/**
+ *
+ * @param {AiChat.Conversation} conversation
+ * @param {string} prompt
+ * @param {string} toolPrompt
+ * @return {[prompt: string, body: {}]}
+ */
+export const makeSystemPrompt = (conversation, prompt, toolPrompt) => {
+	let body = {};
+
+	if (prompt.startsWith("---\n")) {
+		const [meta, content] = parseSkillMetadata(prompt);
+
+		let activatedModules = conversation.activatedModules;
+		// only process at initial
+		if (!activatedModules) {
+			const allowedTools = meta.allowedTools;
+			if (allowedTools) {
+				conversation.activatedModules = new Set(allowedTools);
+				conversation.allowedTools = new Set(allowedTools);
+			}
+
+			const disabledTools = meta.disabledTools;
+			if (disabledTools) {
+				if (!conversation.activatedModules) conversation.activatedModules = new Set(disabledTools);
+				else disabledTools.forEach(v => conversation.activatedModules.add(v));
+			}
+		}
+
+		for (const key of ["tool_choice", "reasoning"]) {
+			if (key in meta) body[key] = meta[key];
+		}
+
+		prompt = content;
+	}
+
+	const transform = (prompt) => prompt.replaceAll(/\{\{(.+?)}}/g, (text, id) => {
+		switch (id) {
+			case "think":
+				return isThinkingEnabled() && config.reasoning === false ? (config.CoTPrompt || defaultCoTPrompt) : "";
+			case "tools":
+				return transform(toolPrompt || "");
+		}
+
+		let val = PLACEHOLDERS[id];
+		if (val != null) {
+			if (typeof val === "function")
+				val = val();
+			return val;
+		}
+
+		return text;
+	}).trim();
+
+	return [transform(prompt), body];
+};
+
+/**
+ *
+ * @param {OpenAI.BaseResponse} json
+ * @param {AiChat.BillingLog} log
+ * @return {string}
+ */
+const getStats = (json, log) => {
+	console.log("stats", json);
+
+	const {provider, usage, timings} = json;
+
+	let myProvider = (config.provider || config.name || config.endpoint);
+	if (provider) myProvider += "//" +provider;
+	log.provider = myProvider;
+
+	if (usage) {
+		let {
+			prompt_tokens, prompt_tokens_details = {},
+			completion_tokens, completion_tokens_details = {},
+			cost
+		} = usage;
+
+		const {reasoning_tokens = 0} = completion_tokens_details;
+		const {cached_tokens = 0, cache_write_tokens = 0} = prompt_tokens_details;
+
+		log.input_tokens = prompt_tokens - cached_tokens;
+		log.output_tokens = completion_tokens;
+
+		if (cached_tokens) log.cached_tokens = cached_tokens;
+		if (reasoning_tokens) log.reasoning_tokens = reasoning_tokens;
+		if (cache_write_tokens) log.cache_write_tokens = cache_write_tokens;
+		if (cost) {
+			log.cost = cost;
+			log.currency = "USD";
+		}
+	}
+
+	if (timings) {
+		let {cache_n, prompt_n, predicted_n, predicted_per_second} = timings;
+		const input_tokens = prompt_n + cache_n;
+
+		log.provider = 'llama.cpp';
+		log.input_tokens = input_tokens;
+		log.output_tokens = predicted_n;
+		log.cached_tokens = cache_n;
+		log.tps = predicted_per_second;
+	}
+};
+
+/**
+ *
+ * @param {AiChat.AssistantMessage} assistantMessage
+ * @param genImages
+ */
+const streamResponseCompleted = (assistantMessage, genImages) => {
 	delete assistantMessage.id;
-	if (assistantMessage.reasoning_details) {
+
+	const {reasoning_details, tool_calls, think} = assistantMessage;
+
+	if (reasoning_details) {
 		let hasText;
-		[assistantMessage.reasoning_details, hasText] = mergeReasoningDetails(assistantMessage.reasoning_details);
+		[assistantMessage.reasoning_details, hasText] = mergeReasoningDetails(reasoning_details);
 		if (hasText) delete assistantMessage.think?.content;
 	}
-	if (assistantMessage.tool_calls) assistantMessage.tool_calls = assistantMessage.tool_calls.map(unconscious);
+	if (tool_calls) assistantMessage.tool_calls = tool_calls.map(unconscious);
 
-	let think;
-	if (isReactive(think = assistantMessage.think)) {
+	if (isReactive(think)) {
 		think.duration += Date.now() - think.start;
 		delete think.start;
 
@@ -961,64 +1097,13 @@ function streamResponseCompleted(assistantMessage, genImages) {
 			...genImages
 		]
 	}
-}
-
-/**
- *
- * @param {AiChat.Conversation} conversation
- * @param {AiChat.Message[]} messages
- * @return {Promise<void>}
- */
-function generateDescription(conversation, messages) {
-	setStatus('生成标题');
-
-	let s1 = getTextContent(messages[0]).substring(0, 512);
-	let s2 = getTextContent(messages[1]).substring(0, 512);
-
-	function generateFallbackTitle() {
-		const i = s1.indexOf("\n");
-		return i >= 0 && i < 30 ? s1.substring(0, i) : s1.substring(0, Math.min(s1.length, 30));
-	}
-
-	if (true !== config.generateTitle) {
-		return Promise.resolve(conversation.title = generateFallbackTitle());
-	}
-
-	let body = {
-		model: config.titleModel,
-		messages: [{
-			role: "system",
-			content: config.titlePrompt || defaultTitlePrompt,
-		}, {
-			role: "user",
-			content: "对话摘要：\n用户:\n" + s1 + "\nLLM:\n" + s2
-		}],
-		max_tokens: 30,
-		temperature: 0.7,
-		stop: ["\n"],
-		reasoning: {enabled: false},
-		stream: false
-	};
-
-	return jsonFetch(config.endpoint+'/chat/completions', {
-		authorization: config.accessToken,
-		body: JSON.stringify(body)
-	}).then(json => {
-		if (json.choices?.[0].finish_reason !== "stop") throw json;
-		return json.choices?.[0].message?.content;
-	}).catch(err => {
-		console.error(err);
-		showToast("标题生成失败\n"+prettyError(err), 'error');
-	}).then(text => {
-		conversation.title = text || generateFallbackTitle();
-	});
-}
+};
 
 const DISABLE_ALL = /*#__PURE__*/ new Set(["*"]);
 
 export class APIRequest {
-	/** @type {AbortController} */
-	abort = null;
+	/** @type {import("unconscious").Reactive<AbortController>} */
+	abort = $state();
 
 	/**
 	 *
@@ -1044,33 +1129,42 @@ export class APIRequest {
 
 	/**
 	 *
-	 * @param {AiChat.Message | AiChat.Message[] | string} last_message
+	 * @param {AiChat.Message | AiChat.Message[] | string} userText
 	 * @param {function(type?: number, content?: AiChat.AssistantMessage): void=} onProgress
-	 * @return {Promise<AiChat.AssistantMessage>}
+	 * @return {Promise<[AiChat.AssistantMessage, AiChat.BillingLog]>}
 	 */
-	async call(last_message, onProgress) {
-		if (this.abort) throw "Already generating";
-		this.abort = new AbortController();
+	async call(userText, onProgress) {
+		const {abort, messages, conversation, body} = this;
+		if (unconscious(abort)) throw "Already generating";
+		abort.value = new AbortController();
 
 		try {
-			const msg = this.messages;
-			const messages = isReactive(msg) ? msg : [...msg];
-			if (typeof last_message === "string") messages.push({role: 'user', content: userText, time: Date.now()});
-			else if (Array.isArray(last_message)) messages.push(...last_message);
-			else if (last_message) messages.push(last_message);
+			if (typeof userText === "string") messages.push({role: 'user', content: userText, time: Date.now()});
+			else if (Array.isArray(userText)) messages.push(...userText);
+			else if (userText) messages.push(userText);
 
-			const result = await _ApiRequest(this.conversation, messages, this.conversation.allowedTools.size, this.body, this.abort, onProgress);
+			const context = {};
+			const result = await _ApiRequest(
+				conversation, messages,
+				conversation.allowedTools.size, body,
+				abort, onProgress,
+				context
+			);
 
-			if (result !== "stop")
-				throw messages.at(-1).error || "调用失败:"+result;
+			const finishReason = result.finish_reason;
+			const assistantMessage = messages.at(-1);
 
-			return messages.at(-1);
+			if (finishReason === "error")
+				throw assistantMessage.error || "调用失败:"+result;
+
+			return [assistantMessage, result];
 		} finally {
-			this.abort = null;
+			abort.value = null;
 		}
 	}
 
-	async interrupt() {
-		if (this.abort) this.abort.abort();
+	interrupt() {
+		const abort = unconscious(this.abort);
+		if (abort) abort.abort();
 	}
 }

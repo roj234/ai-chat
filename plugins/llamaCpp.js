@@ -5,7 +5,7 @@ import "./llamaCpp.css";
 import {jsonFetch, prettyError, throttled} from "/src/utils/utils.js";
 import {SETTINGS} from "/src/settings.js";
 import {showToast} from "/src/components/Toast.js";
-import {isEqual} from "/vendor/equals.js";
+import {deepEqual} from "unconscious/common/deepEqual.js";
 import {setStatus} from "/src/api-request.js";
 import {onLoad} from "/src/plugin.js";
 
@@ -24,7 +24,7 @@ let emptyMessageTokens = -1;
 	}
 	const _countTokens = (text) => {
 		return jsonFetch(config.endpoint+"/messages/count_tokens", {
-			authorization: config.accessToken,
+			key: config.accessToken,
 			body: JSON.stringify({
 				model: config.model,
 				messages: [{
@@ -63,7 +63,7 @@ const isLLaMACppRouter = $asyncState(({url, token}) => {
 	emptyMessageTokens = -1;
 	setIsLlamaCppBackend(false, false);
 	if (!url) return false;
-	return jsonFetch(url+"props", { authorization: token }).then(json => {
+	return jsonFetch(url+"props", { key: token }).then(json => {
 		setIsLlamaCppBackend(true, json.build_info.startsWith("bB"));
 		return json.role === "router";
 	});
@@ -73,10 +73,10 @@ $watch(config, () => {
 	const url = config.endpoint;
 	const value = {
 		// remove v1 postfix
-		url: isLanAddress(url) ? url.substring(0, url.length-2) : "",
+		url: isLanAddress(url) ? url.slice(0, url.length-2) : "",
 		token: config.accessToken
 	};
-	if (isEqual(value, _endpoint.value)) return;
+	if (deepEqual(value, _endpoint.value)) return;
 	_endpoint.value = value;
 	if (isLLaMACppRouter.error) $update(_endpoint);
 });
@@ -177,7 +177,7 @@ function llamaModelManage(model) {
 	}
 
 	return jsonFetch(_endpoint.url+"models/"+action, {
-		authorization: _endpoint.token,
+		key: _endpoint.token,
 		body: JSON.stringify({model: id})
 	}).then(json => {
 		if (!json.success) throw json;

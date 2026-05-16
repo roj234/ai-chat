@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "OpenAIRole": {
+      "enum": ["system", "assistant", "user"]
+    },
+    "MyLorebookPage": {
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "enabled": { "type": "boolean", "default": true },
+            "comment": { "type": "string", "default": "" },
+            "content": { "type": "string" },
+            "constant": { "type": "boolean", "default": false },
+            "position": {
+              "enum": ["worldInfoBefore", "worldInfoAfter", "depth"]
+            },
+            "id": { "type": "string" }
+          },
+          "required": [
+            "name", "enabled", "comment", "content", "constant", "position"
+          ]
+        },
+        {
+          "if": {
+            "properties": {
+              "position": { "const": "depth" }
+            }
+          },
+          "then": {
+            "properties": {
+              "role": {
+                "oneOf": [
+                  { "$ref": "#/$defs/OpenAIRole" },
+                  { "const": null }
+                ]
+              },
+              "depth": { "type": "integer", "minimum": 0 }
+            },
+            "required": [ "depth" ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "constant": { "const": false }
+            }
+          },
+          "then": {
+            "properties": {
+              "recursion": {
+                "default": true,
+                "enum": [true, false, "stop", "only"]
+              },
+              "triggers": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "window": { "type": "integer", "minimum": 0 }
+            },
+            "required": [
+              "recursion", "triggers", "window"
+            ]
+          }
+        }
+      ]
+    },
+    "st|char": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "st|char" },
+        "name": { "type": "string" },
+        "time": { "type": "integer" },
+        "creator": { "type": "string", "default": "" },
+        "creatorNotes": { "type": "string", "default": "" },
+        "tags": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string" }
+        },
+        "systemPrompt": { "type": "string", "default": "" },
+        "description": { "type": "string" },
+        "personality": { "type": "string", "default": "" },
+        "scenario": { "type": "string", "default": "" },
+        "dialogueExamples": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string" }
+        },
+        "greetings": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string" }
+        },
+        "lorebook": {
+          "type": "array",
+          "default": [],
+          "items": { "$ref": "#/$defs/MyLorebookPage" }
+        },
+        "autoMessages": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "depth": { "type": "integer" },
+              "content": { "type": "string" }
+            },
+            "required": ["name", "depth", "content"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "type", "creator", "creatorNotes", "tags",
+        "systemPrompt", "description", "personality",
+        "scenario", "dialogueExamples", "greetings",
+        "lorebook", "autoMessages"
+      ],
+      "additionalProperties": false
+    },
+    "st|lorebook": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "st|lorebook" },
+        "name": { "type": "string" },
+        "pages": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/MyLorebookPage" }
+        }
+      },
+      "required": ["type", "pages"],
+      "additionalProperties": false
+    },
+    "MyPrompt": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "enabled": { "type": "boolean", "default": true },
+        "role": { "$ref": "#/$defs/OpenAIRole" },
+        "content": { "type": "string" },
+        "attr": { "enum": ["first", "marker"] }
+      },
+      "required": ["name", "enabled", "role", "content"],
+      "additionalProperties": false
+    },
+    "MyRegexp": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "enabled": { "type": "boolean", "default": true },
+        "search": { "type": "string" },
+        "replace": { "type": "string" },
+        "stage": { "enum": ["render", "prompt", "all"] },
+        "depth": {
+          "type": "array",
+          "items": { "type": "integer" },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      },
+      "required": ["name", "enabled", "search", "replace", "stage", "depth"],
+      "additionalProperties": false
+    },
+    "st|preset": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "st|preset" },
+        "name": { "type": "string" },
+        "prompts": {
+          "type": "array",
+          "default": [],
+          "items": { "$ref": "#/$defs/MyPrompt" }
+        },
+        "regexps": {
+          "type": "array",
+          "default": [],
+          "items": { "$ref": "#/$defs/MyRegexp" }
+        }
+      },
+      "required": ["type", "prompts", "regexps"],
+      "additionalProperties": false
+    }
+  }
+}

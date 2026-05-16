@@ -1,30 +1,32 @@
-import {compressStatistics, decompressStatistics, deserializeRow} from "../utils/compression.js";
+import {compressLog, decompressLog, deserializeRow} from "../utils/compression.js";
+import {LOG_HOOK} from "../config.js";
 
-export function registerLogRoutes(router) {
+/**
+ * @param {AiChatBackend.Router} router
+ * @param {Record<string, function(body: any, ctx: Partial<AiChatBackend.RouteContext>): any>} batcher
+ */
+export function registerLogRoutes(router, batcher) {
 	router.get('/logs', (ctx) => {
 		const start = Number(ctx.query.start) || 0;
 		const end = Number(ctx.query.end) || Date.now();
-		const rows = ctx.db.prepare('SELECT * FROM statistics WHERE time >= ? AND time <= ? ORDER BY time DESC LIMIT 1000').all(start, end);
-		ctx.send(200, rows.map(row => deserializeRow(row, decompressStatistics)));
+		const rows = ctx.db.prepare('SELECT * FROM logs WHERE time >= ? AND time <= ? ORDER BY time DESC LIMIT 1000').all(start, end);
+		ctx.send(200, rows.map(row => deserializeRow(row, decompressLog)));
 	});
 
-	router.get('/log/:message_id', (ctx) => {
-		const msgId = Number(ctx.params.message_id);
-		const row = ctx.db.prepare('SELECT data, time FROM statistics WHERE message_id = ?').get(msgId);
-		ctx.send(200, row ? deserializeRow(row, decompressStatistics) : null);
-	});
+	batcher['log'] = (id, {db}) => {
+		if (!Number.isFinite(id)) return { error: "illegal id" };
+		const row = db.prepare('SELECT data, time FROM logs WHERE id = ?').get(id);
+		return row ? deserializeRow(row, decompressLog) : null;
+	};
 
-	router.post('/log', async (ctx) => {
-		const body = await ctx.readBody();
-		const messageId = body.message_id;
-		const time = body.time || Date.now();
-		if (messageId == null) return ctx.send(400, { error: 'message_id required' });
+	batcher['log/insert'] = async ({id, time = Date.now(), ...body}, ctx) => {
+		id = id ?? await ctx.getVariable("messageId");
+		if (id == null || time == null) return { error: 'id required' };
 
-		delete body.message_id;
-		delete body.time;
+		LOG_HOOK(body);
 
-		ctx.db.prepare('INSERT OR REPLACE INTO statistics (message_id, time, data) VALUES (?, ?, ?)')
-			.run(messageId, time, compressStatistics(body));
-		ctx.send(201, { success: true });
-	});
+		if (id === -1) id = null;
+		ctx.db.prepare('INSERT INTO logs (id, time, data) VALUES (?, ?, ?) ON CONFLICT DO NOTHING').run(id, time, await compressLog(body));
+		return true;
+	};
 }

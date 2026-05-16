@@ -507,8 +507,8 @@ function _rewriteBackreferences(regexps, { joinWith }) {
         out += re;
         break;
       }
-      out += re.substring(0, match.index);
-      re = re.substring(match.index + match[0].length);
+      out += re.slice(0, match.index);
+      re = re.slice(match.index + match[0].length);
       if (match[0][0] === '\\' && match[1]) {
         // Adjust the backreference.
         out += '\\' + String(Number(match[1]) + offset);
@@ -1729,7 +1729,7 @@ const HLJS = function(hljs) {
       let buf = "";
 
       while (match) {
-        buf += modeBuffer.substring(lastIndex, match.index);
+        buf += modeBuffer.slice(lastIndex, match.index);
         const word = language.case_insensitive ? match[0].toLowerCase() : match[0];
         const data = keywordData(top, word);
         if (data) {
@@ -1753,7 +1753,7 @@ const HLJS = function(hljs) {
         lastIndex = top.keywordPatternRe.lastIndex;
         match = top.keywordPatternRe.exec(modeBuffer);
       }
-      buf += modeBuffer.substring(lastIndex);
+      buf += modeBuffer.slice(lastIndex);
       emitter.addText(buf);
     }
 
@@ -1940,7 +1940,7 @@ const HLJS = function(hljs) {
      */
     function* doEndMatch(match) {
       const lexeme = match[0];
-      const matchPlusRemainder = codeToHighlight.substring(match.index);
+      const matchPlusRemainder = codeToHighlight.slice(match.index);
 
       const endMode = endOfMode(top, match, matchPlusRemainder);
       if (!endMode) { return NO_MATCH; }
@@ -2113,11 +2113,11 @@ const HLJS = function(hljs) {
 
           if (!match) break;
 
-          const beforeMatch = codeToHighlight.substring(index, match.index);
+          const beforeMatch = codeToHighlight.slice(index, match.index);
           const processedCount = yield* processLexeme(beforeMatch, match);
           index = match.index + processedCount;
         }
-        yield* processLexeme(codeToHighlight.substring(index));
+        yield* processLexeme(codeToHighlight.slice(index));
       } else {
         language.__emitTokens(codeToHighlight, emitter);
       }

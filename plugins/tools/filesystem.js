@@ -1,45 +1,81 @@
 import {ContentPart, registerTools} from "/src/skills.js";
-import {config} from "/src/states.js";
+import {config, selectedConversation} from "/src/states.js";
 import {SETTINGS} from "/src/settings.js";
+import {COMMAND_REGISTRY} from "/src/commands.js";
+import {unconscious} from "unconscious";
+import {showToast} from "../../src/components/Toast.js";
 
 SETTINGS.push({
 	id: "fs_server",
 	_tab: "tools",
-	name: "[fs] 本地访问服务",
-	title: "提供本地文件系统访问和执行命令功能",
+	name: "[fs] 文件访问服务",
+	title: "提供文件访问和命令执行功能",
 	type: "input",
-	pattern: /^(\/|https?:\/\/).+\/aichat\/v2\/?$/,
+	pattern: /^(\/|https?:\/\/)/,
 	warning: "请输入合法的API端点",
-	placeholder: "http://localhost:1/aichat/v2"
+	placeholder: "http://localhost:1/api/"
+}, {
+	_tab: "tools",
+	name: "[fs] 工具配置",
+	type: "multiple",
+	choices: {
+		"使用 HashLine 编辑文件": "fs_hashline"
+	},
+	title: {
+		"使用 HashLine 编辑文件": "HashLine让模型使用稳定的锚点进行文件编辑\n然而因为模型并未在这种格式的数据上训练，它可能只是跑分好看\n刷新页面生效"
+	}
 });
 
-const HOST_OS = /\((.+?)\)/.exec(navigator.userAgent)?.[1] || "unknown";
+COMMAND_REGISTRY["basepath"] = [
+	(args) => {
+		const conv = unconscious(selectedConversation);
+		if (!conv) return;
+		const firstArg = args[0];
+		if (!firstArg) delete conv.fs_base;
+		else conv.fs_base = firstArg;
+		showToast("文件根目录已设置为 /"+(firstArg || ""));
+	},
+	"设置文件访问服务的根目录"
+];
 
-function callAPI(func, type = 'fs') {
-	return async (parameters) => {
-		let baseUrl = (import.meta.env.DEV ? "/aichat/v2" : config.fs_agent_endpoint);
-		if (!baseUrl) throw ("用户未配置");
-		if (!baseUrl.endsWith('/')) baseUrl += '/';
+const callAPI = (func, type = 'fs') => async (parameters, _, globalStorage) => {
+	let baseUrl = (import.meta.env.DEV ? "/api" : config.fs_server);
+	if (!baseUrl) throw ("network error");
+	if (!baseUrl.endsWith('/')) baseUrl += '/';
 
-		const response = await fetch(baseUrl+type+"/"+func, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
+	if (func === "read_image") {
+		if (!config.modalities.includes("image")) {
+			return {error: "You don't have [image] modality. Ask user to enable if you do have."}
+		}
+	}
+
+	let url = baseUrl + type + "/" + func;
+	const {fs_base} = globalStorage;
+	if (fs_base) url += "?root="+encodeURIComponent(fs_base);
+
+	let response;
+	try {
+		response = await fetch(url, {
+			method: parameters ? 'POST' : 'GET',
+			headers: {'Content-Type': 'application/json'},
 			body: JSON.stringify(parameters)
 		});
+	} catch (e) {
+		throw "network error";
+	}
 
-		if (!response.ok) throw ((await response.json()).detail);
+	if (!response.ok) throw (await response.text());
 
-		const content = response.headers.get("content-type");
-		if (content.startsWith("image/")) return new ContentPart().image(await response.blob());
-		if (content.startsWith("text/")) return await response.text();
+	const content = response.headers.get("content-type") || "";
+	if (content.startsWith("image/")) return new ContentPart().image(await response.blob());
+	if (content === ("application/json")) return await response.json();
+	return await response.text();
+};
 
-		return await response.json();
-	};
-}
-
+/** @type {AiChat.FunctionTool} */
 const list_path = {
 	name: "list_directory",
-	description: "列目录",
+	description: "List directory",
 	script: callAPI("list"),
 
 	parameters: {
@@ -54,37 +90,43 @@ const list_path = {
 		required: ["path"]
 	}
 };
-
+/** @type {AiChat.FunctionTool} */
 const read_file = {
-	name: "read",
-	description: "读取文件, 返回标签和内容",
+	name: "read_file",
+	description: "Read file as text",
 	script: callAPI("read"),
 
 	parameters: {
 		type: "object",
 		properties: {
 			path: { type: "string", },
-			begin: {
+			format: {
+				type: "string",
+				enum: ["raw", "line_number"],
+				description: "prefixed result with `line + \\t + content`"
+			},
+			start: {
 				type: "integer",
-				description: "起始行号, inclusive",
+				description: "start line (1-based, inclusive)",
 			},
 			end: {
 				type: "integer",
-				description: "结束行号, inclusive",
+				description: "end line (inclusive)",
 			},
 			max_chars: {
 				type: "integer",
-				default: 10000,
-				description: "最大读取字符数，结果将截断到整行。"
+				default: 32768,
+				description: "maximum total characters to read; output is truncated to complete lines."
 			}
 		},
-		required: ["path"]
+		required: ["path", "format"]
 	}
 };
+/** @type {AiChat.FunctionTool} */
 const read_image = {
 	name: "read_image",
-	description: "读取图像 (仅支持 jpg png bmp)",
-	script: callAPI("read"),
+	description: "Read file as image",
+	script: callAPI("read_image"),
 
 	parameters: {
 		type: "object",
@@ -94,51 +136,90 @@ const read_image = {
 		required: ["path"]
 	}
 };
+/** @type {AiChat.FunctionTool} */
 const write_file = {
 	name: "write",
-	description: "覆盖写入文件",
+	description: "Overwrite a file",
 	script: callAPI("write"),
 
 	parameters: {
 		type: "object",
 		properties: {
 			path: { type: "string", },
-			lines: {
+			content: { type: "string" },
+			/*lines: {
 				type: "array",
 				items: { type: "string" }
-			},
+			}*/
 		},
-		required: ["path", "lines"]
+		required: ["path", "content"]
 	}
 };
+/** @type {AiChat.FunctionTool} */
+const patch_file = {
+	name: "patch",
+	description: "Patch ranges in a file using anchors. " +
+		"Each patch modifies the interval [start_anchor, end_anchor). " +
+		"If start == end, then new lines are inserted before that point. " +
+		"Anchor format is \"line#hash\"",
+	script: callAPI("patch"),
+
+	parameters: {
+		type: "object",
+		properties: {
+			path: { type: "string" },
+			patches: {
+				type: "array",
+				items: {
+					type: "object",
+					properties: {
+						start_anchor: {
+							type: "string",
+							description: "inclusive"
+						},
+						end_anchor: {
+							type: "string",
+							description: "exclusive. Use \"#EOF\" for EOF"
+						},
+						lines: {
+							type: "array",
+							items: { type: "string" }
+						},
+					},
+
+					required: ["start_anchor", "end_anchor", "lines"]
+				}
+			}
+		},
+		required: ["path", "patches"]
+	}
+};
+/** @type {AiChat.FunctionTool} */
 const replace_file = {
 	name: "replace",
-	description: "替换文件区域, 区间为 [start_tag, end_tag) 左闭右开\n如果起始和结束相同, 会在该位置插入新行\n标签格式为 `Line#HexTag` 必须严格参照 read, write 或 replace 工具的返回值",
+	description:
+		"Find and replace a single occurrence of a file within a optional range. " +
+		"The search string must occurrence exactly once in the range. "+
+		"Set `all` to true to replace every match in the range instead of just one.",
 	script: callAPI("replace"),
 
 	parameters: {
 		type: "object",
 		properties: {
-			path: { type: "string", },
-			start_tag: {
-				type: "string",
-				description: "起始行号和标签, inclusive"
-			},
-			end_tag: {
-				type: "string",
-				description: "结束行号和标签, exclusive, 如果是文件末尾, 用 `#END`"
-			},
-			lines: {
-				type: "array",
-				items: { type: "string" }
-			},
+			path: { type: "string" },
+			search: { type: "string" },
+			replace: { type: "string" },
+			start_line: { type: "number", description: "inclusive" },
+			end_line: { type: "number", description: "exclusive" },
+			all: { type: "boolean", default: false }
 		},
-		required: ["path", "start_tag", "end_tag", "lines"]
+		required: ["path", "search", "replace"]
 	}
 };
+/** @type {AiChat.FunctionTool} */
 const mkdir = {
 	name: "mkdir",
-	description: "创建目录",
+	description: "Create directory recursively",
 	script: callAPI("mkdir"),
 
 	parameters: {
@@ -149,9 +230,10 @@ const mkdir = {
 		required: ["path"]
 	}
 };
+/** @type {AiChat.FunctionTool} */
 const copy_or_move = {
-	name: "copy",
-	description: "复制或移动文件(夹)",
+	name: "copy_or_move",
+	description: "Copy or move file/directory",
 	script: callAPI("copy"),
 
 	parameters: {
@@ -159,14 +241,15 @@ const copy_or_move = {
 		properties: {
 			src: { type: "string", },
 			dest: { type: "string", },
-			move: { type: "boolean", description: "移动(删除源文件)" }
+			move: { type: "boolean", description: "delete src after copy" }
 		},
 		required: ["src", "dest"]
 	}
 };
+/** @type {AiChat.FunctionTool} */
 const delete_file = {
 	name: "delete",
-	description: "删除文件",
+	description: "Delete file/directory recursively",
 	script: callAPI("delete"),
 
 	parameters: {
@@ -177,9 +260,10 @@ const delete_file = {
 		required: ["path"]
 	}
 };
-const fstat = {
-	name: "fstat",
-	description: "读取元数据",
+/** @type {AiChat.FunctionTool} */
+const stat = {
+	name: "stat",
+	description: "Read file metadata (size, last modified, etc.)",
 	script: callAPI("stat"),
 
 	parameters: {
@@ -191,9 +275,10 @@ const fstat = {
 	}
 };
 
+/** @type {AiChat.FunctionTool} */
 const spawn = {
 	name: "spawn_process",
-	description: "在沙盒中运行子进程(当前系统: "+HOST_OS+")",
+	description: "Spawn a process in sandbox",
 
 	interactive: "secure",
 	script: callAPI("spawn"),
@@ -201,6 +286,7 @@ const spawn = {
 	parameters: {
 		type: "object",
 		properties: {
+			description: { type: "string" },
 			program: { type: "string", },
 			arguments: {
 				type: "array",
@@ -210,17 +296,131 @@ const spawn = {
 			},
 			directory: {
 				type: "string",
-				description: "工作目录",
+				default: ".",
+				description: "Working directory",
 			},
 			timeout: {
 				type: "integer",
 				default: 10,
+				maximum: 120,
 				description: "(in seconds)"
 			}
 		},
-		required: ["program", "directory"]
+		required: ["description", "program", "arguments"]
 	}
 };
 
-registerTools("fs", "操作持久化沙盒中的文件系统. 可用于持久化存储或多文件项目。", [read_file, read_image, write_file, replace_file, delete_file, mkdir, copy_or_move, list_path, fstat]);
-registerTools("spawn_process", "在持久化沙盒中执行本机程序. 可用于构造环境或自动化任务(如 ffmpeg 转码)", [spawn]);
+let fsPrompt = `<file-misc>
+You may use bash/ripgrep via spawn_process tool to find in files.
+Grep pattern in list_directory tool may be used to recursively list directory.
+</file-misc>`;
+const fsTools = [read_file, read_image, write_file, replace_file, delete_file, mkdir, copy_or_move, list_path, stat];
+if (config.fs_hashline) {
+	read_file.parameters.properties.format = {
+		type: "string",
+		enum: ["raw", "line_number", "anchors"]
+	}
+	replace_file.description +=
+		" Use this for simple, one-shot substitutions." +
+		" For multi‑edit, insertions, deletions, or when you can't guarantee a unique match, use `patch` with anchors instead.";
+
+	fsTools.push(patch_file);
+	fsPrompt += `<file-edit-guide>
+For all file editing, use read_file + patch (anchor‑based) or replace (string‑based).
+
+## Reading files
+
+Call \`read_file\` with one of three formats:
+
+- **\`raw\`** — plain text, no metadata. Use for quick inspection when you don't need line‑level precision.
+- **\`line_number\`** — content prefixed with \`N\\t\`. Lightweight: use to scan structure, locate edits, or pair with \`replace\`'s \`start_line\`/\`end_line\`. Cheaper than \`anchors\` (no hash overhead).
+- **\`anchors\`** — content prefixed with \`N#hash\\t\`. Required before \`patch\`. Hash anchors let \`patch\` survive line‑number shifts from earlier edits.
+
+**Strategy**: explore with \`line_number\` first (lower token cost). Switch to \`anchors\` only when you're ready to call \`patch\`.
+
+## Anchor‑based editing (preferred for multi‑edit, insertions, or large files)
+
+1. **Read with anchors**: Call \`read_file\` with \`format: anchors\`. The response looks like:
+
+\`\`\`
+1#fdb1	content
+...
+1234#e7b7	test
+[TRUNCATED: 1234 of 5678 lines shown]
+\`\`\`
+
+The anchor is \`1#fdb1\` and \`1234#e7b7\`.
+
+Without \`anchors\` format, you cannot use \`patch\`.
+
+2. **Plan your edit**: Decide the range to replace or insertion point.
+3. **Patch**: Use \`patch\` with:
+   - \`start_anchor\`: first line to replace (inclusive).
+   - \`end_anchor\`: line **after** the last line to replace (exclusive). Use \`"#EOF"\` for end‑of‑file.
+   - Set \`start_anchor == end_anchor\` to **insert** before that line.
+   - \`lines\`: array of replacement lines (empty array to delete).
+
+Response example:
+
+\`\`\`
+[Patch 1]
+Range: [8, 8)
+New lines: 2 (+2)
+[Content with anchors]
+8#90b8	倒数第二行
+9#1fa9	最后一行
+\`\`\`
+
+- \`Range: [8, 8)\` means start == end → insertion (0 lines replaced).
+- New anchors are returned for changed lines only. Untouched lines keep their original anchors; their line numbers shift by the cumulative diff.
+- You can chain multiple patches in one call without re‑reading.
+
+## String‑based editing (for one‑shot find‑and‑replace)
+
+Use \`replace\` when you have an exact string to swap once. The \`search\` must match **exactly one occurrence** in the file.
+
+To disambiguate when the search string appears multiple times, narrow the scope with:
+- \`start_line\` / \`end_line\` (both inclusive) — restrict the search to that line range.
+
+Typical workflow: \`read_file(format: "line_number")\` → spot the line number → \`replace(search=..., replace=..., start_line=42, end_line=42)\`.
+
+## Guideline
+- Use \`read_file(format: "line_number")\` for exploration — cheaper than \`anchors\`.
+- Use \`patch\` for structural changes, multi‑line edits, insertions, or deletions.
+- Use \`replace\` only for single, unambiguous find‑and‑replace.
+</file-edit-guide>`;
+}
+
+registerTools(
+	"fs",
+	"Manage files in the persistent sandbox. Use for persistent storage or multi‑file projects.",
+	fsTools,
+	{ systemPrompt: fsPrompt }
+);
+
+let spawnPrompt;
+registerTools(
+	"spawn_process",
+	"Execute native programs in the persistent sandbox, e.g. environment setup or automation ('ffmpeg' transcoding).",
+	[spawn],
+	{
+		async systemPrompt() {
+			if (!spawnPrompt) {
+				let {prompt} = await callAPI("env")();
+				if (prompt.startsWith("os: Windows")) {
+					prompt += "\n\nIMPORTANT: PowerShell and cmd have many escape and encoding issues (like '\\'). you MUST use bash / script if available."
+					if (!prompt.includes("bash: No")) {
+						prompt += "\nbash is emulated via msys/busybox, some commands/programs may not available.";
+					}
+				}
+				spawnPrompt = `<environment-info>
+Environment and runtimes:
+${prompt}
+
+Use script file (py / js / java, etc) if spawn_process tool doesn't fulfill your need.
+</environment-info>`;
+			}
+			return spawnPrompt;
+		}
+	}
+);

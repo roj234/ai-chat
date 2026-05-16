@@ -1,8 +1,19 @@
+import {
+	SYNC_CONFLICT,
+	SYNC_CONVERSATION,
+	SYNC_INIT,
+	SYNC_LOCKED,
+	SYNC_MESSAGE,
+	SYNC_READERS,
+	SYNC_RELEASED,
+	SYNC_RESOLVE,
+	SYNC_UNLOCKED
+} from "./sync_const.js";
 
 /**
  *
  * @type {Map<string, Set<{
- *     locked: Set<number>,
+ *     locked: Map<number, boolean>,
  *     ws: WebSocket
  * }>>}
  */
@@ -14,112 +25,194 @@ export function createSyncManager(wss) {
 		const myUrl = new URL(req.url, baseUrl);
 		const userId = myUrl.searchParams.get('user');
 
-		const myLocked = new Set;
-		const value = {
+		/** @type {Map<number, boolean>} */
+		const myLocked = new Map;
+		const self = {
 			locked: myLocked,
 			ws
 		};
 
-		const userData = lockMap.get(userId) || new Set;
-		userData.add(value);
-		lockMap.set(userId, userData);
+		const users = lockMap.get(userId) || new Set;
+		users.add(self);
+		lockMap.set(userId, users);
 
 		{
 			let locked = new Set;
-			for (const v of userData) v.locked.forEach(item => locked.add(item));
+			// AI常见误区：读锁也被当作"已锁定"发给客户端，客户端会把这些对话标记为 LOCKED 显示，但实际上读锁不应该阻塞别人。
+			// 但是我的设计必然存在写者，不可能只有读者，所以这个问题不存在
+			for (const user of users) user.locked.keys().forEach(item => locked.add(item));
 
-			ws.send(JSON.stringify({
-				type: "init",
-				data: userData.size,
-				locked: Array.from(locked)
-			}));
+			ws.send(JSON.stringify([
+				SYNC_INIT,
+				[
+					users.size,
+					Array.from(locked)
+				]
+			]));
 		}
 
+		ws.on('error', (err) => {
+			console.error('连接错误:', err.message);
+		});
+
 		ws.on('close', () => {
-			userData.delete(value);
-			for (const v of userData) {
-				for (const id of myLocked) {
-					if (v.locked.has(id)) {
-						v.ws.send(JSON.stringify({
-							type: "released",
-							data: {
-								id
-							}
-						}));
+			users.delete(self);
+			for (const [id, writeLock] of myLocked.entries()) {
+				if (writeLock) onUnlock(id);
+			}
+		});
+
+		function updateReaderCount(id) {
+			let owner;
+			let count = 0;
+			for (let user of users) {
+				if (user.locked.has(id)) {
+					if (user.locked.get(id)) {
+						owner = user;
+					} else {
+						count = 1;
 						break;
 					}
 				}
 			}
-		});
+
+			owner.ws.send(JSON.stringify([
+				SYNC_READERS,
+				[
+					id,
+					count
+				]
+			]));
+		}
+
+		function onUnlock(id) {
+			const owner = sendToLockOwner(id, [
+				SYNC_RELEASED,
+				id
+			], true);
+			if (!owner) {
+				broadcastExcludeSelf([
+					SYNC_UNLOCKED,
+					id
+				]);
+			} else {
+				users.has(self) && self.ws.send(JSON.stringify([
+					SYNC_LOCKED,
+					id
+				]));
+
+				// 自动升级
+				owner.locked.set(id, true);
+				updateReaderCount(id);
+			}
+		}
+
+		function findLockOwner(id) {
+			for (const user of users) {
+				if (user !== self && user.locked.get(id))
+					return user;
+			}
+		}
+
+		function sendToLockOwner(id, data, allowReader) {
+			const str = JSON.stringify(data);
+			let reader;
+			for (const user of users) {
+				if (user !== self) {
+					if (user.locked.get(id)) {
+						user.ws.send(str);
+						return user;
+					}
+					if (user.locked.has(id)) {
+						reader = user;
+					}
+				}
+			}
+
+			// 如果没有写持有者，将消息发给随机的读持有者，让它升级
+			if (allowReader && reader) {
+				reader.ws.send(str);
+				return reader;
+			}
+		}
+
+		function broadcastExcludeSelf(data) {
+			const str = JSON.stringify(data);
+			for (const user of users) {
+				if (user !== self) user.ws.send(str);
+			}
+		}
+
 
 		ws.on('message', (message) => {
 			try {
-				const {type, data} = JSON.parse(message.toString('utf-8'));
+				const [type, data] = JSON.parse(message.toString('utf-8'));
 				switch (type) {
-					case "update":
-						for (const v of userData) {
-							if (v !== value) {
-								v.ws.send(JSON.stringify({
-									type: "update",
-									data: {
-										id: data.id,
-										conv: data
-									}
-								}));
-							}
-						}
-						break;
-					case "resolve":
+					// 消息锁管理
+					case SYNC_RESOLVE:
+						if (typeof data !== "number") return;
+
 						// 强制解锁
 						if (myLocked.has(data)) {
-							for (const v of userData) {
-								if (v !== value && v.locked.has(data)) {
-									v.ws.send(JSON.stringify({
-										type: "unlock",
-										data: data
-									}))
-								}
-							}
+							const owner = sendToLockOwner(data, [
+								SYNC_RESOLVE,
+								data
+							]);
+							// 切到读锁
+							if (owner) owner.locked.set(data, false);
+							// 升级为写锁
+							myLocked.set(data, true);
 						}
-						break;
-					case "lock":
-						myLocked.add(data);
-						for (const v of userData) {
-							if (v !== value && v.locked.has(data)) {
-								ws.send(JSON.stringify({
-									type: "conflict",
-									data
-								}));
-								break;
-							}
+					break;
+					case SYNC_LOCKED: {
+						if (typeof data !== "number") return;
+
+						const owner = findLockOwner(data);
+						if (owner) {
+							// false => 读锁
+							myLocked.set(data, false);
+							ws.send(JSON.stringify([
+								SYNC_CONFLICT,
+								data
+							]));
+							owner.ws.send(JSON.stringify([
+								SYNC_READERS,
+								[
+									data,
+									1
+								]
+							]));
+						} else {
+							// true => 写锁
+							myLocked.set(data, true);
+							broadcastExcludeSelf([
+								SYNC_LOCKED,
+								data
+							]);
 						}
-						break;
-					case "unlock":
-						myLocked.delete(data.id);
-						delete data.ready;
-						for (const v of userData) {
-							if (v !== value && v.locked.has(data.id)) {
-								v.ws.send(JSON.stringify({
-									type: "released",
-									data
-								}));
-								break;
-							}
-						}
-						break;
-					case "delete":
-						for (const v of userData) {
-							if (v !== value) {
-								v.ws.send(JSON.stringify({
-									type: "update",
-									data: {
-										id: data,
-										// 没有conv就是删除
-									}
-								}));
-							}
-						}
-						break;
+					}
+					break;
+					case SYNC_UNLOCKED: {
+						if (typeof data !== "number") return;
+
+						const writeLock = myLocked.get(data);
+						if (!myLocked.delete(data)) return;
+						if (writeLock) onUnlock(data);
+						else updateReaderCount(data);
+					}
+					break;
+					case SYNC_MESSAGE:
+						broadcastExcludeSelf([
+							SYNC_MESSAGE,
+							data
+						]);
+					break;
+					case SYNC_CONVERSATION:
+						broadcastExcludeSelf([
+							SYNC_CONVERSATION,
+							data
+						]);
+					break;
 				}
 			} catch (e) {
 				console.error(e);

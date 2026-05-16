@@ -1,8 +1,10 @@
 import './ToolCallCard.css';
-import {$state, $update, appendChildren, unconscious} from "unconscious";
+import {$state, $update, $watch, appendChildren, isPureObject, unconscious} from "unconscious";
 import {JsonEditor} from "./JsonEditor.jsx";
-import {toolScriptRegistry} from "../skills.js";
+import {TOOL_NAME, toolScriptRegistry} from "../skills.js";
 import {updateMessageUI} from "./MessageList.jsx";
+import {validateAndShowError} from "unconscious/common/json-schema-utils.js";
+import {onLoad} from "../plugin.js";
 
 /**
  *
@@ -12,12 +14,11 @@ import {updateMessageUI} from "./MessageList.jsx";
  * idx: number
  * }} props
  * @return {JSX.Element}
- * @constructor
  */
 export function ToolCallEditor(props) {
     const { tool: {
         function: fn
-    }, message, idx } = props;
+    }, message } = props;
 
     const formatJson = (s) => {
         try {
@@ -27,86 +28,121 @@ export function ToolCallEditor(props) {
         }
     }
 
+    const index = () => message.tool_calls.indexOf(props.tool);
+
     const toolName = $state(fn.name);
+    const nameError = $state();
 
     const initializeHtml = () => {
         const
             input = $state(),
-            output = $state();
+            output = $state(),
+            inputState = $state(),
+            toolCallId = $state(props.tool.id);
         const reset = () => {
             input.value = formatJson(fn.arguments);
-            output.value = formatJson(message.tool_responses[idx].content);
+            output.value = formatJson(message.tool_responses[index()]?.content);
         };
 
         reset();
+        $watch(toolName, () => {
+            const def = toolScriptRegistry[unconscious(toolName)];
+            nameError.value = !def;
+        });
 
+        let saveBtn;
         appendChildren(base, <>
-                <div className="tool-body">
-                    <div className="args-title">参数</div>
-                    <JsonEditor value={input}/>
+            <div className="tool-body">
+                <div className="args-title">调用ID</div>
+                <div className={"input-warp"}>
+                    <input className={"text-input"} class:invalid={() => !unconscious(toolCallId)} value={toolCallId}
+                           onInput={({target}) => toolCallId.value = target.value}/>
+                    {() => !unconscious(toolCallId) ? <div className={"input-warning"}>不能为空</div> : null}
                 </div>
-                <div className="tool-body">
-                    <div className="args-title">返回值</div>
-                    <JsonEditor value={output}/>
+            </div>
+            <div className="tool-body">
+                <div className="args-title">参数</div>
+                <JsonEditor value={input} state={inputState}/>
+                <div className={"args error"} style:display={() => inputState.error ? "" : "none"}>{() => inputState.error}</div>
+            </div>
+            <div className="tool-body">
+                <div className="args-title">返回值</div>
+                <JsonEditor value={output}/>
+            </div>
+            <div className="tool-body">
+                <div className="args-title">小心修改参数</div>
+                <div style={"display:flex;gap:8px"}>
+                    <button className={"btn warning"} onClick={reset}>重置</button>
+                    <button className={"btn primary"} ref={saveBtn} onClick={({target}) => {
+                        fn.name = unconscious(toolName);
+                        fn.arguments = JSON.stringify(inputState.obj);
+
+                        const outputValue = unconscious(output);
+                        message.tool_responses[index()] = outputValue ? {
+                            success: true,
+                            time: Date.now(),
+                            content: outputValue,
+                            [TOOL_NAME]: fn.name
+                        } : {};
+
+                        target.textContent = "已保存";
+                        target.disabled = true;
+                        setTimeout(() => {
+                            target.textContent = "保存";
+                            target.disabled = false;
+                        }, 1000);
+                    }}>
+                        保存
+                    </button>
+                    <button className={"btn danger"} onClick={() => {
+                        const idx = index();
+                        message.tool_calls.splice(idx, 1);
+                        message.tool_responses.splice(idx, 1);
+                        $update(updateMessageUI);
+                    }}>
+                        删除
+                    </button>
                 </div>
-                <div className="tool-body">
-                    <div className="args-title">小心修改参数</div>
-                    <div style={"display:flex;gap:8px"}>
-                        <button className={"btn warning"} onClick={reset}>重置</button>
-                        <button className={"btn primary"} onClick={({target}) => {
-                            let error;
-                            if (!toolScriptRegistry[toolName.value]) {
-                                error = "工具ID无效";
-                            }
+            </div>
+        </>);
 
-                            const inputValue = unconscious(input);
-                            try {
-                                JSON.parse(inputValue);
-                            } catch {
-                                error = "入参不合法";
-                            }
+        $watch([nameError, inputState], () => {
+            const obj = inputState.obj;
+            if (obj != null) {
+                if (!isPureObject(obj)) {
+                    inputState.value = {error: "顶层必须是JSON对象"};
+                    return;
+                }
 
-                            if (!error) {
-                                fn.name = toolName.name;
-                                fn.arguments = inputValue;
+                const schema = toolScriptRegistry[unconscious(toolName)]?.parameters;
+                if (schema) {
+                    const error = validateAndShowError(obj, schema);
+                    if (error) inputState.value = { error };
+                }
+            }
+        });
 
-                                const outputValue = unconscious(output);
-                                message.tool_responses[idx] = outputValue ? {
-                                    success: true,
-                                    time: Date.now(),
-                                    content: outputValue
-                                } : {};
-
-                                error = "已保存";
-                            }
-
-                            target.textContent = error;
-                            target.disabled = true;
-                            setTimeout(() => {
-                                target.textContent = "保存";
-                                target.disabled = false;
-                            }, 1000);
-                        }}>
-                            保存
-                        </button>
-                        <button className={"btn danger"} onClick={({target}) => {
-                            message.tool_calls.splice(idx, 1);
-                            message.tool_responses.splice(idx, 1);
-                            $update(updateMessageUI);
-                        }}>
-                            删除
-                        </button>
-                    </div>
-                </div>
-            </>
-        );
+        $watch([nameError, inputState, toolCallId], () => {
+            saveBtn.disabled = unconscious(nameError) || inputState.error || !unconscious(toolCallId);
+        });
     };
 
     const base = <details className={"tool-call tool-pending"} onClick.once={initializeHtml}>
         <summary className="tool-header" title={"编辑工具"}>
-            工具ID: <input className={"text-input"} value={toolName} />
+            <div className="args-title">工具名称</div>
+            <div className={"input-warp"}>
+                <input className={"text-input"} class:invalid={nameError} value={toolName} list={"tce-tool-names"}
+                       onInput={({target}) => toolName.value = target.value}/>
+                {() => unconscious(nameError) ? <div className={"input-warning"}>工具名称无效</div> : null}
+            </div>
         </summary>
     </details>;
 
     return base;
 }
+
+onLoad((app) => {
+    app.append(<datalist id="tce-tool-names">{Object.keys(toolScriptRegistry).map(item =>
+        <option value={item} />)
+    }</datalist>);
+})

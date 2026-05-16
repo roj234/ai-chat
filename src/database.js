@@ -1,21 +1,22 @@
 import {debugSymbol} from 'unconscious';
 import {config} from "./states.js";
-import {isEqual} from "../vendor/equals.js";
-import {cloneNamed, prettyError} from "./utils/utils.js";
+import {deepEqual} from "unconscious/common/deepEqual.js";
+import {prettyError} from "./utils/utils.js";
 import * as idb from "./database/db-indexeddb.js";
 import * as remote from "./database/db-remote.js";
 import {showToast} from "./components/Toast.js";
 import {SETTINGS} from "./settings.js";
 import {BM} from "./utils/BranchManager.js";
+import {LOCKED} from "./components/ConversationList.jsx";
 
 const MESSAGE_IN_DB = debugSymbol("MESSAGE_IN_DB");
 const CONVERSATION_IN_DB = debugSymbol("CONVERSATION_IN_DB");
 export const DONE = Promise.resolve();
 
-function databaseError(err) {
+const databaseError = err => {
 	showToast("数据库错误!\n"+prettyError(err)+"\n未保存的更改可能丢失，请直接从页面导出", 'error', 0);
 	return [];
-}
+};
 
 if (DB_MODE !== 'local') {
 	SETTINGS.push({
@@ -24,12 +25,15 @@ if (DB_MODE !== 'local') {
 		name: "数据库服务器",
 		title: "提供文件管理、消息搜索、多租户等功能\n修改后需要刷新页面"+(DB_MODE === "mixed" ? "\n填写 :idb: 使用本地数据库" : ""),
 		type: "input",
-		pattern: (DB_MODE === "mixed" ? /^(?:(?:https?:\/\/.+)?\/aichat\/v2\/?|:idb:$)/ : /^(?:https?:\/\/.+)?\/aichat\/v2\/?/),
+		pattern: (DB_MODE === "mixed" ? /^(?:(?:https?:\/\/)?.*\/api\/v2\/?|:idb:$)/ : /^(?:https?:\/\/)?.*\/api\/v2\/?/),
 		warning: "请输入合法的服务器地址",
-		placeholder: "/aichat/v2/user"
+		placeholder: "/api/v2/username"
 	});
 }
-const db = DB_MODE === 'remote' || (DB_MODE === "mixed" && config.db_server !== ':idb:') ? remote : idb;
+
+export const isIDB = DB_MODE === 'local' || config.db_server === ':idb:';
+
+const db = isIDB ? idb : remote;
 
 export const {
 	deleteDatabase,
@@ -43,25 +47,25 @@ export const {
  * 列出所有会话，按创建时间降序
  * @returns {Promise<Array<{id:number, title:string, time:number, messageId?:number}>>}
  */
-export async function listConversations() {
+export const listConversations = async () => {
 	try {
 		const conversations = await db.listConversations();
 		conversations.forEach((conversation) => {
-			conversation[CONVERSATION_IN_DB] = serializeConversation(conversation);
+			conversation[CONVERSATION_IN_DB] = structuredClone(conversation);
 			conversation.ready = false;
 		});
 		return conversations;
 	} catch (e) {
 		return databaseError(e);
 	}
-}
+};
 
 /**
  * 获取一个会话的消息
  * @param {AiChat.Conversation} conversation 对话
  * @returns {Promise<AiChat.Message[]>}
  */
-export function getMessages(conversation) {
+export const getMessages = conversation => {
 	if (conversation.ready == null) return Promise.resolve([]);
 
 	return db.getMessages(conversation).then(messages => {
@@ -77,67 +81,55 @@ export function getMessages(conversation) {
 		}
 
 		return messages;
-	}).catch(databaseError);
-}
+	});
+};
 
-/**
- * 新建一个会话
- * @returns {Promise<AiChat.Conversation>}
- */
-export async function newConversation() {
-	const conversation = {
-		title: "",
-		time: Date.now(),
-		[MESSAGE_IN_DB]: new Map
-	};
-	if (config.branchModeDefault) conversation.branches = 1;
+const IGNORE_ID = new Set(["id", "ready", "bm_leaf"]);
 
-	if (config.debugDatabase) {
-		conversation.id = -1;
-	} else {
-		await db.newConversation(conversation)
-	}
-
-	conversation[CONVERSATION_IN_DB] = serializeConversation(conversation);
-	return conversation;
-}
-
-const IGNORE_ID = new Set(["id", "parent", "branches"]);
-
-export const CONVERSATION_KEYS = ["id", "title", "time", "allowedTools", "activatedModules", "branches"];
-
-function serializeConversation(data) {
-	return cloneNamed(data, CONVERSATION_KEYS);
-}
+// TODO conversation.ready 切到这个，但是用符号不会触发响应式更新
+export const READY = debugSymbol("ready");
 
 /**
  * 更新会话
- * @param {AiChat.Conversation} data
+ * @param {AiChat.Conversation} conversation
  * @param {AiChat.Message[]|false=} messages
  * @param {boolean=} keepTime
  * @returns {Promise<void>}
  */
-export function updateConversation(data, messages, keepTime) {
-	if (config.debugDatabase) return DONE;
+export const updateConversation = async (conversation, messages, keepTime) => {
+	if (config.debugDatabase || conversation[LOCKED]) return;
 
-	let serial = DONE;
-	let changed;
+	let promises = [];
+	let changed = () => {
+		conversation[CONVERSATION_IN_DB] = structuredClone(conversation);
+		const {ready, ...omit} = conversation;
+		const updateAndThen = db.upsertConversation(omit);
+		promises.push(updateAndThen);
+		changed = null;
+		return updateAndThen;
+	};
+
+	if (!("id" in conversation)) {
+		conversation[MESSAGE_IN_DB] = new Map;
+		const promise = changed().then(id => {
+			conversation.id = id;
+		});
+		if (isIDB) await promise;
+	}
 
 	if (messages) {
 		/**
 		 * @type {Map<number, AiChat.Message>}
 		 */
-		const messagesInDB = data[MESSAGE_IN_DB];
+		const messagesInDB = conversation[MESSAGE_IN_DB];
 		/**
 		 * @type {Map<number, AiChat.Message>}
 		 */
 		const messagesInMemory = new Map();
 
-		const pendingAdd = [];
+		if (conversation[BM]) messages = conversation[BM].messages;
 
-		if (data[BM]) messages = data[BM].messages;
-
-		for (let i = 0; i < messages.length; i++){
+		for (let i = 0; i < messages.length; i++) {
 			const message = messages[i];
 			const id = message.id;
 			if (id === -1) continue;
@@ -146,76 +138,71 @@ export function updateConversation(data, messages, keepTime) {
 				const existingKey = messagesInDB.get(id);
 				messagesInDB.delete(id);
 
-				if (isEqual(existingKey, message, IGNORE_ID)) {
+				if (deepEqual(existingKey, message, IGNORE_ID)) {
 					messagesInMemory.set(id, existingKey);
 					continue;
 				}
 			}
 
-			if (!keepTime) changed = true;
+			if (!keepTime && changed) {
+				conversation.time = Date.now();
+				changed();
+			}
 			const newMessageKey = structuredClone(message);
 			if (id) messagesInMemory.set(id, newMessageKey);
 
 			function save() {
 				const value = {
 					...message,
-					owner: data.id
+					owner: conversation.id
 				};
 				if (message.id == null) message.id = -1;
 
-				return db.updateMessage(value).then(({id}) => {
+				return db.upsertMessage(value).then((id) => {
 					message.id = id;
 					// Async callback
-					data[MESSAGE_IN_DB].set(id, newMessageKey);
-
+					conversation[MESSAGE_IN_DB].set(id, newMessageKey);
 					if (message.time !== value.time) return save();
+				}).finally(() => {
+					if (message.id === -1) delete message.id;
 				})
 			}
-			pendingAdd.push(save);
+			promises.push(save());
 		}
 
 		if (messagesInDB) {
-			const deletePromises = [];
-			messagesInDB.forEach((value, id) => deletePromises.push(db.deleteMessage(id)));
-			serial = Promise.all(deletePromises);
+			messagesInDB.forEach((value, id) => promises.push(db.deleteMessage(id)));
 		}
 
-		for (let save of pendingAdd) serial = serial.then(save);
-
-		data[MESSAGE_IN_DB] = messagesInMemory;
+		conversation[MESSAGE_IN_DB] = messagesInMemory;
 	}
 
-	const serializedForm = serializeConversation(data);
-	if (changed || !isEqual(data[CONVERSATION_IN_DB], serializedForm, IGNORE_ID)) {
-		if (changed) serializedForm.time = data.time = Date.now();
-		data[CONVERSATION_IN_DB] = serializedForm;
-		serial = serial.then(() => db.updateConversation(serializedForm));
-	}
+	if (changed && !deepEqual(conversation[CONVERSATION_IN_DB], conversation, IGNORE_ID)) changed();
 
-	return serial.catch(databaseError);
-}
+	await Promise.all(promises).catch(databaseError);
+};
 
 /**
  * 删除会话及其所有消息
  * @param {AiChat.Conversation} conversation
  * @returns {Promise<void>}
  */
-export function deleteConversation(conversation) {
+export const deleteConversation = conversation => {
 	if (config.debugDatabase) return DONE;
 	return db.deleteConversation(conversation.id);
-}
+};
 
 /**
  *
  * @param {AiChat.BillingLog} log
  * @return {Promise<void>}
  */
-export function appendBillingLog(log) {
-	if (log.message_id == null) return DONE;
+export const appendBillingLog = log => {
+	if (config.debugDatabase) return DONE;
 	return db.appendBillingLog(log);
-}
+};
 
-export function getBillingLog(message_id) {
-	if (message_id == null) return DONE;
-	return db.getBillingLog(message_id);
-}
+export const getBillingLog = id => {
+	if (id == null) return DONE;
+	return db.getBillingLog(id);
+};

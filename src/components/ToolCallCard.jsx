@@ -1,14 +1,12 @@
 import './ToolCallCard.css';
 import {runTools, TOOL_NAME, toolScriptRegistry} from "../skills.js";
 import {config, messages, selectedConversation} from "../states.js";
-import {$state, $update, $watch, appendChildren, isReactive} from "unconscious";
+import {$state, $update, $watch, appendChildren, isReactive, unconscious} from "unconscious";
 import {MORPH_CHILD_FUNCTION} from "../utils/utils.js";
 import morphdom from "morphdom";
 import {highlight, highlightJsonLike} from "../markdown/highlight.js";
 
-function morph(input, data) {
-    morphdom(input, `<pre class="args">${highlightJsonLike(data)}</pre>`)
-}
+const morph = (input, data) => morphdom(input, `<pre class="args">${highlightJsonLike(data)}</pre>`);
 
 /**
  *
@@ -18,7 +16,6 @@ function morph(input, data) {
  * idx: number
  * }} props
  * @return {JSX.Element}
- * @constructor
  */
 export function ToolCallCard(props) {
     const { tool, message, idx } = props;
@@ -26,7 +23,7 @@ export function ToolCallCard(props) {
     const {name} = tool.function;
     const response_content = $state();
 
-    function initializeHtml() {
+    const initializeHtml = () => {
         base._content = response_content;
         response_content.value = message.tool_responses[idx]?.content;
 
@@ -41,7 +38,7 @@ export function ToolCallCard(props) {
                     <div className="args-title">返回值
                         {isReactive(tool)/* || (message !== messages[messages.length-1] && !config.debug)*/ ? null : <button className={"rerun-btn"} onClick={({target}) => {
                             target.disabled = true;
-                            runTools(message, idx, true).then(() => {
+                            runTools(message, unconscious(selectedConversation), idx, true).then(() => {
                                 $update(messages);
                             }).finally(() => {
                                 target.disabled = false;
@@ -71,7 +68,7 @@ export function ToolCallCard(props) {
                 morph(output, response_content.value);
             }, false);
         }
-    }
+    };
 
     const base = <details className={"tool-call"} onClick.once={initializeHtml}>
         <summary className="tool-header" title={"展开工具参数"}><b>{name}</b></summary>
@@ -105,13 +102,13 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
     const alreadyHasFlag = element.classList.contains("tool-pending");
     element.classList.toggle("tool-pending", pending);
 
-    function setAuditState(target, allowUnsafe) {
-        runTools(message, idx, allowUnsafe).then(() => {
+    const setAuditState = (target, allowUnsafe) => {
+        runTools(message, unconscious(selectedConversation), idx, allowUnsafe).then(() => {
             $update(messages);
         });
 
         target.closest(".tool-body").remove();
-    }
+    };
 
     if (pending && !alreadyHasFlag) {
         element.open = true;

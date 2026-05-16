@@ -1,4 +1,4 @@
-import {jsonPrompt, schemaWrapper} from "../Constraint.js";
+import {jsonPrompt, schemaWrapper} from "../core.js";
 
 const plot_node_schema = {
 	type: "object",
@@ -167,7 +167,7 @@ ${getActToneByRandom()}
 ${prompt || "请自由发挥。"}`.trim()
 		}
 	], {
-		...schemaWrapper("plot_arc", plot_arc_schema),
+		...schemaWrapper(plot_arc_schema),
 		reasoning: { enabled: false },
 		//min_p: 0.1,
 		//temperature: 1.2,
@@ -213,7 +213,7 @@ ${characterCard.name} 的弱点为：${characterCard.flaw}
 请以严格的 JSON 格式重新规划《${currentArc.arc_name}》的新节点（至少2个节点：【应对当前的突发反扑】和【新的终极高潮】）。`
 		}
 	], {
-		...schemaWrapper("plot_arc_replan", plot_arc_schema), // 复用原Schema，输出格式一致
+		...schemaWrapper(plot_arc_schema), // 复用原Schema，输出格式一致
 		reasoning: { enabled: false },
 		min_p: 0.1,
 		temperature: 1.2, // 提高温度，鼓励更疯狂的反击策略

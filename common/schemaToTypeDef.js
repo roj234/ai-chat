@@ -3,10 +3,10 @@
  * 将 JSON Schema 转换为类 TypeScript 接口的文本格式，以减少 tokens
  * - 然而事实上并没有减少多少 tokens... 希望模型能理解的更清晰吧
  * @param {OpenAI.ObjectSchema} schema
- * @param {boolean} strict
+ * @param {number} strict
  * @returns {string}
  */
-export function schemaToPrompt(schema, strict = true) {
+export function schemaToPrompt(schema, strict = 1) {
 	const tsDefinition = `\`\`\`typescript
 ${schemaToTS(schema)}
 \`\`\``;
@@ -14,12 +14,16 @@ ${schemaToTS(schema)}
 	return (strict
 		? `### Response format
 Respond in valid JSON format strictly conforming to the following TypeScript interface:`
-		: `Output only a valid JSON object strictly matching this TypeScript interface. 
+		: `Output only a valid JSON object in code fence strictly matching this TypeScript interface. 
 Ensure all required fields are present, types are exact, and no extra fields are added. 
 No conversational text or markdown outside the JSON.`
 	) + "\n\n"+tsDefinition;
 }
 
+/**
+ * @param {OpenAI.ObjectSchema} schema
+ * @returns {string}
+ */
 function schemaToTS(schema) {
 	const INDENT = '  ';
 

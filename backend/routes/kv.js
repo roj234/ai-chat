@@ -1,78 +1,56 @@
 import {compressGeneric, decompressGeneric, deserializeRow} from "../utils/compression.js";
 
-export function registerKVRoutes(router) {
-	// GET kv?key=...
-	router.get('/kv', (ctx) => {
-		const {key} = ctx.query;
-		if (!key) return ctx.send(400, { error: 'key required' });
+/**
+ * @param {Record<string, function(body: any, ctx: Partial<AiChatBackend.RouteContext>): any>} batcher
+ */
+export function registerKVRoutes(batcher) {
+	batcher["kv"] = (key, {db})  => {
+		const row = db.prepare('SELECT value FROM kv WHERE key = ?').get(key);
+		return row && decompressGeneric(row.value);
+	};
 
-		const row = ctx.db.prepare('SELECT value FROM kv WHERE key = ?').get(key);
-		ctx.send(200, row ? decompressGeneric(row.value) : null);
-	});
+	batcher["kv/set"] = async ([key, value], {db}) => {
+		if (!key) return { error: 'missing key' };
 
-	// PUT kv
-	router.put('/kv', async (ctx) => {
-		const { key, value } = await ctx.readBody();
-		if (!key) return ctx.send(400, { error: 'key required' });
+		db.prepare('REPLACE INTO kv (key, value) VALUES (?, ?)').run(key, await compressGeneric(value));
+		return true;
+	};
 
-		ctx.db.prepare('REPLACE INTO kv (key, value) VALUES (?, ?)').run(key, compressGeneric(value));
-		ctx.send(200, { success: true });
-	});
+	batcher["kv/delete"] = (key, {db}) => {
+		if (!key) return { error: 'missing key' };
+		const info = db.prepare('DELETE FROM kv WHERE key = ?').run(key);
+		return info.changes > 0;
+	};
 
-	// DELETE kv?key=...
-	router.delete('/kv', (ctx) => {
-		const {key} = ctx.query;
-		if (!key) return ctx.send(400, { error: 'key required' });
+	batcher["kvs"] = (type, {db}) => {
+		return db.prepare('SELECT name FROM kvs WHERE type = ?').all(type);
+	};
 
-		ctx.db.prepare('DELETE FROM kv WHERE key = ?').run(key);
-		ctx.send(200, { success: true });
-	});
+	batcher["kvs/values"] = (type, {db}) => {
+		return (type === '*' ? db.prepare('SELECT * from kvs').all() : db.prepare('SELECT * FROM kvs WHERE type = ?').all(type)).map(item => deserializeRow(item));
+	};
 
-	// GET kvs/keys?type=...
-	router.get('/kvs/keys', (ctx) => {
-		const {type} = ctx.query;
-		if (!type) return ctx.send(400, { error: 'type required' });
+	batcher["kvs/value"] = ([type, name], {db}) => {
+		if (!type || !name) return { error: 'type and name required' };
 
-		const rows = ctx.db.prepare('SELECT name FROM kvs WHERE type = ?').all(type);
-		ctx.send(200, rows);
-	});
+		const row = db.prepare('SELECT * FROM kvs WHERE type = ? AND name = ?').get(type, name);
+		if (!row) return { error: 'Not found' };
 
-	// GET kvs?type=...
-	router.get('/kvs/values', (ctx) => {
-		const {type} = ctx.query;
-		if (!type) return ctx.send(400, { error: 'type required' });
+		return deserializeRow(row);
+	};
 
-		// * 是给备份用的
-		const rows = type === '*' ? ctx.db.prepare('SELECT * from kvs').all() : ctx.db.prepare('SELECT * FROM kvs WHERE type = ?').all(type);
-		ctx.send(200, rows.map(deserializeRow));
-	});
+	batcher["kvs/upsert"] = async ({ type, name, ...data }, {db}) => {
+		if (!type || !name) return { error: 'type and name required' };
+		if ("error" in data) return { error: 'error cannot be key in data' };
 
-	// GET kvs/by-name?type=...&name=...
-	router.get('/kvs', (ctx) => {
-		const { type, name } = ctx.query;
-		if (!type || !name) return ctx.send(400, { error: 'type and name required' });
+		db.prepare('REPLACE INTO kvs (type, name, data) VALUES (?, ?, ?)').run(type, name, await compressGeneric(data));
+		return true;
+	};
 
-		const row = ctx.db.prepare('SELECT * FROM kvs WHERE type = ? AND name = ?').get(type, name);
-		if (!row) return ctx.send(404, { error: 'Not found' });
+	batcher["kvs/delete"] = ([type, name], {db}) => {
+		if (!type || !name) return { error: 'type and name required' };
 
-		ctx.send(200, deserializeRow(row));
-	});
-
-	// POST kvs
-	router.post('/kvs', async (ctx) => {
-		const body = await ctx.readBody();
-		const { type, name, ...rest } = body;
-		if (!type || !name) return ctx.send(400, { error: 'type and name required' });
-		const info = ctx.db.prepare('REPLACE INTO kvs (type, name, data) VALUES (?, ?, ?)').run(type, name, compressGeneric(rest));
-		ctx.send(201, { __id: Number(info.lastInsertRowid), type, name, ...rest });
-	});
-
-	// DELETE kvs/:id
-	router.delete('/kvs', (ctx) => {
-		const { type, name } = ctx.query;
-		if (!type || !name) return ctx.send(400, { error: 'type and name required' });
-
-		ctx.db.prepare('DELETE FROM kvs WHERE id = ?').run(id);
-		ctx.send(200, { success: true });
-	});
+		const info = db.prepare('DELETE FROM kvs WHERE type = ? AND name = ?').run(type, name);
+		return info.changes > 0;
+	};
 }

@@ -8,8 +8,6 @@
 import {messages} from "/src/states.js";
 import {registerTools} from "/src/skills.js";
 import {sendUserChatMessage} from "/src/api-request.js";
-import {$update} from "unconscious";
-import {updateMessageUI} from "../../src/components/MessageList.jsx";
 
 const prompt2 = `<Follow-up-Suggestions>
 After **EVERY** reply — without exception — you MUST call the

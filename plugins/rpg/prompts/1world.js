@@ -1,4 +1,4 @@
-import {jsonPrompt, schemaWrapper} from "../Constraint.js";
+import {jsonPrompt, schemaWrapper} from "../core.js";
 
 /** @type {OpenAI.ObjectSchema} */
 const schema = {
@@ -162,7 +162,7 @@ export async function generateWorld(prompt) {
 			content: prompt
 		}
 	], {
-		...schemaWrapper("world_book", schema),
+		...schemaWrapper(schema),
 		reasoning: { enabled: false },
 		//min_p: 0.1,
 		//temperature: 1.2,

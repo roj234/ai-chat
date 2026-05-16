@@ -1,47 +1,61 @@
 import {copyButtonAnimation} from "../utils/utils.js";
-import {formatDate} from "unconscious/ext/Utils.js";
+import {formatDate} from "unconscious/common/Utils.js";
 
-import {fmdHTMLRenderer} from "./renderer.js";
-import {FastMDParser} from "fastmd";
+import {createMarkdownRenderer} from "./renderer.js";
+import {createMarkdownParser} from "fastmd";
+
+import "./markdown.css";
 
 const mdParserOptions = {
-	allowedTags: ["details", "summary", "b", "em", "kbd", "q", "!-- --"],
-	parseQuotes: true,
-	preserveLineBreaks: true
+	allowedTags: [
+		"details", "summary",
+		"b", "i", "u", "p", "br", "em", "kbd", "q", "strong",
+		"h1", "h2", "h3", "h4", "h5", "h6",
+		"table", "th", "tr", "td", "thead", "tbody",
+		"ul", "ol", "li",
+		"section",  "div", "span", "hr", "mark",
+		"img", "a",
+	],
+	preserveLineBreaks: true,
+	allowNestedCodeFence3: true
 }
 
 /**
  *
  * @param {HTMLElement} container
  * @param {string} md
- * @param {import("better-marked").ParserOptions=} options
+ * @param {import("fastmd").ParserOptions=} options
  */
-export function renderMarkdownToElement(container, md, options = {}) {
-	//import.meta.env.DEV && document.querySelector(".panel div").append(container);
-	const renderer = new fmdHTMLRenderer(container);
-	const parser = new FastMDParser(renderer, {
+export const renderMarkdownToElement = (container, md, options = {}) => {
+	const renderer = createMarkdownRenderer(container);
+	const parser = createMarkdownParser(renderer, {
 		...mdParserOptions,
+		parseQuotes: true,
 		...options
 	});
 	parser.write(md);
 	parser.end();
-}
+};
 
 /**
  *
  * @param {string} md
  * @return {string}
  */
-export function renderMarkdownToString(md) {
+export const renderMarkdownToString = md => {
 	const root = <div />;
 
-	const renderer = new fmdHTMLRenderer(root, { noHighlight: true, noImage: true });
-	const parser = new FastMDParser(renderer);
+	const renderer = createMarkdownRenderer(root, {
+		...mdParserOptions,
+		noHighlight: true,
+		noImage: true
+	});
+	const parser = createMarkdownParser(renderer);
 	parser.write(md);
 	parser.end();
 
 	return root.innerHTML;
-}
+};
 
 const LANGUAGE_TO_EXT = {
 	javascript: 'js',
@@ -63,9 +77,11 @@ const LANGUAGE_TO_EXT = {
 
 export {registerCodeBlockRenderer} from './renderer.js';
 
-function getElementToCopy(el) {
-	return el.parentElement.parentElement.nextElementSibling;
-}
+/**
+ * @param {Element} el
+ * @return {Element}
+ */
+const getElementToCopy = el => el.parentElement.parentElement.nextElementSibling;
 
 export const copyCodeEventHandler = (e) => {
 	const btn = e.target.closest(".code-block button[data-action]");
@@ -93,9 +109,6 @@ export const copyCodeEventHandler = (e) => {
 			URL.revokeObjectURL(url);
 		}
 		break;
-		/*case "open": {
-			btn.closest("pre").querySelector(".hljs").classList.toggle("done");
-		}*/
 	}
 };
 
@@ -106,9 +119,9 @@ const rendererOptions = { stream: true };
  * @param {HTMLElement} output
  * @return {import("fastmd").Parser}
  */
-export function createMarkdownParser(output) {return new FastMDParser(new fmdHTMLRenderer(output, rendererOptions), mdParserOptions);;}
+export const createStreamingMarkdownParser = output => {return createMarkdownParser(createMarkdownRenderer(output, rendererOptions), mdParserOptions);};
 
-export function createMarkdownStream() {
+export const createMarkdownStream = () => {
 	let parser;
 	let prevOutput;
 	let bufferIndex;
@@ -124,13 +137,13 @@ export function createMarkdownStream() {
 
 			// 给AntiSlop的重试循环用
 			output.replaceChildren();
-			parser = createMarkdownParser(output);
+			parser = createStreamingMarkdownParser(output);
 			bufferIndex = 0;
 			rendererOptions.noHighlight = false;
 		}
 		if (!buffer || !parser) return;
 
-		parser.write(buffer.substring(bufferIndex));
+		parser.write(buffer.slice(bufferIndex));
 		bufferIndex = buffer.length;
 	};
-}
+};

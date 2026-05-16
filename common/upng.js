@@ -1,9 +1,10 @@
 /**
  *
  * @param {ArrayBuffer} buff
- * @return {Record<string, string>}
+ * @param {boolean} returnStripped
+ * @return {Record<string, string> & {STRIPPED: ArrayBuffer}}
  */
-export function readPNG(buff) {
+export function readPNG(buff, returnStripped) {
 	const view = new DataView(buff);
 	const data = new Uint8Array(buff);
 	let offset = 8;
@@ -47,6 +48,31 @@ export function readPNG(buff) {
 		// 跳过数据内容和 CRC (4字节)
 		offset += len;
 		offset += 4;
+	}
+
+	if (returnStripped) {
+		let offset = 8;
+		const chunksToRemove = new Set(["tEXt", "zTXt", "iTXt"]);
+
+		const outData = new Uint8Array(buff.byteLength);
+		outData.set(data.slice(0, 8));
+		let outOffset = 8;
+
+		while (offset < data.length) {
+			const len = view.getUint32(offset, false);
+			const type = readASCII(offset + 4, 4);
+			const totalChunkLength = 12 + len;
+
+			if (!chunksToRemove.has(type)) {
+				outData.set(data.slice(offset, offset + totalChunkLength), outOffset);
+				outOffset += totalChunkLength;
+			}
+
+			offset += totalChunkLength;
+			if (type === "IEND") break;
+		}
+
+		chunks.STRIPPED = outData.buffer.slice(0, outOffset);
 	}
 
 	return chunks;

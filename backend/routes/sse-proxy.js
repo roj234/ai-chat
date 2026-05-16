@@ -1,98 +1,20 @@
-import {SSE_PROXY_BACKEND} from "../config.js";
+import {SSE_PROXY_BACKEND, SSE_PROXY_TRACE, SSE_RESUME_TIMEOUT} from "../config.js";
 import {EventEmitter} from "node:events";
+import {applyDelta, streamFetch} from "../../common/openai-api-utils.js";
+import fs from "node:fs/promises";
+import path from "node:path";
+import {Transform} from 'node:stream';
 
 /**
  *
- * @type {Map<string, AIChatBackend.SSEProxyRequest>}
+ * @type {Map<string, AiChatBackend.SSEProxyRequest>}
  */
 const activeRequests = new Map;
 
-
-/**
- *
- * @param {string} url
- * @param {RequestInit & { authorization?: string }} data
- * @param {function(OpenAI.Response): void} onToken
- * @param {function(): boolean} shouldCancel
- * @return {Promise<void>}
- */
-function streamFetch(url, data = {}, onToken, shouldCancel) {
-	return fetch(url, {
-		method: "POST",
-		headers: {
-			'Content-Type': "application/json",
-			'Authorization': data.authorization||""
-		},
-		referrerPolicy: 'no-referrer',
-		...data
-	}).then(async res => {
-		if (!res.ok) {
-			const err = await res.text();
-			throw {
-				message: err,
-				code: res.status
-			};
-		}
-
-		const reader = res.body.getReader();
-
-		const decoder = new TextDecoder();
-		let buf = '';
-
-		try {
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-				if (shouldCancel()) break;
-
-				buf += decoder.decode(value, { stream: true });
-
-				const lines = buf.split("\n");
-				buf = lines.pop() || '';
-				for (const line of lines) {
-					if (line.startsWith('data: ')) {
-						const data = line.slice(6);
-						if (data === '[DONE]') return;
-
-						const json = JSON.parse(data);
-						let error = json.error?.message;
-						try {
-							onToken(json);
-						} catch (e) {
-							if (!error)
-								error = e;
-						}
-
-						if (error) throw error;
-					}
-				}
-			}
-		} finally {
-			await reader.cancel();
-		}
-	});
-}
-
-function applyDelta(chunk, delta) {
-	for (const item in delta) {
-		if (typeof(delta[item]) === "object") {
-			if (delta[item] == null) continue;
-
-			if (!chunk[item])
-				chunk[item] = Array.isArray(delta[item]) ? [] : {};
-			applyDelta(chunk[item], delta[item]);
-		} else if (null == chunk[item]) {
-			chunk[item] = delta[item];
-		} else {
-			chunk[item] += delta[item];
-		}
-	}
-}
-
-
 function authorize(ctx) {
 	let {authorization} = ctx.req.headers;
-	if (!authorization) return ctx.send(403, { error: 'unknown key' });
+	if (!authorization?.startsWith("Bearer ")) return ctx.send(403, { error: 'unknown key' });
+	authorization = authorization.slice(7);
 
 	let url;
 	let backend = SSE_PROXY_BACKEND[authorization];
@@ -111,27 +33,87 @@ function authorize(ctx) {
 	return [url, authorization];
 }
 
-async function SSEHandler(ctx) {
+/**
+ * 创建一个限制大小的可读流
+ * @param {import('stream').Readable} source 源请求可读流（ctx.req）
+ * @param {number} maxLength 最大字节数
+ * @returns {Transform} 可直接作为 fetch body 的流
+ */
+function createLimiter(source, maxLength) {
+	let totalLength = 0;
+
+	const limited = new Transform({
+		transform(chunk, encoding, callback) {
+			totalLength += chunk.length;
+			if (totalLength > maxLength) {
+				const err = new Error('Request body too large');
+				err.status = 413;
+				source.destroy();
+				return callback(err);
+			}
+
+			this.push(chunk);
+			callback();
+		},
+
+		destroy(err, callback) {
+			source.destroy();
+			callback(err);
+		},
+	});
+
+	source.pipe(limited);
+	source.on('error', (e) => limited.destroy(e));
+
+	return limited;
+}
+
+/**
+ *
+ * @param {string} logPath
+ * @param {AiChatBackend.RouteContext} ctx
+ * @return {Promise<void>}
+ */
+async function SSEHandler(logPath, ctx) {
 	let result = authorize(ctx);
 	if (!result) return;
 	const [url, authorization] = result;
 
-	const params = await ctx.readBody();
+	const MAX_BODY_LENGTH = 20971520;
+	const needBlobProxy = ctx.searchParams.has("blobProxy");
+	let body;
+	let duplex;
+	if (SSE_PROXY_TRACE || needBlobProxy) {
+		body = await ctx.readAsString(MAX_BODY_LENGTH);
+	} else {
+		body = createLimiter(ctx.req, MAX_BODY_LENGTH);
+		duplex = 'half';
+	}
 	const abort = new AbortController();
 
 	let completion = {};
-	/**
-	 * @type {AIChatBackend.SSEProxyRequest}
-	 */
+	/** @type {AiChatBackend.SSEProxyRequest} */
 	let proxyRequest;
 
+	ctx.res.on('close', () => {
+		if (!proxyRequest) abort.abort();
+	});
+
+	let hasError;
+	const startTime = Date.now();
 	try {
+		/*if (needBlobProxy) {
+			const obj = JSON.parse(body);
+
+			body = new ReadableStream
+		}*/
+
 		await streamFetch(url+'/chat/completions', {
-			body: JSON.stringify(params),
+			body,
+			duplex,
 			signal: abort.signal,
-			authorization
+			key: authorization
 		}, chunk => {
-			// 1. 获取 ID (第一个包逻辑)
 			if (!proxyRequest) {
 				const id = chunk.id;
 				activeRequests.set(id, proxyRequest = {
@@ -141,19 +123,24 @@ async function SSEHandler(ctx) {
 					event: new EventEmitter,
 					isFinished: false
 				});
+				console.log('SSE代理请求开始', id);
 
-				ctx.res.writeHead(200, {
-					'Content-Type': 'text/event-stream'
-				});
+				if (SSE_PROXY_TRACE) {
+					const fileName = `${logPath}/${encodeURIComponent(id)}_${Date.now()%1000}.jsonl`;
+					proxyRequest._fileName = fileName;
+					proxyRequest._inputPromise = fs.appendFile(fileName, body);
+				}
 
-				chunk.resumable = true;
+				ctx.res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+
+				chunk.resumable = { start: startTime, ft: Date.now() };
 			}
 
 			if (!ctx.res.closed) ctx.res.write(`data: ${JSON.stringify(chunk)}\n\n`);
 
 			proxyRequest.event.emit('data', chunk);
 
-			const {choices, text} = chunk;
+			const {choices, text, ...rest} = chunk;
 			if (choices) {
 				let out_choices = completion.choices || (completion.choices = []);
 				for (let i = 0; i < choices.length; i++){
@@ -163,25 +150,18 @@ async function SSEHandler(ctx) {
 					Object.assign(out_choices[i], rest);
 					applyDelta(out_choices[i].delta, delta);
 				}
-				delete chunk.choices;
 			} else {
 				completion.text = (completion.text || "") + text;
 			}
-			Object.assign(completion, chunk);
-
-		}, () => {
-			if (!proxyRequest && ctx.res.closed) {
-				abort.abort();
-				return true;
-			}
+			Object.assign(completion, rest);
 		});
 	} catch (err) {
 		if (err.name === 'AbortError') {
 			console.log('SSE代理请求中止');
 		} else {
-			console.log("SSE代理请求出错", err);
+			console.log('SSE代理请求出错', err);
 
-			const {code = 500, message} = err;
+			const {status = 500, message} = err;
 			let obj = {
 				upstream_error: message
 			};
@@ -189,7 +169,11 @@ async function SSEHandler(ctx) {
 				obj = JSON.parse(message);
 			} catch {}
 
-			ctx.send(code, obj);
+			ctx.send(status, obj);
+			hasError = true;
+
+			// 确保源连接被释放，避免 hang 住
+			ctx.req.destroy();
 		}
 	} finally {
 		if (proxyRequest) {
@@ -197,31 +181,73 @@ async function SSEHandler(ctx) {
 			proxyRequest.event.emit('end');
 			proxyRequest.event.removeAllListeners();
 
-			delete completion.resumable;
-			//console.log('SSE代理请求结束');
+			completion.resumable.end = true;
+			console.log('SSE代理请求结束', proxyRequest.id);
 
-			// 15分钟后销毁
-			setTimeout(() => {
+			proxyRequest.timeoutId = setTimeout(() => {
 				activeRequests.delete(proxyRequest.id);
-			}, 15 * 60 * 1000);
+			}, SSE_RESUME_TIMEOUT);
+
+			if (SSE_PROXY_TRACE) {
+				await proxyRequest._inputPromise.then(() =>
+					fs.appendFile(proxyRequest._fileName, '\n' + JSON.stringify(proxyRequest.data))
+				);
+			}
 		}
 		abort.abort();
 
-		if (!ctx.res.closed) ctx.res.end();
+		if (!hasError && !ctx.res.closed) ctx.res.end();
 	}
 }
 
-export function registerSSEProxyRoutes(router) {
+const modelCache = new Map;
+
+/**
+ * @param {AiChatBackend.Router} router
+ * @param {string} dataPath
+ */
+export function registerSSEProxyRoutes(router, dataPath) {
+	const logPath = path.join(dataPath, "logs");
+	if (SSE_PROXY_TRACE) fs.mkdir(logPath, {recursive: true});
+
+	router.post("/models/wipe_cache", (ctx) => {
+		modelCache.clear();
+		ctx.send(200, { success: true });
+	});
+
 	router.get('/models', async (ctx) => {
 		let result = authorize(ctx);
 		if (!result) return;
 		const [url, authorization] = result;
 
-		const proxyRes = await fetch(url+'/models', { headers: { authorization } });
-		ctx.send(proxyRes.status, await proxyRes.json());
+		const key = url+"|"+authorization;
+		const res = ctx.res;
+		let cache = modelCache.get(key);
+		if (!cache || Date.now() - cache.time > 3600000) {
+			const proxyRes = await fetch(url+'/models', { headers: {
+				accept: "application/json",
+				authorization: "Bearer "+authorization,
+			} });
+
+			const data = await proxyRes.text();
+
+			if (!proxyRes.ok) {
+				res.writeHead(proxyRes.status, proxyRes.headers);
+				res.end(data);
+				return
+			}
+
+			modelCache.set(key, cache = {
+				time: Date.now(),
+				data
+			})
+		}
+
+		res.writeHead(200, { 'Content-Type': "application/json" });
+		res.end(cache.data);
 	});
-	router.post('/chat/completions', SSEHandler);
-	router.post('/completions', SSEHandler);
+	router.post('/chat/completions', SSEHandler.bind(null, logPath));
+	router.post('/completions', SSEHandler.bind(null, logPath));
 
 	router.post('/resume/:id', async (ctx) => {
 		const {id} = ctx.params;
@@ -253,10 +279,15 @@ export function registerSSEProxyRoutes(router) {
 		const state = activeRequests.get(id);
 
 		if (state) {
+			clearTimeout(state.timeoutId);
 			activeRequests.delete(id);
 			state.abort.abort(); // 停止向 OpenAI 请求
 			return ctx.send(200, { success: true });
 		}
 		ctx.send(404, { success: false, error: "SSE代理会话已过期" });
+	});
+
+	router.get("/resume/list", (ctx) => {
+		ctx.send(200, { sessions: [...activeRequests.keys()] });
 	});
 }

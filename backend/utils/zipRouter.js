@@ -1,4 +1,4 @@
-import {openZip} from "../../common/jszip.js";
+import {ZipReader} from "unconscious/common/zip-io.js";
 import {MIME_TYPES} from "./mime.js";
 import {pipeline} from 'node:stream/promises';
 import {Readable} from 'node:stream'
@@ -12,11 +12,11 @@ function getContentType(filename) {
 // ==================== 路由器工厂函数 ====================
 /**
  * 根据 ZIP Blob 创建一个 Node HTTP 请求处理函数
- * @param {Blob} zipBlob
+ * @param {Buffer} zipBlob
  * @returns {(req: http.IncomingMessage, res: http.ServerResponse) => void}
  */
 export async function createZipRouter(zipBlob) {
-	const zip = await openZip(zipBlob);
+	const zip = await ZipReader(zipBlob);
 
 	return async function zipRouter({req, res, path}) {
 		if (path.startsWith("/")) path = path.slice(1);
@@ -80,7 +80,7 @@ export async function createZipRouter(zipBlob) {
 			if (entry.method === 8) needDecompress = true;
 		}
 
-		const buffer = Buffer.from(await body.arrayBuffer());
+		const buffer = Buffer.from(body);
 		res.writeHead(200, headers);
 
 		if (needDecompress) {

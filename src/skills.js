@@ -1,10 +1,10 @@
 import {config, messages, selectedConversation} from "./states.js";
-import {$state, $update, $watch, debugSymbol} from "unconscious";
+import {$state, $update, $watch, debugSymbol, unconscious} from "unconscious";
 import {loadingBlock, prettyError} from "./utils/utils.js";
 
 import "./skills.css";
 import {updateMessageUI} from "./components/MessageList.jsx";
-import {parseJsonPath} from "/common/jsonSchema.js";
+import {compileSchema, jsonPathOp} from "unconscious/common/json-schema-utils.js";
 import {onLoad} from "./plugin.js";
 import {COMMAND_REGISTRY} from "./commands.js";
 import {showToast} from "./components/Toast.js";
@@ -89,74 +89,7 @@ export class ContentPart {
 	}
 }
 
-
-/**
- * 辅助函数：解析路径并操作对象
- * @param {Object} obj
- * @param {string|string[]} path
- * @param {'set' | 'add'| 'append' | 'merge' | 'delete' | 'get'} action
- * @param {any=} value
- * @return {{value: any, undo: any}}
- */
-export const jsonPathOp = (obj, path, action, value) => {
-	const keys = Array.isArray(path) ? path : parseJsonPath(path);
-
-	let current = obj;
-	for (let i = 0; i < keys.length - 1; i++) {
-		if (!current[keys[i]]) {
-			if (action === "delete") return {value: false};
-			if (action === "get") return {};
-
-			current[keys[i]] = {};
-		}
-		current = current[keys[i]];
-	}
-	const lastKey = keys[keys.length - 1];
-
-	let container = current[lastKey];
-	let undo = container;
-
-	switch (action) {
-		case 'get': return {value: container};
-		case 'set': container = value; break;
-		case 'add': container = Number(container || 0) + Number(value); break;
-		case 'append':
-			if (!Array.isArray(container)) {
-				if (container) throw new Error("值 "+path+" 已存在且不是数组！");
-				container = [];
-			}
-
-			undo = container.length;
-			if (Array.isArray(value)) container.push(...value);
-			else container.push(value);
-		break;
-		case 'merge': container = { ...container, ...value }; break;
-		case 'delete': {
-			if (Array.isArray(current)) {
-				undo = current.splice(parseInt(lastKey), 1);
-				return {
-					undo: {
-						_isArray: true,
-						value: undo
-					},
-					value: undo
-				}
-			} else {
-				undo = current[lastKey];
-				return {
-					undo,
-					value: delete current[lastKey]
-				};
-			}
-		}
-	}
-
-	current[lastKey] = container;
-	return {
-		undo,
-		value: container
-	};
-};
+export {jsonPathOp} from "unconscious/common/json-schema-utils.js";
 
 
 export const set_title_body = {
@@ -295,9 +228,9 @@ toolScriptRegistry["use"] = {
  *
  * @param {{allowedTools: Set<string>, activatedModules: Set<string>}} conversation
  * @param {boolean} allowNewSkills
- * @return {[OpenAI.Tool[], string]}
+ * @return {Promise<[OpenAI.Tool[], string]>}
  */
-export function getTools(conversation, allowNewSkills) {
+export const getTools = async (conversation, allowNewSkills) => {
 	const {allowedTools, activatedModules} = conversation;
 
 	// 隐藏工具必须通过系统提示开启
@@ -314,8 +247,11 @@ export function getTools(conversation, allowNewSkills) {
 			usableDefTools = usableDefTools.filter(tool => !activatedModules.has(tool.function.name));
 		}
 		for (const name of activatedModules) {
-			const prompt = optionalTools[name]?.systemPrompt;
-			if (prompt) systemPrompt.push(prompt);
+			let prompt = optionalTools[name]?.systemPrompt;
+			if (prompt) {
+				if (typeof prompt === "function") prompt = await prompt();
+				systemPrompt.push(prompt);
+			}
 		}
 	}
 
@@ -349,31 +285,29 @@ export function getTools(conversation, allowNewSkills) {
 		for (const name of allowedTools) tools_.push(tools[name]);
 	}
 	return [tools_, systemPrompt.join("\n\n")];
-}
+};
 
-function convertToCamelCase(str) {
-	return str.replace(/-([a-z])/g, (match, letter) => letter.toUpperCase());
-}
+const convertToCamelCase = str => str.replace(/-([a-z])/g, (match, letter) => letter.toUpperCase());
 
 /**
  *
  * @param {string} content
  * @return {[{}, string]}
  */
-export function parseSkillMetadata(content) {
+export const parseSkillMetadata = content => {
 	const metadata = {};
 
 	if (!content.startsWith("---\n")) return [metadata, content];
 	const end = content.indexOf("\n---", 3);
 	if (end < 0) return [metadata, content];
 
-	const body = content.substring(end + 4).trim();
+	const body = content.slice(end + 4).trim();
 
-	content.substring(4, end).trim().split("\n")
+	content.slice(4, end).trim().split("\n")
 		.filter(v => v)
 		.map(v => {
 			const index = v.indexOf(':');
-			return [v.substring(0, index).trim(), v.substring(index + 1).trim()];
+			return [v.slice(0, index).trim(), v.slice(index + 1).trim()];
 		})
 		.forEach(([k, v]) => {
 			k = convertToCamelCase(k);
@@ -382,7 +316,7 @@ export function parseSkillMetadata(content) {
 	});
 
 	return [metadata, body];
-}
+};
 
 const NO_PARAMETERS = {
 	"type": "object",
@@ -393,7 +327,7 @@ const NO_PARAMETERS = {
  *
  * @param {string} text
  */
-export function registerSkill(text) {
+export const registerSkill = text => {
 	const [skill, content] = parseSkillMetadata(text);
 	if (!skill) throw new Error("SKILL.md format error");
 
@@ -418,13 +352,13 @@ export function registerSkill(text) {
 	toolScriptRegistry[skill.name] = {
 		script() {return content.trim();}
 	};
-}
+};
 
 /**
  * @param {AiChat.FunctionTool} tool
  * @return {OpenAI.Tool}
  */
-function registerTool(tool) {
+const registerTool = tool => {
 	const {name, description, parameters = NO_PARAMETERS, ...rest} = tool;
 	if (!rest.script) throw new Error("Missing script for tool " + name);
 
@@ -433,12 +367,15 @@ function registerTool(tool) {
 		throw new Error("同名工具已存在？");
 	}
 
+	parameters.additionalProperties = false;
+	compileSchema(parameters, true);
 	toolScriptRegistry[name] = rest;
+	rest.parameters = parameters;
 	return {
 		type: "function",
 		function: {name, description, parameters}
 	};
-}
+};
 
 /**
  * 注册按需启用的工具
@@ -451,7 +388,7 @@ function registerTool(tool) {
  *     systemPrompt: string
  * }>} extra
  */
-export function registerTools(name, description, toolDefs, {onActivated, hidden, systemPrompt} = {}) {
+export const registerTools = (name, description, toolDefs, {onActivated, hidden, systemPrompt} = {}) => {
 	const toolNames = [];
 	for (const toolDef of toolDefs) {
 		const tool = registerTool(toolDef);
@@ -466,22 +403,20 @@ export function registerTools(name, description, toolDefs, {onActivated, hidden,
 		hidden,
 		systemPrompt
 	};
-}
+};
 
 /**
  * 注册默认启用的工具
  * @param {AiChat.FunctionTool[]} tools
  */
-export function registerDefaultTools(tools) {
+export const registerDefaultTools = tools => {
 	for (const tool of tools) {
 		defaultTools.push(registerTool(tool));
 	}
-}
+};
 
 const conversationChangedCallbacks = [];
-export function onConversationChanged(callback) {
-	conversationChangedCallbacks.push(callback);
-}
+export const onConversationChanged = callback => conversationChangedCallbacks.push(callback);
 
 let lastId;
 $watch(selectedConversation, () => {
@@ -490,9 +425,11 @@ $watch(selectedConversation, () => {
 	if (selectedConversation.ready) {
 		if (changed) {
 			lastId = selectedConversation.id;
-			runAllTools(selectedConversation.value, messages.value, false);
+			const conv = unconscious(selectedConversation);
+			const msg = unconscious(messages);
+			runAllTools(conv, msg, false);
 			for (const cb of conversationChangedCallbacks) {
-				cb(selectedConversation.value, messages.value);
+				cb(conv, msg);
 			}
 		}
 	} else {
@@ -506,7 +443,7 @@ $watch(selectedConversation, () => {
  * @param {AiChat.AssistantMessage[]} messages
  * @param {boolean} isImporting
  */
-export function runAllTools(conversation, messages, isImporting) {
+export const runAllTools = (conversation, messages, isImporting) => {
 	for (const {tool_calls, tool_responses} of messages) {
 		if (tool_calls)
 		for (let i = 0; i < tool_calls.length; i++) {
@@ -525,91 +462,90 @@ export function runAllTools(conversation, messages, isImporting) {
 			}
 		}
 	}
-}
+};
 
 /**
  *
  * @param {AiChat.AssistantMessage} response
- * @param {boolean|number=false} forceRerun
+ * @param {AiChat.Conversation} globalStorage
+ * @param {true|number|null=null} forceRerun
  * @param {boolean=} allowUnsafe
  * @return {Promise<boolean>}
  */
-export async function runTools(response, forceRerun, allowUnsafe) {
-	const tool_responses = response.tool_responses;
+export const runTools = async ({tool_calls, tool_responses}, globalStorage, forceRerun, allowUnsafe) => {
 	let autoNext = true;
-	const globalStorage = selectedConversation.value;
 
-	for (let i = 0; i < response.tool_calls.length; i++) {
+	const callTool = async i => {
+		const tc = tool_calls[i];
 		let msg = tool_responses[i];
-		const tc = response.tool_calls[i];
+		let {name} = tc.function;
 
 		if (msg?.success != null) {
-			if (forceRerun !== i) continue;
-			toolScriptRegistry[msg[TOOL_NAME]].undo?.(msg, globalStorage);
+			if (forceRerun !== i) return;
+			toolScriptRegistry[name].undo?.(msg, globalStorage);
 		}
 		msg = tool_responses[i] = {};
 
-		if (tc.type === "function") {
-			let {name} = tc.function;
-			msg[TOOL_NAME] = name;
-			msg.time = Date.now();
+		msg[TOOL_NAME] = name;
+		msg.time = Date.now();
 
-			try {
-				const parameters = JSON.parse(tc.function.arguments);
+		try {
+			const parameters = JSON.parse(tc.function.arguments);
 
-				const fn = toolScriptRegistry[name];
-				let interactive = fn.interactive;
-				if (interactive) {
-					/*if (typeof interactive === "function") {
-						interactive = interactive(parameters);
-					}*/
-					if (interactive === "secure") {
-						if (!config.permitAllTools && !selectedConversation.grantedTools?.has(name)) {
-							autoNext = false;
-							if (forceRerun === true || (forceRerun === i && !allowUnsafe)) {
-								msg.success = false;
-								msg.content = "User doesn't permit this call";
-								continue;
-							}
-
-							if (forceRerun !== i) {
-								delete msg.time;
-								continue;
-							}
-						}
-					} else if (interactive) {
+			const fn = toolScriptRegistry[name];
+			let interactive = fn.interactive;
+			if (interactive) {
+				/*if (typeof interactive === "function") {
+					interactive = interactive(parameters);
+				}*/
+				if (interactive === "secure") {
+					if (!config.permitAllTools && !selectedConversation.grantedTools?.has(name)) {
 						autoNext = false;
+						if (forceRerun === true || (forceRerun === i && !allowUnsafe)) {
+							msg.success = false;
+							msg.content = "User doesn't permit this call";
+							return;
+						}
+
+						if (forceRerun !== i) {
+							delete msg.time;
+							return;
+						}
 					}
 				}
-
-				let result = fn.script(parameters, msg, globalStorage);
-				if (result instanceof Promise) {
-					$update(updateMessageUI);
-					result = await result;
-				}
-				if (typeof result !== "string") result = result instanceof ContentPart ? result.content : JSON.stringify(result);
-				if (interactive !== 'uionly') {
-					msg.success = true;
-					msg.content = result || "";
-				}
-			} catch (e) {
-				console.error(e);
-				msg.success = false;
-				msg.content = prettyError(e);
 				autoNext = false;
 			}
-			msg.time = Date.now();
+
+			let result = fn.script(parameters, msg, globalStorage);
+			if (result instanceof Promise) {
+				$update(updateMessageUI);
+				result = await result;
+			}
+			if (typeof result !== "string") result = result instanceof ContentPart ? result.content : JSON.stringify(result);
+			if (interactive !== 'uionly') {
+				msg.success = true;
+				msg.content = result || "";
+			}
+		} catch (e) {
+			console.error(e);
+			msg.success = false;
+			msg.content = prettyError(e);
+			autoNext = false;
 		}
-	}
+		msg.time = Date.now();
+	};
+
+	if (typeof forceRerun === "number") await callTool(forceRerun);
+	else for (let i = 0; i < tool_calls.length; i++) await callTool(i);
 
 	return autoNext;
-}
+};
 
 /**
  *
  * @param {string} system_prompt
  */
-export function setSystemPrompt(system_prompt) {
+export const setSystemPrompt = system_prompt => {
 	if (system_prompt) {
 		if (messages[0].role === "system") {
 			messages[0].content = system_prompt;
@@ -623,4 +559,4 @@ export function setSystemPrompt(system_prompt) {
 	} else if (messages[0].role === "system") {
 		messages.shift();
 	}
-}
+};

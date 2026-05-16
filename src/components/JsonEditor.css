@@ -14,14 +14,18 @@
         padding: var(--padding);
         font-size: var(--font-size);
         line-height: var(--line-height);
-        font-family: monospace;
-        /*white-space: pre;*/
+        white-space: pre-wrap;
+        word-break: break-word;
         overflow: auto;
         border: none;
         outline: none;
     }
 
-    & > textarea {
+    & textarea, & code {
+        font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    }
+
+    & textarea {
         background: transparent;
         color: transparent; /* 文字透明 */
         caret-color: white; /* 光标可见 */

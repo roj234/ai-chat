@@ -15,10 +15,10 @@ if (DB_MODE !== "local") {
 				if (!config_) throw "";
 				config_.db_server = db_server;
 				config.value = config_;
-				showToast("成功从新服务器拉取配置", 'ok');
+				showToast("成功拉取配置", 'ok');
 			}).catch(() => {
 				config.value = old;
-				showToast("未能从新服务器拉取配置\n可能之前未保存过配置\n正在使用切换服务器前的配置", 'error');
+				showToast("未能拉取配置\n可能之前未保存过\n正在使用切换前的配置", 'error');
 			}).finally(Shared.SettingUI.sync);
 		}
 

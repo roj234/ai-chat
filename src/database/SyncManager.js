@@ -1,100 +1,169 @@
-import {beginConversation, conversations, selectedConversation} from "../states.js";
-import {decodeObjects} from "../utils/marshal.js";
+import {beginConversation, conversations, messages, runningConversations, selectedConversation} from "../states.js";
+import {decodeObjects, serializeJSON} from "../utils/marshal.js";
 import {showToast} from "../components/Toast.js";
-import {$watch, unconscious} from "unconscious";
-import SimpleModal from "../components/SimpleModal.jsx";
+import {$computed, $update, unconscious} from "unconscious";
 import {onLoad} from "../plugin.js";
-import {serializeJSON} from "./db-remote.js";
+import {LOCKED, updateConversationListUI} from "../components/ConversationList.jsx";
 
-let closeToast;
+import {
+	SYNC_CONFLICT,
+	SYNC_CONVERSATION,
+	SYNC_INIT,
+	SYNC_LOCKED,
+	SYNC_MESSAGE,
+	SYNC_READERS,
+	SYNC_RELEASED,
+	SYNC_RESOLVE,
+	SYNC_UNLOCKED
+} from "/backend/sync_const.js";
 
-/** @type {number} */
-let forceUnlockId;
+export {SYNC_MESSAGE, SYNC_CONVERSATION};
+
+let body;
+
 /** @type {function} */
-let conversationMessage;
+let readonlyToast;
 
 /** @type {WebSocket} */
 let ws;
 
 let pendingEvents = [];
 
-async function on(type, data) {
+/**
+ *
+ * @param {number} type
+ * @param {any} data
+ * @return {Promise<void>}
+ */
+const on = async (type, data) => {
+	if (type === SYNC_MESSAGE && !readerCount.get(selectedConversation.id)) return;
+
 	if (ws?.readyState === WebSocket.OPEN) {
-		ws.send(await serializeJSON({type, data}));
+		ws.send("["+type+","+(typeof data === "string" ? data : await serializeJSON(data))+"]");
 	} else {
 		pendingEvents.push([type, data]);
 	}
-}
+};
+
+const setWritable = (id) => {
+	if (readonlyToast) readonlyToast();
+	readonlyToast = null;
+	body.remove("_readonly");
+	setCurrentLocked(0, id);
+};
+
+const setReadonly = (id) => {
+	readonlyToast = showToast(<>只读模式<br/>
+		该对话已被其它客户端打开<br/>
+		<button className={"btn danger"} onClick={() => {
+			on(SYNC_RESOLVE, id);
+			setWritable(id);
+		}}>强制解锁
+		</button>
+	</>, 'error', 0);
+	body.add("_readonly");
+	setCurrentLocked(1, id);
+};
+
+const findConversation = id => {
+	const convList = unconscious(conversations);
+	const index = convList.findIndex(item => item.id === id);
+	return convList[index];
+};
+
+const setCurrentLocked = (locked, id) => {
+	const id1 = selectedConversation.id;
+	if (id1 == null || (id != null && id1 !== id)) return;
+	selectedConversation[LOCKED] = locked;
+	$update(updateConversationListUI);
+};
 
 export function initSync(address) {
 	ws = new WebSocket(address);
 	ws.onopen = () => {
-		for (const [type, data] of pendingEvents) {
-			on(type, data);
-		}
+		for (const [type, data] of pendingEvents) on(type, data);
 		pendingEvents = [];
 	};
 	ws.onclose = () => {
-		closeToast = showToast(<>实时同步服务已断开 <button className={"btn primary"} onClick={({target}) => {
-			initSync(address);
-			closeToast();
-		}}>重连</button></>, "error", 0);
-	}
+		showToast(<>同步服务已断开 <button className={"btn primary"} onClick={() => {
+			location.reload();
+		}}>刷新</button></>, "error", 0);
+	};
 	ws.onmessage = async (event) => {
-		let {type, data} = JSON.parse(event.data);
+		let [type, data] = JSON.parse(event.data);
 		data = await decodeObjects(data);
 		switch (type) {
-			case "init":
-				showToast("实时同步服务已连接, 共 "+data+" 个客户端", "ok");
+			// 状态更新
+			case SYNC_INIT: {
+				const [clients, locked] = data;
+				showToast("同步服务已连接, 共 "+clients+" 个客户端", "ok");
+				if (locked.length) {
+					for (const item of locked) {
+						const conv = findConversation(item);
+						if (conv) conv[LOCKED] = 1;
+					}
+					$update(updateConversationListUI);
+				}
+			}
 			break;
-			case "conflict":
-				SimpleModal({
-					title: "其它客户端已经锁定了该对话",
-					message: "点击确认关闭其它客户端的对话（可能导致那边未保存的修改丢失）",
-					accent: "danger",
-					confirmMessage: "强制解锁",
-					onConfirm() {
-						on("resolve", data);
-					},
-					onCancel() {
+			case SYNC_READERS: {
+				const [id, count] = data;
+				readerCount.set(id, count > 0);
+			}
+			break;
+			case SYNC_LOCKED:
+			case SYNC_UNLOCKED: {
+				const conv = findConversation(data);
+				if (conv) {
+					conv[LOCKED] = type === SYNC_LOCKED;
+					$update(updateConversationListUI);
+				}
+			}
+			break;
+			// 独占锁和冲突处理
+			case SYNC_CONFLICT: {
+				setReadonly(data);
+			}
+			break;
+			case SYNC_RESOLVE: {
+				if (selectedConversation.id === data) {
+					setReadonly(data);
+				}
+			}
+			break;
+			case SYNC_RELEASED: {
+				if (data === selectedConversation.id) {
+					selectedConversation.ready = false;
+					setWritable(data);
+				}
+			}
+			break;
+			// 消息状态更新
+			case SYNC_MESSAGE: {
+				const {owner, ...message} = data;
+				const isUpdate = Object.keys(message).length > 1;
+
+				const index = unconscious(messages).findIndex(item => item.id === message.id);
+				if (index >= 0) {
+					if (isUpdate) messages[index] = message;
+					else messages.splice(index, 1);
+				} else if (isUpdate && selectedConversation.id === owner) {
+					messages.push(message);
+				}
+				break;
+			}
+			// 对话状态更新
+			case SYNC_CONVERSATION: {
+				const isUpdate = Object.keys(data).length > 1;
+
+				const index = conversations.findIndex(item => item.id === data.id);
+				if (index >= 0) data = Object.assign(conversations.splice(index, 1)[0], data);
+				if (isUpdate) conversations.unshift(data);
+				else {
+					if (data.id === selectedConversation.id) {
+						showToast("当前对话已被其它客户端删除", 'error', 0);
 						beginConversation();
 					}
-				});
-			break;
-			case "unlock": {
-				if (selectedConversation.id === data) {
-					forceUnlockId = data;
-					prevObj = null;
-					conversationMessage = showToast("当前对话已被其它客户端锁定\n您可以尝试重新获取所有权\n或等待对方释放锁", 'error', 0);
-					beginConversation();
-				}
-			}
-			break;
-			case "released": {
-				if (forceUnlockId === data.id) {
-					forceUnlockId = -1;
-					conversationMessage();
-					conversationMessage = null;
-
-					const convList = unconscious(conversations);
-					const index = convList.findIndex(item => item.id === data.id);
-					const myConv = convList[index];
-					if (Object.keys(data).length > 1) {
-						for (const key of Object.keys(myConv)) delete myConv[key];
-						Object.assign(myConv, data);
-					}
-					myConv.ready = false;
-					selectedConversation.value = myConv;
-				}
-			}
-			break;
-			case "update": {
-				const index = conversations.findIndex(item => item.id === data.id);
-				if (index >= 0) conversations.splice(index, 1);
-				if (data.conv) conversations.unshift(await decodeObjects(data.conv));
-				else if (selectedConversation.id === data.id) {
-					showToast("当前对话已被其它客户端删除", 'error', 0);
-					beginConversation();
 				}
 			}
 			break;
@@ -104,20 +173,50 @@ export function initSync(address) {
 	return { on }
 }
 
-let prevObj;
+const readerCount = new Map;
+/** @type {Map<number, number>} */
+const locks = new Map;
+const lock = (id) => {
+	let lockCount = (locks.get(id) || 0);
+	if (!lockCount) on(SYNC_LOCKED, id);
+	locks.set(id, lockCount + 1);
+};
+const unlock = (id) => {
+	let lockCount = locks.get(id);
+	if (!lockCount) return;
+	if (lockCount === 1) {
+		on(SYNC_UNLOCKED, id);
+		locks.delete(id);
+		readerCount.delete(id);
+	} else {
+		locks.set(id, lockCount - 1);
+	}
+}
 
-onLoad(() => {
-	/*$watch(updateConversationListUI, () => {
-		on("lock_force", [...runningConversations.keys()]);
-	}, false);*/
+onLoad((app) => {
+	body = app.classList;
+	const originalDelete = runningConversations.delete.bind(runningConversations);
+	const originalSet = runningConversations.set.bind(runningConversations);
 
-	$watch(selectedConversation, () => {
-		const conv = selectedConversation.value;
-		if (conv) {
-			prevObj = conv;
-			if (!conv.ready) on("lock", prevObj.id);
-		} else if (prevObj != null) {
-			on("unlock", prevObj);
+	runningConversations.delete = (id) => {
+		unlock(id);
+		return originalDelete(id);
+	}
+	runningConversations.set = (id, value) => {
+		if (!runningConversations.has(id)) lock(id);
+		return originalSet(id, value);
+	}
+
+	$computed((oldValue) => {
+		const conv = unconscious(selectedConversation);
+		const convId = conv?.id;
+		if (oldValue !== convId) {
+			if (oldValue) {
+				setWritable();
+				unlock(oldValue);
+			}
+			if (conv) lock(convId);
 		}
+		return convId;
 	});
 });

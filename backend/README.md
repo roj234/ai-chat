@@ -1,5 +1,4 @@
 
-## AIGC警告
+## 后端以 BSD-3 开源，后端指 backend 文件夹中的所有代码
 
-服务端的代码80%+是 DeepSeek V4 Pro 和 Gemini 3 Flash 写的  
-(当然人改过)
+你可以先看看 config.example.js 

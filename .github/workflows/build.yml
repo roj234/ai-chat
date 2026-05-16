@@ -1,0 +1,85 @@
+name: Build
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (例如 v1.0.0)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write # 必须赋予写入权限才能创建 Release
+
+jobs:
+  build:
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[pre]')
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          path: packages/ai-chat
+
+      - name: Clone unconscious
+        run: git clone https://github.com/roj234/unconscious.git packages/unconscious
+
+      - name: Clone streaming-markdown
+        run: git clone https://github.com/roj234/streaming-markdown.git packages/streaming-markdown
+
+      - name: Setup monorepo root
+        run: |
+          echo '{ "private": true, "workspaces": ["packages/*"] }' > package.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build
+        working-directory: packages/ai-chat
+
+      - name: Prepare Release Folder
+        run: |
+          cd packages/ai-chat
+          mkdir ai-chat
+          
+          cd dist
+          zip -r ../ai-chat/dist.zip . -x "server.js"
+          cd ..
+          
+          cp dist/server.js ai-chat
+          cp backend/config.example.js ai-chat
+          cp backend/package.json ai-chat
+          cp misc/launch.bat ai-chat
+          cp misc/launch.sh ai-chat
+          zip -r ./full_release.zip ./ai-chat
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release
+          path: packages/ai-chat/ai-chat/
+
+      # --- 自动 Release 步骤 ---
+      - name: Create Release
+        # 触发条件：
+        # 1. 手动触发 (workflow_dispatch)
+        # 2. 或者 Commit Message 包含 "[release]" 关键字
+        if: |
+          github.event_name == 'workflow_dispatch' || 
+          contains(github.event.head_commit.message, '[release]')
+        uses: softprops/action-gh-release@v2
+        with:
+          # 如果是手动触发且输入了 tag，则使用输入的 tag；否则使用当前时间戳
+          tag_name: ${{ github.event.inputs.tag_name || format('v{0}', github.run_number) }}
+          name: ${{ github.event.inputs.tag_name || format('b{0}', github.run_number) }}
+          body: |
+            ${{ github.event.head_commit.message }}
+          files: packages/ai-chat/full_release.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

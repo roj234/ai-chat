@@ -6,11 +6,11 @@ import {WebSocketServer} from "ws";
  * 创建 Vite 插件，将匹配的请求转发给统一的 Router 处理。
  * @returns {import('vite').Plugin}
  */
-export function serverDevPlugin({prefix = '/aichat'} = {}) {
+export function serverDevPlugin({prefix = '/api'} = {}) {
 	return {
 		name: 'server-dev',
-		configureServer(server) {
-			const router = initServer("data");
+		async configureServer(server) {
+			const router = await initServer("data");
 
 			const wss = new WebSocketServer({ noServer: true });
 			createSyncManager(wss);
@@ -19,7 +19,7 @@ export function serverDevPlugin({prefix = '/aichat'} = {}) {
 			server.httpServer.on('upgrade', (request, socket, head) => {
 				const url = new URL(request.url, `http://${request.headers.host}`);
 
-				if (url.pathname === "/aichat/v2/sync") {
+				if (url.pathname === "/api/sync") {
 					wss.handleUpgrade(request, socket, head, (ws) => {
 						wss.emit('connection', ws, request);
 					});
@@ -30,7 +30,7 @@ export function serverDevPlugin({prefix = '/aichat'} = {}) {
 				const originalUrl = req.url;
 				if (!originalUrl.startsWith(prefix)) return next();
 
-				req.url = "/aichat"+originalUrl.substring(prefix.length);
+				req.url = "/api"+originalUrl.slice(prefix.length);
 				try {
 					await router.handle(req, res);
 				} finally {

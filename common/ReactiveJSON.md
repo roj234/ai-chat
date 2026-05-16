@@ -1,131 +1,223 @@
-
 # 教程：构建响应式流式 JSON 界面
 
 当你使用 LLM 生成结构化 JSON 时，通常需要等待整个字符串接收完毕才能解析。**ReactiveJSON** 允许你在 JSON 还在传输时，就实时地将已解析的部分渲染到页面上。
 
-本教程将教你如何实现类似 `galgame_example.js` 的效果。
+本教程将基于 `StoryEngine.js` 的实现，教你如何构建一个支持流式渲染的 AI 互动界面。
 
 ## 1. 核心概念
 
-*   **`createReactiveJSON()`**: 创建一个特殊的响应式代理对象。当你往里面灌入不完整的 JSON 字符串时，它会自动解析并更新对应的属性。
-*   **`createReactiveMarkdown(container, value)`**: 专门用于处理 JSON 字段中的 Markdown 文本，实现流式打字机效果。
-*   **`$foreach(list, callback)`**: 监听数组变化，实时增量渲染列表项，其功能相当于响应式的 list.map(callback) 。
+*   **`$foreach(list, callback)`**  
+    响应式列表渲染。当数组新增元素时，自动增量挂载新 DOM，而不是重新渲染整个列表。  
+    作用类似 `list.map(callback)`，但性能更好且不会打断已有动画。
+
+*   **`$once(source, callback)`**  
+    仅当数据 **第一次变得可用**（如从 `undefined` 变为非空）时挂载一个元素，之后不再更新（元素内容将会更新）。  
+    非常适合渲染“手动思维链”这类可能不存在的内容。
+
+*   **`registerSchemaMessageRole(id, name, renderer, composer?, schema?)`**  
+    注册一个自定义消息类型的渲染器。`id` 需与 `jsonPrompt` 中使用的类型 ID 一致（如 `'my/storyEngine'`）。  
+    它替代了旧版教程中的 `registerSchemaCodeBlockRenderer`。
+
+*   **`createReactiveMarkdown(container, value)`**  
+    专门用于处理 JSON 字段中的 Markdown 文本，实现流式打字机效果。
+
+*   **`unconscious(value)`**  
+    获取响应式属性的非响应式原始数据。
 
 ## 2. 准备工作
 
-首先，你需要定义你的 **JSON Schema**。这是 LLM 遵循的规范，也是你 UI 结构的蓝图。
+定义你的 **JSON Schema**，这既是 LLM 输出的约束，也是 UI 结构的蓝图。
 
 ```javascript
 const schema = {
     type: "object",
     properties: {
+        reasoning: { type: "string" },            // 可选：思考过程
         character: { type: "string" },
         dialogue: { type: "string" },
-        inventory: { 
-            type: "array", 
-            items: { type: "string" } 
+        inventory: {
+            type: "array",
+            items: { type: "string" }
+        },
+        suggested_choices: {                      // 可选交互选项
+            type: "array",
+            items: { type: "string" }
         }
-    }
+    },
+    required: ["character", "dialogue"]
 };
 ```
 
 ## 3. 实现步骤
 
-### 第一步：调用模型
+### 第一步：调用模型 （WIP，未来可能改变）
+
+使用 `jsonPrompt` 发起请求，指定类型 ID 和 Schema 约束。
 
 ```javascript
-await jsonPrompt(
-	[], // 在这里填入OpenAI兼容消息
-    {
-		// 必填项目，galgame的名字可以随便填，好像没人检查这个
-        // 请注意：务必在OpenAI兼容消息数组中告诉模型要怎么写JSON，这里只是格式约束，模型看不到它！
-        // 已经启用严格约束，模型无法生成错误的JSON （除非API不支持）
-        ...schemaWrapper("galgame", schema),
-        
-        // 你可以填写其它参数，例如 temperature 等
-        reasoning: { enabled: false },
-        max_tokens: 8000,
-    },
-    'my_plugin/custom_type' // 这里要和下面 registerReactiveCodeBlockRenderer 中的相同
+import { jsonPrompt, schemaWrapper } from "../core.js";
+import { $update, unconscious } from "unconscious";
+
+const ID = 'my/storyEngine';
+let messages = []; // 实际项目中建议使用响应式状态（如从 `unconscious` 创建的数组）
+
+async function sendAction(messages_, userInput) {
+	// 构造用户提示
+	const time = Date.now();
+	messages_.push({
+		id: -1, // 不存入数据库
+		role: "user",
+		time,
+		content: schemaToPrompt(schema, config.jsonSupport) + "提示词，当然，你也可以不用schemaToPrompt函数，手动向AI描述schema\n" + userInput
+	});
+
+	const originalPrompt = {
+		role: "user",
+		time,
+		content: userInput
+	};
+
+	let assistantResponse;
+	try {
+		// 调用模型
+		assistantResponse = await jsonPrompt(messages_, {
+			...schemaWrapper(schema_),
+            // 自定义请求体
+			reasoning: {enabled: enableThink},
+			max_tokens: 8000,
+		}, ID);
+	} catch (e) {
+		console.error(e);
+		// 出错了，恢复原始数据
+		messages_[messages_.length - 2] = originalPrompt;
+		return;
+	}
+
+	// 将 AI 回复替换消息数组，使用splice是为了兼容对话分支
+	messages_.splice(messages_.length - 2, 2,
+		originalPrompt,
+		{
+			...assistantResponse,
+			role: ID,
+			content: JSON.parse(assistantResponse.content)
+		}
+	);
+}
+```
+
+### 第二步：注册渲染器
+
+用 `registerSchemaMessageRole` 挂载你的 UI 渲染函数。
+
+```javascript
+
+const composer = ({content}, output, input, index, length) => {
+	// 进行更复杂的判断决定序列化给 LLM 的是哪些文字
+	output.push({
+		role: "assistant",
+		content: JSON.stringify(content)
+	});
+};
+
+registerSchemaMessageRole(
+    ID,            // 必须与 jsonPrompt 的参数一致
+    '故事渲染器',   // 显示名称
+    renderStory,   // 渲染函数 (val) => JSX.Element[]
+    composer,      // 消息组合函数，用于决定哪些数据要发回LLM
+    schema         // 可选的 schema （可以和AI生成的不同，例如少些 required，或包含复杂的 allOf ），用于编辑时的校验
 );
 ```
 
-### 第二步：构建 DOM 结构
+### 第三步：构建响应式 UI
 
-利用 `unconscious` 提供的响应式能力，将 `data` 绑定到 HTML 元素上。
+渲染函数接收的是一个 **已解析的响应式代理对象**（即 `content` 字段）。  
+利用 `$foreach`、`$once` 和 lambda 表达式等实现增量渲染。
 
 ```javascript
-const renderUI = (data) => (
-    <div class="npc-card">
-        {/* 1. 简单文本绑定 */}
-        <h2 class="name">
-            {() => unconscious(data.character) || "加载中..."}
-        </h2>
+function renderStory(val) {
+    return [
+        // 基础文本：用箭头函数避免直接读取代理
+        <header>
+            👤 {() => unconscious(val.character) || "加载中..."}
+        </header>,
 
-        {/* 2. 流式 Markdown 绑定 (用于长文本) */}
-        {createReactiveMarkdown(<div class="content" />, data.dialogue)}
+        // 仅显示一次的“思考过程”
+        $once(val.reasoning, () => (
+            <div class="reasoning">{val.reasoning}</div>
+        )),
 
-        {/* 3. 列表循环绑定 */}
+        // 流式 Markdown（自动打字机效果）
+        {createReactiveMarkdown(<div class="dialogue"/>, val.dialogue)},
+
+        // 响应式列表：每新增一个物品就挂载一个节点
         <div class="items">
-            {$foreach(data.inventory, (item) => (
+            {$foreach(val.inventory, (item) => (
                 <span class="tag">{item}</span>
             ))}
-        </div>
-    </div>
-);
-```
+        </div>,
 
-### 第三步：接入流式数据
-
-你需要将 LLM 返回的增量文本实时传给 `update` 函数。如果你在编写 Markdown 代码块渲染器，通常如下操作：
-
-```javascript
-// 请注意 my_custom_type 必须和 jsonPrompt 中填写的相同，并且全局唯一
-// 另外ID中不能出现英文冒号 ':' 你可以使用斜杠作为命名空间分隔符
-registerSchemaCodeBlockRenderer('my_plugin/custom_type', renderUI);
+        // 条件渲染的按钮，仅在有选项时挂载（避免无故出现 margin，padding，background 等）
+        $once(val.suggested_choices, () => (
+            <div class="choices" onClick.delegate={"button"}={({delegateTarget}) => {
+                sendAction(delegateTarget.textContent);
+            }}>
+                {$foreach(val.suggested_choices, (choice) => (
+                    <button>{choice}</button>
+                ))}
+            </div>
+        ))
+    ];
+}
 ```
 
 ## 4. 关键技巧与陷阱
 
-### A. 访问原始值
-在 JS 表达式或属性判断中，使用 `unconscious(proxy)` 来获取其当前解析到的原始值。
+### A. 用 `unconscious` 获取原始值
+渲染器中拿到的 `val` 是响应式代理，不能直接用于条件判断，必须用 `unconscious(val)` 取出当前值。
+
 ```javascript
-// 错误写法：if (data.location) ... (proxy对象永远为真)
-// 正确写法：
-<div style={() => unconscious(data.location) ? "" : "display:none"}>
+// ❌ 错误：代理对象始终为真，元素永远不会隐藏
+<div style={val.location ? "" : "display:none"}>
+
+// ✅ 正确
+<div style={() => unconscious(val.location) ? "" : "display:none"}>
 ```
 
 ### B. 处理特殊的 `value` 属性
-在流式 JSON 中，如果你的 JSON key 恰好叫 `value`，由于它是响应式内部关键字，请在 UI 绑定时改用 `$value` 访问。
+如果你的 Schema 中某个字段恰好叫 `value`（响应式内部关键字），渲染时需通过 `unconscious(item).value` 间接访问。
+
 ```javascript
 // JSON: { "name": "HP", "value": 100 }
-<span>{item.name}: {item.$value}</span> 
+<span>{item.name}: {() => unconscious(item).value}</span>
 ```
 
-### C. Markdown 的流式渲染
-普通的文本绑定如 `data.text` 会在每次字符更新时重绘整个容器。使用 `createReactiveMarkdown` 可以实现只追加新字符，性能更好且不会中断 CSS 动画。
+### C. `$foreach` 与 `$once` 的作用边界
+- **`$foreach`** 适用于数组，会持续监听新增与删除，适合不确定长度的列表。
+- **`$once`** 适用于只显示一次的数据（如推理过程、生成成功标志），一旦挂载就不再销毁或更新。
+
+如果某个字段是可变的且需要实时反映变化，直接用 `{val.text}` 绑定即可。
 
 ### D. 样式与动画
-由于 DOM 节点是增量产生的，你可以利用 CSS 动画为新产生的元素添加淡入效果：
+由于 DOM 节点是增量产生的，你可以利用 CSS 为新元素添加淡入效果：
+
 ```css
-/* gal.css */
-.gal-card {
-    animation: fadeIn 0.5s ease-out;
+.card {
+    animation: fadeIn 0.4s ease-out;
 }
 @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
+    from { opacity: 0; transform: translateY(5px); }
     to { opacity: 1; transform: translateY(0); }
 }
 ```
 
 ## 5. 完整代码结构参考
 
-你可以参考 `galgame_example.js` 的模式：
-1. **定义 Schema**: 确保 LLM 输出可预测。
-2. **注册渲染器**: 挂载到 Markdown 解析流程。
-3. **数据占位**: 在数据未到达时显示“--”或加载中。
-4. **状态隔离**: 使用 `debugSymbol` 或私有属性将 `rjson` 实例绑定在当前 DOM 节点上，防止重复渲染。
+你可以参考 `StoryEngine.js` 的组织方式：
 
----
+1. **定义 Schema**：确保 LLM 输出既符合业务需要，又能被 UI 安全渲染。
+2. **注册渲染器**：使用 `registerSchemaMessageRole`，将角色 ID 与 UI 函数绑定。
+3. **调用模型**：`jsonPrompt` + `schemaWrapper` 发起请求，解析结果后 push 到响应式消息数组并 `$update`。
+4. **增量渲染**：用 `$foreach` 处理列表，`$once` 处理一次性内容，`createReactiveMarkdown` 处理长文本。
+5. **交互封闭**：在 `$once` 或 `$foreach` 内部通过事件委托绑定用户操作，触发新一轮的 `sendAction`。
 
-通过这种方式，你可以构建出极其流畅的 AI 交互体验，用户不再需要盯着空白屏幕等待回复结束，或者对着 JSON 语法高亮发呆，而是看着内容像“生长”一样出现在界面上。
+通过这套模式，你就能够构建出那种“文字像生长一样出现在屏幕上”的高沉浸感 AI 应用，而且无需面对 JSON 解析的复杂性或等待整段回复完成。

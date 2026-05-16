@@ -12,11 +12,21 @@ const customCodeRenderer = {};
  * @param {string} type
  * @param {function(code: string, language: string, node: HTMLElement, is_finished: boolean): void} htmlGenerator
  */
-export function registerCodeBlockRenderer(type, htmlGenerator) {
-	customCodeRenderer[type] = htmlGenerator;
-}
+export const registerCodeBlockRenderer = (type, htmlGenerator) => customCodeRenderer[type] = htmlGenerator;
 
 const loadKatex = once(() => import('katex'));
+
+const getInnerHTML = node => {
+	if (node._value) return node._value;
+	if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+	let html = '';
+	for (const child of node.childNodes) {
+		html += child.__value ?? getInnerHTML(child);
+	}
+	return html;
+};
+
+const allowedAttributes = new Set(["class", "style", "href", "width", "height", "align", "start", "checked", "lang"]);
 
 /**
  * @param {HTMLElement} root
@@ -26,9 +36,8 @@ const loadKatex = once(() => import('katex'));
  *     noImage: boolean
  * }>} options
  * @return {import("better-marked").Renderer}
- * @constructor
  */
-export function fmdHTMLRenderer(root, options = {}) {
+export function createMarkdownRenderer(root, options = {}) {
 	/**
 	 * @type {HTMLElement[]}
 	 */
@@ -59,7 +68,7 @@ export function fmdHTMLRenderer(root, options = {}) {
 				case fastmd.STRIKE:        slot = <s />         ;break
 				case fastmd.CODE_INLINE:   slot = <kbd />      ;break
 				case fastmd.RAW_URL:
-				case fastmd.LINK:          slot = <a />         ;break
+				case fastmd.LINK:          slot = <a target="_blank" rel="noopener noreferrer" />         ;break
 				case fastmd.IMAGE:
 					// 并没有写错，因为 noImage 下我不会设置 src 属性
 					slot = options.noImage ? <img referrerPolicy="no-referrer" /> : <div className="safe-image loading">
@@ -116,6 +125,10 @@ export function fmdHTMLRenderer(root, options = {}) {
 				case fastmd.EQUATION_INLINE: slot = <math />; break;
 				case fastmd.HTML_ELEMENT:
 					slot = document.createElement(__element_id);
+					if (__element_id === "a"){
+						slot.target = "_blank";
+						slot.rel = "noopener noreferrer";
+					}
 					break;
 				case fastmd.QUOTE:
 					slot = <q />
@@ -128,7 +141,7 @@ export function fmdHTMLRenderer(root, options = {}) {
 
 			if (undo) {
 				node.remove();
-				return node._value || node.innerHTML;
+				return getInnerHTML(node);
 			}
 
 			if (token_id === fastmd.CODE_FENCE) {
@@ -146,29 +159,35 @@ export function fmdHTMLRenderer(root, options = {}) {
 		add_text(text, parser) {
 			const node = nodes.at(-1);
 			const token = parser.tokens.at(-1);
+
+			const markdownOriginalText = (dollar, displayMode) => {
+				let text = node._value;
+				if (dollar) return displayMode ? `$$\n${text}\n$$` : `$${text}$`;
+				else return displayMode ? `\\[\n${text}\n\\]` : `\\(${text}\\)`;
+			};
+
 			switch (token) {
 				case fastmd.IMAGE:
-					this.set_attr(fastmd.TITLE, text);
+					this.set_attr("title", text);
 					return;
 				case fastmd.EQUATION_BLOCK:
 				case fastmd.EQUATION_INLINE: {
 					node._value = (node._value || "") + text;
 
+					const dollar = parser.eq_dollar;
+					const displayMode = token === fastmd.EQUATION_BLOCK;
+					node.__value = markdownOriginalText(dollar, displayMode);
+
 					if (!node.dataset.processed) {
 						node.dataset.processed = true;
-
-						const dollar = parser.eq_dollar;
-						const displayMode = token === fastmd.EQUATION_BLOCK;
 
 						loadKatex().then((katex) => {
 							const cleanFormula = node._value.replace(/\p{Script=Han}+/gu, '\\text{$&}');
 							node.innerHTML = katex.renderToString(cleanFormula, {throwOnError: false, displayMode});
 						}).catch(e => {
-							let text = node._value;
-							if (dollar) text = displayMode ? `$$\n${text}\n$$` : `$${text}$`;
-							else text = displayMode ? `\\[\n${text}\n\\]` : `\\(${text}\\)`;
+							let text = markdownOriginalText(dollar, displayMode);
 
-							const errorNode = <span className="katex-error" title={"公式渲染失败:\n"+e.message.substring(19)}>{text}</span>;
+							const errorNode = <span className="katex-error" title={"公式渲染失败:\n"+e.message.slice(19)}>{text}</span>;
 							if (displayMode) node.replaceChildren(<br/>, errorNode);
 							else node.replaceChildren(errorNode);
 						}).finally(() => {
@@ -203,10 +222,10 @@ export function fmdHTMLRenderer(root, options = {}) {
 			if (lastChild?.nodeType !== Node.TEXT_NODE) node.appendChild(new Text(text));
 			else lastChild.appendData(text);
 		},
-		set_attr(type, value) {
+		set_attr(name, value) {
 			const node = nodes.at(-1);
 
-			if (type === fastmd.LANG) {
+			if (name === fastmd.LANG) {
 				const owner = node.closest("pre.code-block");
 				let [language, filename] = value.split(":", 2);
 
@@ -216,12 +235,15 @@ export function fmdHTMLRenderer(root, options = {}) {
 				value = language;
 			}
 
-			if (type === fastmd.SRC && !options.noImage) {
+			if (name === fastmd.SRC && !options.noImage) {
 				node.replaceWith(unconscious(<SafeImage src={value} title={node.title} />));
 				return;
 			}
 
-			const name = fastmd.ATTRIBUTE_NAMES[type];
+			if (name === fastmd.HREF && value.toLowerCase().startsWith("javascript:")) return;
+			if (name === "style" && value.includes("url")) return;
+			if (!allowedAttributes.has(name)) return;
+
 			const attr = node.attributes[name];
 			if (!attr) {
 				node.setAttribute(name, value);

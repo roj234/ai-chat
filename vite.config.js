@@ -1,5 +1,5 @@
 // vite.config.js
-import { defineConfig } from 'vite';
+import {defineConfig} from 'vite';
 
 import unconscious from 'unconscious/VitePlugin.mjs';
 import purgecss from 'unconscious/VitePurgeCSS.mjs';
@@ -11,24 +11,38 @@ import {viteFontMinify} from 'unconscious/vite/font-minify.js';
 import packageInfo from "./package.json";
 
 import fs from 'node:fs';
+import path from "node:path";
 
-const VITE_TRICK_CONFIG = "../../backend/config.js";
-const VITE_TRICK_SERVER = "../../backend/server-dev.js";
+
+const VITE_TRICK_CONFIG = path.resolve(__dirname, 'backend/config.js');
+const VITE_TRICK_SERVER = path.resolve(__dirname, 'backend/server-dev.js');
+
+if (!fs.existsSync(VITE_TRICK_CONFIG)) {
+    fs.copyFileSync(path.resolve(__dirname, 'backend/config.example.js'), VITE_TRICK_CONFIG);
+}
+
+const stringHash = s => {
+    let h = 1;
+    for (let i = 0; i < s.length; i++) {
+        h = (31 * h + s.charCodeAt(i)) & 4294967295;
+    }
+    return h;
+};
+
+const isGitHubActions = process.env.GITHUB_ACTIONS === 'true';
 
 //https://cn.vite.dev/
 export default defineConfig(async () => {
-    if (!fs.existsSync("backend/config.js")) {
-        fs.copyFileSync("backend/config.example.js", "backend/config.js");
-    }
+    const serverConfigInfo = await import("file://"+VITE_TRICK_CONFIG);
 
     return {
     define: {
         APP_NAME: JSON.stringify(packageInfo.name),
         APP_VERSION: JSON.stringify(packageInfo.version),
-        DB_SERVER: JSON.stringify(""), // https://nas.lan/aichat/v2/{{user}}
+        DB_SERVER: JSON.stringify(""), // serverConfigInfo.xxx
         DB_MODE: JSON.stringify('mixed'), // local remote mixed
         DEFAULT_LLM_ENDPOINT: JSON.stringify(""),
-        RESUME_TIMEOUT: JSON.stringify((await import(VITE_TRICK_CONFIG)).SSE_RESUME_TIMEOUT),
+        RESUME_TIMEOUT: JSON.stringify(serverConfigInfo.SSE_RESUME_TIMEOUT),
     },
 
     plugins: [
@@ -40,10 +54,13 @@ export default defineConfig(async () => {
                 /^hljs-/,
                 /^role-/,
                 /^btn-/,
+                'closed',
+                'lang',
+                'my/storyEngine'
             ]
         }),
         viteFontMinify(),
-        (await import(VITE_TRICK_SERVER)).serverDevPlugin(),
+        (await import("file://"+VITE_TRICK_SERVER)).serverDevPlugin(),
         {
             name: 'inject-build-time',
             transformIndexHtml(html) {
@@ -76,15 +93,29 @@ export default defineConfig(async () => {
     base: '', // 绝对路径什么的不要啊
     build: {
         modulePreload: { polyfill: false },
+        reportCompressedSize: !isGitHubActions,
         //sourcemap: true,
 
         assetsInlineLimit: 512,
         rollupOptions: {
+            input: {
+                main: 'index.html',
+                logViewer: 'log_viewer.html',
+                jsonEditor: 'json_editor.html',
+                characterViewer: 'character_viewer.html'
+            },
+
             output: {
-                experimentalMinChunkSize: 10240,
-                entryFileNames: `[name].[hash].js`,
-                chunkFileNames: `[name].[hash].js`,
-                assetFileNames: `[name].[hash].[ext]`,
+                // 手动控制 chunk 拆分
+                manualChunks(id) {
+                    if (id.includes('highlight.js/es/languages/')) {
+                        if (id.includes("json")) return;
+
+                        return 'hljs/'+(stringHash(id)&31).toString(36)
+                    }
+                },
+
+                //experimentalMinChunkSize: 10240,
             },
         }
     }

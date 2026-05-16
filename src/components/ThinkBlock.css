@@ -61,7 +61,6 @@
     border: 1px solid var(--border);
     border-radius: var(--border-radius-md);
     font-size: 12px;
-    line-height: var(--md-line-height);
     min-height: 26px;
 
     position: relative;

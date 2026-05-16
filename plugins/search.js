@@ -1,8 +1,8 @@
 import {searchMessages} from "../src/database.js";
 
 import "./search.css";
-import {formatDate} from "unconscious/ext/Utils.js";
-import {selectedConversation} from "../src/states.js";
+import {formatDate} from "unconscious/common/Utils.js";
+import {isMobile, selectedConversation} from "../src/states.js";
 import {onLoad} from "../src/plugin.js";
 
 const searchBtn = <button className={"ri-search-line btn ghost"} title={"搜索对话"} onClick={() => {
@@ -24,7 +24,7 @@ const searchInput = <div style={"position:absolute;z-index:1;background:var(--bg
 			};
 			const element = (
 				<div className="modal-overlay" style={"background:transparent;pointer-events:none"}>
-					<div className="modal" style={"max-width:60vw;pointer-events:all"}
+					<div className="modal" style={"pointer-events:all;"+(isMobile?"":"max-width:60vw")}
 						 onClick={(e) => e.stopPropagation()}>
 						<div className="header"><b>{str}的搜索结果</b>
 							<button className="btn ghost" onClick={handleClose}>关闭</button>

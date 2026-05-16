@@ -1,0 +1,69 @@
+import {SETTINGS} from "/src/settings.js";
+import {duplicateConversation} from "/src/data-exchange.js";
+import {openJsonEditor} from "/src/json_editor/editorProxy.js";
+import {messages, selectedConversation} from "/src/states.js";
+import {$unwatch, $update, $watch, unconscious} from "unconscious";
+import {decodeObjects, serializeJSON} from "../src/utils/marshal.js";
+import {updateConversation} from "../src/database.js";
+import {updateMessageUI} from "../src/components/MessageList.jsx";
+import {updateConversationListUI} from "../src/components/ConversationList.jsx";
+
+SETTINGS.push({
+	type: "element",
+	_tab: "data",
+	name: "复制选中的对话",
+	title: "仅应用于测试",
+	element: <div className={"choice-scroll"}>
+		<button className="btn ghost" onClick={duplicateConversation}>另存为</button>
+		<button className="btn ghost" onClick={async () => {
+			let jsonText, update, onclose;
+			let updatePromise = () => {
+				serializeJSON({
+					...unconscious(selectedConversation),
+					messages: unconscious(messages)
+				}, 2).then(text => {
+					jsonText = text;
+					update?.();
+				})
+			};
+			await updatePromise();
+
+			let skipNext;
+			[update, onclose] = openJsonEditor("conversation",
+				() => jsonText,
+				async (v) => {
+					const {messages: messages_, ...conversation} = await decodeObjects(JSON.parse(v));
+
+					const obj = unconscious(selectedConversation);
+					if (obj?.id !== conversation.id) {
+						console.warn("ID不相同，忽略");
+						return;
+					}
+
+					const msg = unconscious(messages);
+					msg.length = 0;
+					msg.push(...messages_);
+
+					Object.keys(obj).forEach(item => {delete obj[item];});
+					Object.assign(obj, conversation);
+
+					await updateConversation(obj, messages_, true);
+
+					$update(updateMessageUI);
+					$update(updateConversationListUI);
+					skipNext = true;
+				}
+			);
+			const syncToEditor = () => {
+				if (skipNext) skipNext = false;
+				else update();
+			};
+
+			$watch([selectedConversation, messages], syncToEditor);
+			onclose(() => {
+				$unwatch(selectedConversation, syncToEditor);
+				$unwatch(messages, syncToEditor);
+			});
+		}} disabled={() => !unconscious(selectedConversation)}>编辑当前对话的原始数据 <i className={"ri-external-link-line"} /></button>
+	</div>
+});

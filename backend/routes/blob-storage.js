@@ -7,36 +7,53 @@ import {createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 
 
-export function registerBlobRoutes(router, blobDir) {
+/**
+ * @param {AiChatBackend.Router} router
+ * @param {Record<string, function(body: any, ctx: Partial<AiChatBackend.RouteContext>): any>} batcher
+ * @param {string} blobDir
+ */
+export function registerBlobRoutes(router, batcher, blobDir) {
 	const tempDir = join(blobDir, ".tmp");
 	const dbPath = join(blobDir, 'index.db');
-	mkdir(tempDir, { recursive: true });
-
-	const db = new DatabaseSync(dbPath);
-	db.exec(`
+	/** @type {DatabaseSync} */
+	let db;
+	mkdir(tempDir, { recursive: true }).then(() => {
+		db = new DatabaseSync(dbPath);
+		db.exec(`
   CREATE TABLE IF NOT EXISTS blobs (
     hash BLOB PRIMARY KEY,
     mime TEXT NOT NULL,
     name TEXT NOT NULL,
     size INTEGER NOT NULL,
-    time INTEGER NOT NULL DEFAULT (unixepoch())
+    time INTEGER NOT NULL
   ) WITHOUT ROWID 
 `);
+	});
 
 	// 辅助函数：获取分桶路径 (例如: ab/cd/hash)
 	const getStoragePath = (hash) => {
 		// for Windows user
-		const bucket1 = hash.substring(0, 2).toLowerCase();
-		//const bucket2 = hash.substring(2, 4);
+		const bucket1 = hash.slice(0, 2).toLowerCase();
+		//const bucket2 = hash.slice(2, 4);
 		return join(blobDir, bucket1);
+	};
+
+	batcher["blob"] = (hash) => {
+		const hashBuf = Buffer.from(hash, 'base64url');
+		const info = db.prepare('SELECT * FROM blobs WHERE hash = ?').get(hashBuf);
+		if (!info) return { error: 'not found' };
+
+		return {
+			name: info.name,
+			size: info.size,
+			type: info.mime
+		};
 	};
 
 	// 下载 Blob
 	router.get('/blob/:hash', async (ctx) => {
 		const { hash } = ctx.params;
-
 		const hashBuf = Buffer.from(hash, 'base64url');
-
 		const info = db.prepare('SELECT * FROM blobs WHERE hash = ?').get(hashBuf);
 		if (!info) return ctx.send(404, { error: 'not found' });
 
@@ -55,14 +72,68 @@ export function registerBlobRoutes(router, blobDir) {
 			}
 		}
 
+		const fileSize = info.size;
+		const dataPath = join(getStoragePath(hash), hash);
+
+		// 检查并解析 Range 头
+		let range = ctx.req.headers['range'];
+		let start, end;
+
+		if (range && !range.includes(',')) {
+			const ifRange = ctx.req.headers['if-range'];
+			if (ifRange) {
+				if (ifRange !== lastModified) range = null;
+			}
+		} else {
+			range = null;
+		}
+
+		if (range) {
+			const match = range.match(/^bytes=(\d+)-(\d*)$/);
+			if (match) {
+				start = parseInt(match[1], 10);
+				if (match[2] !== '') {
+					end = parseInt(match[2], 10);
+				} else {
+					end = fileSize - 1;
+				}
+				if (end >= fileSize) end = fileSize - 1;
+
+				// 验证范围
+				if (start >= fileSize || start > end) {
+					ctx.res.writeHead(416, {
+						'Content-Range': `bytes */${fileSize}`,
+						'Content-Length': '0',
+						'Last-Modified': lastModified
+					});
+					ctx.res.end();
+					return;
+				}
+
+				const contentLength = end - start + 1;
+				ctx.res.writeHead(206, {
+					'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+					'Content-Length': contentLength.toString(),
+					'Content-Type': info.mime,
+					'Cache-Control': 'public, max-age=31536000, immutable',
+					'Last-Modified': lastModified,
+					'Accept-Ranges': 'bytes'
+				});
+
+				// 管道部分内容
+				await pipeline(createReadStream(dataPath, { start, end }), ctx.res);
+				return;
+			}
+		}
+
 		ctx.res.writeHead(200, {
 			'Content-Type': info.mime,
-			'Content-Length': info.size,
+			'Content-Length': fileSize,
 			'Cache-Control': 'public, max-age=31536000, immutable',
-			'Last-Modified': lastModified
+			'Last-Modified': lastModified,
+			'Accept-Ranges': 'bytes'
 		});
 
-		const dataPath = join(getStoragePath(hash), hash);
 		await pipeline(createReadStream(dataPath), ctx.res);
 	});
 
@@ -98,13 +169,15 @@ export function registerBlobRoutes(router, blobDir) {
 			await rename(tempFile, join(bucket, hashStr));
 
 			db.prepare(`
-                INSERT INTO blobs (hash, mime, name, size) 
-                VALUES (?, ?, ?, ?)
+                INSERT INTO blobs (hash, mime, name, size, time) 
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT DO NOTHING
             `).run(
 				hashBuf,
 				ctx.req.headers['content-type'] || 'application/octet-stream',
-				ctx.req.headers['x-filename'] || '',
-				fileSize
+				ctx.searchParams.get("name") || "",
+				fileSize,
+				Date.now()
 			);
 
 			ctx.send(201, { hash });

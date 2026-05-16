@@ -10,7 +10,7 @@ import {config} from "../states.js";
  * @param {OpenAI.ReasoningDetail[]} details
  * @returns {[OpenAI.ReasoningDetail[], boolean]}
  */
-export function mergeReasoningDetails(details) {
+export const mergeReasoningDetails = details => {
 	if (details.length === 0) return [details, false];
 
 	const result = [];
@@ -34,14 +34,14 @@ export function mergeReasoningDetails(details) {
 	}
 
 	return [result, hasText];
-}
+};
 
 /**
  * 获取思考文本
  * @param {OpenAI.ReasoningDetail[]} details
  * @returns {string}
  */
-function getReasoningTextFromDetails(details) {
+const getReasoningTextFromDetails = details => {
 	let str = "";
 
 	for (const item of details) {
@@ -53,7 +53,7 @@ function getReasoningTextFromDetails(details) {
 	}
 
 	return str;
-}
+};
 
 const reasoningFormatNames = {
 	r: "reason",
@@ -66,7 +66,6 @@ const reasoningFormatNames = {
  *
  * @param {AiChat.AssistantMessage} think
  * @return {JSX.Element|null}
- * @constructor
  */
 export function ThinkBlock({message, edit}) {
 	const {think} = message;
@@ -81,11 +80,16 @@ export function ThinkBlock({message, edit}) {
 				content = getReasoningTextFromDetails(message.reasoning_details);
 			}
 			if (edit) {
-				container.replaceWith(<div style={"font-size:14px"}>思维链格式&nbsp;&nbsp;<select onChange={({target}) => {
-					think.format = target.selectedOptions[0].value;
-				}}>
-					{Object.entries(reasoningFormatNames).map(([k, v]) => <option value={k} selected={format === k}>{v}</option>)}
-				</select></div>, <EditWidget value={content} onChange={(value) => think.content = value}/>);
+				const arr = [];
+				if (format != null) {
+					arr.push(<div style={"font-size:14px"}>思维链格式&nbsp;&nbsp;<select onChange={({target}) => {
+						think.format = target.selectedOptions[0].value;
+					}}>
+						{Object.entries(reasoningFormatNames).map(([k, v]) => <option value={k} selected={format === k}>{v}</option>)}
+					</select></div>);
+				}
+				arr.push(<EditWidget value={content} onChange={(value) => think.content = value}/>);
+				container.replaceWith(...arr);
 			} else {
 				renderMarkdownToElement(container, content);
 			}
@@ -105,7 +109,7 @@ export function ThinkBlock({message, edit}) {
 					return "已思考 " + Math.round(duration / 1000) + " 秒";
 				})}
 			</summary>
-			<div ref={container} className="think-content">
+			<div ref={container} className="think-content md">
 				<button className={"ri-file-copy-line ghost"} title={"复制"} onClick={({target}) => {
 					copyButtonAnimation(think.content, target);
 				}}></button>

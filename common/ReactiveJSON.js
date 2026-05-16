@@ -1,57 +1,100 @@
-import {StreamJsonParser} from './StreamJsonParser.js';
-import {MultiKeyMap} from './MultiKeyMap.js';
+import {createJsonParser} from 'unconscious/common/Json.js';
+import {NestedMap} from 'unconscious/common/NestedMap.js';
 // TODO 内部API
-import {$update, $watchWithCleanup, __capture, __createState, debugSymbol, unconscious, isReactive} from "unconscious";
-import {createMarkdownParser, registerCodeBlockRenderer} from "/src/markdown/markdown.js";
-import {EditableMessageRoles, MessageRoles} from "/src/states.js";
-import {EditWidget} from "/src/components/EditWidget.jsx";
-import {showToast} from "/src/components/Toast.js";
+import {
+	$state,
+	$unwatch,
+	$update,
+	$watch,
+	$watchWithCleanup,
+	__capture,
+	__createState,
+	appendChildren,
+	debugSymbol,
+	isReactive,
+	unconscious
+} from "unconscious";
+import {createStreamingMarkdownParser, registerCodeBlockRenderer} from "/src/markdown/markdown.js";
+import {EditableMessageRoles, MessageCopyHandler, MessageRoles} from "/src/states.js";
+import {JsonEditor} from "/src/components/JsonEditor.jsx";
+import {validateAndShowError} from "unconscious/common/json-schema-utils.js";
 
 const IS_FINISHED = debugSymbol('is_finished');
 const SYM = debugSymbol("REACTIVE_JSON");
 
 /**
+ * 用来实现类似 { value && a } 但在 Unconscious 框架下不重新生成元素的效果
+ * @param {import("unconscious").Reactive<any>} proxy
+ * @param {() => JSX.Element} element
+ * @return {import("unconscious").Reactive<JSX.Element>}
+ */
+export function $once(proxy, element) {
+	const output = $state();
+	const listener = () => {
+		if (unconscious(proxy) != null) {
+			output.value = element();
+			$unwatch(proxy, listener);
+		}
+	};
+	$watch(proxy, listener);
+	return output;
+}
+
+/**
  *
- * @param {string} role
+ * @param {string} id
  * @param {string} name
  * @param renderer
  * @param compose
+ * @param {OpenAI.Schema | function(AiChat.AssistantMessage): OpenAI.Schema} schema
  */
-export function registerSchemaMessageRole(role, name, renderer, compose) {
-	EditableMessageRoles.add(role);
-	MessageRoles[role] = {
+export function registerSchemaMessageRole(id, name, renderer, compose, schema) {
+	EditableMessageRoles.add(id);
+	MessageRoles[id] = {
 		name,
 		compose,
 		getChunks(message, chunks, index, isEditing) {
+			const {think, content, reasoning_details} = message;
+			message[MessageCopyHandler] = () => JSON.stringify(message.content, null, 2);
+
+			if (think) {
+				const child = { type: "think", think };
+				if (reasoning_details) child.reasoning_details = reasoning_details;
+				chunks.push(child);
+			}
+
 			chunks.push({
 				type: "html",
 				html: () => {
 					if (isEditing(message)) {
-						return (<EditWidget value={JSON.stringify(message.content, null, 2)} onChange={newValue => {
-							try {
-								message.content = JSON.parse(newValue);
-							} catch (e) {
-								showToast("JSON Format Error", "error");
+						const state = $state();
+						$watch(state, () => {
+							const val = state.obj;
+							if (val) {
+								let schema1 = schema;
+								if (typeof schema1 === 'function') schema1 = schema(message);
+								const error = validateAndShowError(val, schema1);
+								if (error) {
+									state.value = {error};
+									return;
+								}
+								message.content = val;
 							}
-						}} />);
+						})
+						return (<div>
+							<JsonEditor value={JSON.stringify(message.content, null, 2)} state={state} />
+							{() => state.error && <pre className={"error"} >{state.error}</pre> }
+						</div>);
 					} else {
-						return (<pre className={"code-block"}>
-							<div className="code-header sticky">
-								<span>json_schema ({role})</span>
-								<span className="buttons">
-									<button className="ri-download-2-line ghost" data-action="save" title="下载代码"></button>
-									<button className="ri-file-copy-line ghost" data-action="copy" title="复制代码"></button>
-								</span>
-							</div>
-							<code lang={role} _value={JSON.stringify(message.content)}>{renderer(message.content)}</code>
-						</pre>)
+						return (<pre className={"code-block"}><code lang={id}>{renderer(message.content)}</code></pre>);
 					}
 				}
 			});
+			chunks.push({ type: "usage" });
 		}
 	}
 
-	registerSchemaCodeBlockRenderer(role, renderer);
+	registerSchemaCodeBlockRenderer(id, renderer);
 }
 
 /**
@@ -63,29 +106,17 @@ export function registerSchemaCodeBlockRenderer(name, renderer) {
 	registerCodeBlockRenderer(name, (code, language, node, is_finished) => {
 		let rjson = node[SYM];
 		if (!rjson) {
+			node.previousElementSibling?.remove();
 			node[SYM] = rjson = createReactiveJSON();
 
 			const [val] = rjson;
 
 			const nodes = renderer(val);
-			if (Array.isArray(nodes)) node.replaceChildren(...nodes);
-			else node.replaceChildren(nodes);
+			appendChildren(node, Array.isArray(nodes) ? nodes : [nodes]);
 		}
 
 		const [_, update] = rjson;
 		update(code, is_finished);
-
-		// 调试用途
-		/*let index = 0;
-		const ccb = () => update(code.substring(0, index), false);
-		const t = setInterval(() => {
-			index++;
-			ccb();
-			if (index === code.length) {
-				update(code, true);
-				clearInterval(t);
-			}
-		}, 10);*/
 	});
 
 }
@@ -97,13 +128,13 @@ export function registerSchemaCodeBlockRenderer(name, renderer) {
  * @returns {HTMLElement} 返回容器本身
  */
 export function createReactiveMarkdown(container, value) {
-	let parser = createMarkdownParser(container);
+	let parser = createStreamingMarkdownParser(container);
 	let prevLen = 0;
 
 	if (isReactive(value)) {
 		$watchWithCleanup(value, () => {
 			const text = unconscious(value) || "";
-			parser.write(text.substring(prevLen));
+			parser.write(text.slice(prevLen));
 			if (value[IS_FINISHED]) parser.end();
 			prevLen = text.length;
 		});
@@ -129,7 +160,7 @@ export function createReactiveMarkdown(container, value) {
  */
 export function createReactiveJSON() {
 	/** @type {Map<(string|number)[], import("unconscious").Reactive<any>>} */
-	const registry = new MultiKeyMap();
+	const registry = new NestedMap();
 	/**
 	 * 内部工厂函数：根据路径和目标对象创建或获取 Proxy
 	 * @param {(string|number)[]} path 属性链路径
@@ -148,7 +179,6 @@ export function createReactiveJSON() {
 			get(t, prop, proxy) {
 				//__capture(t);
 				if (typeof prop === 'symbol' || prop === "value") return t[prop];
-				if (prop === "$value") prop = "value";
 
 				let value = t.value;
 				if (prop === "toJSON") return () => value;
@@ -175,7 +205,7 @@ export function createReactiveJSON() {
 		return proxy;
 	};
 
-	const parser = StreamJsonParser((path, value, is_partial) => {
+	const parser = createJsonParser((path, value, is_partial) => {
 		const state = createProxy(path);
 		state.value = value;
 		if (!is_partial) state[IS_FINISHED] = true;

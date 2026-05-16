@@ -6,12 +6,12 @@ export const AudioPlayer = ({src, autoplay}) => {
 	let currentSpeedIndex = 0;
 
 	// 工具函数：格式化时间为 mm:ss
-	function formatTime(seconds) {
+	const formatTime = seconds => {
 		if (isNaN(seconds)) return "0:00";
 		const m = Math.floor(seconds / 60);
 		const s = Math.floor(seconds % 60);
 		return `${m}:${s < 10 ? '0' : ''}${s}`;
-	}
+	};
 
 	if (typeof src !== "string") src = src.toUrl();
 

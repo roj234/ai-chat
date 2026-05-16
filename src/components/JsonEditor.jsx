@@ -1,11 +1,13 @@
 import "./JsonEditor.css";
-import {$state, $watchWithCleanup} from "unconscious";
+import {$state, $watchWithCleanup, AS_IS, preserveState} from "unconscious";
 import morphdom from "morphdom";
 import {lightSync} from "../markdown/highlight.js";
-import {StreamJsonParser} from "/common/StreamJsonParser.js";
+import {createJsonParser} from "unconscious/common/Json.js";
 
-export const JsonEditor = ({value = ""}) => {
-	const state = $state(value);
+const highlightJson = (text) => lightSync(text, "json");
+
+export const JsonEditor = ({value = "", state}) => {
+	const currentText = preserveState($state(value));
 	let pre, code;
 	/**
 	 * @type {HTMLTextAreaElement}
@@ -13,23 +15,26 @@ export const JsonEditor = ({value = ""}) => {
 	let textarea;
 
 	function update() {
-		let codeStr = state.value = textarea.value;
+		let codeStr = currentText.value = textarea.value;
 
-		const parser = StreamJsonParser(() => {});
+		const parser = createJsonParser(AS_IS);
 		try {
 			parser.write(codeStr);
-			parser.end();
-		} catch (e) {
-			const errorNear = parser.pos - 1;
-			codeStr = codeStr.slice(0, errorNear)+"\0"+codeStr.slice(errorNear);
-		}
+			const obj = parser.end();
+			if (state) state.value = { obj };
 
-		morphdom(code, "<code>"+lightSync(codeStr, "json").replace("\0", "<span class='cursor'></span>")+"</code>");
+			morphdom(code, "<code>"+highlightJson(codeStr)+"</code>");
+		} catch (e) {
+			if (state) state.value = { error: e+" near index "+parser.pos() };
+
+			const errorNear = parser.pos();
+			morphdom(code, "<code>"+highlightJson(codeStr.slice(0, errorNear))+"<span class='cursor'></span>"+(highlightJson(codeStr.slice(errorNear))||"\n")+"</code>");
+		}
 	}
 
 	const el = <div className="args CodeEditor">
 		<pre ref={pre}><code ref={code}></code></pre>
-		<textarea ref={textarea} spellCheck={false} value={state} onInput={update} onKeyDown={event => {
+		<textarea ref={textarea} spellCheck={false} value={currentText} onInput={update} onKeyDown={event => {
 			if (event.key === "Tab") {
 				event.preventDefault();
 				textarea.setRangeText('\t', textarea.selectionStart, textarea.selectionEnd, 'end');
@@ -39,6 +44,6 @@ export const JsonEditor = ({value = ""}) => {
 			pre.scrollTop = textarea.scrollTop;
 		}}></textarea>
 	</div>;
-	$watchWithCleanup(state, update);
+	$watchWithCleanup(currentText, update);
 	return el;
 }

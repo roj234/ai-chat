@@ -1,26 +1,38 @@
 import {decompressMessage, deserializeRow} from "../utils/compression.js";
 
+/**
+ * @param {AiChatBackend.Router} router
+ */
 export function registerSearchRoutes(router) {
 	router.get('/search', async (ctx) => {
-		const keyword = ctx.query.keyword;
+		// mode = [semantic, keyword, null]
+		const {keyword, mode} = ctx.query;
 		if (!keyword) return ctx.send(400, { error: 'keyword required' });
 
 		let limit = parseInt(ctx.query.limit) || 50;
 		if (limit > 100) limit = 100;
 
-		// semantic keyword or null
-		const mode = ctx.query.mode;
-
-		const vectorDB = ctx.vectorDB;
+		const {vectorDB, db} = ctx;
 
 		if (vectorDB && vectorDB.size === 0) {
 			console.log("正在初始化语义索引...");
 			const batchSize = 500;
 			let lastId = 0;
 
+			const asyncPromises = new Set;
+			const addTask = async (cb) => {
+				if (asyncPromises.size >= 8) {
+					await Promise.any([...asyncPromises]);
+				}
+
+				const promise = cb();
+				asyncPromises.add(promise);
+				promise.finally(() => asyncPromises.delete(promise));
+			}
+
 			while (true) {
 				// 使用 ID 游标分页比 OFFSET 更快
-				const rows = ctx.db.prepare(
+				const rows = db.prepare(
 					'SELECT id, content, data FROM messages WHERE id > ? ORDER BY id LIMIT ?'
 				).all(lastId, batchSize);
 
@@ -31,10 +43,10 @@ export function registerSearchRoutes(router) {
 					const idStr = row.id.toString(36);
 
 					// 索引内容
-					if (row.content) await vectorDB.set('m#'+idStr, row.content);
+					if (row.content) await addTask(() => vectorDB.set('m#'+idStr, row.content));
 					// 索引思考过程
 					const thinking = body.think?.content;
-					if (thinking) await vectorDB.set('M#'+idStr, thinking);
+					if (thinking) await addTask(() => vectorDB.set('M#'+idStr, thinking));
 
 					lastId = row.id;
 				}
@@ -48,7 +60,7 @@ export function registerSearchRoutes(router) {
 			console.time("语义搜索");
 			// ids 结构为 [{id: "m#abc", score: 0.9}, ...]
 			const matches = await vectorDB.query(keyword, limit, 0.5);
-			matches.forEach(m => vectorKeys.set(parseInt(m.id.substring(2), 36), m.score));
+			matches.forEach(m => vectorKeys.set(parseInt(m.id.slice(2), 36), m.score));
 			console.timeEnd("语义搜索");
 		}
 
@@ -92,7 +104,7 @@ export function registerSearchRoutes(router) {
             ORDER BY c.id DESC, rm.id
         `;
 
-		const rows = ctx.db.prepare(sql).all(
+		const rows = db.prepare(sql).all(
 			...vectorKeys.keys(),
 			searchPattern,
 			limit,

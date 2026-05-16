@@ -1,37 +1,48 @@
-import {decodeMsg, encodeMsg} from "../../common/Msgpack.js";
-import {brotliCompressSync, brotliDecompressSync, constants} from 'node:zlib';
-import {COMPRESSION_LEVEL, COMPRESSION_MSGPACK_SCHEMA, COMPRESSION_START_SIZE} from "../config.js";
+import {bakeSchema, decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
+import {brotliCompress, brotliDecompressSync, constants} from 'node:zlib';
+import {DB_COMPRESS_LEVEL, DB_COMPRESS_MIN_SIZE, DB_USE_MSGPACK_SCHEMA} from "../config.js";
+import {s2c_schema} from "../../common/MsgpackSchema.js";
 
 const IS_SQLITE = true;
 
 // 注意，这些schema只能追加，规则和protobuf相同
 const conversation_schema = [
 	"activatedModules", "allowedTools", "grantedTools",
-	"branches"
+	"bm_leaf", "bm_dummy"
 ];
+const finish_reason = ["finish_reason", null, ["stop", "length", "tool_calls", "error", "interrupt"]];
 const message_schema = [
-	// 未来支持枚举类型？
-	//["role",
-	//	["user", "assistant", "system"]
-	//],
-
-	"role",
+	["role", null, ["system", "user", "assistant"]],
 	"model",
 	["content",
-		["type", "text",
-			["image_url", ["url"]],
+		[
+			["type", null, ["text", "image_url", "input_audio"]],
+			"text",
+			["image_url", [["url", s2c_schema]]],
 			["input_audio", ["data", "format"]]
 		]
 	],
 	["think",
-		["duration", "content", "format"]
+		[
+			"duration",
+			"content",
+			["format", null, ["r", "rc", "mthink"]]
+		]
 	],
-	"finish_reason",
+	finish_reason,
 	["reasoning_details",
-		["index", "type", "text", "format", "data", "signature", "summary"]
+		[
+			"index",
+			["type", null, ['reasoning.text','reasoning.summary','reasoning.encrypted']],
+			"text",
+			["format", null, ['unknown', 'openai-responses-v1', 'xai-responses-v1', 'anthropic-claude-v1', 'google-gemini-v1']],
+			"data", "signature", "summary"
+		]
 	],
 	["tool_calls",
-		["id", "type",
+		[
+			"id",
+			["type", null, ["function"]],
 			["function", ["name", "arguments"]]
 		]
 	],
@@ -39,16 +50,18 @@ const message_schema = [
 		["time", "content", "success"]
 	]
 ];
-const statistic_schema = [
-	"preset_id", "request_id", "provider",
+const log_schema = [
+	"model", "request_id", "provider",
 	"input_tokens", "output_tokens", "reasoning_tokens", "cached_tokens", "cache_write_tokens",
-	"latency", "ttft", "finish_reason", "cost", "currency",
+	"duration", "latency",
+	finish_reason,
+	"cost",
+	["currency", null, ["USD", "CNY"]],
 ];
 
-const generic_schema = [];
-for (let i = 0; i < generic_schema.length; i++) {
-	generic_schema[i] = [generic_schema[i], generic_schema];
-}
+bakeSchema(conversation_schema);
+bakeSchema(message_schema);
+bakeSchema(log_schema);
 
 export function deserializeRow(row, decompression = decompressGeneric) {
 	const {data, ...rest} = row;
@@ -84,30 +97,36 @@ function decompressIfNeeded(data, schema) {
  *
  * @param {Object} data
  * @param {Object} [schema = null]
- * @return {Uint8Array|Buffer|string}
+ * @return {Buffer|Promise<Buffer>}
  */
 function compressIfEnabled(data, schema) {
 	let packed;
 
-	if (COMPRESSION_MSGPACK_SCHEMA) {
+	if (DB_USE_MSGPACK_SCHEMA) {
 		packed = encodeMsg(data, schema);
 	} else {
 		packed = JSON.stringify(data);
 		if (!IS_SQLITE) packed = new TextEncoder().encode(packed);
 	}
 
-	if (packed.length > COMPRESSION_START_SIZE) {
-		const compressed = brotliCompressSync(packed, {
-			params: {
-				[constants.BROTLI_PARAM_QUALITY]: COMPRESSION_LEVEL,
-			},
-		});
+	if (packed.length > DB_COMPRESS_MIN_SIZE) {
+		return new Promise((resolve, reject) => {
+			brotliCompress(packed, {
+				params: {
+					[constants.BROTLI_PARAM_QUALITY]: DB_COMPRESS_LEVEL,
+				},
+			}, (error, compressed) => {
+				if (error) reject(error);
 
-		if (compressed.length + 1 < packed.length) {
-			const header = Buffer.allocUnsafe(1);
-			header[0] = 0xC1;
-			return Buffer.concat([header, compressed]);
-		}
+				if (compressed.length + 1 < packed.length) {
+					const header = Buffer.allocUnsafe(1);
+					header[0] = 0xC1;
+					resolve(Buffer.concat([header, compressed]));
+				} else {
+					resolve(packed);
+				}
+			});
+		});
 	}
 
 	return packed;
@@ -121,9 +140,9 @@ export const compressConversation = (data) => compressIfEnabled(data, conversati
 /** @param {Uint8Array|Object} data */
 export const decompressConversation = (data) => decompressIfNeeded(data, conversation_schema);
 
-export const compressStatistics = (data) => compressIfEnabled(data, statistic_schema);
+export const compressLog = (data) => compressIfEnabled(data, log_schema);
 /** @param {Uint8Array|Object} data */
-export const decompressStatistics = (data) => decompressIfNeeded(data, statistic_schema);
+export const decompressLog = (data) => decompressIfNeeded(data, log_schema);
 
 export const compressGeneric = compressIfEnabled;//(data) => compressIfEnabled(data, generic_schema);
 /** @param {Uint8Array|Object} data */

@@ -1,16 +1,16 @@
 import './ConversationList.css';
-import {VirtualList} from 'unconscious/ext/VirtualList.js';
-import {formatDate} from 'unconscious/ext/Utils.js';
-import {$state, $update, $watchWithCleanup} from 'unconscious';
-import {deleteConversation, getMessages, updateConversation} from "../database.js";
+import {VirtualList} from 'unconscious/common/VirtualList.js';
+import {formatDate} from 'unconscious/common/Utils.js';
+import {$state, $update, $watchWithCleanup, debugSymbol, unconscious} from 'unconscious';
+import {deleteConversation, updateConversation} from "../database.js";
 import {conversations, isMobile, messages, runningConversations, selectedConversation} from "../states.js";
 import SimpleModal from "./SimpleModal.jsx";
-import {BM, enableBranches} from "../utils/BranchManager.js";
 import {exportConversation} from "../data-exchange.js";
 import {onLoad} from "../plugin.js";
-import "/plugins/st/STTagList.css";
+import "/plugins/rp_basic/TagList.css";
 
 export const updateConversationListUI = $state();
+export const LOCKED = debugSymbol("CONV_LOCKED");
 
 const closeHoverMenu = (e) => {
 	if (hoverMenu.isConnected) {
@@ -34,7 +34,7 @@ onLoad((app) => {
 });
 
 // 分组逻辑：基于时间戳计算相对日期
-function groupConversations() {
+const groupConversations = () => {
 	const today = new Date().setHours(0, 0, 0, 0);
 	const yesterday = today - 86400000;
 	const sevenDaysAgo = today - 7 * 86400000;
@@ -64,7 +64,7 @@ function groupConversations() {
 	});
 
 	return groups;
-}
+};
 
 /**
  * React组件：渲染对话列表，按时间分组，支持选择、编辑标题、删除。
@@ -72,8 +72,8 @@ function groupConversations() {
  * @param {Conversation[]} props.conversations - 对话数组
  * @param {import("unconscious").Reactive<Conversation>} [props.selectedConversation] - 当前激活的对话ID，用于添加active类
  */
-export function ConversationList(/*{ conversations, selectedConversation, messages }*/) {
-	function eventHandler(e) {
+export const ConversationList = (/*{ conversations, selectedConversation, messages }*/) => {
+	const eventHandler = e => {
 		const target = e.target;
 		const owner = target.closest('.chat-item');
 		if (!owner) return;
@@ -148,15 +148,17 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 		}
 
 		selectedConversation.value = conv;
-	}
+	};
 
 	const mouseHandler = (e) => {
-		if (e.target.closest('.tag-dropdown') === hoverMenu) return;
+		if (e.target.closest('.chat-item') === hoverMenu.closest('.chat-item')) return;
 		hoverMenu.style.left = e.pageX+"px";
 		hoverMenu.style.top = e.pageY+"px";
 		e.target.append(hoverMenu);
 		e.stopPropagation();
 	};
+	const b2i = (n) => n ? 1 : 0;
+	const keyFunc = conv => conv.textContent ?? conv.id + "\0" + conv.title + "\0" + b2i(selectedConversation.value === conv) + b2i(conv[LOCKED]) + b2i(runningConversations.has(conv.id));
 
 	const list = <div className="sidebar-list scroll" id="chatList" onClick={eventHandler}></div>;
 	const groupAndConvArr = [];
@@ -167,7 +169,7 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 		data: groupAndConvArr,
 		keyFunc,
 		renderer(conv) {
-			if (!conv.id) return conv;
+			if (conv.nodeType) return conv;
 
 			const btn = <button className={"edit-btn " + ("ri-more-line")} title={"菜单"} />;
 			btn.addEventListener(isMobile ? 'click' : 'mouseover', mouseHandler);
@@ -178,46 +180,41 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 				title={formatDate("Y-m-d H:i:s", conv.time)}
 			>
 				{runningConversations.has(conv.id) ? <span className={"spinner"} /> : null}
+				{conv[LOCKED] ? <span className="ri-lock-line" title={"其它端正在编辑"} /> : null}
 				<span className="chat-title">{conv.title || '无标题'}</span>
 				<div className="chat-actions">{btn}</div>
 			</div>;
 		}
 	});
 
-	function keyFunc(conv) {
-		return conv.id ? conv.id + "\0" + conv.title + "\0" + (selectedConversation.value === conv) + "\0" + runningConversations.has(conv.id) : conv.textContent;
-	}
-
 	$watchWithCleanup(updateConversationListUI, () => {
+		const conv = unconscious(selectedConversation);
+		if (conv) {
+			const newTime = conv.time;
+			const newConv = conversations[0];
+			if (newTime > newConv.time) {
+				let index = conversations.indexOf(conv);
+				if (index >= 0) conversations.splice(index, 1);
+				conversations.unshift(conv);
+			}
+		}
+
 		vl.render();
-	})
+	});
 
 	$watchWithCleanup(conversations, () => {
 		groupAndConvArr.length = 0;
 
 		const groups = groupConversations();
 		for (const groupName in groups) {
-			groupAndConvArr.push(<div className="chat-group">
-				<div>{groupName}</div></div>);
+			groupAndConvArr.push(<div className="chat-group"><div>{groupName}</div></div>);
 			groupAndConvArr.push(...groups[groupName]);
 		}
 		vl.resize();
 	}, false);
 
-	let dontUpdateFlag;
 	$watchWithCleanup(selectedConversation, () => {
-		const conv = selectedConversation.value;
-		if (conv && !conv.ready) {
-			getMessages(conv).then(data => {
-				conv.ready = true;
-
-				if (selectedConversation.value === conv) {
-					dontUpdateFlag = conv;
-					$update(selectedConversation);
-					messages.value = conv.branches ? enableBranches(conv, data) : data;
-				}
-			});
-		}
+		const conv = unconscious(selectedConversation);
 		if (!conv) {
 			vl.dom.querySelector(".active")?.classList.remove("active");
 		} else {
@@ -226,28 +223,5 @@ export function ConversationList(/*{ conversations, selectedConversation, messag
 		}
 	}, false);
 
-	// autosave
-	$watchWithCleanup(messages, () => {
-		const tmp = dontUpdateFlag;
-		dontUpdateFlag = null;
-		if (selectedConversation.ready) {
-			const conv = selectedConversation.value;
-			if (conv === tmp) return;
-
-			const newTime = Date.now();
-
-			const newer = conversations[0];
-			if (newer !== conv && newTime > newer.time) {
-				conv.time = newTime;
-
-				let index = conversations.indexOf(conv);
-				conversations.splice(index, 1);
-				conversations.unshift(conv);
-			}
-
-			updateConversation(conv, conv.branches ? conv[BM].messages : messages.value);
-		}
-	}, false);
-
 	return list;
-}
+};

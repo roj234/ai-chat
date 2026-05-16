@@ -3,14 +3,13 @@ import {DONE} from "../database.js";
 
 
 const DB_NAME = 'AiChat';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
+/** @type {Promise<IDBDatabase>} */
 let dbPromise;
 
-export async function deleteDatabase() {
-	let promise = dbPromise || DONE;
-
-	return promise.then(db => {
+export const deleteDatabase = async () => {
+	return (dbPromise||DONE).then(db => {
 		if (db) db.close();
 		const req = indexedDB.deleteDatabase(DB_NAME);
 		req.onblocked = () => {
@@ -22,10 +21,10 @@ export async function deleteDatabase() {
 			req.onerror = reject;
 		});
 	});
-}
+};
 
 /**
- * 打开并返回数据库实例（单例）
+ * 打开并返回数据库实例
  * @returns {Promise<IDBDatabase>}
  */
 function openDb() {
@@ -51,10 +50,15 @@ function openDb() {
 					db.createObjectStore("kvs", { keyPath: ['type', 'name'] });
 
 					// 计费日志, 插入顺序就是时间顺序
-					db.createObjectStore('statistics', { keyPath: 'message_id' });
+					db.createObjectStore('logs', { keyPath: 'id' });
 				} else {
-					alert("不支持的数据库版本，请手动更新");
-					throw "error";
+					if (oldVersion === 7) {
+						db.deleteObjectStore("statistics");
+						db.createObjectStore('logs', { keyPath: 'id' });
+					} else {
+						alert("不支持的数据库版本，请手动更新");
+						throw "error";
+					}
 				}
 			};
 
@@ -74,147 +78,130 @@ function openDb() {
 		}));
 }
 
+
+let batchQueue;
+let batchWrite;
+let batchStore;
+
+const runBatch = async () => {
+	const queue = batchQueue;
+	const stores = [...batchStore];
+	const mode = batchWrite ? "readwrite": "readonly";
+	batchQueue = batchStore = batchWrite = 0;
+
+	const tx = (await openDb()).transaction(stores, mode);
+	tx.onerror = () => {
+		const error = new Error(tx.error?.message);
+		for (const el of queue) el[2](error);
+	};
+	for (const [fn, resolve] of queue) {
+		const v = fn(tx, resolve);
+		if (v) v.onsuccess = (event) => resolve(event.target.result);
+	}
+};
+
 /**
  *
- * @param {string | string[]} database
  * @param {function(tx: IDBTransaction, resolve: (value: (PromiseLike<unknown> | unknown)) => void): void | IDBRequest<unknown>} callback
  * @param {boolean=} write
+ * @param {string} database
  * @return {Promise<unknown>}
  */
-function transaction(database, callback, write) {
-	return new Promise(async (resolve, reject) => {
-		const tx = (await openDb()).transaction(database, write ? 'readwrite' : 'readonly');
-		tx.onerror = () => reject(new Error(tx.error?.message));
-		tx.oncomplete = resolve;
-		const v = callback(tx, resolve);
-		if (v) v.onsuccess = (event) => resolve(event.target.result);
-	});
-}
+const transaction = (callback, write, ...database) => new Promise((resolve, reject) => {
+	const data = [ callback, resolve, reject ];
+	if (!batchQueue) {
+		batchQueue = [data];
+		batchStore = new Set(database);
+		setTimeout(runBatch);
+	} else {
+		batchQueue.push(data);
+		database.forEach(item => batchStore.add(item));
+	}
+	batchWrite |= write;
+});
 
 /**
  * 获取一个会话的消息
  * @param {AiChat.Conversation} conversation 对话
  * @returns {Promise<AiChat.Message[]>}
  */
-export function getMessages(conversation) {
-	return transaction('messages', (tx, resolve) => {
-		const store = tx.objectStore('messages');
-		// 也可使用 IDBKeyRange.only()
-		const request = store.index('owner').getAll(conversation.id);
-
-		request.onsuccess = (event) => {
-			const messages = event.target.result;
-
-			messages.sort((a, b) => {
-				const b1 = a.role === "system";
-				const b2 = b.role === "system";
-				if (b1 !== b2) return b2 - b1;
-				return 0;
-			});
-
-			resolve(messages);
-		}
-	});
-}
-
-/**
- * 新建一个会话
- * @param {AiChat.Conversation} conversation
- * @returns {Promise<AiChat.Conversation>}
- */
-export function newConversation(conversation) {
-	return transaction('conversations', (tx, resolve) => {
-		const req = tx.objectStore('conversations').add(conversation);
-		req.onsuccess = (e) => {
-			conversation.id = e.target.result;
-			resolve(conversation);
-		};
-	}, true);
-}
+export const getMessages = conversation => transaction((tx, resolve) => {
+	const request = tx.objectStore('messages').index('owner').getAll(conversation.id);
+	request.onsuccess = (event) => {
+		resolve(event.target.result.sort((a, b) => {
+			const b1 = a.role === "system";
+			const b2 = b.role === "system";
+			if (b1 !== b2) return b2 - b1;
+			return 0;
+		}));
+	}
+}, false, 'messages');
 
 /**
  * 更新会话
  * @param {AiChat.Conversation} conversation
- * @returns {Promise<void>}
+ * @returns {Promise<number>}
  */
-export function updateConversation(conversation) {
-	return transaction('conversations', tx => {
-		return tx.objectStore('conversations').put(conversation);
-	}, true);
-}
+export const upsertConversation = conversation => transaction((tx) => tx.objectStore('conversations').put(conversation), true, 'conversations');
 
 /**
  * 插入或更新消息
  * @param {AiChat.Message} message=
- * @returns {Promise<void>}
+ * @returns {Promise<number>}
  */
-export function updateMessage(message) {
-	return transaction('messages', (tx, resolve) => {
-		const messageStore = tx.objectStore('messages');
-		messageStore.put(message).onsuccess = (e) => {
-			message.id = e.target.result;
-			resolve(message);
-		}
-	}, true);
-}
+export const upsertMessage = message => transaction((tx) => tx.objectStore('messages').put(message), true, 'messages');
 
 /**
  * 按ID删除消息
  * @param {number} id
  * @returns {Promise<void>}
  */
-export function deleteMessage(id) {
-	return transaction('messages', (tx) => tx.objectStore('messages').delete(id), true);
-}
+export const deleteMessage = id => transaction((tx) => tx.objectStore('messages').delete(id), true, 'messages');
 
 /**
  * 删除会话及其所有消息
  * @param {number} id
  * @returns {Promise<void>}
  */
-export function deleteConversation(id) {
-	return transaction(['conversations', 'messages'], tx => {
-		tx.objectStore('conversations').delete(id);
+export const deleteConversation = id => transaction(tx => {
+	tx.objectStore('conversations').delete(id);
 
-		const msgStore = tx.objectStore('messages');
-		const cursorRequest = msgStore.index('owner').openKeyCursor(id);
-		cursorRequest.onsuccess = (event) => {
-			const cursor = event.target.result;
-			if (cursor) {
-				msgStore.delete(cursor.primaryKey);
-				cursor.continue();
-			}
-		};
-	}, true);
-}
+	const msgStore = tx.objectStore('messages');
+	const cursorRequest = msgStore.index('owner').openKeyCursor(id);
+	cursorRequest.onsuccess = (event) => {
+		const cursor = event.target.result;
+		if (cursor) {
+			msgStore.delete(cursor.primaryKey);
+			cursor.continue();
+		}
+	};
+}, true, 'conversations', 'messages');
 
 /**
  * 列出所有会话，按创建时间降序
  * @returns {Promise<Array<{id:number, title:string, time:number, messageId?:number}>>}
  */
-export function listConversations() {
-	return transaction('conversations', (tx, resolve) => {
-		const idx = tx.objectStore('conversations').index('time');
+export const listConversations = () => transaction((tx, resolve) => {
+	const idx = tx.objectStore('conversations').index('time');
 
-		const result = [];
-		idx.openCursor(null, 'prev').onsuccess = (event) => {
-			const cursor = event.target.result;
-			if (cursor) {
-				result.push(cursor.value);
-				cursor.continue();
-			} else {
-				resolve(result);
-			}
-		};
-	});
-}
+	const result = [];
+	idx.openCursor(null, 'prev').onsuccess = (event) => {
+		const cursor = event.target.result;
+		if (cursor) {
+			result.push(cursor.value);
+			cursor.continue();
+		} else {
+			resolve(result);
+		}
+	};
+}, false, 'conversations');
 
 /**
  * 搜索所有消息中包含 keyword 的会话（全量扫描）
  * @param {string} keyword 搜索关键词（不区分大小写）
  * @returns {Promise<Array<AiChat.Conversation & {matchingMessages: AiChat.Message[]}>>}
  */
-export function searchMessages(keyword) {
+export const searchMessages = keyword => {
 	const lowerKeyword = keyword.toLowerCase();
 
 	return listConversations().then(conversations => {
@@ -245,16 +232,14 @@ export function searchMessages(keyword) {
 		console.error('搜索失败:', err);
 		return [];
 	});
-}
+};
 
 /**
  * 读取KV存储
  * @param {IDBValidKey} key
  * @returns {Promise<any>}
  */
-export function getKV(key) {
-	return transaction('kv', tx => tx.objectStore('kv').get(key));
-}
+export const getKV = key => transaction(tx => tx.objectStore('kv').get(key), false, 'kv');
 
 /**
  * 创建、更新或删除KV存储
@@ -262,46 +247,40 @@ export function getKV(key) {
  * @param {Object & Partial<AiChat.IDBKVList>} value
  * @returns {Promise<void>}
  */
-export function setKV(key, value) {
-	return transaction('kv', tx => {
-		const store = tx.objectStore('kv');
-		return value === undefined ? store.delete(key) : store.put(value, key);
-	}, true);
-}
+export const setKV = (key, value) => transaction(tx => {
+	const store = tx.objectStore('kv');
+	return value === undefined ? store.delete(key) : store.put(value, key);
+}, true, 'kv');
 
 /**
  * 读取KV存储列表
  * @param {IDBValidKey} type
  * @returns {Promise<(Object & AiChat.IDBKVList)[]>}
  */
-export function kvListGetValues(type) {
-	return transaction('kvs', tx => tx.objectStore('kvs').getAll(type === '*' ? null : IDBKeyRange.bound([type], [type, '\uffff'])));
-}
+export const kvListGetValues = type => transaction(tx => tx.objectStore('kvs').getAll(type === '*' ? null : IDBKeyRange.bound([type], [type, '\uffff'])), false, 'kvs');
 
 /**
  * 读取KV存储列表的key
  * @param {IDBValidKey} type
  * @returns {Promise<AiChat.IDBKVList[]>}
  */
-export function kvListGetKeys(type) {
-	return transaction('kvs', (tx, resolve) => {
-		const results = [];
+export const kvListGetKeys = type => transaction((tx, resolve) => {
+	const results = [];
 
-		tx.objectStore('kvs').openCursor(IDBKeyRange.bound([type], [type, '\uffff'])).onsuccess = (event) => {
-			const cursor = event.target.result;
-			if (cursor) {
-				const [type, name] = cursor.key;
-				results.push({
-					//type,
-					name
-				});
-				cursor.continue();
-			} else {
-				resolve(results);
-			}
-		};
-	});
-}
+	tx.objectStore('kvs').openCursor(IDBKeyRange.bound([type], [type, '\uffff'])).onsuccess = (event) => {
+		const cursor = event.target.result;
+		if (cursor) {
+			const [type, name] = cursor.key;
+			results.push({
+				//type,
+				name
+			});
+			cursor.continue();
+		} else {
+			resolve(results);
+		}
+	};
+}, false, 'kvs');
 
 /**
  * 获取一项
@@ -309,9 +288,7 @@ export function kvListGetKeys(type) {
  * @param {IDBValidKey} name
  * @returns {Promise<Object & AiChat.IDBKVList>}
  */
-export function kvListGet(type, name) {
-	return transaction('kvs', tx => tx.objectStore('kvs').get([type, name]));
-}
+export const kvListGet = (type, name) => transaction(tx => tx.objectStore('kvs').get([type, name]), false, 'kvs');
 
 
 /**
@@ -321,11 +298,11 @@ export function kvListGet(type, name) {
  * @param {IDBValidKey=} name
  * @returns {Promise<number>}
  */
-export function kvListSet(value, type, name) {
+export const kvListSet = (value, type, name) => {
 	if (type) value.type = type;
 	if (name) value.name = name;
-	return transaction('kvs', tx => tx.objectStore('kvs').put(value), true);
-}
+	return transaction(tx => tx.objectStore('kvs').put(value), true, 'kvs');
+};
 
 /**
  * 删除KV存储列表
@@ -333,19 +310,13 @@ export function kvListSet(value, type, name) {
  * @param {string} name
  * @returns {Promise<void>}
  */
-export function kvListDel(type, name) {
-	return transaction('kvs', tx => tx.objectStore('kvs').delete([type, name]), true);
-}
+export const kvListDel = (type, name) => transaction(tx => tx.objectStore('kvs').delete([type, name]), true, 'kvs');
 
 /**
  *
  * @param {AiChat.BillingLog} log
  * @return {Promise<void>}
  */
-export function appendBillingLog(log) {
-	return transaction('statistics', tx => tx.objectStore('statistics').add(log), true);
-}
+export const appendBillingLog = log => transaction(tx => tx.objectStore('logs').add(log), true, 'logs');
 
-export function getBillingLog(message_id) {
-	return transaction('statistics', tx => tx.objectStore('statistics').get(message_id));
-}
+export const getBillingLog = id => transaction(tx => tx.objectStore('logs').get(id), false, 'logs');

@@ -11,7 +11,7 @@ const MAX_LOG_LENGTH = 5000;
 
 export const interpreter = {
 	name: "execute_javascript",
-	description: "Run javascript in WebWorker sandbox, 不支持 import, 仅能访问内置对象. 可用于数学计算、字符串处理、原型验证等。",
+	description: "Run javascript in WebWorker sandbox, 不支持 import/require, 仅能访问内置对象. 可用于数学计算、字符串处理、原型验证等.",
 	parameters: {
 		type: "object",
 		properties: {
@@ -53,7 +53,7 @@ export const interpreter = {
 
 					if (log.length > MAX_LOG_LENGTH) {
 						const len = log.length-MAX_LOG_LENGTH;
-						log = log.substring(len);
+						log = log.slice(len);
 						trimmedChars += len;
 					}
 
@@ -81,4 +81,4 @@ export const interpreter = {
 	}
 };
 
-registerTools("interpreter", "执行多种类型代码. 可用于数学计算、字符串处理、原型验证等。", [interpreter]);
+registerTools("interpreter", "安全的执行 JavaScript 代码. 可用于数学计算、字符串处理、原型验证等。", [interpreter]);

@@ -2,38 +2,7 @@ import {showToast} from "../components/Toast.js";
 import {$watch, debugSymbol, unconscious} from "unconscious";
 import {highlightJsonLike} from "../markdown/highlight.js";
 
-/**
- * 发起API请求
- * @param {string} url
- * @param {RequestInit & { authorization?: string }} data
- * @return {Promise<*>}
- */
-export function jsonFetch(url, data = {}) {
-	const method = data.body ? "POST" : "GET";
-	return fetch(url, {
-		method,
-		headers: {
-			'Accept': 'application/json',
-			'Content-Type': "application/json",
-			'Authorization': "Bearer "+(data.authorization||"")
-		},
-		referrerPolicy: 'no-referrer',
-		...data
-	}).catch(err => {
-		if (err.message === "Failed to fetch")
-			throw ("网络连接失败\n请检查API地址是否正确，连接是否畅通");
-		throw err;
-	}).then(res => {
-		if (!res.ok) {
-			return res.text().then(err => {
-				throw (`API错误 ${res.status}\n${err}`);
-			});
-		}
-
-		return res.json();
-	});
-}
-
+export {jsonFetch} from "/common/openai-api-utils.js";
 
 /**
  * 只克隆指定名称
@@ -41,25 +10,23 @@ export function jsonFetch(url, data = {}) {
  * @param {Set<string>|string[]} names
  * @return {{}}
  */
-export function cloneNamed(obj, names) {
+export const cloneNamed = (obj, names) => {
 	const result = {};
 	obj = unconscious(obj);
 	for (const name of names) {
 		if (name in obj) result[name] = obj[name];
 	}
 	return result;
-}
+};
 
 export const IN_EDIT_MODE = debugSymbol("EDIT");
 
-export function loadingBlock(message) {
-	return <div className={"my-box loading"}>
-		<div className="spinner"></div>
-		<span>{message}</span>
-	</div>;
-}
+export const loadingBlock = message => <div className={"my-box loading"}>
+	<div className="spinner"></div>
+	<span>{message}</span>
+</div>;
 
-export function errorBlock(error, title) {
+export const errorBlock = (error, title) => {
 	let safeHtml;
 	if (typeof error !== "string") {
 		if (error instanceof Error) {
@@ -76,7 +43,7 @@ export function errorBlock(error, title) {
 	const pre = <pre className="error-text" ></pre>;
 	pre[safeHtml?"innerHTML":"textContent"] = error;
 	return <div className="error-block" style={title && "--title:" + JSON.stringify(title)}>{pre}</div>;
-}
+};
 
 export const MORPH_CHILD_FUNCTION = debugSymbol("MORPH_CHILD_FUNCTION");
 export const MORPH_CHILD_HANDLER = (key, node) => {
@@ -121,7 +88,7 @@ export function limitMaxSide(width, height, maxSide) {
  * @param {number=} maxSize - 最大大小
  * @returns {Promise<Blob>} - 返回压缩后的 JPEG Blob
  */
-export async function compressImage(file, { quality = 0.85, maxSide = 2048, maxSize = 2097152 } = {}) {
+export const compressImage = async (file, { quality = 0.85, maxSide = 2048, maxSize = 2097152 } = {}) => {
 	const imageBitmap = await createImageBitmap(file);
 
 	try {
@@ -149,13 +116,13 @@ export async function compressImage(file, { quality = 0.85, maxSide = 2048, maxS
 	} finally {
 		imageBitmap.close();
 	}
-}
+};
 
 /**
  * @param {Error | string} error
  * @return {string}
  */
-export function prettyError(error) {
+export const prettyError = error => {
 	if (typeof error === "string") return error;
 	if (!(error instanceof Error)) {
 		try {
@@ -173,13 +140,13 @@ export function prettyError(error) {
 				const fullPath = match[1];
 				const lineNumber = match[2];
 				// 从路径中提取文件名
-				const fileName = fullPath.substring(fullPath.lastIndexOf('/') + 1);
-				return "\t"+line.substring(0, match.index).trim()+`${fileName}:${lineNumber})`;
+				const fileName = fullPath.slice(fullPath.lastIndexOf('/') + 1);
+				return "\t"+line.slice(0, match.index).trim()+`${fileName}:${lineNumber})`;
 			}
 			return null;
 		});
 	return (error.message||error.name)+"\n"+(stackTrace.join("\n"));
-}
+};
 
 const TIMER = /* #__PURE__ */ Symbol();
 const ANIMATION_TIME = 200;
@@ -188,7 +155,7 @@ const ANIMATION_TIME = 200;
  *
  * @param {HTMLElement} element
  */
-export function jsHide(element) {
+export const jsHide = element => {
 	clearTimeout(element[TIMER]);
 
 	if (!element.style.display) {
@@ -202,9 +169,9 @@ export function jsHide(element) {
 			element.style.left = "";
 		});
 	}
-}
+};
 
-export function copyButtonAnimation(data, btn) {
+export const copyButtonAnimation = (data, btn) => {
 	const successCallback = () => {
 		btn.className = "ri-checkbox-line ghost";
 		setTimeout(() => btn.className = "ri-file-copy-line ghost", 1000);
@@ -222,7 +189,7 @@ export function copyButtonAnimation(data, btn) {
 		input.remove();
 		successCallback();
 	}
-}
+};
 
 /**
  * 节流函数，保证最终一定会以最新的参数调用一次
@@ -231,7 +198,7 @@ export function copyButtonAnimation(data, btn) {
  * @param {number} wait=300
  * @return {T}
  */
-export function throttled(fn, wait = 300) {
+export const throttled = (fn, wait = 300) => {
 	let timer;
 	let latestArgs;
 	const again = (...args) => {
@@ -249,84 +216,25 @@ export function throttled(fn, wait = 300) {
 		}
 	};
 	return again;
-}
-
-/**
- *
- * @param {string} url
- * @param {RequestInit & { authorization?: string }} data
- * @param {function(OpenAI.Response): void} onToken
- * @return {Promise<void>}
- */
-export function streamFetch(url, data = {}, onToken) {
-	return fetch(url, {
-		method: "POST",
-		headers: {
-			'Content-Type': "application/json",
-			'Authorization': "Bearer "+(data.authorization||"")
-		},
-		referrerPolicy: 'no-referrer',
-		...data
-	}).then(async res => {
-		if (!res.ok) {
-			const err = await res.text();
-			throw (`API错误 ${res.status}\n${err}`);
-		}
-
-		const reader = res.body.getReader();
-
-		const decoder = new TextDecoder();
-		let buf = '';
-
-		try {
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-				buf += decoder.decode(value, { stream: true });
-
-				const lines = buf.split("\n");
-				buf = lines.pop() || '';
-				for (const line of lines) {
-					if (line.startsWith('data: ')) {
-						const data = line.slice(6);
-						if (data === '[DONE]') return;
-
-						const json = JSON.parse(data);
-						let error = json.error?.message;
-						try {
-							onToken(json);
-						} catch (e) {
-							if (!error)
-								error = e;
-						}
-
-						if (error) throw error;
-					}
-				}
-			}
-		} finally {
-			await reader.cancel();
-		}
-	});
-}
+};
 
 /**
  *
  * @param {AiChat.Message} m
  * @return {string}
  */
-export function getTextContent(m) {
+export const getTextContent = m => {
 	const content = unconscious(m.content);
 	return Array.isArray(content) ? content.filter(e => e.type === "text").map(e => e.text).join("\n\n") :  typeof content === "string" ? content : null;
-}
+};
 
 /**
  *
  * @param {HTMLElement} element
  */
-export function indexInParent(element) {return Array.prototype.indexOf.call(element.parentElement.children, element);}
+export const indexInParent = element => Array.prototype.indexOf.call(element.parentElement.children, element);
 
-export function once(callback) {
+export const once = callback => {
 	let result;
 	return () => {
 		if (callback) {
@@ -335,7 +243,7 @@ export function once(callback) {
 		}
 		return result;
 	}
-}
+};
 
 
 /**
@@ -343,7 +251,7 @@ export function once(callback) {
  * @param {HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement} formElement
  * @param {import('unconscious').Reactive<string>} variable
  */
-export function bind(formElement, variable) {
+export const bind = (formElement, variable) => {
 	formElement.addEventListener("input", e => {
 		variable.value = formElement.value;
 	});
@@ -354,4 +262,4 @@ export function bind(formElement, variable) {
 	});
 
 	return formElement;
-}
+};

@@ -11,7 +11,7 @@ SETTINGS.push({
 
 		// Accept 400 Bad Request
 		jsonFetch(config.endpoint+(config.mode === "chat" ? '/chat/completions' : '/completions'), {
-			authorization: config.accessToken,
+			key: config.accessToken,
 			body: JSON.stringify({
 				model: "loremipsum",
 				messages: [{ role: "user", content: "Hello" }],
@@ -23,7 +23,7 @@ SETTINGS.push({
 		}).catch(err => {
 			console.error(err);
 			err = prettyError(err);
-			err = err.substring(0, err.indexOf("\n"));
+			err = err.slice(0, err.indexOf("\n"));
 			return err.endsWith(" 400") || err.endsWith(" 500");
 		}).then(result => {
 			target.disabled = false;

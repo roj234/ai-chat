@@ -1,22 +1,77 @@
 import {$foreach, $state} from "unconscious";
 import {config} from "/src/states.js";
 import SimpleModal from "../src/components/SimpleModal.jsx";
-import {prettyTime, formatSize} from "unconscious/ext/Utils.js";
+import {formatSize, prettyTime} from "unconscious/common/Utils.js";
 
 const pageSize = 20;
 
-const blobs = $state([]);
-let currentPage = $state(1);
-let total = $state();
+const blobs = $state();
+const currentPage = $state(1);
+const total = $state();
 let table;
 
+const fetchList = async () => {
+	try {
+		const res = await fetch(`${config.db_server}/blobs?page=${currentPage}&limit=${pageSize}`);
+		const result = await res.json();
+
+		blobs.value = result.data;
+		total.value = result.total;
+	} catch (err) {
+		alert('获取列表失败: ' + err.message);
+	}
+};
+
+const deleteItem = hash => {
+	SimpleModal({
+		title: "确定要删除吗？",
+		onConfirm() {
+			fetch(`${config.db_server}/blob/${hash}`, {method: 'DELETE'}).then(fetchList);
+		}
+	})
+};
+
+const deleteSelected = () => {
+	const checks = table.querySelectorAll('.row-check:checked');
+	if (checks.length === 0) return;
+	SimpleModal({
+		title: `确定要删除选中的 ${checks.length} 项吗？`,
+		onConfirm() {
+			const all = [];
+			for (let chk of checks) {
+				all.push(fetch(`${config.db_server}/blob/${chk.value}`, {method: 'DELETE'}));
+			}
+			Promise.all(all).then(fetchList);
+		}
+	});
+};
+
+const toggleAll = master => {
+	table.querySelectorAll('.row-check').forEach(chk => chk.checked = master.checked);
+};
+
+const changePage = delta => {
+	const page = currentPage.value + delta;
+	if (page < 1 || page > Math.ceil(total/pageSize)) return;
+	currentPage.value = page;
+	fetchList();
+};
+
+const showFull = url => {
+	SimpleModal({
+		title: "图像预览",
+		message: <img src={url} />
+	})
+};
+
 const container = <div className={"modal-overlay"}>
-	<div className="modal" style={"max-width: 70vw"}>
-		<div className="header">
+	<div className="modal" style={"max-width:70vw"}>
+		<div className="header" style={"display:flex;gap:8px"}>
 			<b>Blob 存储管理</b>
-			<button className="btn primary" onClick={fetchList}>刷新</button>
+			<button className="ri-loop-right-line btn primary" title={"刷新"} onClick={fetchList}></button>
+			<span className={"spacer"}></span>
 			<button className="btn danger" onClick={deleteSelected}>删除选中</button>
-			<button className="ri-close-line btn ghost" style="border:none" onClick={() => container.remove()}></button>
+			<button className="ri-close-line btn ghost" style="border:none" title={"关闭窗口"} onClick={() => container.remove()}></button>
 		</div>
 
 		<div style={"overflow:auto"}>
@@ -25,10 +80,10 @@ const container = <div className={"modal-overlay"}>
 				<tr>
 					<th width="30"><input type="checkbox" onClick={({target}) => toggleAll(target)}/></th>
 					<th>预览</th>
-					<th>Hash / 名称</th>
+					<th>Hash</th>
 					<th>类型</th>
 					<th>大小</th>
-					<th>修改时间</th>
+					<th>上传时间</th>
 					<th>操作</th>
 				</tr>
 				</thead>
@@ -46,14 +101,14 @@ const container = <div className={"modal-overlay"}>
 						<td>{formatSize(item.size)}</td>
 						<td>{prettyTime(item.time)}</td>
 						<td>
-							<a href={blobUrl} target="_blank" className="btn primary">下载</a>
-							<button className="btn danger" onClick={() => {
+							<a href={blobUrl} target="_blank" title={"下载"} className="ri-download-2-line btn primary"></a>
+							<button className="ri-delete-bin-line btn danger" title={"删除"} onClick={() => {
 								deleteItem(item.hash);
-							}}>删除
+							}}>
 							</button>
 						</td>
 					</tr>
-				})}
+				}, item => item.hash)}
 				</tbody>
 			</table>
 		</div>
@@ -63,56 +118,9 @@ const container = <div className={"modal-overlay"}>
 			<button className="btn" onClick={() => changePage(1)}>下一页</button>
 		</div>
 	</div>
-
 </div>;
 
-async function fetchList() {
-	try {
-		const res = await fetch(`${config.db_server}/blobs?page=${currentPage}&limit=${pageSize}`);
-		const result = await res.json();
-
-		blobs.value = result.data;
-		total.value = result.total;
-	} catch (err) {
-		alert('获取列表失败: ' + err.message);
-	}
-}
-
-async function deleteItem(hash) {
-	if (!confirm('确定要删除吗？')) return;
-	await fetch(`${config.db_server}/blob/${hash}`, {method: 'DELETE'});
-	fetchList();
-}
-
-async function deleteSelected() {
-	const checks = table.querySelectorAll('.row-check:checked');
-	if (checks.length === 0) return;
-	if (!confirm(`确定要删除选中的 ${checks.length} 项吗？`)) return;
-
-	for (let chk of checks) {
-		await fetch(`${config.db_server}/blob/${chk.value}`, {method: 'DELETE'});
-	}
-	fetchList();
-}
-
-function toggleAll(master) {
-	table.querySelectorAll('.row-check').forEach(chk => chk.checked = master.checked);
-}
-
-function changePage(delta) {
-	if (currentPage.value + delta < 1) return;
-	currentPage.value += delta;
-	fetchList();
-}
-
-function showFull(url) {
-	SimpleModal({
-		title: "图像预览",
-		message: <img src={url} />
-	})
-}
-
-export function display() {
+export const display = () => {
 	document.body.append(container);
 	fetchList();
-}
+};

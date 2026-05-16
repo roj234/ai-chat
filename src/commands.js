@@ -2,6 +2,8 @@ import {showToast} from "./components/Toast.js";
 import {beginConversation, selectedConversation} from "./states.js";
 import {updateConversation} from "./database.js";
 import {loadPreset} from "./components/PresetDropdown.jsx";
+import {unconscious} from "unconscious";
+import {tokenize} from "unconscious/common/StringTokenizer.js";
 
 /**
  * 指令处理器定义
@@ -25,12 +27,14 @@ export const COMMAND_REGISTRY = {
 	],
 	title: [
 		async (args) => {
-			if (!selectedConversation.value) throw new Error("未选中对话");
+			const conversation = unconscious(selectedConversation);
+			if (!conversation) throw new Error("未选中对话");
+
 			const newTitle = args.join(" "); // 支持带空格的标题
 			if (!newTitle) throw new Error("标题不能为空");
 
 			selectedConversation.title = newTitle;
-			await updateConversation(selectedConversation.value);
+			await updateConversation(conversation);
 			showToast("标题已更新", "success");
 		},
 		"修改对话标题: /title <new_title>",
@@ -54,8 +58,8 @@ export const COMMAND_REGISTRY = {
  * 示例: /title "My Room" category:work
  * 返回: { command: "title", args: ["My Room"], params: { category: "work" } }
  */
-function parseCommand(text) {
-	const parts = text.trim().substring(1).split(/\s+/);
+const parseCommand = text => {
+	const parts = tokenize(text.substring(1));
 	const command = parts.shift().toLowerCase();
 	const args = [];
 	const params = {};
@@ -71,15 +75,15 @@ function parseCommand(text) {
 	});
 
 	return { command, args, params };
-}
+};
 
 /**
  * 主入口函数
- * @param {HTMLTextAreaElement} element
+ * @param {import("unconscious").Reactive<string>} inputText
  * @returns {Promise<boolean>} 是否拦截了输入
  */
-export async function handleCommand(element) {
-	const text = element.value.trim();
+export const handleCommand = async inputText => {
+	const text = inputText.value.trim();
 	if (!text.startsWith('/')) return false;
 
 	// 允许 "/#" 作为注释不执行
@@ -91,9 +95,9 @@ export async function handleCommand(element) {
 	try {
 		if (execute) {
 			// 清空输入框（除非是 help 指令想保留内容）
-			if (command !== 'help') element.value = "";
+			if (command !== 'help') inputText.value = "";
 
-			await execute(args, params, element);
+			await execute(args, params, inputText);
 		} else {
 			showToast(`未知指令: /${command}`, 'error');
 		}
@@ -103,4 +107,4 @@ export async function handleCommand(element) {
 	}
 
 	return true;
-}
+};

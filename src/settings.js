@@ -1,4 +1,4 @@
-import {clearDatabase, duplicateConversation, exportConversation, importConversation} from "./data-exchange.js";
+import {clearDatabase, exportConversation, importConversation} from "./data-exchange.js";
 import {createPreset} from "./components/PresetDropdown.jsx";
 import {config, isMobile, messages, selectedConversation} from "./states.js";
 import defaultCoTPrompt from "../media/thinkPrompt.txt?raw";
@@ -57,9 +57,9 @@ export const CUSTOM_CONTROLS = <>
 	</button>
 	<button className="ri-git-fork-line chip"
 			style:display={() => selectedConversation.value ? "" : "none"}
-			class:active={() => selectedConversation.branches}
+			class:active={() => selectedConversation.bm_leaf}
 			onClick={() => {
-				if (!selectedConversation.branches) {
+				if (!selectedConversation.bm_leaf) {
 					SimpleModal({
 						title: "是否为当前对话启用分支功能？",
 						message: "启用后，部分功能将会与之前版本的预期行为不同\n- 您将无法同时进行多个编辑操作\n- 您将无法删除对话中间的消息\n- 编辑操作将创建新的分支（可在设置中修改）\n- 当前版本和上下文管理（技能、变量等）存在一些兼容性问题",
@@ -78,7 +78,7 @@ export const CUSTOM_CONTROLS = <>
 					});
 				}
 			}}>
-		<div className="tooltip">对话分支（实验性）：保存并探索对话的不同走向</div>
+		<div className="tooltip">对话分支：保存并探索对话的不同走向</div>
 	</button>
 </>;
 
@@ -110,10 +110,13 @@ export const SETTINGS = [
 		placeholder: defaultTitlePrompt
 	},
 	{
-		name: "个人自用95新项目，欢迎提交bug和功能建议",
+		name: "© 2025-2026 Roj234, Made with ❤",
 		_order: 99, // 总是最后一个
 		type: "element",
-		element: <a href={"https://github.com/roj234/ai-chat"} target={"_blank"}>&copy; 2025-2026 Roj234</a>
+		element: <div className={"choice-scroll"}>
+			<a target={"_blank"} href={"https://github.com/roj234/ai-chat"} >开源地址</a>
+			<a target={"_blank"} href={"log_viewer.html"}>请求日志</a>
+		</div>,
 	},
 	//model
 	{
@@ -176,11 +179,11 @@ export const SETTINGS = [
 		title: "单次回复的最大 token 数量。过小会导致回答被截断。\n如服务商支持，可启用‘助手消息预填充’。\n设为 0 表示无限制（不推荐）。",
 		type: "number",
 		min: 0,
-		max: 16384,
-		omit: 0
+		max: 99999,
+		_omit: 0
 	},
 	{
-		id: "allowContinue",
+		id: "canPrefill",
 		_tab: "model",
 		_group: 'model',
 		name: "助手消息预填充 (Assistant Prefill)",
@@ -191,37 +194,66 @@ export const SETTINGS = [
 		}
 	},
 	{
+		id: "prefillPath",
+		_tab: 'model',
+		_group: 'model',
+		name: "(高级) 助手消息预填充 请求体配置",
+		title: "JSONPath,JSON (value)",
+		placeholder: "prefix,true",
+		type: "input"
+	},
+	{
 		id: "forceThink",
 		_tab: "model",
 		_group: 'model',
-		name: "模型思考限制",
+		name: "推理能力",
 		title: "覆盖并隐藏【深度思考】开关",
 		type: "radio",
 		choices: {
-			"不支持思考": false,
-			"仅支持思考": true
+			"不能推理": false,
+			"仅能推理": true
 		}
 	},
 	{
 		id: "modalities",
 		_tab: "model",
 		_group: 'model',
-		name: "模型能力支持",
+		name: "多模态能力",
 		type: "multiple",
 		choices: {
 			"图像": 'image',
 			"音频": 'audio',
 			"工具": "tool",
-			//"思考": "reasoning",
 		}
 	},
-/*	{
-		id: "modelPrice",
+	{
+		id: "jsonSupport",
 		_tab: "model",
 		_group: 'model',
-		name: "模型价格",
-		title: "在服务商未提供usage字段时向日志API传入原始字符数，并乘以该系数估算价格",
-	},*/
+		name: "JSON响应能力",
+		type: "radio",
+		required: true,
+		choices: {
+			"无": 0,
+			"对象": 1,
+			"Schema (严格)": 2,
+			"Schema (标准)": 3
+		}
+	},
+	{
+		_tab: "model",
+		name: "请求优化",
+		type: "radio",
+		choices: {
+			"流式发送Body": "streamDuplex",
+			//"后端发送Blob": "sseBlobProxy"
+		},
+		title: {
+			"流式发送Body": "使用HTTP/2流式发送请求，避免在JS中构造超大的JSON字符串\nHTTP/1其实也支持，但谷歌为了强迫H2普及故意不支持",
+			//"后端发送Blob": "使用后端服务的SSE Proxy代替客户端发送Blob\n需要后端"
+		},
+		_group: 'model'
+	},
 	{
 		id: "additionalBody#",
 		_tab: 'model',
@@ -231,17 +263,6 @@ export const SETTINGS = [
 		type: "textbox",
 		placeholder: "{\n  \"chat_template_kwargs\": {},\n}"
 	},
-/*	{
-		id: "prefillKVCache",
-		_tab: "model",
-		_group: 'model',
-		name: "我的本地LLM很卡 (请看tooltip)",
-		title: "在生成完一轮对话之后立即让llama.cpp填充KV缓存\n当思考开启时能加速\n如果你的 prompt 处理速度（不是生成速度）超过三位数 TPS，那么这个选项没有意义",
-		type: "radio",
-		choices: {
-			"预处理Prompt": true
-		}
-	},*/
 	// model
 	// prompt
 	{
@@ -294,6 +315,24 @@ export const SETTINGS = [
 			"仅手动 CoT": 'm',
 			"所有": true
 		}
+	},
+	{
+		id: "reasoningPath",
+		_tab: 'prompt',
+		_group: 'model',
+		name: "(高级) 推理开关 请求体配置",
+		title: "JSONPath,JSON (enabled), JSON (disabled)",
+		placeholder: "reasoning.enabled",
+		type: "input"
+	},
+	{
+		id: "reasoningEffortPath",
+		_tab: 'prompt',
+		_group: 'model',
+		name: "(高级) 推理预算 请求体配置",
+		title: "JSONPath",
+		placeholder: "reasoning.effort",
+		type: "input"
 	},
 	// prompt
 	// sampling
@@ -478,15 +517,6 @@ export const SETTINGS = [
 	},
 	{
 		type: "element",
-		_tab: "data",
-		name: "复制选中的对话",
-		title: "项目已支持对话分支，功能不再建议使用",
-		element: <div className={"choice-scroll"}>
-			<button className="btn ghost" onClick={duplicateConversation}>另存为</button>
-		</div>
-	},
-	{
-		type: "element",
 		_tab: ["general", "data"],
 		name: "将当前配置保存为新预设",
 		element: <div className={"choice-scroll"}>
@@ -496,9 +526,9 @@ export const SETTINGS = [
 	{
 		type: "element",
 		_tab: "data",
-		name: "清除所有数据（不可恢复）",
+		name: "清除所有数据",
 		element: <div className={"choice-scroll"}>
-			<button className="btn danger" onClick={clearDatabase}>删除数据库</button>
+			<button className="btn danger" onClick={clearDatabase}>删库</button>
 		</div>
 	},
 	// data
@@ -513,7 +543,7 @@ export const SETTINGS = [
 		},
 		title: {
 			"请求调试": "预览发送到API的原始请求体",
-			"响应调试": "在控制台打印SSE流，手动执行工具调用",
+			"响应调试": "在控制台打印SSE流",
 			"数据库只读": "数据库修改在刷新后重置",
 			"延迟提交消息": "点击发送按钮仅追加用户消息，第二次点击时请求LLM",
 		}
@@ -536,9 +566,18 @@ export const SETTINGS = [
 			"YOLO模式": true
 		}
 	},
+	// logs
+	{
+		id: "provider",
+		name: "模型渠道",
+		type: "input",
+		_tab: "data",
+		title: "仅用于统计, 留空使用预设名称",
+		_group: "model"
+	}
 ];
 
-function toggleFullscreen() {
+const toggleFullscreen = () => {
 	let elem = document.body;
 
 	if (!document.fullscreenElement) {
@@ -550,7 +589,7 @@ function toggleFullscreen() {
 		document.exitFullscreen();
 		screen.orientation?.unlock();
 	}
-}
+};
 
 // 手机上删掉对话框宽度
 if (isMobile) {
@@ -566,7 +605,7 @@ if (isMobile) {
 export const BODY_PARAMETERS = SETTINGS.filter(({id = "", _tab}) => (_tab === "sampling" && !id.endsWith("#")) || id === "max_tokens");
 BODY_PARAMETERS.forEach(item => item.body_id = item.id.replaceAll(/[^a-zA-Z09-_]/g, '').trim());
 
-export const presetKeysAlways = ["name", "think", "tools"];
+export const presetKeysAlways = ["name"];
 export const presetKeys = {};
 for (const [k, v] of [
 	["title", "标题生成参数"],
@@ -577,38 +616,37 @@ for (const [k, v] of [
 	presetKeys[k] = {
 		id: k,
 		name: v,
-		keys: []
+		keys: [...presetKeysAlways]
 	}
 }
 
 // 删除过时的配置项
 requestIdleCallback(() => {
-	SETTINGS.forEach(({id, _group, choices}) => {
+	const keys = new Set(Object.keys(config));
+	["name", "think", "tools"].forEach(name => keys.delete(name));
+
+	SETTINGS.forEach(({id, _group, type, choices}) => {
 		if (!id) {
-			if (_group) for (const [k, v] of Object.entries(_group)) {
-				presetKeys[v].keys.push(k);
+			if (_group) {
+				if (typeof _group !== "string") {
+					for (const [k, v] of Object.entries(_group)) {
+						presetKeys[v].keys.push(k);
+					}
+				} else {
+					presetKeys[_group].keys.push(id);
+				}
 			}
-			// TODO schema 验证？
-			//if (choices) configKeys.push(...Object.values(choices));
+
+			if (type === "multiple") {
+				Object.values(choices).forEach(k => keys.delete(k));
+			}
 		} else {
 			if (_group) {
 				presetKeys[_group].keys.push(id);
 			}
-			//configKeys.push(id);
+			keys.delete(id);
 		}
 	});
 
-	const keys = new Set(presetKeysAlways);
-	for (let el of SETTINGS) {
-		if (el.id) {
-			keys.add(el.id);
-		} else if (el.type === "multiple") {
-			Object.values(el.choices).forEach(k => keys.add(k));
-		}
-	}
-	for (let key of Object.keys(config)) {
-		if (!keys.has(key)) {
-			delete config[key];
-		}
-	}
+	for (let key of keys) delete config[key];
 });

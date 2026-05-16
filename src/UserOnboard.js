@@ -2,10 +2,10 @@ import {driver} from "driver.js";
 import "driver.js/dist/driver.css";
 import {jsHide} from "./utils/utils.js";
 
-function removeBrainDiv(driver) {
+const removeBrainDiv = driver => {
 	jsHide(setting);
 	driver.moveNext();
-}
+};
 
 const buttons = ["next", "close"];
 
@@ -26,7 +26,6 @@ const mainPageDriver = driver({
 		}
 
 		mainPageDriver.destroy();
-		localStorage[APP_NAME+':tour-completed'] = APP_VERSION;
 	},
 
 	steps: [
@@ -61,7 +60,7 @@ const mainPageDriver = driver({
 				}
 			}
 		},
-		{ element: '.controls > button:nth-child(2)', popover: {
+		{ element: '.controls > button:nth-child(3)', popover: {
 			title: '假设您对LLM前后端和内部机制有充分的了解', description: '点击工具调用将会启用系统内置或插件提供的工具<br/>' +
 					'一旦模型调用过工具，后续不建议禁止工具调用，否则可能出现意料之外的结果<br/>' +
 					'你可以在系统提示词中（通过本项目提供的扩展格式）允许或禁止模型使用某些工具',
@@ -73,12 +72,9 @@ const mainPageDriver = driver({
 		{ element: '#settingDialog .filter > .filter-row[data-id="generateTitle"]', popover: {
 			title: '生成对话标题', description: '当LLM完成新对话的第一条消息时，让它总结你们的对话并生成标题'
 		} },
-		{ element: '#settingDialog .filter > div:nth-child(3)', popover: {
+		{ element: '#settingDialog .filter > div:nth-child(4)', popover: {
 			title: '导入数据', description: '导入之前导出的数据，或插件支持的格式<br/>' +
 					'例如官方的SillyTavern插件可以导入酒馆的V2角色卡规范(json/png)',
-		} },
-		{ element: '#settingDialog .filter > div:nth-child(4)', popover: {
-			title: '另存为', description: '与你的想象可能不太一样，这个按钮的功能是将目前选中的对话复制一份，因为该项目尚不支持对话分支',
 			onNextClick(element, step, {driver}) {
 				switchTab("model").then(() => driver.moveNext());
 			}
@@ -88,11 +84,14 @@ const mainPageDriver = driver({
 					'大部分模型也只支持对话API<br/>' +
 					'使用文本补全API需要你会JavaScript，懂一定的Jinja2模板'
 		} },
-		{ element: '#settingDialog .filter > .filter-row[data-id="allowContinue"]', popover: {
+		{ element: '#settingDialog .filter > .filter-row[data-id="canPrefill"]', popover: {
 			title: '“继续”消息', description: '回复预填充 (Assistant Message Prefill)<br/>' +
 					'你可以随时点击发送按钮【中止】和【继续】LLM的回复<br/>' +
 					'闭源模型可能不支持<br/>' +
-					'llama.cpp 不支持思考模式的预填充，除了我的分支',
+					'llama.cpp 不支持思考模式的预填充，除了我的分支'
+		} },
+		{ element: '#settingDialog .filter > .filter-row[data-id="additionalBody#"]', popover: {
+			title: '扩展请求体', description: '此处填写的JSON将直接被合并到最终的body中，优先级最高',
 			onNextClick(element, step, {driver}) {
 				switchTab("prompt").then(() => driver.moveNext());
 			}
@@ -117,18 +116,14 @@ const mainPageDriver = driver({
 					'低：20% 的 max_tokens<br/>' +
 					'中：50% 的 max_tokens<br/>' +
 					'高：80% 的 max_tokens',
-				onNextClick(element, step, {driver}) {
-					switchTab("sampling").then(() => driver.moveNext());
-				}
+			onNextClick(element, step, {driver}) {
+				switchTab("sampling").then(() => driver.moveNext());
+			}
 		} },
 		{ element: '#settingDialog .filter > .filter-row[data-id="antiSlop#"]', popover: {
 			title: '反语法约束采样', description: '基于回滚和prefill的反语法约束采样<br/>' +
 					'<b>禁止</b>模型生成符合正则表达式约束的回复<br/>' +
 					'要使用此功能，后端必须支持 logprobs 和 prefill',
-		} },
-		{ element: '#settingDialog .filter > .filter-row[data-id="additionalBody#"]', popover: {
-			title: '扩展请求体', description: '此处填写的JSON将直接被合并到最终的body中，优先级最高',
-
 			onNextClick(element, step, {driver}) {
 				switchTab("data").then(() => driver.moveNext());
 			}
@@ -137,7 +132,7 @@ const mainPageDriver = driver({
 			title: '导出数据', description: '导出选中的对话，如果没有选中的，导出所有对话，和/或配置文件<br/>' +
 					'如果对话中包含多媒体文件，以zip格式保存，否则json',
 		} },
-		{ element: '#settingDialog .filter > div:nth-child(3)', popover: {
+		{ element: '#settingDialog .filter > div:nth-child(4)', popover: {
 			title: '保存预设', description: '将当前页面的设置保存为一个预设，可以在下拉框中选择或删除',
 		} },
 		{ element: '#settingDialog .pretty-select', popover: {
@@ -166,10 +161,10 @@ if (setting.style.display === 'none') {
 	timeout = 300;
 }
 
-function switchTab(tab) {
+const switchTab = tab => {
 	document.querySelector(`#settingDialog .sidebar-list [data-tab=${JSON.stringify(tab)}]`).click();
 	return new Promise(resolve => queueMicrotask(resolve));
-}
+};
 
 switchTab("model").then(() => {
 	const filter = document.querySelector("#settingDialog .filter");
