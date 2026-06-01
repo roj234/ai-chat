@@ -1,59 +1,46 @@
-import esbuild from 'esbuild';
-import path from 'path';
-import {fileURLToPath} from 'url';
-import fs from "fs";
-
+import {rollup} from 'rollup';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import serverPackageInfo from "./backend/package.json" with {type: "json"}
+import path from 'path';
+import {fileURLToPath} from 'url';
+import serverPackageInfo from './backend/package.json' with {type: 'json'};
+import {nodeResolve} from 'unconscious/vite/build-backend.js';
 
 const execFilePromise = promisify(execFile);
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const configAbsPath = path.resolve(__dirname, 'backend/config.js');
 const serverAbsPath = path.resolve(__dirname, 'dist/server.js');
 
-esbuild.build({
-	entryPoints: ['backend/server.js'],
-	bundle: true,
-	platform: 'node',
-	target: 'node22',
-	outfile: serverAbsPath,
-	format: "esm",
-	charset: 'utf8',
+const rollupConfig = {
+	input: 'backend/server.js',
 	external: [
-		...Object.keys(serverPackageInfo.dependencies || {})
+		...Object.keys(serverPackageInfo.dependencies || {}),
 	],
 	plugins: [
+		nodeResolve(),
 		{
-			name: 'config-handle',
-			setup(build) {
-				// 拦截所有解析请求
-				build.onResolve({ filter: /.*config\.js$/ }, (args) => {
-					const resolvedPath = path.resolve(args.resolveDir, args.path);
-					if (resolvedPath === configAbsPath) {
-						return {
-							path: './config.js',
-							external: true,
-						};
-					}
-				});
+			name: 'ny-plugin',
+			resolveId(id, importer) {
+				if (id.endsWith("/config.js")) return { id: './config.js', external: true };
+			},
+			async transform(code, id) {
+				code = code.replaceAll("{{BUILD_TIME}}", new Date().toISOString());
+				code = code.replaceAll("{{PROJECT_VERSION}}", serverPackageInfo.version);
 
-				build.onEnd(async _ => {
-					let s = fs.readFileSync(serverAbsPath, "utf8");
-					s = s.replaceAll("{{BUILD_TIME}}", new Date().toISOString());
-					s = s.replaceAll("{{PROJECT_VERSION}}", serverPackageInfo.version);
+				try {
+					const result = await execFilePromise("git", "describe --tags --abbrev=7 --dirty=* --always".split(" "));
+					code = code.replaceAll("{{GIT_COMMIT}}", result.stdout.trim());
+				} catch {}
 
-					try {
-						const result = await execFilePromise("git", "describe --tags --abbrev=7 --dirty=* --always".split(" "));
-						s = s.replaceAll("{{GIT_COMMIT}}", result.stdout.trim());
-					} catch {}
-
-					fs.writeFileSync(serverAbsPath, s);
-				})
+				return { code, map: null };
 			}
 		}
-	]
-}).then(() => {
-	console.log("Server built: ", serverAbsPath);
+	],
+};
+
+const bundle = await rollup(rollupConfig);
+await bundle.write({
+	file: serverAbsPath,
+	format: 'esm',
+	//compact: true,
 });
+console.log("Server built: ", serverAbsPath);

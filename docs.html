@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>项目文档</title>
+    <link rel="stylesheet" href="vendor/normalize.css" />
+    <link rel="stylesheet" href="vendor/remixicon/remixicon.css" />
+    <link rel="preload" as="font" crossorigin href="vendor/remixicon/remixicon.woff2" />
+    <link rel="stylesheet" href="src/doc_viewer/doc_viewer.css" />
+    <script type="module" src="src/doc_viewer/doc_viewer.js"></script>
+</head>
+<body id="app">
+<div id="loading">
+    <style>
+        #loading {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: #8886;
+            z-index: 99;
+            transition: opacity 0.6s ease;
+        }
+        .spinner {
+            stroke-dasharray: 0 75;
+            stroke-linecap: round;
+            stroke-width: 2;
+            fill: none;
+            transform-origin: center;
+            animation:
+                    dash 1.5s ease-in-out infinite,
+                    spin 2s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        @keyframes dash {
+            50% { stroke-dasharray: 55 75; stroke-dashoffset: -15; }
+            100% { stroke-dashoffset: -75; }
+        }
+    </style>
+    <noscript><h1>Enable JavaScript to continue.</h1></noscript>
+    <svg width="20vw" height="20vh" viewBox="0 0 32 32">
+        <circle stroke="currentColor" cx="16" cy="16" r="12" class="spinner" />
+    </svg>
+</div>
+</body>
+</html>

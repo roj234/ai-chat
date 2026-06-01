@@ -3,6 +3,7 @@ import {decodeObjects, encodeObjects, serializeJSON} from "../utils/marshal.js";
 import {initSync, SYNC_CONVERSATION, SYNC_MESSAGE} from "./SyncManager.js";
 import {decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
 import {c2s_schema, c2s_schema_version, s2c_schema, s2c_schema_version} from "/common/MsgpackSchema.js";
+import {SHA256} from "unconscious/common/SHA256.js";
 
 let sync;
 
@@ -48,9 +49,14 @@ const request = async (path, {body, method} = {}) => {
 	if (!res.ok) {
 		let text = await decode();
 		if (typeof text !== "string") {
-			text = JSON.stringify(text);
+			text.status = res.status;
+			throw text;
 		}
-		throw `HTTP ${res.status}\n${text}`;
+
+		throw {
+			status: res.status,
+			error: text
+		};
 	}
 	return decode();
 };
@@ -103,7 +109,7 @@ export const upsertConversation = async conversation => {
 	sync?.on(SYNC_CONVERSATION, conversation);
 	return id;
 };
-export const deleteConversation = id => {
+export const deleteConversation = (id) => {
 	sync?.on(SYNC_CONVERSATION, {id});
 	return u_deleteConversation(id);
 };
@@ -119,6 +125,7 @@ export const getMessages = conversation => {
 	return u_getConversation(id).then(json => {
 		for (const key of Object.keys(conversation)) delete conversation[key];
 		Object.assign(conversation, json);
+		conversation.id = id;
 		return messages;
 	});
 };
@@ -129,7 +136,7 @@ export const upsertMessage = async message => {
 	return id;
 };
 
-export const deleteMessage = id => {
+export const deleteMessage = (id, conversation) => {
 	sync?.on(SYNC_MESSAGE, {id});
 	return u_deleteMessage(id);
 };
@@ -185,7 +192,7 @@ export const kvListGet = async (type, name) => {
 
 		val = await u_getKVList([type, name]);
 		delete val.type;
-		if (val) kvListCache.set(cacheKey, new WeakRef(val));
+		if (val) kvListCache.set(cacheKey, new WeakRef(structuredClone(val)));
 	}
 	return val;
 };
@@ -201,6 +208,9 @@ export const kvListDel = (type, name) => u_deleteKVList([type, name]);
 export const appendBillingLog = makeBatch("log/insert");
 export const getBillingLog = makeBatch("log");
 
+export const blobByName = makeBatch("blob-by-name");
+export const blobSetName = makeBatch("blob/set-name");
+
 export const deleteDatabase = async () => request('database', {method: 'DELETE'});
 
 const URLSAFE = {
@@ -210,59 +220,71 @@ const URLSAFE = {
 };
 
 /**
- * 使用 SubtleCrypto 计算 Blob 的 SHA-256（十六进制字符串）
- * 注意：大文件会一次性加载到内存，可能造成卡顿
+ * 计算 Blob 的 SHA-256 注意 前后端哈希函数需要统一否则会上传失败
  * @param {Blob} blob
  * @returns {Promise<string>}
  */
-export const sha256 = async blob => {
-	// Web Crypto 好垃圾哦
-	const buffer = await blob.arrayBuffer();
-	const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-	return btoa(String.fromCharCode(...new Uint8Array(hashBuffer))).replaceAll(/[+\/=]/g, match => URLSAFE[match]);
+export const blobHash = async blob => {
+	let arrayBuffer;
+
+	if (blob.size < 1048576 * 32) {
+		// Web Crypto 好垃圾哦
+		// 这时候我就怀念 Java 的手操内存了
+		const buffer = await blob.arrayBuffer();
+		arrayBuffer = await crypto.subtle.digest('SHA-256', buffer);
+	} else {
+		const hasher = new SHA256();
+
+		const reader = blob.stream().getReader();
+		while (true) {
+			const {done, value} = await reader.read();
+			if (done) break;
+			hasher.update(value);
+		}
+
+		arrayBuffer = hasher.digest();
+	}
+
+	return btoa(String.fromCharCode(...new Uint8Array(arrayBuffer))).replaceAll(/[+\/=]/g, match => URLSAFE[match]);
 };
 
 const BLOB = Symbol();
 
-function _FakeBlob(hash, type, name, size) {
-	this.hash = hash;
-	this.type = type;
-	this.name = name;
-	this.size = size;
-}
+function _FakeBlob(obj) {this.$='BlobH';Object.assign(this, obj);}
 _FakeBlob.prototype = {
 	constructor: File,
 	toUrl() {return dbUrl+`blob/`+this.hash;},
-	async _fetch() {return this[BLOB] || (this[BLOB] = await (await fetch(this.toUrl())).blob());},
-	async toDataURL() {return (await this._fetch()).toDataURL();},
-	async arrayBuffer() {return (await this._fetch()).arrayBuffer();},
-	async bytes() {return (await this._fetch()).bytes();},
-	async text() {return (await this._fetch()).text();},
+	async blob() {return this[BLOB] || (this[BLOB] = await (await fetch(this.toUrl())).blob());},
+	async toDataURL() {return (await this.blob()).toDataURL();},
+	async arrayBuffer() {return (await this.blob()).arrayBuffer();},
+	async bytes() {return (await this.blob()).bytes();},
+	async text() {return (await this.blob()).text();},
 };
 
-const u_blob = makeBatch("blob");
+const u_getBlobInfo = makeBatch("blob");
 
 /**
  *
- * @param {Blob|_FakeBlob} blob
+ * @param {File|_FakeBlob} blob
  * @return {Promise<string>}
  */
-export const updateBlob = async blob => {
+export const uploadBlob = async blob => {
 	const existingHash = blob.hash;
 	if (existingHash) return existingHash;
 
-	const hash = await sha256(blob);
+	const hash = await blobHash(blob);
 	try {
-		await u_blob(hash);
+		await u_getBlobInfo(hash);
 	} catch {
-		const resp = await fetch(dbUrl+`blob/`+hash+"?name="+encodeURIComponent(blob.name||""), {
+		let url = dbUrl+`blob/`+hash+"?name="+encodeURIComponent(blob.name||"")+"&time="+(blob.lastModified||"");
+		const resp = await fetch(url, {
 			method: 'POST',
 			headers: { 'Content-Type': blob.type },
 			body: blob
 		});
 		if (!resp.ok) throw await resp.text();
 	}
-	return hash;
+	return blob.hash = hash;
 };
 
 /**
@@ -271,6 +293,7 @@ export const updateBlob = async blob => {
  * @return {Promise<Blob>}
  */
 export const getBlob = async ({hash, name}) => {
-	const { name: serverName, type, size } = await u_blob(hash);
-	return new _FakeBlob(hash, type || "application/octet-stream", name, size);
+	const serverData = await u_getBlobInfo(hash).catch(() => {});
+	if (name) serverData.name = name;
+	return new _FakeBlob({ hash, ...serverData });
 };

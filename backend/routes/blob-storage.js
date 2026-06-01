@@ -5,7 +5,12 @@ import {pipeline} from 'node:stream/promises';
 import {createHash} from 'node:crypto';
 
 import {DatabaseSync} from 'node:sqlite';
+import {cachePreparedSql} from "../utils/sqliteUtils.js";
 
+// 50MB
+const MAX_UPLOAD_SIZE = 52428800;
+// 数据库版本号
+const DB_VERSION = 1;
 
 /**
  * @param {AiChatBackend.Router} router
@@ -19,15 +24,25 @@ export function registerBlobRoutes(router, batcher, blobDir) {
 	let db;
 	mkdir(tempDir, { recursive: true }).then(() => {
 		db = new DatabaseSync(dbPath);
-		db.exec(`
-  CREATE TABLE IF NOT EXISTS blobs (
+		const { user_version } = db.prepare('PRAGMA user_version').get();
+		cachePreparedSql(db);
+
+		if (user_version === 0) {
+			db.exec(`
+CREATE TABLE blobs (
     hash BLOB PRIMARY KEY,
-    mime TEXT NOT NULL,
+    type TEXT NOT NULL,
     name TEXT NOT NULL,
+	indexedName TEXT UNIQUE NULL,
     size INTEGER NOT NULL,
-    time INTEGER NOT NULL
-  ) WITHOUT ROWID 
-`);
+    lastModified INTEGER NOT NULL
+) WITHOUT ROWID;
+PRAGMA user_version = `+DB_VERSION);
+		} else if (user_version === DB_VERSION) {
+			return;
+		} else {
+			throw new Error("数据库版本号错误，请补充迁移函数");
+		}
 	});
 
 	// 辅助函数：获取分桶路径 (例如: ab/cd/hash)
@@ -40,14 +55,30 @@ export function registerBlobRoutes(router, batcher, blobDir) {
 
 	batcher["blob"] = (hash) => {
 		const hashBuf = Buffer.from(hash, 'base64url');
-		const info = db.prepare('SELECT * FROM blobs WHERE hash = ?').get(hashBuf);
-		if (!info) return { error: 'not found' };
+		const row = db.prepare('SELECT name, type, size, lastModified FROM blobs WHERE hash = ?').get(hashBuf);
+		return row ? row : {error: 'not found'};
+	};
 
-		return {
-			name: info.name,
-			size: info.size,
-			type: info.mime
-		};
+	// 文件库接口
+	batcher["blob/by-name"] = (name) => {
+		const row = db.prepare('SELECT * FROM blobs WHERE indexedName = ?').get(name);
+		if (!row) return {error: 'not found'};
+		row.hash = Buffer.from(row.hash).toString('base64url');
+		return row;
+	};
+	batcher["blob/set-name"] = ([hash, name]) => {
+		const hashBuf = Buffer.from(hash, 'base64url');
+
+		db.exec('BEGIN');
+		try {
+			db.prepare('UPDATE blobs SET indexedName = NULL WHERE indexedName = ? AND hash != ?').run(name, hashBuf)
+			const result = db.prepare('UPDATE blobs SET indexedName = ? WHERE hash = ?').run(name, hashBuf);
+			db.exec('COMMIT');
+			return result.changes > 0;
+		} catch (e) {
+			db.exec('ROLLBACK');
+			throw e;
+		}
 	};
 
 	// 下载 Blob
@@ -57,12 +88,12 @@ export function registerBlobRoutes(router, batcher, blobDir) {
 		const info = db.prepare('SELECT * FROM blobs WHERE hash = ?').get(hashBuf);
 		if (!info) return ctx.send(404, { error: 'not found' });
 
-		const lastModified = new Date(info.time).toUTCString();
+		const lastModified = new Date(info.lastModified).toUTCString();
 
 		const ifModifiedSince = ctx.req.headers['if-modified-since'];
 		if (ifModifiedSince) {
 			const imsDate = new Date(ifModifiedSince);
-			if (!isNaN(imsDate.getTime()) && info.time <= imsDate) {
+			if (!isNaN(imsDate.getTime()) && info.lastModified <= imsDate) {
 				ctx.res.writeHead(304, {
 					'Content-Length': 0,
 					'Last-Modified': lastModified,
@@ -114,7 +145,7 @@ export function registerBlobRoutes(router, batcher, blobDir) {
 				ctx.res.writeHead(206, {
 					'Content-Range': `bytes ${start}-${end}/${fileSize}`,
 					'Content-Length': contentLength.toString(),
-					'Content-Type': info.mime,
+					'Content-Type': info.type,
 					'Cache-Control': 'public, max-age=31536000, immutable',
 					'Last-Modified': lastModified,
 					'Accept-Ranges': 'bytes'
@@ -127,7 +158,7 @@ export function registerBlobRoutes(router, batcher, blobDir) {
 		}
 
 		ctx.res.writeHead(200, {
-			'Content-Type': info.mime,
+			'Content-Type': info.type,
 			'Content-Length': fileSize,
 			'Cache-Control': 'public, max-age=31536000, immutable',
 			'Last-Modified': lastModified,
@@ -148,11 +179,24 @@ export function registerBlobRoutes(router, batcher, blobDir) {
 		const hasher = createHash('sha256');
 		let fileSize = 0;
 
+		const expectedLength = parseInt(ctx.req.headers["content-length"]);
+		if (expectedLength >= MAX_UPLOAD_SIZE) {
+			ctx.send(413, { error: 'file too big '+MAX_UPLOAD_SIZE });
+			ctx.req.destroy();
+			return;
+		}
+
+		hasError:
 		try {
 			const fileStream = createWriteStream(tempFile);
 			ctx.req.on('data', chunk => {
 				hasher.update(chunk);
 				fileSize += chunk.length;
+
+				if (fileSize >= MAX_UPLOAD_SIZE) {
+					ctx.send(413, { error: 'file too big '+MAX_UPLOAD_SIZE });
+					ctx.req.destroy();
+				}
 			});
 			await pipeline(ctx.req, fileStream);
 
@@ -160,8 +204,8 @@ export function registerBlobRoutes(router, batcher, blobDir) {
 			const hashStr = hashBuf.toString('base64url');
 
 			if (hash !== hashStr) {
-				await unlink(tempFile); // 删除重复的临时文件
-				return ctx.send(400, { error: 'hash error' });
+				ctx.send(400, { error: 'hash error' });
+				break hasError;
 			}
 
 			const bucket = getStoragePath(hashStr);
@@ -169,21 +213,24 @@ export function registerBlobRoutes(router, batcher, blobDir) {
 			await rename(tempFile, join(bucket, hashStr));
 
 			db.prepare(`
-                INSERT INTO blobs (hash, mime, name, size, time) 
+                INSERT INTO blobs (hash, type, name, size, lastModified) 
                 VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT DO NOTHING
             `).run(
 				hashBuf,
 				ctx.req.headers['content-type'] || 'application/octet-stream',
-				ctx.searchParams.get("name") || "",
+				ctx.searchParams.get("name") || null,
 				fileSize,
-				Date.now()
+				Math.max(0, Math.min(parseInt(ctx.searchParams.get("time")) || 0, Date.now()))
 			);
 
 			ctx.send(201, { hash });
+			return;
 		} catch (err) {
-			ctx.send(500, { error: 'Upload failed', detail: err.message });
+			ctx.send(500, { error: err.message });
 		}
+
+		await unlink(tempFile); // 删除重复的临时文件
 	});
 
 	/**
@@ -191,10 +238,8 @@ export function registerBlobRoutes(router, batcher, blobDir) {
 	 * GET /blobs?page=1&pageSize=20
 	 */
 	router.get('/blobs', async (ctx) => {
-		// 解析分页参数
-		const params = new URLSearchParams(ctx.req.url.split('?')[1]);
-		const page = Math.max(1, parseInt(params.get('page')) || 1);
-		const pageSize = Math.max(1, Math.min(100, parseInt(params.get('limit')) || 20));
+		const page = Math.max(1, parseInt(ctx.searchParams.get('page')) || 1);
+		const pageSize = Math.max(1, Math.min(100, parseInt(ctx.searchParams.get('limit')) || 20));
 		const offset = (page - 1) * pageSize;
 
 		try {
@@ -206,7 +251,7 @@ export function registerBlobRoutes(router, batcher, blobDir) {
 			const listStmt = db.prepare(`
                 SELECT *
                 FROM blobs 
-                ORDER BY time DESC 
+                ORDER BY lastModified DESC 
                 LIMIT ? OFFSET ?
             `);
 			const rows = listStmt.all(pageSize, offset);
@@ -221,7 +266,7 @@ export function registerBlobRoutes(router, batcher, blobDir) {
 				data: rows
 			});
 		} catch (err) {
-			ctx.send(500, { error: 'Failed to fetch list', detail: err.message });
+			ctx.send(500, { error: err.message });
 		}
 	});
 
@@ -233,16 +278,19 @@ export function registerBlobRoutes(router, batcher, blobDir) {
 		const { hash } = ctx.params;
 		let hashBuf = Buffer.from(hash, 'base64url');
 
-		const info = db.prepare('DELETE FROM blobs WHERE hash = ?').run(hashBuf).changes;
-		if (!info) return ctx.send(404, { error: 'not found' });
+		// 防止删除任意文件
+		const row = db.prepare('SELECT hash FROM blobs WHERE hash = ?').get(hashBuf);
+		if (!row) return ctx.send(404, { error: 'not found' });
+
+		const dataPath = join(getStoragePath(hash), hash);
 
 		try {
-			const dataPath = join(getStoragePath(hash), hash);
 			await unlink(dataPath);
+			db.prepare('DELETE FROM blobs WHERE hash = ?').run(hashBuf);
 
-			ctx.send(200, { message: 'Deleted successfully', hash });
+			ctx.send(200, true);
 		} catch (err) {
-			ctx.send(500, { error: 'Delete failed', detail: err.message });
+			ctx.send(500, { error: err.message });
 		}
 	});
 }

@@ -51,7 +51,7 @@ const loadBackupZip = async file => {
 		}
 	}
 
-	config.debugDatabase = 0;
+	config.incognito = 0;
 
 	const kvList = await zipFile.getText("kvList.json");
 	if (kvList) {
@@ -267,7 +267,7 @@ export const downloadFile = (blob, ext) => {
 	const url = URL.createObjectURL(blob);
 	const a = document.createElement('a');
 	a.href = url;
-	a.download = `${APP_NAME}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${ext}`;
+	a.download = blob.name || `${APP_NAME}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${ext}`;
 	a.click();
 	URL.revokeObjectURL(url);
 };

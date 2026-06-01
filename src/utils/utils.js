@@ -133,7 +133,7 @@ export const prettyError = error => {
 	}
 
 	const stackRegex = /((?:https?|file|webpack|node|app):.*):(\d+):(\d+)/;
-	const stackTrace = error.stack.split('\n').slice(1)
+	const stackTrace = (error.stack||'').split('\n').slice(1)
 		.map(line => {
 			const match = line.match(stackRegex);
 			if (match) {

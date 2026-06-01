@@ -1,4 +1,4 @@
-import {jsonPrompt, schemaWrapper} from "../core.js";
+import {jsonPrompt} from "../core.js";
 import "./StoryEngine.css";
 import {$once, createReactiveMarkdown, registerSchemaMessageRole} from "/common/ReactiveJSON.js";
 import {$foreach, $update, unconscious} from "unconscious";
@@ -110,14 +110,14 @@ const schema = {
 export async function sendAction(messages_, prompt) {
 	if (unconscious(abortCompletion)) return;
 
-	let schema_ = schema;
+	let schemaToLLM = schema;
 	let promptPrefix = '';
 	const enableThink = !!config.think;
 	if (enableThink) {
 		//promptPrefix = "\n\n"+schema_.properties.reasoning.description;
-		schema_ = structuredClone(schema);
-		delete schema_.properties.reasoning;
-		schema_.required.shift();
+		schemaToLLM = structuredClone(schema);
+		delete schemaToLLM.properties.reasoning;
+		schemaToLLM.required.shift();
 	}
 
 	const time = Date.now();
@@ -125,7 +125,7 @@ export async function sendAction(messages_, prompt) {
 		id: -1,
 		role: "user",
 		time,
-		content: schemaToPrompt(schema_, config.jsonSupport) + promptPrefix + "\n\n你必须在 dialogue 和 action 字段中使用中文，除非设定要求角色使用其他语言\n\n" +
+		content: schemaToPrompt(schemaToLLM, config.jsonSupport) + promptPrefix + "\n\n你必须在 dialogue 和 action 字段中使用中文，除非设定要求角色使用其他语言\n\n" +
 			"## 用户输入（*斜体*为世界发生的变化，非玩家行为）\n\n" + prompt
 	});
 
@@ -137,8 +137,7 @@ export async function sendAction(messages_, prompt) {
 
 	let assistantResponse;
 	try {
-		assistantResponse = await jsonPrompt(messages_, {
-			...schemaWrapper(schema_),
+		assistantResponse = await jsonPrompt(schemaToLLM, messages_, {
 			reasoning: {enabled: enableThink},
 			max_tokens: 8000,
 		}, ID);

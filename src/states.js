@@ -1,4 +1,4 @@
-import {$asyncState, $state, $store, $watch, debugSymbol} from 'unconscious';
+import {$asyncState, $state, $store, $watch, debugSymbol, unconscious} from 'unconscious';
 import {jsonFetch} from "./utils/utils.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
 import {onLoad} from "./plugin.js";
@@ -16,9 +16,6 @@ onLoad(() => window.addEventListener('resize', mobileCheck));
  *
  * @type {{
  * completionTemplate: function(OpenAI.Message[]): string,
- * additionalBody: Record<string, any>,
- * stop: string[],
- * antiSlop: Record<string, number>
  * }}
  */
 export const state = {};
@@ -51,7 +48,7 @@ export const config = $store("config", {
 	generateTitle: false,
 
 	jsonSupport: 0,
-	max_tokens: 10000,
+	max_tokens: 30000,
 	top_p: 1,
 	top_k: 0,
 	min_p: 0,
@@ -143,7 +140,7 @@ export const abortCompletion = $state();
 export const runningConversations = new Map;
 
 $watch(selectedConversation, () => {
-	abortCompletion.value = runningConversations.get(selectedConversation.id)?.abort;
+	abortCompletion.value = unconscious(runningConversations.get(selectedConversation.id)?.abort);
 });
 
 export const resumableCompletions = $store("resumable", {}, {persist: true, deep: false, ser: (value) => {

@@ -19,6 +19,14 @@ export function randomId() {
 	return Math.random().toString(36).slice(2, 10);
 }
 
+function handleDelete(virtualList, item, dirtyHandle) {
+	const start = virtualList.findIndex(item);
+	if (start < 0) return;
+	virtualList.items.splice(start, 1);
+	markDirty(dirtyHandle);
+	virtualList.render();
+}
+
 //region 各种虚拟列表
 /**
  *
@@ -52,8 +60,9 @@ function createList(dirtyHandle, config, onUpdate) {
 			markDirty(dirtyHandle);
 			if (k === SORT) {
 				const items = virtualList.items;
+				const index = virtualList.findIndex(item);
 				items.splice(index, 1);
-				items.splice(v - 1, 0, item);
+				items.splice(v-1, 0, item);
 				virtualList.setItems(items);
 				return true;
 			}
@@ -97,9 +106,7 @@ function createList(dirtyHandle, config, onUpdate) {
 								message: <div dangerouslySetInnerHTML={highlightJsonLike(item)}/>,
 								accent: 'danger',
 								onConfirm() {
-									virtualList.items.splice(index, 1);
-									markDirty(dirtyHandle);
-									virtualList.render();
+									handleDelete(virtualList, item, dirtyHandle);
 								}
 							})
 						}}
@@ -150,17 +157,17 @@ function createLorebookList(dirtyHandle) {
 			choices: {
 				"正则": "regex",
 				"常驻": "constant",
-				"向量化": "rag",
+				"向量化(未实现)": "rag",
 			},
 			title: {
 				"正则": "开启后，触发词将作为正则表达式处理，能匹配更复杂的模式。",
 				"常驻": "不依赖触发词，对话一开始就自动加入背景，适合全局性设定（如世界观基调）。",
-				"向量化": "基于嵌入向量和输入的余弦相似度判断"
+				"向量化(未实现)": "基于嵌入向量和输入的余弦相似度判断"
 			}
 		},
 		{
 			id: "cossim",
-			name: "余弦相似度阈值",
+			name: "余弦相似度阈值(未实现)",
 			type: "number",
 			min: 0,
 			max: 1,
@@ -168,7 +175,7 @@ function createLorebookList(dirtyHandle) {
 		},
 		{
 			id: "recursion",
-			name: "连锁（未实现）",
+			name: "连锁(未实现)",
 			type: "radio",
 			choices: {
 				"能被连锁激活": true,
@@ -305,11 +312,7 @@ function createTextList(handler, textFieldName) {
 					<button
 						className="preset-panel__delete-btn"
 						onClick={() => {
-							const confirm = () => {
-								virtualList.items.splice(index, 1);
-								markDirty(dirtyHandle);
-								virtualList.render();
-							};
+							const confirm = () => handleDelete(virtualList, item, dirtyHandle);
 
 							const content = item.content;
 							if (!content) {
@@ -345,6 +348,7 @@ function createTextList(handler, textFieldName) {
 					]} onChange={(k, v, obj) => {
 						if (k === SORT) {
 							const items = virtualList.items;
+							const index = virtualList.findIndex(item);
 							items.splice(index, 1);
 							items.splice(v-1, 0, item);
 							virtualList.setItems(items);

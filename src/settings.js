@@ -1,9 +1,11 @@
+import {parseJsonLenient} from "unconscious/common/Json.js";
 import {clearDatabase, exportConversation, importConversation} from "./data-exchange.js";
-import {createPreset} from "./components/PresetDropdown.jsx";
 import {config, isMobile, messages, selectedConversation} from "./states.js";
 import defaultCoTPrompt from "../media/thinkPrompt.txt?raw";
+import {createPreset} from "./components/PresetDropdown.jsx";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {disableBranches, enableBranches, setLastMessage} from "./utils/BranchManager.js";
+import {isPureObject} from "unconscious";
 
 const defaultSystemPrompt = `You are a helpful assistant.
 {{think}}
@@ -114,8 +116,9 @@ export const SETTINGS = [
 		_order: 99, // 总是最后一个
 		type: "element",
 		element: <div className={"choice-scroll"}>
-			<a target={"_blank"} href={"https://github.com/roj234/ai-chat"} >开源地址</a>
+			<a target={"_blank"} href={"https://github.com/roj234/ai-chat"}>开源地址</a>
 			<a target={"_blank"} href={"log_viewer.html"}>请求日志</a>
+			<a target={"_blank"} href={"docs.html"}>离线文档</a>
 		</div>,
 	},
 	//model
@@ -237,7 +240,7 @@ export const SETTINGS = [
 			"无": 0,
 			"对象": 1,
 			"Schema (严格)": 2,
-			"Schema (标准)": 3
+			"Schema (完全)": 3
 		}
 	},
 	{
@@ -255,13 +258,19 @@ export const SETTINGS = [
 		_group: 'model'
 	},
 	{
-		id: "additionalBody#",
+		id: "additionalBody",
 		_tab: 'model',
 		_group: 'model',
 		name: "自定义请求体",
 		title: "以 JSON 格式添加额外请求体参数，将覆盖其它设置。",
 		type: "textbox",
-		placeholder: "{\n  \"chat_template_kwargs\": {},\n}"
+		placeholder: "{\n  \"chat_template_kwargs\": {},\n}",
+		pattern(value) {
+			let data = parseJsonLenient(value);
+			if (!isPureObject(data)) return "必须是JSON对象";
+			return [data];
+		},
+		load: (obj) => obj && JSON.stringify(obj, null, 2),
 	},
 	// model
 	// prompt
@@ -322,7 +331,8 @@ export const SETTINGS = [
 		_group: 'model',
 		name: "(高级) 推理开关 请求体配置",
 		title: "JSONPath,JSON (enabled), JSON (disabled)",
-		placeholder: "reasoning.enabled",
+		pattern: /^[a-z_.]+(,[^,]+,[^,]+)?$/,
+		placeholder: "reasoning.enabled,true,false",
 		type: "input"
 	},
 	{
@@ -330,8 +340,9 @@ export const SETTINGS = [
 		_tab: 'prompt',
 		_group: 'model',
 		name: "(高级) 推理预算 请求体配置",
-		title: "JSONPath",
-		placeholder: "reasoning.effort",
+		title: "JSONPath, 整数预算=i | 字符串 effort=s (默认)",
+		pattern: /^[a-z_.]+(,[si])?$/,
+		placeholder: "reasoning.effort,s",
 		type: "input"
 	},
 	// prompt
@@ -409,31 +420,84 @@ export const SETTINGS = [
 		_omit: 0
 	},
 	{
-		id: "stop#",
+		id: "stop",
 		_tab: 'sampling',
 		_group: 'sampling',
 		name: "停止序列",
 		title: "生成过程中遇到这些字符立即停止。填写 JSON 数组格式。",
 		type: "input",
-		placeholder: "[\"\\n\", \"User: \", \"###\"]"
+		_omit: "",
+		placeholder: "[\"\\n\", \"User: \", \"###\"]",
+		pattern(value) {
+			let data = parseJsonLenient(value);
+
+			if (!Array.isArray(data)) return "不是字符串数组";
+			for (const x of data)
+				if (typeof x !== "string")
+					return "不是字符串数组";
+
+			return [data];
+		},
+		load: (obj) => obj && JSON.stringify(obj)
 	},
 	{
-		id: "antiSlop#",
+		id: "antiSlop",
 		_tab: 'sampling',
 		_group: 'sampling',
-		name: "反语法约束",
+		name: "AntiSlop采样",
 		title: "通过正则表达式禁止模型生成特定文本。填写 JSON 格式。\n比 logit_bias 更强大，支持递归回退。\n通常仅支持 vLLM / llama.cpp 等本地后端。\n暂不支持工具调用。",
 		type: "textbox",
-		placeholder: "{\n\"(?:不是|不再是|不再|并非|没有)[^，。！？]{1,10}，而是\": 1.0\n}"
+		placeholder: "{\n\"(?:不是|不再是|不再|并非|没有)[^，。！？]{1,10}，而是\": 1.0\n}",
+		pattern(value) {
+			let data = parseJsonLenient(value);
+
+			if (Array.isArray(data)) {
+				let obj = {};
+				for (const x of data) {
+					new RegExp(x);
+					obj[x] = 1;
+					if (typeof x !== "string")
+						return "不是字符串数组";
+				}
+				data = obj;
+			} else {
+				if (!isPureObject(data)) return "只接受数组或对象";
+
+				for (const k in data) {
+					const v = data[k];
+					new RegExp(k);
+					// 允许为0，方便禁用
+					if (typeof v !== "number" || v < 0 || v > 1)
+						return "概率必须是[0,1]之间的数字";
+				}
+			}
+
+			return [data];
+		},
+		load: (obj) => obj && JSON.stringify(obj, null, 2),
 	},
 	{
-		id: "logit_bias#",
+		id: "logit_bias",
 		_tab: 'sampling',
 		_group: 'sampling',
 		name: "词元偏置 (Logit Bias)",
 		title: "手动调整特定词元的概率。设置 100 会强制输出该词，-100 会完全禁用该词。通常用于引导模型使用或避开特定词汇。\n警告：先问 LLM 这个参数的具体含义，切勿直接修改，否则你会后悔的",
 		placeholder: "{\n  \"\\n\\n\": -100\n}",
-		type: "textbox"
+		type: "textbox",
+		_omit: "",
+		pattern(value) {
+			let data = parseJsonLenient(value);
+
+			if (!isPureObject(data)) return "只接受对象";
+			for (const k in data) {
+				const v = data[k];
+				if (typeof v !== "number")
+					return "概率必须是数字";
+			}
+
+			return [data];
+		},
+		load: (obj) => obj && JSON.stringify(obj, null, 2),
 	},
 	// sampling
 	// customize
@@ -475,11 +539,9 @@ export const SETTINGS = [
 		type: "multiple",
 		choices: {
 			"上滑隐藏输入框": "uiAutoHideInput",
-			"MD图片引用": "interleavedImageTag",
 			"合并连续的工具调用": "combineToolCalls"
 		},
 		title: {
-			"MD图片引用": "在消息中使用单行 ![imageN] 插入第N个附件 (N从1开始)",
 			"合并连续的工具调用": "将多条工具调用消息合并为一条 (仅影响渲染, 需要重载对话)\n开启后无法编辑合并的对话"
 		}
 	},
@@ -536,15 +598,15 @@ export const SETTINGS = [
 		name: "开发",
 		type: "multiple",
 		choices: {
-			"请求调试": "debugRequest",
-			"响应调试": "debug",
-			"数据库只读": "debugDatabase",
-			"延迟提交消息": "uiDelaySubmit",
+			"请求调试": "reviewRequest",
+			"响应调试": "logSSE",
+			"数据库只读": "incognito",
+			"延迟提交消息": "reviewMessage",
 		},
 		title: {
 			"请求调试": "预览发送到API的原始请求体",
-			"响应调试": "在控制台打印SSE流",
-			"数据库只读": "数据库修改在刷新后重置",
+			"响应调试": "在控制台记录原始SSE流",
+			"数据库只读": "无痕模式：跳过数据库写入，用于调试渲染或测试推理",
 			"延迟提交消息": "点击发送按钮仅追加用户消息，第二次点击时请求LLM",
 		}
 	},
@@ -602,8 +664,8 @@ if (isMobile) {
 	};
 }
 
-export const BODY_PARAMETERS = SETTINGS.filter(({id = "", _tab}) => (_tab === "sampling" && !id.endsWith("#")) || id === "max_tokens");
-BODY_PARAMETERS.forEach(item => item.body_id = item.id.replaceAll(/[^a-zA-Z09-_]/g, '').trim());
+export const BODY_PARAMETERS = SETTINGS.filter(({id = "", _tab}) => (id !== 'antiSlop' && _tab === "sampling" || id === "max_tokens"));
+BODY_PARAMETERS.forEach(item => item.body_id = item.id);
 
 export const presetKeysAlways = ["name"];
 export const presetKeys = {};

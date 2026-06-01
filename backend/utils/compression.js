@@ -48,7 +48,8 @@ const message_schema = [
 	],
 	["tool_responses",
 		["time", "content", "success"]
-	]
+	],
+	"name"
 ];
 const log_schema = [
 	"model", "request_id", "provider",

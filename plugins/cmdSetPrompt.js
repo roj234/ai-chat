@@ -1,7 +1,7 @@
 import {config, selectedConversation} from "/src/states.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {setSystemPrompt} from "/src/skills.js";
-import {makeSystemPrompt} from "/src/api-request.js";
+import {buildSystemPrompt} from "/src/api-request.js";
 import {defaultSystemPrompt} from "/src/settings.js";
 import {kvListGet} from "/src/database.js";
 import {showToast} from "/src/components/Toast.js";
@@ -20,7 +20,7 @@ COMMAND_REGISTRY["setprompt"] = [
 			prompt = tmp;
 		}
 
-		prompt = makeSystemPrompt(selectedConversation, prompt).prompt;
+		prompt = buildSystemPrompt(selectedConversation, prompt).prompt;
 		setSystemPrompt(prompt);
 		$update(updateMessageUI);
 	},

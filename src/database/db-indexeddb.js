@@ -156,7 +156,7 @@ export const upsertMessage = message => transaction((tx) => tx.objectStore('mess
  * @param {number} id
  * @returns {Promise<void>}
  */
-export const deleteMessage = id => transaction((tx) => tx.objectStore('messages').delete(id), true, 'messages');
+export const deleteMessage = (id) => transaction((tx) => tx.objectStore('messages').delete(id), true, 'messages');
 
 /**
  * 删除会话及其所有消息

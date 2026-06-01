@@ -32,36 +32,16 @@ import {deepEntries} from "unconscious/common/json-schema-utils.js";
 import {applyDelta, streamFetch} from "/common/openai-api-utils.js";
 
 export const statusBadge = <span />;
-export const setStatus = (text, tone = '') => {
+export const updateStatusText = (text, tone = '') => {
 	statusBadge.textContent = text;
 	statusBadge.className = 'badge ' + tone;
 };
 
-export const MD_APPEND = 2, MD_END = 3;
-
-export const getMarkdownContainer = think => {
-	const scroller = Shared.scroller;
-
-	const bodyNode = scroller.children[0].children[0].lastElementChild?.querySelector(".body");
-	if (bodyNode) {
-		const children = bodyNode.children;
-		const element = children[children.length - 1];
-		if (element) {
-			if (think) {
-				if (element.matches(".think")) return element.lastElementChild;
-			} else {
-				if (element.matches(".md")) return element;
-			}
-		}
-	}
-};
-
 /**
  *
- * @param {string | OpenAI.ContentPart[]=} userText
  * @return {Promise<string>}
  */
-export async function sendUserChatMessage(userText) {
+export async function submitUserChatMessage() {
 	if (unconscious(abortCompletion)) return "error";
 	abortCompletion.value = new AbortController();
 
@@ -75,7 +55,7 @@ export async function sendUserChatMessage(userText) {
 		content_ = content;
 
 		const currentIsThink = isReactive(content.think);
-		const container = getMarkdownContainer(currentIsThink);
+		const container = findStreamingContainer(currentIsThink);
 		if (!container) {
 			waitingForContent = currentIsThink;
 			return true;
@@ -113,12 +93,12 @@ export async function sendUserChatMessage(userText) {
 		if (selectedConversation.id !== conversation_.id) return;
 
 		switch (type) {
-			case MD_APPEND:
+			case MARKDOWN_APPEND:
 				// noinspection UnnecessaryLocalVariableJS
 				const flag = waitingForContent;
 				if (updateMarkdown(content) && waitingForContent !== flag) break;
 			return;
-			case MD_END: {
+			case MARKDOWN_END: {
 				if (content_) {
 					updateCount = 0;
 					updateMarkdown(content_, true);
@@ -137,6 +117,7 @@ export async function sendUserChatMessage(userText) {
 	const context = {};
 
 	// _ApiRequest 会更新 abortCompletion
+	// TODO 让 stampLock 支持这个
 	let oldValue;
 	$watch(abort_, () => {
 		const newValue = unconscious(abort_);
@@ -152,11 +133,10 @@ export async function sendUserChatMessage(userText) {
 	});
 	$update(updateConversationListUI);
 
-	if (userText) messages_.push({role: 'user', content: userText, time: Date.now()});
 	try {
-		const result = await _ApiRequest(
+		const result = await executeCompletionRequest(
 			conversation_, messages_,
-			config.tools, state.additionalBody,
+			config.tools, config.additionalBody,
 			abort_, callback,
 			context
 		);
@@ -170,7 +150,7 @@ export async function sendUserChatMessage(userText) {
 		const assistantMessage = messages_.at(-1);
 
 		const resumeObj = resumableCompletions[conversation_.id];
-		if (finishReason !== 'error' || assistantMessage.error !== "network error\n") {
+		if (finishReason !== 'error' || assistantMessage.error?.trim() !== "network error"/* fetch */) {
 			if (resumeObj) {
 				try {
 					promises.push(jsonFetch(config.endpoint+"/abort/"+resumeObj.id, {
@@ -188,13 +168,13 @@ export async function sendUserChatMessage(userText) {
 			}
 		}
 
-		const tone = finish_reason_tone[finishReason];
+		const tone = FINISH_REASON_TONE[finishReason];
 		const is_ok = tone != null;
 
 		if ('interrupt' !== finishReason && 'loop' !== finishReason) {
 			if ('error' !== finishReason) {
 				if (!conversation_.title) {
-					generateTitle(conversation_, messages_);
+					generateChatTitle(conversation_, messages_);
 				}
 			}
 
@@ -205,14 +185,14 @@ export async function sendUserChatMessage(userText) {
 		}
 
 		if (is_ok && assistantMessage.tool_calls) {
-			if ((config.maxToolTurns && countAgentTurns(messages_) >= config.maxToolTurns) || !await runTools(assistantMessage, conversation_)) {
+			if ((config.maxToolTurns && countAgenticTurns(messages_) >= config.maxToolTurns) || !await runTools(assistantMessage, conversation_)) {
 				// 如果存在可能需要批准的工具调用
 				finishReason = 'interrupt';
 			}
 			$update(updateMessageUI);
 		}
 
-		setStatus(finish_reason_names[finishReason], tone ?? 'error');
+		updateStatusText(FINISH_REASON_LABEL[finishReason], tone ?? 'error');
 
 		promises.push(updateConversation(conversation_, unconscious(messages_)));
 
@@ -224,7 +204,7 @@ export async function sendUserChatMessage(userText) {
 
 		if (selectedConversation.id !== conversation_.id) {
 			finishReason = 'interrupt'; // 如果不在前台就不自动执行
-			showToast("对话 "+conversation_.title+"(#"+conversation_.id+") 已完成！", "ok");
+			showToast("对话 "+conversation_.title+"(#"+conversation_.id+") 已结束", tone ?? "error");
 		}
 
 		await Promise.all(promises);
@@ -236,13 +216,13 @@ export async function sendUserChatMessage(userText) {
 	}
 }
 
-const finish_reason_names = {
+const FINISH_REASON_LABEL = {
 	'tool_calls': '批准工具调用',
 	'length': '长度限制',
 	'stop': '完成',
 	'error': '错误',
 };
-const finish_reason_tone = {
+const FINISH_REASON_TONE = {
 	'tool_calls': '',
 	'stop': 'ok',
 };
@@ -250,7 +230,7 @@ const finish_reason_tone = {
 /**
  * @return {number}
  */
-const countAgentTurns = messages => {
+const countAgenticTurns = messages => {
 	const arr = messages.value;
 	let turns = 0;
 	for (let i = arr.length - 1; i >= 0; i--) {
@@ -267,7 +247,7 @@ const countAgentTurns = messages => {
  * @param {AiChat.Conversation} conversation
  * @param {AiChat.Message[]} messages
  */
-const generateTitle = (conversation, messages) => {
+const generateChatTitle = (conversation, messages) => {
 	let s1 = getTextContent(messages[0]).slice(0, 512);
 
 	const i = s1.indexOf("\n");
@@ -276,7 +256,7 @@ const generateTitle = (conversation, messages) => {
 	let s2 = getTextContent(messages[1]).slice(0, 512);
 	if (config.generateTitle !== true) return;
 
-	setStatus('生成标题');
+	updateStatusText('生成标题');
 
 	jsonFetch(config.endpoint+'/chat/completions', {
 		key: config.accessToken,
@@ -305,6 +285,26 @@ const generateTitle = (conversation, messages) => {
 	});
 };
 
+
+export const MARKDOWN_APPEND = 2, MARKDOWN_END = 3;
+
+export const findStreamingContainer = think => {
+	const scroller = Shared.scroller;
+
+	const bodyNode = scroller.children[0].children[0].lastElementChild?.querySelector(".body");
+	if (bodyNode) {
+		const children = bodyNode.children;
+		const element = children[children.length - 1];
+		if (element) {
+			if (think) {
+				if (element.matches(".think")) return element.lastElementChild;
+			} else {
+				if (element.matches(".md")) return element;
+			}
+		}
+	}
+};
+
 /**
  *
  * @param {AiChat.Conversation} conversation
@@ -316,7 +316,7 @@ const generateTitle = (conversation, messages) => {
  * @param {AiChat.LLMRequestContext} context
  * @return {Promise<false | AiChat.BillingLog>}
  */
-function _ApiRequest(
+function executeCompletionRequest(
 	conversation, messages,
 	allowTool, additionalBody,
 	abortCompletion, onProgress,
@@ -334,7 +334,7 @@ function _ApiRequest(
 
 		const attempt = () => {
 			const currentRetryCount = retryCount;
-			lastRequest = sendRequest(
+			lastRequest = sendCompletionRequest(
 				conversation,
 				messages,
 				allowTool,
@@ -368,7 +368,7 @@ function _ApiRequest(
  * @param {AiChat.LLMRequestContext} context
  * @return {Promise<false | AiChat.BillingLog>}
  */
-async function sendRequest(
+async function sendCompletionRequest(
 	conversation, messages,
 	allowTool, additionalBody,
 	abortCompletion, onProgress,
@@ -385,7 +385,7 @@ async function sendRequest(
 		assistantMessage, initialAssistantMessage,
 		/** @type {string | Error} */
 		error,
-	} = await composeMessages(
+	} = await buildCompletionPayload(
 		conversation, messages,
 		allowTool, additionalBody,
 		context
@@ -397,18 +397,19 @@ async function sendRequest(
 
 	if (assistantMessage) {
 		delete assistantMessage.error;
-		delete assistantMessage.finish_reason;
+		assistantMessage.finish_reason = '';
 		onProgress?.();
 	} else {
 		messages.push(assistantMessage = {
 			role: 'assistant',
 			content: '',
 			model: config.model,
-			id: -1
+			id: -1,
+			finish_reason: ''
 		});
 	}
 
-	if (config.debugRequest && !error && data.body) {
+	if (config.reviewRequest && !error && data.body) {
 		error = await new Promise((resolve) => {
 			SimpleModal({
 				title: "预览请求体",
@@ -426,7 +427,7 @@ async function sendRequest(
 
 	if (error) {
 		if (config.sound) failure();
-		setStatus('错误', 'error');
+		updateStatusText('错误', 'error');
 
 		assistantMessage.error = error;
 		assistantMessage.finish_reason = 'error';
@@ -436,7 +437,7 @@ async function sendRequest(
 	let finishReason;
 	let startTime = Date.now();
 	/** @type {Partial<AiChat.BillingLog>} */
-	const log = { time: startTime/*, preset_id: config.name*/ };
+	const log = { time: startTime, provider: (config.provider || config.name || config.endpoint) };
 
 	let genImages = [];
 
@@ -448,18 +449,19 @@ async function sendRequest(
 		manualCoTCloseTag = format.startsWith("m") && "</"+format.slice(1)+">\n";
 		thinkState = assistantMessage.think = $state(thinkState);
 		requestAnimationFrame(() => {
-			onProgress?.(MD_APPEND, assistantMessage);
+			onProgress?.(MARKDOWN_APPEND, assistantMessage);
 		});
 	}
 
 	const endThinking = () => {
 		thinkState.duration += Date.now() - thinkState.start;
+		//thinkState.content = thinkState.content.trimEnd();
 		delete thinkState.start;
 		delete thinkState.index;
 		thinkState = assistantMessage.think = {...thinkState};
 	};
 
-	setStatus('请求中');
+	updateStatusText('请求中');
 
 	// Request
 	try {
@@ -469,7 +471,7 @@ async function sendRequest(
 			key: config.accessToken,
 			signal: abortCompletion.signal
 		}, json => {
-			if (config.debug) console.log("SSE response", json);
+			if (config.logSSE) console.log("SSE response", json);
 
 			if (json.timings) {
 				const {predicted_per_second, predicted_n} = json.timings;
@@ -477,16 +479,16 @@ async function sendRequest(
 				if (json.prompt_progress) {
 					const {processed, total} = json.prompt_progress;
 
-					setStatus("预填充: "+(processed / total * 100).toFixed(2)+"%");
+					updateStatusText("预填充: "+(processed / total * 100).toFixed(2)+"%");
 					//assistantMessage[PROMPT_PROGRESS] = processed / total;
 					//onProgress?.();
 					return;
 				}
-				setStatus("生成中, "+predicted_n+" Tokens, "+predicted_per_second.toFixed(2)+"TPS");
+				updateStatusText("生成中, "+predicted_n+" Tokens, "+predicted_per_second.toFixed(2)+"TPS");
 			}
 
 			if (!log.request_id) {
-				setStatus('生成中');
+				updateStatusText('生成中');
 
 				const {id, model, resumable} = json;
 
@@ -501,7 +503,7 @@ async function sendRequest(
 					firstTokenTime = resumable.ft;
 
 					if (thinkState) thinkState.start = startTime;
-					if (!resumable.end) resumeObj = resumableCompletions[conversation.id] = { id };
+					if (!resumable.end && null != conversation.id) resumeObj = resumableCompletions[conversation.id] = { id };
 				}
 
 				log.latency = firstTokenTime - startTime;
@@ -518,7 +520,7 @@ async function sendRequest(
 			if (!finishReason) finishReason = chunk?.finish_reason;
 			if (finishReason) {
 				log.duration = Date.now() - startTime;
-				getStats(json, log);
+				extractUsageMetrics(json, log);
 			}
 
 			if (!chunk) return;
@@ -574,11 +576,15 @@ async function sendRequest(
 						toolCalls.push($state(call));
 						hasNewToolCalls = true;
 					}
-					if (hasNewToolCalls) onProgress?.(MD_END);
+					if (hasNewToolCalls) onProgress?.(MARKDOWN_END);
 				}
 			} else {
 				text = chunk.text;
 				if (!text) return;
+			}
+
+			if (context.antiSlop?.sample(chunk, assistantMessage)) {
+				throw "retry";
 			}
 
 			let content = assistantMessage.content + (text || "");
@@ -608,8 +614,10 @@ async function sendRequest(
 						format: reasoning_format
 					});
 					if (assistantMessage.content || assistantMessage.tool_calls) endThinking();
-				} else {
+				} else if (isReactive(thinkState)) {
 					thinkState.content += reasoning_text;
+				} else if (thinkState.content.trimEnd() !== reasoning_text.trimEnd()) {
+					console.warn("未预料的思考块", thinkState);
 				}
 			} else if (isReactive(thinkState)) {
 				if (manualCoTCloseTag) {
@@ -643,21 +651,17 @@ async function sendRequest(
 				if (content) endThinking(thinkState);
 			}
 
-			if (context.antiSlop?.sample(chunk, assistantMessage)) {
-				throw "retry";
-			}
-
 			assistantMessage.content = content;
-			if (!assistantMessage.tool_calls) onProgress?.(MD_APPEND, assistantMessage);
+			if (!assistantMessage.tool_calls) onProgress?.(MARKDOWN_APPEND, assistantMessage);
 		});
 
 		if (!finishReason) {
 			finishReason = 'error';
-			assistantMessage.error = "network error\n";
+			assistantMessage.error = "network error";
 		}
 	} catch (err) {
 		if (err.name === 'AbortError') {
-			setStatus('已取消');
+			updateStatusText('已取消');
 			finishReason = "interrupt";
 		} else {
 			abortCompletion.abort();
@@ -670,7 +674,7 @@ async function sendRequest(
 				}
 
 				if (config.sound) failure();
-				setStatus('错误', 'error');
+				updateStatusText('错误', 'error');
 				console.error(err);
 				if (err.status) err = `API错误 ${err.status}\n${err.message}`;
 				assistantMessage.error = prettyError(err);
@@ -682,7 +686,7 @@ async function sendRequest(
 		assistantMessage.finish_reason = finishReason;
 		log.finish_reason = finishReason;
 
-		onProgress?.(MD_END, assistantMessage);
+		onProgress?.(MARKDOWN_END, assistantMessage);
 	}
 
 	return log;
@@ -696,6 +700,9 @@ const scrollToBottom = () => {
 	});
 };
 
+// 第一个见 sendCompletionRequest 函数
+const allowPrefillFinishReasons = [null, "length", "interrupt", "error"];
+
 /**
  *
  * @param {Partial<AiChat.Conversation>} conversation
@@ -705,7 +712,7 @@ const scrollToBottom = () => {
  * @param {AiChat.LLMRequestContext} context
  * @return {Promise<{assistantMessage: AiChat.AssistantMessage, data: {headers: {Authorization: string, "Content-Type": string}, body: string | function(): ReadableStream}, url: string}>}
  */
-async function composeMessages(
+async function buildCompletionPayload(
 	conversation, messages,
 	allowTools, additionalBody,
 	context
@@ -726,10 +733,9 @@ async function composeMessages(
 	/** @type {boolean} */
 	let isPrefill;
 	if (initialAssistantMessage) {
-		const isAutomatic = assistantMessage.finish_reason === "tool_calls";
-
-		if (isAutomatic) assistantMessage = null;
-		else if (!config.canPrefill) {
+		const finishReason = assistantMessage.finish_reason;
+		if (!allowPrefillFinishReasons.includes(finishReason)) assistantMessage = null;
+		else if (finishReason === 'error' || !config.canPrefill) {
 			messages.pop();
 			assistantMessage = null;
 		} else {
@@ -751,11 +757,11 @@ async function composeMessages(
 		const json_msg = cloneNamed(m, ["role", "content", "tool_calls", "reasoning_details"]);
 		json_messages.push(json_msg);
 
-		const {tool_calls, tool_responses, think, finish_reason} = m;
+		const {tool_calls, tool_responses, think} = m;
 		if (tool_calls) {
 			toolsUsed = true;
 
-			setStatus("正在执行工具");
+			updateStatusText("正在执行工具");
 			await runTools(m, conversation, true);
 
 			for (let i = 0; i < tool_calls.length; i++) {
@@ -770,7 +776,7 @@ async function composeMessages(
 		const isPrefill = m === assistantMessage;
 		const prefillPath = config.prefillPath;
 		if (isPrefill && prefillPath) {
-			const [path, value] = prefillPath.split(",");
+			const [path, value = "true"] = prefillPath.split(",");
 			jsonPathOp(json_msg, path, "set", JSON.parse(value));
 			// json_msg.prefix = true;
 		}
@@ -824,9 +830,6 @@ async function composeMessages(
 			body[body_id] = v;
 		}
 	}
-	for (const key of ["stop", "logit_bias"]) {
-		if (state[key]) body[key] = state[key];
-	}
 
 	let toolPrompt;
 	if (config.mode === 'completions') {
@@ -852,27 +855,31 @@ async function composeMessages(
 			}
 		}
 
-		const shouldThink = isThinkingEnabled() && config.reasoning;
-		const reasoningPath = (config.reasoningPath||"reasoning.enabled,true,false").split(",");
-		if (reasoningPath.length !== 3) throw "无效的ReasoningPath配置";
+		const reasoningEffort = config.reasoning;
+		const enableThink = isThinkingEnabled() && reasoningEffort;
+		const [reasoningPath, reasoningEnabledValue = 'true', reasoningDisabledValue = 'false'] = (config.reasoningPath||"reasoning.enabled").split(",");
 
-		jsonPathOp(body, reasoningPath[0], "set", JSON.parse(reasoningPath[shouldThink?1:2]));
-		if (shouldThink) {
-			if (config.reasoning === "minimal") {
-				body.reasoning.max_tokens = 1024;
-			} else {
-				jsonPathOp(body, config.reasoningEffortPath || "reasoning.effort", "set", config.reasoning);
-				/*body.reasoning.max_tokens = ({
-					"low": 0.2,
-					"medium": 0.5,
-					"high": 0.8,
-				}[config.reasoning]) * body.max_tokens;*/
+		jsonPathOp(body, reasoningPath, "set", JSON.parse(enableThink?reasoningEnabledValue:reasoningDisabledValue));
+		if (enableThink) {
+			const [reasoningEffortPath, reasoningEffortType = 's'] = (config.reasoningEffortPath || "reasoning.effort").split(",");
+			let fieldValue = reasoningEffort;
+			if (reasoningEffortType === 'i') {
+				if (reasoningEffort === "minimal") {
+					fieldValue = 1024;
+				} else {
+					fieldValue = ({
+						"low": 0.2,
+						"medium": 0.5,
+						"high": 0.8,
+					}[reasoningEffort]) * body.max_tokens;
+				}
 			}
+			jsonPathOp(body, reasoningEffortPath, "set", fieldValue);
 		}
 	}
 	if (additionalBody) Object.assign(body, additionalBody);
 
-	let [systemPrompt, systemBody] = makeSystemPrompt(conversation, config.systemPrompt || defaultSystemPrompt, toolPrompt);
+	let [systemPrompt, systemBody] = buildSystemPrompt(conversation, config.systemPrompt || defaultSystemPrompt, toolPrompt);
 	if (systemPrompt) {
 		if (json_messages[0]?.role !== 'system')
 			json_messages.unshift({role: 'system', content: systemPrompt});
@@ -884,7 +891,7 @@ async function composeMessages(
 	}
 
 	block:
-	if (state.antiSlop) {
+	if (config.antiSlop) {
 		if (!context.retry) {showToast("这个调用不支持AntiSlop采样"); break block;}
 
 		// 在 llama.cpp 上TPS高得多，而且我本来就只需要采样器最后输出的可能候选
@@ -899,7 +906,7 @@ async function composeMessages(
 		}
 
 		if (!context.antiSlop)
-			context.antiSlop = createAntiSlopSampler(body.top_p ?? 1, body.min_p ?? 0, state.antiSlop, context);
+			context.antiSlop = createAntiSlopSampler(body.top_p ?? 1, body.min_p ?? 0, config.antiSlop, context);
 	}
 
 	if (isLlamaCppBackend) {
@@ -965,7 +972,7 @@ const isThinkingEnabled = () => (typeof config.forceThink === "boolean" ? config
  * @param {string} toolPrompt
  * @return {[prompt: string, body: {}]}
  */
-export const makeSystemPrompt = (conversation, prompt, toolPrompt) => {
+export const buildSystemPrompt = (conversation, prompt, toolPrompt) => {
 	let body = {};
 
 	if (prompt.startsWith("---\n")) {
@@ -1021,14 +1028,12 @@ export const makeSystemPrompt = (conversation, prompt, toolPrompt) => {
  * @param {AiChat.BillingLog} log
  * @return {string}
  */
-const getStats = (json, log) => {
-	console.log("stats", json);
+const extractUsageMetrics = (json, log) => {
+	console.log("usage", json);
 
 	const {provider, usage, timings} = json;
 
-	let myProvider = (config.provider || config.name || config.endpoint);
-	if (provider) myProvider += "//" +provider;
-	log.provider = myProvider;
+	if (provider) log.provider += "//" +provider;
 
 	if (usage) {
 		let {
@@ -1122,7 +1127,7 @@ export class APIRequest {
 		this.messages = messages;
 		/** @type {Record<string, any>} */
 		this.body = {
-			...state.additionalBody,
+			...config.additionalBody,
 			...body
 		};
 	}
@@ -1144,7 +1149,7 @@ export class APIRequest {
 			else if (userText) messages.push(userText);
 
 			const context = {};
-			const result = await _ApiRequest(
+			const result = await executeCompletionRequest(
 				conversation, messages,
 				conversation.allowedTools.size, body,
 				abort, onProgress,

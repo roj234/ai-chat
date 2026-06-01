@@ -39,9 +39,9 @@ export default defineConfig(async () => {
     define: {
         APP_NAME: JSON.stringify(packageInfo.name),
         APP_VERSION: JSON.stringify(packageInfo.version),
-        DB_SERVER: JSON.stringify(""), // serverConfigInfo.xxx
+        DB_SERVER: JSON.stringify(serverConfigInfo.SERVER_BASE_ADDR),
         DB_MODE: JSON.stringify('mixed'), // local remote mixed
-        DEFAULT_LLM_ENDPOINT: JSON.stringify(""),
+        DEFAULT_LLM_ENDPOINT: JSON.stringify(serverConfigInfo.SERVER_BASE_ADDR ? serverConfigInfo.SERVER_BASE_ADDR+"sse/v1" : ""),
         RESUME_TIMEOUT: JSON.stringify(serverConfigInfo.SSE_RESUME_TIMEOUT),
     },
 
@@ -102,7 +102,12 @@ export default defineConfig(async () => {
                 main: 'index.html',
                 logViewer: 'log_viewer.html',
                 jsonEditor: 'json_editor.html',
-                characterViewer: 'character_viewer.html'
+                characterViewer: 'character_viewer.html',
+                docs: 'docs.html',
+            },
+
+            external(id) {
+                return id.startsWith("node:")
             },
 
             output: {

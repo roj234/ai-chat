@@ -207,6 +207,9 @@ button[class^="ri-"] {
         display: none;
     }
 }
+._human .hide-human {
+    display: none !important;
+}
 
 /* 新对话 */
 .composer .logo { display: none; }

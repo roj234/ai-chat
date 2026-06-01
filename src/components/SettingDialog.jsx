@@ -36,7 +36,7 @@ export const createTab = (id, name, icon, after) => {
 createTab("general", "通用", "ri-wrench-line");
 createTab("model", "模型", "ri-key-line");
 createTab("sampling", "采样", "ri-filter-line");
-createTab("prompt", "Prompt", "ri-menu-2-line");
+createTab("prompt", "提示词", "ri-menu-2-line");
 createTab("customize", "个性化", "ri-brush-line");
 createTab("appearance", "外观", "ri-brush-line");
 createTab("data", "数据管理", "ri-database-2-line");

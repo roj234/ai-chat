@@ -68,7 +68,7 @@ registerTools("zoom", "Zoom in on a specific region of an image. 可用于识别
 		if (!sourceBase64) throw new Error("图片"+img_idx+"不存在");
 
 		// 1. 将 Base64 转换为 Blob，然后创建 ImageBitmap
-		const blob = sourceBase64 instanceof Blob ? sourceBase64 : await (await fetch(sourceBase64)).blob();
+		const blob = sourceBase64.blob ? sourceBase64.blob() : sourceBase64 instanceof Blob ? sourceBase64 : await (await fetch(sourceBase64)).blob();
 		const imgBitmap = await createImageBitmap(blob);
 
 		// 2. 计算目标尺寸

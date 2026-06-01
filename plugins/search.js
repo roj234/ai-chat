@@ -2,7 +2,7 @@ import {searchMessages} from "../src/database.js";
 
 import "./search.css";
 import {formatDate} from "unconscious/common/Utils.js";
-import {isMobile, selectedConversation} from "../src/states.js";
+import {conversations, isMobile, selectedConversation} from "../src/states.js";
 import {onLoad} from "../src/plugin.js";
 
 const searchBtn = <button className={"ri-search-line btn ghost"} title={"搜索对话"} onClick={() => {
@@ -78,10 +78,11 @@ function AccordionItem(item) {
 						<span className="similarity">{simPercent}% 匹配</span>
 					) : null}
 					<button className={"btn ghost"} onClick.stop={() => {
-						selectedConversation.value = {
-							id: item.id,
-							ready: false
-						};
+						if (selectedConversation.id !== item.id) {
+							const value = conversations.find(it => it.id === item.id);
+							value.ready = false;
+							selectedConversation.value = value;
+						}
 					}}>转到</button>
 				</div>
 				<span className="result-time">{formatDate('Y-m-d H:i:s', item.time)}</span>

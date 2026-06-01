@@ -1,10 +1,10 @@
-import {abortCompletion, inputText, messages} from "../states.js";
+import {abortCompletion, inputText, messages, selectedConversation} from "../states.js";
 import {$watch, unconscious} from "unconscious";
 
 const x = ["发送", "中止", "继续", "重试", "执行工具"];
 const y = ["ri-send-plane-fill", "ri-square-fill", "ri-play-large-fill", "ri-loop-right-line", "ri-function-ai-line"/* ri-check-double-line */];
 const button_state_map = {
-	stop: 0,
+	//stop: 0,
 	interrupt: 2,
 	length: 2,
 	error: 3,
@@ -31,10 +31,16 @@ export const createSendButton = (attachments, onSend) => {
 		if (value) return true;
 
 		const last = messages.at(-1);
-		if (!last) return false;
+		if (!last || selectedConversation.noAI) return false;
 
 		if (last.role === 'assistant') {
-			const state = button_state_map[last.finish_reason] ?? 3;
+			let state = button_state_map[last.finish_reason];
+			if (state == null) {
+				// 手动构造消息
+				if (last.tool_calls?.length) {
+					state = 4;
+				}
+			}
 			if (!state) return false;
 			setSendBtnIcon(state);
 

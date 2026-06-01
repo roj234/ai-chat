@@ -3,7 +3,19 @@ import {config, selectedConversation} from "/src/states.js";
 import {SETTINGS} from "/src/settings.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {unconscious} from "unconscious";
-import {showToast} from "../../src/components/Toast.js";
+import {showToast} from "/src/components/Toast.js";
+import SimpleModal from "/src/components/SimpleModal.jsx";
+import {createWebFileSystem} from "./WebFileSystem.js";
+
+/** @type {FileSystemDirectoryHandle} */
+let webFileSystem;
+async function initWebFileSystem() {
+	const rootHandle = await showDirectoryPicker({
+		id: APP_NAME+"_agent_root",
+		mode: "readwrite"
+	});
+	webFileSystem = createWebFileSystem(rootHandle);
+}
 
 SETTINGS.push({
 	id: "fs_server",
@@ -11,7 +23,7 @@ SETTINGS.push({
 	name: "[fs] 文件访问服务",
 	title: "提供文件访问和命令执行功能",
 	type: "input",
-	pattern: /^(\/|https?:\/\/)/,
+	pattern: /^(\/|https?:\/\/)|^:browser:$/,
 	warning: "请输入合法的API端点",
 	placeholder: "http://localhost:1/api/"
 }, {
@@ -38,10 +50,24 @@ COMMAND_REGISTRY["basepath"] = [
 	"设置文件访问服务的根目录"
 ];
 
-const callAPI = (func, type = 'fs') => async (parameters, _, globalStorage) => {
-	let baseUrl = (import.meta.env.DEV ? "/api" : config.fs_server);
-	if (!baseUrl) throw ("network error");
-	if (!baseUrl.endsWith('/')) baseUrl += '/';
+const callAPI = (func, type = 'fs') => async (parameters, _, globalStorage = {}) => {
+	let baseUrl = (import.meta.env.DEV ? config.fs_server || "/api" : config.fs_server);
+	const useWebFileSystem = !baseUrl || baseUrl === ':browser:';
+	if (useWebFileSystem) {
+		if (!baseUrl) {
+			const useBrowser = await new Promise(resolve => {
+				SimpleModal({
+					title: "未配置文件访问服务",
+					message: "确认：使用浏览器文件系统API\n取消：填写文件访问服务地址后重新请求",
+					onConfirm(){config.fs_server = ':browser:';resolve(true)},
+					onCancel(){resolve(false)}
+				})
+			});
+			if (!useBrowser) throw '请配置文件访问服务'
+		}
+
+		if (!webFileSystem) await initWebFileSystem();
+	} else if (!baseUrl.endsWith('/')) baseUrl += '/';
 
 	if (func === "read_image") {
 		if (!config.modalities.includes("image")) {
@@ -49,8 +75,14 @@ const callAPI = (func, type = 'fs') => async (parameters, _, globalStorage) => {
 		}
 	}
 
-	let url = baseUrl + type + "/" + func;
 	const {fs_base} = globalStorage;
+
+	if (useWebFileSystem) {
+		if (fs_base) throw '浏览器文件系统暂不支持子目录隔离';
+		return webFileSystem[func](parameters);
+	}
+
+	let url = baseUrl + type + "/" + func;
 	if (fs_base) url += "?root="+encodeURIComponent(fs_base);
 
 	let response;
@@ -220,7 +252,7 @@ const replace_file = {
 const mkdir = {
 	name: "mkdir",
 	description: "Create directory recursively",
-	script: callAPI("mkdir"),
+	script: callAPI("mkdirs"),
 
 	parameters: {
 		type: "object",
@@ -313,6 +345,7 @@ const spawn = {
 let fsPrompt = `<file-misc>
 You may use bash/ripgrep via spawn_process tool to find in files.
 Grep pattern in list_directory tool may be used to recursively list directory.
+Root path is '/'
 </file-misc>`;
 const fsTools = [read_file, read_image, write_file, replace_file, delete_file, mkdir, copy_or_move, list_path, stat];
 if (config.fs_hashline) {
@@ -399,13 +432,23 @@ registerTools(
 );
 
 let spawnPrompt;
+
+function checkEnv() {
+	const fsServer = config.fs_server;
+	if (!fsServer) throw '请配置文件访问服务';
+	if (fsServer === ':browser:') throw '浏览器文件系统不支持运行程序';
+}
+
 registerTools(
 	"spawn_process",
 	"Execute native programs in the persistent sandbox, e.g. environment setup or automation ('ffmpeg' transcoding).",
 	[spawn],
 	{
+		onActivated: checkEnv,
 		async systemPrompt() {
 			if (!spawnPrompt) {
+				checkEnv();
+
 				let {prompt} = await callAPI("env")();
 				if (prompt.startsWith("os: Windows")) {
 					prompt += "\n\nIMPORTANT: PowerShell and cmd have many escape and encoding issues (like '\\'). you MUST use bash / script if available."

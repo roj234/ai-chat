@@ -11,11 +11,14 @@ import {
 	SYNC_INIT,
 	SYNC_LOCKED,
 	SYNC_MESSAGE,
+	SYNC_PING,
 	SYNC_READERS,
 	SYNC_RELEASED,
 	SYNC_RESOLVE,
 	SYNC_UNLOCKED
 } from "/backend/sync_const.js";
+import {updateMessageUI} from "../components/MessageList.jsx";
+import {clearDirtyFlags} from "../database.js";
 
 export {SYNC_MESSAGE, SYNC_CONVERSATION};
 
@@ -39,7 +42,7 @@ const on = async (type, data) => {
 	if (type === SYNC_MESSAGE && !readerCount.get(selectedConversation.id)) return;
 
 	if (ws?.readyState === WebSocket.OPEN) {
-		ws.send("["+type+","+(typeof data === "string" ? data : await serializeJSON(data))+"]");
+		ws.send("["+type+","+(typeof data === "number" ? data : await serializeJSON(data))+"]");
 	} else {
 		pendingEvents.push([type, data]);
 	}
@@ -80,6 +83,14 @@ const setCurrentLocked = (locked, id) => {
 
 export function initSync(address) {
 	ws = new WebSocket(address);
+
+	let timestamp;
+	const updater = setInterval(() => {
+		if (Date.now() - timestamp > 900000) {
+			ws.send(`[${SYNC_PING}]`);
+		}
+	}, 60000);
+
 	ws.onopen = () => {
 		for (const [type, data] of pendingEvents) on(type, data);
 		pendingEvents = [];
@@ -88,8 +99,11 @@ export function initSync(address) {
 		showToast(<>同步服务已断开 <button className={"btn primary"} onClick={() => {
 			location.reload();
 		}}>刷新</button></>, "error", 0);
+		clearInterval(updater);
 	};
 	ws.onmessage = async (event) => {
+		timestamp = Date.now();
+
 		let [type, data] = JSON.parse(event.data);
 		data = await decodeObjects(data);
 		switch (type) {
@@ -143,13 +157,18 @@ export function initSync(address) {
 				const {owner, ...message} = data;
 				const isUpdate = Object.keys(message).length > 1;
 
-				const index = unconscious(messages).findIndex(item => item.id === message.id);
+				const conv = unconscious(selectedConversation);
+				const msg = unconscious(messages);
+
+				const index = msg.findIndex(item => item.id === message.id);
 				if (index >= 0) {
-					if (isUpdate) messages[index] = message;
-					else messages.splice(index, 1);
-				} else if (isUpdate && selectedConversation.id === owner) {
-					messages.push(message);
+					if (isUpdate) msg[index] = message;
+					else msg.splice(index, 1);
+				} else if (isUpdate && conv.id === owner) {
+					msg.push(message);
 				}
+				clearDirtyFlags(conv, message.id, isUpdate && message);
+				$update(updateMessageUI);
 				break;
 			}
 			// 对话状态更新
@@ -211,7 +230,7 @@ onLoad((app) => {
 		const conv = unconscious(selectedConversation);
 		const convId = conv?.id;
 		if (oldValue !== convId) {
-			if (oldValue) {
+			if (oldValue != null) {
 				setWritable();
 				unlock(oldValue);
 			}

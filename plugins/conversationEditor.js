@@ -3,10 +3,11 @@ import {duplicateConversation} from "/src/data-exchange.js";
 import {openJsonEditor} from "/src/json_editor/editorProxy.js";
 import {messages, selectedConversation} from "/src/states.js";
 import {$unwatch, $update, $watch, unconscious} from "unconscious";
-import {decodeObjects, serializeJSON} from "../src/utils/marshal.js";
+import {decodeObjects, serializeJSON} from "/src/utils/marshal.js";
 import {updateConversation} from "../src/database.js";
-import {updateMessageUI} from "../src/components/MessageList.jsx";
-import {updateConversationListUI} from "../src/components/ConversationList.jsx";
+import {updateMessageUI} from "/src/components/MessageList.jsx";
+import {updateConversationListUI} from "/src/components/ConversationList.jsx";
+import {parseJsonLenient} from "unconscious/common/Json.js";
 
 SETTINGS.push({
 	type: "element",
@@ -32,7 +33,7 @@ SETTINGS.push({
 			[update, onclose] = openJsonEditor("conversation",
 				() => jsonText,
 				async (v) => {
-					const {messages: messages_, ...conversation} = await decodeObjects(JSON.parse(v));
+					const {messages: messages_, ...conversation} = await decodeObjects(parseJsonLenient(v));
 
 					const obj = unconscious(selectedConversation);
 					if (obj?.id !== conversation.id) {

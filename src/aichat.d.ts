@@ -17,10 +17,10 @@ declare namespace AiChat {
         /** 本会话中自动允许的工具 */
         grantedTools?: Set<string>,
 
-        /**
-         * 分支对话，最后一条对话的ID
-         * 这个选项无法在开启后关闭
-         */
+        // 禁用AI功能
+        noAI?: true;
+
+        /** 分支对话，最后一条对话的ID */
         bm_leaf?: number;
     }
 
@@ -36,6 +36,9 @@ declare namespace AiChat {
         hidden?: boolean;
         // 上一条消息的ID
         parent?: number;
+
+        // 其他人的对话
+        name?: string;
     }
 
     type AssistantMessage = BaseMessage & {
@@ -73,7 +76,7 @@ declare namespace AiChat {
         start?: number;
     };
 
-    interface Preset {
+    type Preset = {
         name: string,
 
         endpoint: string,
@@ -87,7 +90,11 @@ declare namespace AiChat {
         CoTPrompt: string,
 
         edit: boolean,
-        debug: boolean,
+
+        reviewRequest: boolean,
+        reviewMessage: boolean,
+        logSSE: boolean,
+        incognito: boolean,
 
         generateTitle: boolean,
         titleModel: string,
@@ -101,6 +108,12 @@ declare namespace AiChat {
         forceThink: boolean | null,
         modalities: ('image' | 'audio' | 'tool')[]
 
+        additionalBody: Record<string, any>,
+        stop: string[],
+        antiSlop: Record<string, number>
+
+        nickname: string;
+
         jsonSupport: 0 | 1 | 2 | 3,
 
         // UI
@@ -108,7 +121,7 @@ declare namespace AiChat {
         tools: 0 | 1,
     }
 
-    interface BillingLog {
+    type BillingLog = {
         request_id: string,
         id?: number,
         provider: string,
@@ -154,7 +167,7 @@ declare namespace AiChat {
         idx: number;
     }
 
-    interface ToolUIPart {
+    type ToolUIPart = {
         type: "tool";
         tool_name: string;
         response: ToolResponse;
@@ -204,7 +217,7 @@ declare namespace AiChat {
 
     type FunctionTool<Payload> = OpenAI.FunctionToolJSON & FunctionToolImpl<Payload>;
 
-    interface ApiModel {
+    type ApiModel = {
         id: string;
         aliases: string[];
         tags: string[];
@@ -226,6 +239,13 @@ declare namespace AiChat {
 
     type AntiSlop = {
         sample(chunk: OpenAI.TextChoice | OpenAI.ChatChoice, message: AssistantMessage): true | void;
+    }
+
+    type MarkdownRendererOptions = {
+        noHighlight?: boolean,
+        stream?: boolean,
+        noImage?: boolean,
+        trusted?: boolean
     }
 
     namespace DnD {
@@ -360,10 +380,32 @@ declare namespace AiChat {
 
         interface CustomMessageRole {
             name: string;
+            /**
+             * chunks 是否需要动态生成
+             */
             reactive?: boolean;
+            /**
+             *
+             * @param message 输入的消息
+             * @param output 输出的JSON消息
+             * @param callbacks 写入一个回调，在所有compose完成后调用
+             * @param index 消息序号
+             * @param length 消息总数
+             * @param conv 当前对话
+             */
             compose?(message: Message, output: OpenAI.Message[], callbacks: MessageComposedCallback[], index: number, length: number, conv: Conversation);
-            getChunks(message: Message, chunks: ResponseContentPart[], index: number, isEditing: function(Message): boolean, messages: Message[], isPostHook?: boolean): void | true;
-            keyFunc?(chunk: ResponseContentPart): any[];
+            /**
+             *
+             * @param message 消息
+             * @param chunks 输出的 chunks
+             * @param index 消息序号
+             * @param isEditing 一个函数，判断给定的消息是否处于编辑状态
+             * @param messages 消息数组
+             * @param isPostHook 后处理，chunks已经添加完成
+             */
+            getChunks?(message: Message, chunks: ResponseContentPart[], index: number, isEditing: function(Message): boolean, messages: Message[], isPostHook?: boolean): void | true;
+            // 返回 void 表示继续后面的处理，添加内部的keys，否则直接以这些keys结束
+            keyFunc?(chunk: ResponseContentPart, keys: any[]): any[] | void;
         }
 
         type MessageComposedCallback = (messages: Message[], output: OpenAI.Message[], body: Record<string, any>, is_prefill: boolean) => void;

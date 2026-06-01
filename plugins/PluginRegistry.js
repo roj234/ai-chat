@@ -6,6 +6,9 @@ import "./cmdSetPrompt.js";
 // JSON对话编辑器
 import "./conversationEditor.js";
 
+// 无痕模式弹窗提醒
+import "./incognitoToast.js";
+
 // Blob管理器
 import "./BlobManager.js";
 // 预设快速切换菜单
@@ -21,7 +24,7 @@ import "./search.js";
 import "./configSync.js";
 
 // 文件系统和Agent工具组 (use:fs)
-import "./tools/filesystem.js";
+import "./tools/agent.js";
 // 图表工具 (use:chart)
 import "./tools/ChartCreator.js";
 // 角色扮演工具组 (use:roleplay) !WIP!

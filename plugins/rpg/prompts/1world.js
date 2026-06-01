@@ -1,4 +1,4 @@
-import {jsonPrompt, schemaWrapper} from "../core.js";
+import {jsonPrompt} from "../core.js";
 
 /** @type {OpenAI.ObjectSchema} */
 const schema = {
@@ -129,7 +129,7 @@ const schema = {
  */
 
 export async function generateWorld(prompt) {
-	return await jsonPrompt([
+	return await jsonPrompt(schema, [
 		{
 			role: "system",
 			content: `你是一位顶级的网文/小说世界观架构师与设定补全专家。
@@ -162,10 +162,7 @@ export async function generateWorld(prompt) {
 			content: prompt
 		}
 	], {
-		...schemaWrapper(schema),
-		reasoning: { enabled: false },
-		//min_p: 0.1,
-		//temperature: 1.2,
+		reasoning: {enabled: false},
 		max_tokens: 10000,
 	});
 }

@@ -1,11 +1,58 @@
 import {indexInParent} from "../utils/utils.js";
-import {$foreach, debugSymbol} from "unconscious";
+import {$foreach} from "unconscious";
 import {showToast} from "./Toast.js";
-import {config} from "../states.js";
+import {config, selectedConversation} from "../states.js";
 import {readAsString} from "/common/chardet.js";
 import {formatSize} from "unconscious/common/Utils.js";
 
-const FILE_NAME = debugSymbol("FILE_NAME");
+/**
+ * @param {File} file
+ * @param {boolean} isFileTransferWindow
+ * @param {OpenAI.ContentPart[]} attachments
+ */
+export function blobToContentPart(file, isFileTransferWindow, attachments) {
+	if (file.size > 104857600) {
+		showToast("文件 " + file.name + " 过大, 仅允许100MB以内的文件", "error");
+		return;
+	}
+
+	if (file.type.startsWith('image')) {
+		if (!isFileTransferWindow && !config.modalities?.includes("image")) {
+			showToast("模型不支持图片，无法上传 " + file.name);
+			return;
+		}
+		attachments.push({
+			type: "image_url",
+			image_url: {url: file}
+		});
+	} else if (file.type.startsWith('audio')) {
+		if (!isFileTransferWindow && !config.modalities?.includes("audio")) {
+			showToast("模型不支持音频，无法上传 " + file.name);
+			return;
+		}
+		attachments.push({
+			type: "input_audio",
+			input_audio: {
+				data: file,
+				format: file.type.slice(file.type.indexOf('/') + 1)
+			}
+		});
+	} else if (file.type.startsWith('text')) {
+		if (file.hash) {
+			attachments.push({
+				type: "text",
+				text: file
+			});
+		} else {
+			readAsString(file).then(text => {
+				attachments.push({
+					type: "text",
+					text: file.size > 16384 ? new File([text], file.name, {type: file.type}) : text
+				});
+			})
+		}
+	}
+}
 
 /**
  * @param {import("unconscious").Reactive<OpenAI.ContentPart[]>} attachments
@@ -14,42 +61,11 @@ const FILE_NAME = debugSymbol("FILE_NAME");
 export const createFileUploader = attachments => <input type="file"
 														accept="image/png,image/jpeg,image/bmp,image/gif,audio/wav,audio/mp3,audio/flac,text/plain"
 														multiple onChange={({target}) => {
-	for (const file of target.files) {
-		if (file.size > 104857600) {
-			showToast("文件 " + file.name + " 过大, 仅允许10MB以内的文件", "error");
-			continue;
-		}
 
-		if (file.type.startsWith('image')) {
-			if (!config.modalities?.includes("image")) {
-				showToast("模型不支持图片，无法上传 " + file.name);
-				continue;
-			}
-			attachments.push({
-				type: "image_url",
-				image_url: {url: file}
-			});
-		} else if (file.type.startsWith('audio')) {
-			if (!config.modalities?.includes("audio")) {
-				showToast("模型不支持音频，无法上传 " + file.name);
-				continue;
-			}
-			attachments.push({
-				type: "input_audio",
-				input_audio: {
-					data: file,
-					format: file.type.slice(file.type.indexOf('/') + 1)
-				}
-			});
-		} else if (file.type.startsWith('text')) {
-			readAsString(file).then(text => {
-				attachments.push({
-					type: "text",
-					[FILE_NAME]: file.name + "\n" + formatSize(file.size),
-					text
-				});
-			})
-		}
+	const isFileTransferWindow = selectedConversation.id === 0;
+
+	for (const file of target.files) {
+		blobToContentPart(file, isFileTransferWindow, attachments);
 	}
 
 	target.value = '';
@@ -85,7 +101,7 @@ export const createAttachmentGallery = (attachments) => {
 					return (
 						<div className="attachment text-part" style={"--format: \"TXT\""}>
 							<div className="text-preview">
-								{att[FILE_NAME]}
+								{att.text.name + "\n"+formatSize(att.text.size)}
 							</div>
 							{DeleteBtn}
 						</div>

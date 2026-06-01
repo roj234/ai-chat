@@ -36,7 +36,7 @@ export function ToolCallCard(props) {
                 </div>
                 <div className="tool-body">
                     <div className="args-title">返回值
-                        {isReactive(tool)/* || (message !== messages[messages.length-1] && !config.debug)*/ ? null : <button className={"rerun-btn"} onClick={({target}) => {
+                        {isReactive(tool) ? null : <button className={"rerun-btn"} onClick={({target}) => {
                             target.disabled = true;
                             runTools(message, unconscious(selectedConversation), idx, true).then(() => {
                                 $update(messages);

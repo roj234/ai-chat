@@ -2,7 +2,7 @@ import {debugSymbol, unconscious} from "unconscious";
 import {showToast} from "../components/Toast.js";
 import {messages, selectedConversation} from "../states.js";
 
-export const BM = debugSymbol("BranchManager");
+export const BRANCH_MANAGER = debugSymbol("BranchManager");
 
 const INDEX = debugSymbol("INDEX");
 const CHILDREN = debugSymbol("CHILDREN");
@@ -231,7 +231,7 @@ function createBranchManager(conv, messages) {
  */
 export function enableBranches(conv, messages) {
 	const bm = createBranchManager(conv, unconscious(messages));
-	conv[BM] = bm;
+	conv[BRANCH_MANAGER] = bm;
 	return bm.getMessages();
 }
 
@@ -241,10 +241,10 @@ export function enableBranches(conv, messages) {
  * @return {AiChat.Message[]}
  */
 export function disableBranches(conv) {
-	const bm = conv[BM];
+	const bm = conv[BRANCH_MANAGER];
 	delete conv.bm_leaf;
 	delete conv.bm_dummy;
-	delete conv[BM];
+	delete conv[BRANCH_MANAGER];
 	return bm.toArray();
 }
 
@@ -254,7 +254,7 @@ export function disableBranches(conv) {
  */
 export function copyBranchAt(message) {
 	/** @type {AiChat.BranchManager} */
-	const branchManager = selectedConversation[BM];
+	const branchManager = selectedConversation[BRANCH_MANAGER];
 	const copiedMessage = structuredClone(message);
 	copiedMessage.id = -1;
 	branchManager.branchAt(branchManager.messages[message.parent], copiedMessage);
@@ -268,7 +268,7 @@ export function copyBranchAt(message) {
  */
 export function setLastMessage(message) {
 	/** @type {AiChat.BranchManager} */
-	const branchManager = selectedConversation[BM];
+	const branchManager = selectedConversation[BRANCH_MANAGER];
 	branchManager.setLeaf(message);
 	messages.value = branchManager.getMessages();
 }
@@ -281,7 +281,7 @@ export function setLastMessage(message) {
  */
 export function setBranchIndex(message, branchIndex) {
 	/** @type {AiChat.BranchManager} */
-	const bm = selectedConversation[BM];
+	const bm = selectedConversation[BRANCH_MANAGER];
 	bm.switchBranch(bm.messages[message.parent], branchIndex);
 	messages.value = bm.getMessages();
 }
@@ -292,5 +292,5 @@ export function setBranchIndex(message, branchIndex) {
  * @return {[number, number]}
  */
 export function getBranchIndexCount(message) {
-	return selectedConversation[BM]?.getBranchInfo(message) || NO_BRANCHES;
+	return selectedConversation[BRANCH_MANAGER]?.getBranchInfo(message) || NO_BRANCHES;
 }

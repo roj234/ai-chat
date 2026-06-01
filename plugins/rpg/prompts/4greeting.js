@@ -1,4 +1,4 @@
-import {jsonPrompt, schemaWrapper} from "../core.js";
+import {jsonPrompt} from "../core.js";
 
 /** @type {OpenAI.ObjectSchema} */
 const schema = {
@@ -85,7 +85,7 @@ const schema = {
  * @param {String} prompt 用户开局的特殊要求（可选）
  */
 export async function generateGreeting(world, character, firstNode, prompt) {
-	return await jsonPrompt([
+	return await jsonPrompt(schema, [
 		{
 			role: "system",
 			content: `你是一位顶尖的跑团守秘人（Keeper）与金牌网文开局构架师。
@@ -132,7 +132,7 @@ ${character.sex}，${character.age}，${character.race}，所属势力：${chara
 ${character.appearance}
 
 ### 标签
-${character.tags.map(t=>`- **${t.name}**：${t.description}`).join('\n')}
+${character.tags.map(t => `- **${t.name}**：${t.description}`).join('\n')}
 
 ### 弱点/执念：
 ${character.flaw}
@@ -167,8 +167,7 @@ ${world.attribute_schema.map(f => `- **${f.name}**  \n  简介：${f.description
 ${prompt}`.trim()
 		}
 	], {
-		...schemaWrapper(schema),
-		reasoning: { enabled: false },
+		reasoning: {enabled: false},
 		//min_p: 0.1,
 		//temperature: 1.15,
 		max_tokens: 8000,

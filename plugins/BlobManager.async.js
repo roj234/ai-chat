@@ -2,6 +2,7 @@ import {$foreach, $state} from "unconscious";
 import {config} from "/src/states.js";
 import SimpleModal from "../src/components/SimpleModal.jsx";
 import {formatSize, prettyTime} from "unconscious/common/Utils.js";
+import {copyButtonAnimation} from "../src/utils/utils.js";
 
 const pageSize = 20;
 
@@ -89,19 +90,23 @@ const container = <div className={"modal-overlay"}>
 				</thead>
 				<tbody ref={table}>
 				{$foreach(blobs, item => {
-					const isImg = item.mime.startsWith('image/');
+					const isImg = item.type.startsWith('image/');
 					const blobUrl = `${config.db_server}/blob/${item.hash}`;
 
 					return <tr>
 						<td><input type="checkbox" className="row-check" value={item.hash} /></td>
 						<td>{isImg ?
 							<img src={blobUrl} className="preview-img" onClick={() => showFull(blobUrl)}/> : '-'}</td>
-						<td style="word-break: break-all; font-family: monospace; font-size: 12px;">{item.hash}</td>
-						<td>{item.mime}</td>
+						<td style="word-break:break-all;font-size:14px">{item.name}<br/>{item.hash}</td>
+						<td>{item.type}</td>
 						<td>{formatSize(item.size)}</td>
-						<td>{prettyTime(item.time)}</td>
-						<td>
-							<a href={blobUrl} target="_blank" title={"下载"} className="ri-download-2-line btn primary"></a>
+						<td title={new Date(item.lastModified).toISOString()}>{prettyTime(item.lastModified)}</td>
+						<td style={"display:flex;gap:8px"}>
+							<button className="ri-file-copy-line ghost" title={"复制"} onClick={({target}) => {
+								copyButtonAnimation("![blob]("+item.hash+")", target)
+							}}></button>
+							<a href={blobUrl} target="_blank" title={"下载"}
+							   className="ri-download-2-line btn primary"></a>
 							<button className="ri-delete-bin-line btn danger" title={"删除"} onClick={() => {
 								deleteItem(item.hash);
 							}}>

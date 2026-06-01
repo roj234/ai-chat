@@ -1,24 +1,41 @@
 import {getKV, setKV} from "/src/database.js";
 import {SETTINGS} from "/src/settings.js";
-import {$state, $watch} from "unconscious";
-import {isMobile} from "/src/states.js";
+import {$computed, $state, $watch, unconscious} from "unconscious";
+import {config, isMobile} from "/src/states.js";
 import {onLoad} from "/src/plugin.js";
 
 /** @type {import('unconscious').Reactive<Blob>} */
 const BG_BLOB = $state();
 /** @type {import('unconscious').Reactive<Blob>} */
 const FONT_BLOB = $state();
+/** @type {import('unconscious').Reactive<'cover' | 'contain' | 'stretch' | 'tile' | 'center'>} */
+const BG_FIT = $computed(() => config.backgroundFit);
 
 onLoad(() => {
 	getKV("chat-background").then(blob => BG_BLOB.value = blob);
 	getKV("chat-font").then(blob => FONT_BLOB.value = blob);
 
-	$watch(BG_BLOB, () => {
-		const blob = BG_BLOB.value;
+	$watch([BG_BLOB, BG_FIT], () => {
+		const blob = unconscious(BG_BLOB);
+		const style = document.body.style;
+		if (!blob) { style.background = ''; return; }
+		let url = blob.toUrl();
 
-		let url;
-		document.body.style.background = !blob ? '' : `url("${url = blob.toUrl()}") center `+(isMobile?'top':'center')+` / cover`;
-		return url && (() => URL.revokeObjectURL(url));
+		const pos = isMobile ? 'center top' : 'center center';
+		const fit = unconscious(BG_FIT);
+		let bgStyle;
+
+		switch (fit) {
+			default:
+			case 'cover': bgStyle = `${pos} / cover no-repeat`; break;
+			case 'contain': bgStyle = `${pos} / contain no-repeat`; break;
+			case 'stretch': bgStyle = `${pos} / 100% 100% no-repeat`; break;
+			case 'tile': bgStyle = `repeat`; break;
+			case 'center': bgStyle = `${pos} / auto no-repeat`; break;
+		}
+
+		style.background = `url("${url}") `+bgStyle;
+		return () => URL.revokeObjectURL(url);
 	});
 
 	$watch(FONT_BLOB, () => {
@@ -56,6 +73,19 @@ SETTINGS.push({
 		</button>
 		{() => BG_BLOB.name}
 	</div>
+},{
+	type: "radio",
+	required: true,
+	_tab: "appearance",
+	id: "backgroundFit",
+	name: "背景图契合模式",
+	choices: {
+		"填充": "cover",
+		"适应": "contain",
+		"拉伸": "stretch",
+		"平铺": "tile",
+		"居中": "center"
+	},
 },{
 	type: "element",
 	_tab: "appearance",

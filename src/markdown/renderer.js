@@ -19,6 +19,8 @@ const loadKatex = once(() => import('katex'));
 const getInnerHTML = node => {
 	if (node._value) return node._value;
 	if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+	// TODO 嵌套回退时可以考虑用 _value = node.title, __value = `![${node.title}](${encodeURI(node.src)})`
+	if (node.nodeName === 'IMG' || node.className === 'safe-image loading') return node.title;
 	let html = '';
 	for (const child of node.childNodes) {
 		html += child.__value ?? getInnerHTML(child);
@@ -26,16 +28,12 @@ const getInnerHTML = node => {
 	return html;
 };
 
-const allowedAttributes = new Set(["class", "style", "href", "width", "height", "align", "start", "checked", "lang"]);
+const allowedAttributes = new Set(["class", "style", "href", "width", "height", "align", "start", "checked", "lang", "title"]);
 
 /**
  * @param {HTMLElement} root
- * @param {Partial<{
- *     noHighlight: boolean,
- *     stream: boolean,
- *     noImage: boolean
- * }>} options
- * @return {import("better-marked").Renderer}
+ * @param {AiChat.MarkdownRendererOptions} options
+ * @return {import("fastmd").Renderer}
  */
 export function createMarkdownRenderer(root, options = {}) {
 	/**
@@ -71,7 +69,7 @@ export function createMarkdownRenderer(root, options = {}) {
 				case fastmd.LINK:          slot = <a target="_blank" rel="noopener noreferrer" />         ;break
 				case fastmd.IMAGE:
 					// 并没有写错，因为 noImage 下我不会设置 src 属性
-					slot = options.noImage ? <img referrerPolicy="no-referrer" /> : <div className="safe-image loading">
+					slot = options.noImage || options.trusted ? <img referrerPolicy="no-referrer" /> : <div className="safe-image loading">
 						<div className="spinner"></div>
 					</div>;
 					break
@@ -123,13 +121,7 @@ export function createMarkdownRenderer(root, options = {}) {
 
 				case fastmd.EQUATION_BLOCK:
 				case fastmd.EQUATION_INLINE: slot = <math />; break;
-				case fastmd.HTML_ELEMENT:
-					slot = document.createElement(__element_id);
-					if (__element_id === "a"){
-						slot.target = "_blank";
-						slot.rel = "noopener noreferrer";
-					}
-					break;
+				case fastmd.HTML_ELEMENT: slot = document.createElement(__element_id); break;
 				case fastmd.QUOTE:
 					slot = <q />
 			}
@@ -235,14 +227,24 @@ export function createMarkdownRenderer(root, options = {}) {
 				value = language;
 			}
 
-			if (name === fastmd.SRC && !options.noImage) {
-				node.replaceWith(unconscious(<SafeImage src={value} title={node.title} />));
-				return;
-			}
+			if (!options.trusted) {
+				if (name === fastmd.SRC && !options.noImage) {
+					node.replaceWith(unconscious(<SafeImage src={value} title={node.title} />));
+					return;
+				}
 
-			if (name === fastmd.HREF && value.toLowerCase().startsWith("javascript:")) return;
-			if (name === "style" && value.includes("url")) return;
-			if (!allowedAttributes.has(name)) return;
+				if (name === fastmd.HREF) {
+					if (value.toLowerCase().startsWith("javascript:")) return;
+
+					if (value[0] !== '#') {
+						node.target = "_blank";
+						node.rel = "noopener noreferrer";
+					}
+				}
+
+				if (name === "style" && value.includes("url")) return;
+				if (!allowedAttributes.has(name)) return;
+			}
 
 			const attr = node.attributes[name];
 			if (!attr) {

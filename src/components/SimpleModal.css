@@ -35,7 +35,7 @@
 
     & .body {
         color: var(--muted);
-        /*overflow: auto;*/
+        overflow: auto;
 
         /* For input mode, ensure the body has space for the input */
         &:has(.modal-input) {

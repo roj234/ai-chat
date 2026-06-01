@@ -9,12 +9,14 @@ import {registerKVRoutes} from "./routes/kv.js";
 import {registerSearchRoutes} from "./routes/search.js";
 import {registerLogRoutes} from "./routes/log.js";
 import {registerDatabaseRoutes} from "./routes/database.js";
-import {registerFsRoutes} from "./routes/fs.js";
+import {registerFsRoutes} from "./routes/agent.js";
 import {registerBlobRoutes} from "./routes/blob-storage.js";
 import {registerSSEProxyRoutes} from "./routes/sse-proxy.js";
 
 import {
 	ALLOW_USER_NAMES,
+	ENABLE_FILE_TRANSFER,
+	RESPONSE_USE_MSGPACK_SCHEMA,
 	RESTRICT_USER_CREATION,
 	SEMANTIC_SEARCH_ENABLE,
 	SHUTDOWN_SQL,
@@ -24,12 +26,23 @@ import {
 } from "./config.js";
 import {c2s_schema_version} from "../common/MsgpackSchema.js";
 
-import {compressGeneric, decompressGeneric, deserializeRow} from "./utils/compression.js";
+import {compressGeneric, compressMessage, decompressGeneric, deserializeRow} from "./utils/compression.js";
+import {cachePreparedSql} from "./utils/sqliteUtils.js";
 
 global.compression = {
 	compressGeneric,
 	decompressGeneric,
 	deserializeRow
+};
+
+const registerSSEProxy = (router, rootDir) => {
+	router.get("/sse/props", (ctx) => {
+		ctx.send(204, "");
+	});
+
+	router.push("sse/v1");
+	registerSSEProxyRoutes(router, rootDir);
+	router.pop();
 };
 
 /**
@@ -47,7 +60,7 @@ export async function initServer(dataPath, basePath = "api", workspacePath) {
 	const router = new Router((ctx) => {
 		const sandboxRoot = path.join(workspace, ctx.searchParams.get("root") || "")
 		ctx.sandboxRoot = sandboxRoot;
-		ctx.errorFilter = str => str.replace(sandboxRoot, "");
+		ctx.errorFilter = str => str.replaceAll(sandboxRoot, "");
 
 		const {userId} = ctx.params;
 		if (userId != null) {
@@ -78,13 +91,7 @@ export async function initServer(dataPath, basePath = "api", workspacePath) {
 		return router;
 	}
 
-	router.get("/sse/props", (ctx) => {
-		ctx.send(204, "");
-	});
-
-	router.push("sse/v1");
-	registerSSEProxyRoutes(router, ROOT_DIR);
-	router.pop();
+	registerSSEProxy(router, ROOT_DIR);
 
 	for await (const entry of fs.glob("plugins/*/index.js", { cwd: import.meta.dirname, withFileTypes: true })) {
 		if (entry.isFile()) {
@@ -94,9 +101,11 @@ export async function initServer(dataPath, basePath = "api", workspacePath) {
 
 	router.push('v2/:userId');
 
+	registerSSEProxy(router, ROOT_DIR);
+
 	const batchTypes = {
 		sync: (_, ctx) => WEBSOCKET_SYNC_ENABLE ? WEBSOCKET_SYNC_BASE(ctx) : null,
-		msgpack: () => c2s_schema_version
+		msgpack: () => RESPONSE_USE_MSGPACK_SCHEMA && c2s_schema_version
 	};
 
 	// batch接口统一处理大部分请求
@@ -207,53 +216,57 @@ function getUserData(dbPath, userId) {
 	return db;
 }
 
+// 数据库版本号
+const DB_VERSION = 1;
+
 function initDB(dbPath) {
 	const db = new DatabaseSync(dbPath);
-	db.exec(`
-CREATE TABLE IF NOT EXISTS conversations (
+	const { user_version } = db.prepare('PRAGMA user_version').get();
+	cachePreparedSql(db);
+
+	if (user_version === 0) {
+		db.exec(`
+CREATE TABLE conversations (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	title TEXT DEFAULT '',
 	time INTEGER NOT NULL,
 	data BLOB NOT NULL
 );
-CREATE TABLE IF NOT EXISTS messages (
+CREATE TABLE messages (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	owner INTEGER NOT NULL REFERENCES conversations(id),
 	time INTEGER,
 	content TEXT NOT NULL,
 	data BLOB NOT NULL
 );
-CREATE TABLE IF NOT EXISTS kv (
+CREATE TABLE kv (
 	key TEXT PRIMARY KEY,
 	value BLOB NOT NULL
 ) WITHOUT ROWID;
-CREATE TABLE IF NOT EXISTS kvs (
+CREATE TABLE kvs (
 	type TEXT NOT NULL,
     name TEXT NOT NULL,
     data BLOB NOT NULL,
     PRIMARY KEY (type, name)
 ) WITHOUT ROWID;
-CREATE INDEX IF NOT EXISTS idx_messages_owner ON messages(owner);
-CREATE TABLE IF NOT EXISTS logs (
+CREATE INDEX idx_messages_owner ON messages(owner);
+CREATE TABLE logs (
 	id INTEGER UNIQUE,
 	time INTEGER NOT NULL,
 	data BLOB NOT NULL
 );
-`); // use rowid for logs now
-	db.exec(STARTUP_SQL);
-	const sqlCache = new Map;
-	const originalPrepare = db.prepare;
-	Object.defineProperty(db, "prepare", {
-		value: (sql) => {
-			let statement = sqlCache.get(sql);
-			if (!statement) {
-				if (sqlCache.size > 500) sqlCache.clear();
 
-				statement = originalPrepare.call(db, sql);
-				sqlCache.set(sql, statement);
-			}
-			return statement;
-		}
-	})
+PRAGMA user_version = `+DB_VERSION); // logs 使用 rowid 做底层索引
+	} else if (user_version === DB_VERSION) {
+	} else {
+		throw new Error("数据库版本号错误，请补充迁移函数");
+	}
+
+	db.exec(STARTUP_SQL);
+	if (ENABLE_FILE_TRANSFER) {
+		db.prepare("INSERT INTO conversations (id, title, time, data) VALUES (0, '文件传输助手', ?, ?) ON CONFLICT(id) DO NOTHING").run(
+			Date.now(), compressMessage({ noAI: true })
+		);
+	}
 	return db;
 }

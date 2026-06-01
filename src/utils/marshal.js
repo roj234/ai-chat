@@ -1,4 +1,4 @@
-import {getBlob, updateBlob} from "../database.js";
+import {getBlob, uploadBlob} from "../database.js";
 import {deepEntries} from "unconscious/common/json-schema-utils.js";
 
 const decodeDollar = async (v, zr) => {
@@ -6,8 +6,8 @@ const decodeDollar = async (v, zr) => {
 	switch (v.$) {
 		case "Blob": {
 			if (zr) {
-				const data = await zr.get("blobs/"+v.index);
-				if (data) return new File([data], v.name, {type: v.type});
+				const buf = await zr.get("blobs/"+v.index);
+				if (buf) return new File([buf], v.name, v);
 			}
 			throw "找不到引用的 Blob 对象";
 		}
@@ -58,12 +58,13 @@ export const encodeObjects = (input, replacer, zipWriter) => {
 					replacer.set(val, {
 						$: "Blob",
 						type: val.type,
+						lastModified: val.lastModified,
 						name: val.name,
 						index: blobIndex
 					});
 
 					return zipWriter.add("blobs/"+blobIndex, new Uint8Array(ab));
-				}): updateBlob(val).then(hash => {
+				}): uploadBlob(val).then(hash => {
 					replacer.set(val, {
 						$: "BlobH",
 						hash,

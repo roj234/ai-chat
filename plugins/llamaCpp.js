@@ -6,7 +6,7 @@ import {jsonFetch, prettyError, throttled} from "/src/utils/utils.js";
 import {SETTINGS} from "/src/settings.js";
 import {showToast} from "/src/components/Toast.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
-import {setStatus} from "/src/api-request.js";
+import {updateStatusText} from "/src/api-request.js";
 import {onLoad} from "/src/plugin.js";
 
 const _endpoint = $state({});
@@ -39,13 +39,13 @@ let emptyMessageTokens = -1;
 
 		const value = userInput.value;
 		if (!value) {
-			setStatus("");
+			updateStatusText("");
 			return
 		}
 
 		if (isLlamaCppBackend) {
 			countTokens(value).then(token_count => {
-				setStatus(token_count+" Tokens");
+				updateStatusText(token_count+" Tokens");
 			});
 		}
 	}, 200);

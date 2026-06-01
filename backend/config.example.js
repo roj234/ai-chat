@@ -43,6 +43,12 @@ export const SEMANTIC_SEARCH_CHUNK_MODE = {
 // 2. 实时同步与用户管理
 // ==========================================
 
+/**
+ * 服务器API直连地址 (用于输入用户名)
+ * @example https://nas.lan/aichat/api/
+ */
+export const SERVER_BASE_ADDR = ``;
+
 /** 是否开启 WebSocket 状态同步 */
 export const WEBSOCKET_SYNC_ENABLE = true;
 
@@ -84,6 +90,11 @@ export const STARTUP_SQL = `
 `;
 export const SHUTDOWN_SQL = ``;
 
+/**
+ * 启用文件传输助手
+ */
+export const ENABLE_FILE_TRANSFER = true;
+
 // ==========================================
 // 4. SSE 后端代理与转发 (SSE Proxy)
 // ==========================================
@@ -110,6 +121,47 @@ export const SSE_PROXY_BACKEND = {
 		authorization: 'xxx'
 	}
 };
+
+/**
+ * 可以async
+ * @param {string} url
+ * @param {string} apiKey
+ * @param {AiChatBackend.RouteContext} ctx
+ * @return {void | Object | function(OpenAI.ChatCompletionRequest): Object | void}
+ */
+export const SSE_PROXY_MODERATION = (url, apiKey, ctx) => {
+	if (apiKey === 'some-key') return {error: "This key is forbidden"};
+
+	// 可能为 null
+	const {userId} = ctx.params;
+	if (userId === 'admin') return;
+
+	/**
+	 *
+	 * @param {string} text
+	 * @return {{error: string}}
+	 */
+	const moderation = (text) => {
+		if (text.includes("fuck")) {
+			return {error: "This message considered high risk"};
+		}
+	}
+
+	return (body) => {
+		for (const {content} of body.messages) {
+			if (Array.isArray(content)) {
+				for (const {type, text} of content) {
+					if (type === "text") {
+						const result = moderation(text);
+						if (result) return result;
+					}
+				}
+			} else {
+				return moderation(content);
+			}
+		}
+	};
+}
 
 /** 是否开启黑箱调试：记录所有请求响应到 data/logs 目录 */
 export const SSE_PROXY_TRACE = false;
@@ -160,6 +212,9 @@ export const DB_COMPRESS_MIN_SIZE = 1024;
  * 数据库的 Brotli 压缩级别 (0-11)
  */
 export const DB_COMPRESS_LEVEL = 7;
+
+/** 是否使用 Msgpack 替代 JSON 序列化响应（体积更小，速度更快） */
+export const RESPONSE_USE_MSGPACK_SCHEMA = true;
 
 /**
  * 响应的 Brotli 压缩级别 (0-11)

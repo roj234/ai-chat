@@ -1,7 +1,7 @@
 import {ThinkBlock} from "./ThinkBlock.jsx";
 import {ToolCallCard} from "./ToolCallCard.jsx";
 import {$computed, $foreach, $state, $update, $watch, AppendObserver, debugSymbol, unconscious} from "unconscious";
-import {formatDate} from "unconscious/common/Utils.js";
+import {formatDate, formatSize} from "unconscious/common/Utils.js";
 import {copyCodeEventHandler, renderMarkdownToElement, renderMarkdownToString} from "../markdown/markdown.js";
 import {
 	abortCompletion,
@@ -13,7 +13,7 @@ import {
 	messages,
 	selectedConversation
 } from "../states.js";
-import {sendUserChatMessage} from "../api-request.js";
+import {submitUserChatMessage} from "../api-request.js";
 import {
 	copyButtonAnimation,
 	errorBlock,
@@ -36,6 +36,7 @@ import "./MyLoading.jsx";
 import morphdom from "morphdom";
 import SimpleModal from "./SimpleModal.jsx";
 import {ToolCallEditor} from "./ToolCallEditor.jsx";
+import {downloadFile} from "../data-exchange.js";
 
 // region AiChat.ResponseContentPart[] 的生成和渲染函数
 /**
@@ -66,6 +67,14 @@ function chunkRenderer(m) {
 			}
 			case "text": {
 				const {text} = item;
+				if (typeof text !== "string") {
+					return <details>
+						<summary>{text.name || "文本文件"} ({formatSize(text.size)}, {text.type})</summary>
+						<a onClick={() => {
+							downloadFile(text);
+						}}>下载</a>
+					</details>
+				}
 				if (isEditing(m.key)) {
 					return <EditWidget value={text} onChange={value => {
 						item.text = value;
@@ -178,7 +187,7 @@ function chunkGather(message, chunks, index, messages) {
 		return;
 	}
 
-	let {think, reasoning_details, content, tool_calls, error} = message;
+	let {think, reasoning_details, content, tool_calls, error, finish_reason} = message;
 
 	if (think) {
 		const child = { type: "think", think };
@@ -234,8 +243,9 @@ function chunkGather(message, chunks, index, messages) {
 		}
 	}
 
-	if (!error && message.finish_reason === "interrupt") {
-		error = "你中断了生成";
+	if (!error) {
+		if (finish_reason === 'interrupt') error = "你中断了生成";
+		if (finish_reason === 'length') error = "达到最大输出长度";
 	}
 	if (error) {
 		chunks.push({ type: "error", error, key: message });
@@ -251,13 +261,14 @@ function chunkGather(message, chunks, index, messages) {
 function chunkKeyFunc(message, chunk) {
 	const {key, type} = chunk;
 
+	const keys = [];
+
 	let kf;
 	if ((kf = MessageRoles[key?.role]?.keyFunc)) {
-		const kfKeys = kf(chunk);
+		const kfKeys = kf(chunk, keys);
 		if (kfKeys) return kfKeys;
 	}
 
-	const keys = [];
 	const add = (el) => {
 		if (el) {
 			if (Array.isArray(el)) keys.push(...el);
@@ -337,10 +348,10 @@ function updateButtons(m, container) {
 
 	const haveBranches = selectedConversation.bm_leaf;
 	const buttons = [];
-	const notGenerating = abortCompletion.value == null;
+	const notGenerating = !unconscious(abortCompletion);
 	const isEditing_ = isEditing(key);
 	const isLast = (end_index ? end_index === messages.length : index === messages.length-1);
-	const mayChange = (!isLast || notGenerating) && EditableMessageRoles.has(role);
+	const mayChange = (!isLast || notGenerating) && EditableMessageRoles.has(role) && !key.isOther;
 	const isComposite = end_index > index + 1;
 	// 不支持编辑组合消息（工具调用）
 	if (mayChange && !isComposite) buttons.push(isEditing_ ? saveBtn : editBtn);
@@ -430,7 +441,7 @@ const buttonHandler = (e) => {
 			} else {
 				deleteMessage(self.index, messages.length);
 			}
-			sendUserChatMessage();
+			submitUserChatMessage();
 		}
 		break;
 		case "undo": {
@@ -479,20 +490,24 @@ const buttonHandler = (e) => {
 		break;
 		case "edit": {
 			const currentEditing = getEditing(message);
-			const inEdit = currentEditing === message;
-			if (currentEditing && !inEdit) {
+			const isEditingSelf = currentEditing === message;
+			if (currentEditing && !isEditingSelf) {
 				selectedConversation[IN_EDIT_MODE] = null;
 
 				const currentRef = combinedMessages.find(item => item.key === currentEditing);
+
+				// 退出编辑模式
+				currentRef[PINNED] = false;
 				vl.setItem(vl.findIndex(currentRef), currentRef);
 			}
 			const updateSelf = () => {
 				if (selectedConversation.bm_leaf) {
-					selectedConversation[IN_EDIT_MODE] = inEdit ? null : message;
+					selectedConversation[IN_EDIT_MODE] = isEditingSelf ? null : message;
 
-					if (inEdit && message.id === -1) delete message.id;
+					self[PINNED] = !isEditingSelf;
+					if (isEditingSelf && message.id === -1) delete message.id;
 				} else {
-					message[IN_EDIT_MODE] = !inEdit;
+					self[PINNED] = message[IN_EDIT_MODE] = !isEditingSelf;
 				}
 
 				// 爷不管了，直接更新HTML
@@ -500,7 +515,7 @@ const buttonHandler = (e) => {
 				if (!message.content) $update(updateMessageUI);
 			};
 
-			if (inEdit) {
+			if (isEditingSelf) {
 				if (message.think && !message.think.content) delete message.think;
 
 				$update(messages);
@@ -515,7 +530,7 @@ const buttonHandler = (e) => {
 							title: "选择分支历史编辑模式？",
 							message: "确认：从此处创建一个新分支并编辑\n取消：直接修改历史对话\n该弹窗是您在 '设置 > 自定义' 中开启的高级选项",
 							onConfirm: newBranch,
-							onCancel:updateSelf
+							onCancel: updateSelf
 						});
 					} else {
 						newBranch();
@@ -537,7 +552,7 @@ const buttonHandler = (e) => {
  */
 function deleteMessage(start, end) {
 	const removed = messages.splice(start, end - start);
-	const globalStorage = selectedConversation.value;
+	const globalStorage = unconscious(selectedConversation);
 	for (let i = removed.length - 1; i >= 0; i--){
 		const {tool_responses} = removed[i];
 		if (tool_responses) {
@@ -633,6 +648,7 @@ const combinedMessages = $computed((oldMessages) => {
 
 		if (!isReactiveElement) {
 			getBranchChunk(message, chunks);
+			ref[PINNED] = isEditing(message);
 			ref.time = ref.key.time;
 			continue;
 		}
@@ -654,7 +670,7 @@ const combinedMessages = $computed((oldMessages) => {
 			ref.time = ref.key.time;
 			ref.end_index = i;
 
-			generationEnded = message.finish_reason;
+			generationEnded = message.finish_reason !== '';
 			ref[PINNED] = !generationEnded || isEditing(message);
 			if (!generationEnded) {
 				if (!message.time) chunks.push({ type: "loading" });
@@ -701,7 +717,7 @@ $watch([messages, updateMessageUI, abortCompletion], () => {
  * @return {string}
  */
 function roleName(m) {
-	if (m.role === "user") return "你";
+	if (m.role === "user") return m.name || "你";
 	if (m.role === "system") return "系统提示";
 
 	return MessageRoles[m.role]?.name || m.model || "AI";
@@ -721,17 +737,20 @@ export function MessageList() {
 
 		const callback = () => updateButtons(m, buttons);
 		const buttonDiv = <div className={"btn-line"}><span ref={buttons}></span></div>;
+		const isAI = !selectedConversation.noAI;
 		const div = <div onMouseEnter={callback} onTouchStart.passive={callback} className={`msg ${role}`} _identity={m}>
 			<div className={"line"}>
-				{isEditing(m.key) && roleSelection.includes(m.role) ? <select onChange={e => {
-					m.role = m.key.role = e.target.selectedOptions[0].value;
+				{isEditing(m.key) && isAI && roleSelection.includes(m.role) ? <select onChange={e => {
+					const role = m.role = m.key.role = e.target.selectedOptions[0].value;
+					m.content = (role==='assistant'?$state:unconscious)(m.content);
 					vl.setItem(vl.findIndex(m), m);
+					$update(updateMessageUI);
 				}}>
 					{roleSelection.map(name =>
 						<option selected={m.role === name} value={name}>{name}</option>)
 					}
 				</select> : <b>{roleName(m)}</b>}
-				<span className='time'>{formatDate('Y-m-d H:i:s', time || 0)}</span>
+				<span className='time'>{formatDate('Y-m-d H:i:s', time??null)}</span>
 				<span className='spacer'></span>
 			</div>
 			{isMobile ? null : buttonDiv}

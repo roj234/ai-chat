@@ -7,7 +7,7 @@
 
 import {messages} from "/src/states.js";
 import {registerTools} from "/src/skills.js";
-import {sendUserChatMessage} from "/src/api-request.js";
+import {submitUserChatMessage} from "/src/api-request.js";
 
 const prompt2 = `<Follow-up-Suggestions>
 After **EVERY** reply — without exception — you MUST call the
@@ -171,7 +171,8 @@ const schema = {
 
 		const chooseMessage = (content) => {
 			removeToolCall();
-			sendUserChatMessage(content);
+			messages.push({role: 'user', content, time: Date.now()});
+			submitUserChatMessage();
 		}
 
 		return <div className="choice-list" style={"flex-direction: row"}>

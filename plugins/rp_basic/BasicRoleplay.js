@@ -53,7 +53,7 @@ const definition = {
 // MyCharacterInstance用到的非序列化属性
 const _instances = debugSymbol("MCI_READY");
 
-//region misc 初始化 & 状态管理
+//region createSchemaEditColumn
 function showOverwriteConfirm(item, typeStr, callback) {
 	if (item._dirty) {
 		SimpleModal({
@@ -85,7 +85,7 @@ const storeOptions = {
  *     onImported: function(id: number, name: string): void,
  * ]}
  */
-function _SchemaEditorImpl(typeId, template, editorConstructor) {
+function createSchemaEditColumn(typeId, template, editorConstructor) {
 	/** @type {import("unconscious").Reactive<AiChat.IDBKVList[]>} */
 	const items = $state([]);
 	/** @type {import("unconscious").Reactive<IDBKVList>} */
@@ -187,12 +187,11 @@ function _SchemaEditorImpl(typeId, template, editorConstructor) {
 		selectedItem,
 	];
 }
-
 //endregion
 
-const [presetBar, openPresetPanel, presetList, currentPreset] = _SchemaEditorImpl("st|preset", {name: "空白"}, _PresetEditor);
-const [charBar, openCharPanel, characterList, currentCharacter] = _SchemaEditorImpl("st|char", {name: "新角色"}, _CharacterEditor);
-const [lorebookBar, openLorebookPanel, lorebookList, currentLorebook] = _SchemaEditorImpl("st|lorebook", {name: "新的世界"}, _LorebookEditor);
+const [presetBar, openPresetPanel, presetList, currentPreset] = createSchemaEditColumn("st|preset", {name: "空白"}, _PresetEditor);
+const [charBar, openCharPanel, characterList, currentCharacter] = createSchemaEditColumn("st|char", {name: "新角色"}, _CharacterEditor);
+const [lorebookBar, openLorebookPanel, lorebookList, currentLorebook] = createSchemaEditColumn("st|lorebook", {name: "新的世界"}, _LorebookEditor);
 
 charBar[0].append(<button className={"btn ghost"} title={"请先保存再创建故事"} disabled={() => !currentCharacter.name} onClick={() => {
 	createConversation(unconscious(currentCharacter));
@@ -208,7 +207,7 @@ SETTINGS.filter((item) => item._id === "import").forEach((item) => {
 });
 SETTINGS.push(
 	{
-		id: "st_username",
+		id: "nickname",
 		name: "你的名字",
 		title: "可在角色设定中单独设置",
 		type: "input",
@@ -473,7 +472,7 @@ registerDataImportHandler("image/png", async (file, batch) => {
 });
 
 //endregion
-//region 从角色卡新建对话和相关UI组件
+//region 从角色卡新建对话
 /**
  * 从角色新建对话
  * @param {AiChat.DnD.MyCharacter} char
@@ -501,66 +500,8 @@ async function createConversation(char) {
 	showToast("已创建 "+char.name+" 的新对话", "ok");
 	return true;
 }
-
-function insertAfter(text, msg) {
-	const template = "\n\n" + applyMacro(text);
-	if (Array.isArray(msg.content)) {
-		msg.content.push({
-			type: "text",
-			text: template
-		})
-	} else {
-		msg.content += template;
-	}
-}
-
-/**
- *
- * @param {AiChat.DnD.MyCharConversation} self
- * @return {JSX.Element}
- */
-const StoryConfigPanel = self => {
-	const selectedLorebooks = $state(self.content.lorebookNames);
-	const selectedPreset = $state(self.content.presetName);
-
-	const update = () => {
-		self[_instances].stable = false;
-		$update(updateMessageUI);
-		queueMicrotask(() => self[_instances].stable = true);
-	};
-
-	$watch(selectedPreset, () => {
-		const name = selectedPreset.value;
-		kvListGet("st|preset", name).then(item => {
-			self.content.presetName = name;
-			self[_instances].preset = item;
-			update();
-		});
-	}, false);
-
-	$watch(selectedLorebooks, () => {
-		const nameArr = selectedLorebooks.value;
-		const valueArr = Array(nameArr.length);
-		self[_instances].lorebooks.value = valueArr;
-
-		const promises = [];
-
-		for (let i = 0; i < nameArr.length; i++){
-			const j = i;
-			promises.push(kvListGet("st|lorebook", nameArr[i]).then(item => {
-				valueArr[j] = item;
-			}));
-		}
-
-		Promise.all(promises).then(update);
-	}, false);
-
-	return <div style={"display:flex;justify-content:space-around"}>
-			<LorebookList items={lorebookList} selection={selectedLorebooks} />
-			<PresetList items={presetList} selection={selectedPreset} />
-	</div>;
-};
-
+//endregion
+//region UI组件
 MessageRoles["st|char"] = {
 	name: "角色卡",
 	reactive(self) {
@@ -791,7 +732,7 @@ MessageRoles["st|char"] = {
 							世界书 ({name}) ({pages.length}项)
 						</summary>
 						<div className="think-content">
-							{pages.map(item => _LorebookPage(item))}
+							{pages.map(_LorebookPage)}
 						</div>
 					</details>
 				});
@@ -902,18 +843,81 @@ MessageRoles["assistant"] = {
 		for (let i = chunks.length - 1; i >= 0; i--) {
 			const chunk = chunks[i];
 			if (chunk.type === "text") {
+				chunk.rpHook = (chunk.rpHook || 0) + 1;
 				chunk.text = applyRenderReplace(preset, chunk.text, index);
 				break;
 			}
 		}
+	},
+	keyFunc(chunk, keys) {
+		if (chunk.rpHook) keys.push(chunk.rpHook);
 	}
+};
+
+function insertAfter(text, msg) {
+	const template = "\n\n" + applyMacro(text);
+	if (Array.isArray(msg.content)) {
+		msg.content.push({
+			type: "text",
+			text: template
+		})
+	} else {
+		msg.content += template;
+	}
+}
+
+/**
+ *
+ * @param {AiChat.DnD.MyCharConversation} self
+ * @return {JSX.Element}
+ */
+const StoryConfigPanel = self => {
+	const selectedLorebooks = $state(self.content.lorebookNames);
+	const selectedPreset = $state(self.content.presetName);
+
+	const update = () => {
+		self[_instances].stable = false;
+		$update(updateMessageUI);
+		queueMicrotask(() => self[_instances].stable = true);
+	};
+
+	$watch(selectedPreset, () => {
+		const name = selectedPreset.value;
+		kvListGet("st|preset", name).then(item => {
+			self.content.presetName = name;
+			self[_instances].preset = item;
+			update();
+		});
+	}, false);
+
+	$watch(selectedLorebooks, () => {
+		const nameArr = selectedLorebooks.value;
+		const valueArr = Array(nameArr.length);
+		self[_instances].lorebooks.value = valueArr;
+
+		const promises = [];
+
+		for (let i = 0; i < nameArr.length; i++){
+			const j = i;
+			promises.push(kvListGet("st|lorebook", nameArr[i]).then(item => {
+				valueArr[j] = item;
+			}));
+		}
+
+		Promise.all(promises).then(update);
+	}, false);
+
+	return <div style={"display:flex;justify-content:space-around"}>
+		<LorebookList items={lorebookList} selection={selectedLorebooks} />
+		<PresetList items={presetList} selection={selectedPreset} />
+	</div>;
 };
 
 /**
  * @param {AiChat.DnD.MyLorebookPage} item
  * @return {JSX.Element}
  */
-function _LorebookPage(item) {
+const _LorebookPage = item => {
 	let {name, enabled, comment, content, regex, constant, recursion, triggers, window, position, id, depth} = item;
 	const attributes = [];
 	if (!enabled) attributes.push("禁用");
@@ -956,6 +960,5 @@ function _LorebookPage(item) {
 		<summary>{name || comment || `${triggers.map(JSON.stringify).join(" | ")}` || "无标题"}</summary>
 	</details>;
 	return el;
-}
-
+};
 //endregion

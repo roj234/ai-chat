@@ -14,7 +14,7 @@ export function LorebookList({items, selection}) {
 	}
 
 	return <div className="tag-dropdown">
-		<button className="btn ghost">+ 已选择 {() => selection.length} 个世界书</button>
+		<button className="btn ghost">+ 使用 {() => selection.length} 个世界书</button>
 		<div className="list" onClick.delegate{"input"}={({delegateTarget}) => {
 			toggleLorebook(delegateTarget.dataset.id);
 		}}>

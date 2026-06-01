@@ -38,6 +38,10 @@ q:before, q:after { content: none; }
     hyphens: auto;
     line-height: var(--md-line-height);
 
+    & img { max-width: 100%; }
+
+    & li::marker { color: var(--muted); }
+
     & em { color: rgb(145,145,145,1); }
     & q, & q em { color: rgb(228,138,36,1); }
     & hr {

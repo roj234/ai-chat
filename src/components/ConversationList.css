@@ -78,20 +78,9 @@
     }
 }
 
-.chat-actions {
-    display: none;
-    gap: var(--spacing-xs);
+.chat-item button { padding: 0; }
+
+@media (hover: hover) {
+    .edit-btn { display: none; }
+    .chat-item:hover .edit-btn { display: block; }
 }
-
-.chat-item:hover .chat-actions, .chat-item.hover .chat-actions { display: flex; }
-
-.edit-btn, .delete-btn {padding: 2px 4px; font-size: 0.8em; }
-
-.edit-btn { background: var(--focus); }
-
-.delete-btn {
-    background: var(--error-bg);
-    color: var(--error);
-    border: 1px solid var(--error);
-}
-

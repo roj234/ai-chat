@@ -4,6 +4,7 @@ import {
 	SYNC_INIT,
 	SYNC_LOCKED,
 	SYNC_MESSAGE,
+	SYNC_PING,
 	SYNC_READERS,
 	SYNC_RELEASED,
 	SYNC_RESOLVE,
@@ -41,6 +42,7 @@ export function createSyncManager(wss) {
 			// AI常见误区：读锁也被当作"已锁定"发给客户端，客户端会把这些对话标记为 LOCKED 显示，但实际上读锁不应该阻塞别人。
 			// 但是我的设计必然存在写者，不可能只有读者，所以这个问题不存在
 			for (const user of users) user.locked.keys().forEach(item => locked.add(item));
+			locked.delete(0);
 
 			ws.send(JSON.stringify([
 				SYNC_INIT,
@@ -96,10 +98,12 @@ export function createSyncManager(wss) {
 					id
 				]);
 			} else {
-				users.has(self) && self.ws.send(JSON.stringify([
-					SYNC_LOCKED,
-					id
-				]));
+				if (id !== 0) {
+					users.has(self) && self.ws.send(JSON.stringify([
+						SYNC_LOCKED,
+						id
+					]));
+				}
 
 				// 自动升级
 				owner.locked.set(id, true);
@@ -120,7 +124,7 @@ export function createSyncManager(wss) {
 			for (const user of users) {
 				if (user !== self) {
 					if (user.locked.get(id)) {
-						user.ws.send(str);
+						if (id !== 0) user.ws.send(str);
 						return user;
 					}
 					if (user.locked.has(id)) {
@@ -131,26 +135,30 @@ export function createSyncManager(wss) {
 
 			// 如果没有写持有者，将消息发给随机的读持有者，让它升级
 			if (allowReader && reader) {
-				reader.ws.send(str);
+				if (id !== 0) reader.ws.send(str);
 				return reader;
 			}
 		}
 
 		function broadcastExcludeSelf(data) {
+			if (data[1] === 0) return;
+
 			const str = JSON.stringify(data);
 			for (const user of users) {
 				if (user !== self) user.ws.send(str);
 			}
 		}
 
-
 		ws.on('message', (message) => {
 			try {
 				const [type, data] = JSON.parse(message.toString('utf-8'));
 				switch (type) {
+					case SYNC_PING:
+						ws.send(JSON.stringify([SYNC_PING]));
+					break;
 					// 消息锁管理
 					case SYNC_RESOLVE:
-						if (typeof data !== "number") return;
+						if (typeof data !== "number" || data === 0) return;
 
 						// 强制解锁
 						if (myLocked.has(data)) {
@@ -171,17 +179,21 @@ export function createSyncManager(wss) {
 						if (owner) {
 							// false => 读锁
 							myLocked.set(data, false);
-							ws.send(JSON.stringify([
-								SYNC_CONFLICT,
-								data
-							]));
-							owner.ws.send(JSON.stringify([
+
+							const syncReaders = JSON.stringify([
 								SYNC_READERS,
-								[
-									data,
-									1
-								]
-							]));
+								[ data, 1 ]
+							]);
+
+							if (data !== 0) {
+								ws.send(JSON.stringify([
+									SYNC_CONFLICT,
+									data
+								]));
+							} else {
+								ws.send(syncReaders);
+							}
+							owner.ws.send(syncReaders);
 						} else {
 							// true => 写锁
 							myLocked.set(data, true);

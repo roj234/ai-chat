@@ -1,21 +1,20 @@
 import {debugSymbol} from 'unconscious';
 import {config} from "./states.js";
-import {deepEqual} from "unconscious/common/deepEqual.js";
+import {delta} from "unconscious/common/deepEqual.js";
 import {prettyError} from "./utils/utils.js";
 import * as idb from "./database/db-indexeddb.js";
 import * as remote from "./database/db-remote.js";
 import {showToast} from "./components/Toast.js";
 import {SETTINGS} from "./settings.js";
-import {BM} from "./utils/BranchManager.js";
+import {BRANCH_MANAGER} from "./utils/BranchManager.js";
 import {LOCKED} from "./components/ConversationList.jsx";
 
-const MESSAGE_IN_DB = debugSymbol("MESSAGE_IN_DB");
-const CONVERSATION_IN_DB = debugSymbol("CONVERSATION_IN_DB");
+const MESSAGE_DIFF = debugSymbol("MESSAGE_IN_DB");
+const PREV_CONVERSATION = debugSymbol("CONVERSATION_IN_DB");
 export const DONE = Promise.resolve();
 
-const databaseError = err => {
-	showToast("数据库错误!\n"+prettyError(err)+"\n未保存的更改可能丢失，请直接从页面导出", 'error', 0);
-	return [];
+export const databaseError = err => {
+	showToast("数据库错误!\n"+prettyError(err)+"\n新更改可能丢失，建议从页面导出剩余数据", 'error', 0);
 };
 
 if (DB_MODE !== 'local') {
@@ -40,7 +39,7 @@ export const {
 	getKV, setKV,
 	kvListGetValues, kvListSet, kvListDel, kvListGetKeys, kvListGet,
 	searchMessages,
-	updateBlob, getBlob
+	uploadBlob, getBlob
 } = db;
 
 /**
@@ -48,17 +47,23 @@ export const {
  * @returns {Promise<Array<{id:number, title:string, time:number, messageId?:number}>>}
  */
 export const listConversations = async () => {
-	try {
-		const conversations = await db.listConversations();
-		conversations.forEach((conversation) => {
-			conversation[CONVERSATION_IN_DB] = structuredClone(conversation);
-			conversation.ready = false;
-		});
-		return conversations;
-	} catch (e) {
-		return databaseError(e);
-	}
+	const conversations = await db.listConversations();
+	conversations.forEach((conversation) => conversation.ready = false);
+	return conversations;
 };
+
+/**
+ * 清除对话的脏标记
+ * @param {AiChat.Conversation} conversation 对话
+ * @param {number} id
+ * @param {AiChat.Message} message
+ */
+export const clearDirtyFlags = (conversation, id, message) => {
+	/** @type {Map<number, AiChat.Message>} */
+	const m = conversation[MESSAGE_DIFF];
+	if (message) m.set(id, structuredClone(message));
+	else m.delete(id);
+}
 
 /**
  * 获取一个会话的消息
@@ -69,11 +74,11 @@ export const getMessages = conversation => {
 	if (conversation.ready == null) return Promise.resolve([]);
 
 	return db.getMessages(conversation).then(messages => {
-		/**
-		 * @type {Map<number, string>}
-		 */
+		/** @type {Map<number, AiChat.Message>} */
 		const m = new Map();
-		conversation[MESSAGE_IN_DB] = m;
+
+		conversation[PREV_CONVERSATION] = structuredClone(conversation);
+		conversation[MESSAGE_DIFF] = m;
 
 		for (let message of messages) {
 			delete message.owner;
@@ -84,7 +89,8 @@ export const getMessages = conversation => {
 	});
 };
 
-const IGNORE_ID = new Set(["id", "ready", "bm_leaf"]);
+const DIFF_IGNORE_KEYS = new Set(["id", "ready"]);
+const WAITING = debugSymbol("UPDATE_WAIT")
 
 // TODO conversation.ready 切到这个，但是用符号不会触发响应式更新
 export const READY = debugSymbol("ready");
@@ -97,89 +103,112 @@ export const READY = debugSymbol("ready");
  * @returns {Promise<void>}
  */
 export const updateConversation = async (conversation, messages, keepTime) => {
-	if (config.debugDatabase || conversation[LOCKED]) return;
+	if (config.incognito || conversation[LOCKED]) return;
+
+	const prevUpdate = conversation[WAITING];
+	if (prevUpdate) await prevUpdate;
 
 	let promises = [];
-	let changed = () => {
-		conversation[CONVERSATION_IN_DB] = structuredClone(conversation);
-		const {ready, ...omit} = conversation;
-		const updateAndThen = db.upsertConversation(omit);
-		promises.push(updateAndThen);
+	let changed = (diff) => {
 		changed = null;
+		conversation[PREV_CONVERSATION] = structuredClone(conversation);
+		const updateAndThen = db.upsertConversation(diff);
+		promises.push(updateAndThen);
 		return updateAndThen;
 	};
 
+	// 新对话
 	if (!("id" in conversation)) {
-		conversation[MESSAGE_IN_DB] = new Map;
-		const promise = changed().then(id => {
+		conversation[MESSAGE_DIFF] = new Map;
+		const {ready, ...rest} = conversation;
+		const promise = changed(rest).then(id => {
 			conversation.id = id;
 		});
 		if (isIDB) await promise;
+		conversation.id = null;
+		// 后端事务会自动提取新增的id，前端不需要处理
 	}
 
 	if (messages) {
+		if (conversation[BRANCH_MANAGER]) messages = conversation[BRANCH_MANAGER].messages;
+
 		/**
 		 * @type {Map<number, AiChat.Message>}
 		 */
-		const messagesInDB = conversation[MESSAGE_IN_DB];
+		const messagesInDB = conversation[MESSAGE_DIFF];
 		/**
 		 * @type {Map<number, AiChat.Message>}
 		 */
 		const messagesInMemory = new Map();
-
-		if (conversation[BM]) messages = conversation[BM].messages;
 
 		for (let i = 0; i < messages.length; i++) {
 			const message = messages[i];
 			const id = message.id;
 			if (id === -1) continue;
 
+			let diff;
 			if (id) {
-				const existingKey = messagesInDB.get(id);
+				const snapshot = messagesInDB.get(id);
 				messagesInDB.delete(id);
 
-				if (deepEqual(existingKey, message, IGNORE_ID)) {
-					messagesInMemory.set(id, existingKey);
+				diff = delta(snapshot, message, DIFF_IGNORE_KEYS);
+				if (!diff) {
+					messagesInMemory.set(id, snapshot);
 					continue;
 				}
+			} else {
+				// 新消息防止重复入库
+				message.id = -1;
 			}
 
-			if (!keepTime && changed) {
-				conversation.time = Date.now();
-				changed();
-			}
-			const newMessageKey = structuredClone(message);
-			if (id) messagesInMemory.set(id, newMessageKey);
+			if (!keepTime) conversation.time = Date.now();
+
+			let snapshot = structuredClone(message);
+			if (id) messagesInMemory.set(id, snapshot);
+
+			// 后面会写 owner 字段，浅拷贝
+			if (!diff) diff = {...snapshot};
 
 			function save() {
-				const value = {
-					...message,
-					owner: conversation.id
-				};
-				if (message.id == null) message.id = -1;
+				diff.id = id;
+				diff.owner = conversation.id;
+				const saveTime = message.time;
 
-				return db.upsertMessage(value).then((id) => {
+				return db.upsertMessage(diff).then((id) => {
 					message.id = id;
-					// Async callback
-					conversation[MESSAGE_IN_DB].set(id, newMessageKey);
-					if (message.time !== value.time) return save();
-				}).finally(() => {
-					if (message.id === -1) delete message.id;
-				})
+					// messagesInMemory 可能已经变了，取最新的值
+					conversation[MESSAGE_DIFF].set(id, snapshot);
+
+					// 消息在RTT内又修改了，重新更新
+					if (message.time !== saveTime) {
+						diff = delta(snapshot, message, DIFF_IGNORE_KEYS);
+						if (diff) return save();
+					}
+				});
 			}
-			promises.push(save());
+			promises.push(save().finally(() => {
+				// 如果新消息保存失败，不要阻止后续保存
+				if (message.id === -1) delete message.id;
+			}));
 		}
 
 		if (messagesInDB) {
-			messagesInDB.forEach((value, id) => promises.push(db.deleteMessage(id)));
+			messagesInDB.forEach((value, id) => promises.push(db.deleteMessage(id, conversation)));
 		}
 
-		conversation[MESSAGE_IN_DB] = messagesInMemory;
+		conversation[MESSAGE_DIFF] = messagesInMemory;
 	}
 
-	if (changed && !deepEqual(conversation[CONVERSATION_IN_DB], conversation, IGNORE_ID)) changed();
+	let convDiff;
+	if (changed && (convDiff = delta(conversation[PREV_CONVERSATION], conversation, DIFF_IGNORE_KEYS))) {
+		convDiff.id = conversation.id;
+		changed(convDiff);
+	}
 
-	await Promise.all(promises).catch(databaseError);
+	const wait = Promise.all(promises).catch(databaseError);
+	conversation[WAITING] = wait;
+	await wait;
+	delete conversation[WAITING];
 };
 
 /**
@@ -188,7 +217,7 @@ export const updateConversation = async (conversation, messages, keepTime) => {
  * @returns {Promise<void>}
  */
 export const deleteConversation = conversation => {
-	if (config.debugDatabase) return DONE;
+	if (config.incognito) return DONE;
 	return db.deleteConversation(conversation.id);
 };
 
@@ -198,7 +227,7 @@ export const deleteConversation = conversation => {
  * @return {Promise<void>}
  */
 export const appendBillingLog = log => {
-	if (config.debugDatabase) return DONE;
+	if (config.incognito) return DONE;
 	return db.appendBillingLog(log);
 };
 

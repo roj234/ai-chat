@@ -62,6 +62,7 @@ export const applyPreset = ({prompts, regexps}, ctx, jsonMessages, prefill) => {
 		let {content, enabled, attr, role} = prompt;
 		if (!enabled) continue;
 
+		content = applyMacro(content, ctx);
 		if (attr === "marker") {
 			if (content === "dialogueExamples") {
 				if (ctx.dialogueExamples?.length)
@@ -183,7 +184,7 @@ export const applyPreset = ({prompts, regexps}, ctx, jsonMessages, prefill) => {
 
 export const createDefaultCtx = char => ({
 	char: char.name,
-	user: char.user || config.st_username || DEFAULT_USER_NAME
+	user: char.user || config.nickname || DEFAULT_USER_NAME
 });
 
 /**

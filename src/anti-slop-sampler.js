@@ -33,6 +33,7 @@ export const createAntiSlopSampler = (topP, minP, patterns, context, window = 10
 	const toastMessage = $state();
 	let toast;
 	let toastTime;
+	let toastTimer;
 	const displayToast = (message) => {
 		const now = Date.now();
 		if (message) {
@@ -41,11 +42,17 @@ export const createAntiSlopSampler = (topP, minP, patterns, context, window = 10
 			if (!toast) {
 				toast = showToast(toastMessage, 'error', 0);
 			}
-		} else {
-			if (now - toastTime > 3000) {
-				toast();
-				toast = null;
-			}
+		}
+		if (!toastTimer) {
+			const prevToastTime = toastTime;
+			toastTimer = setTimeout(() => {
+				toastTimer = null;
+				if (toastTime !== prevToastTime) return displayToast();
+				if (toast) {
+					toast();
+					toast = null;
+				}
+			}, 2000);
 		}
 	}
 
@@ -75,7 +82,7 @@ export const createAntiSlopSampler = (topP, minP, patterns, context, window = 10
 		if (!chunk.delta?.content && !chunk.delta?.reasoning_content) return;
 
 		/** @type {string} */
-		let content = message[RAW_MESSAGE] || "";
+		let content = message[RAW_MESSAGE] ?? ((message.think?.content || "") + message.content);
 		const isThinking = isReactive(message.think);
 
 		for (const logprobs of logprobs_list) {

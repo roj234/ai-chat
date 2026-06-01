@@ -16,6 +16,7 @@ const mdParserOptions = {
 		"section",  "div", "span", "hr", "mark",
 		"img", "a",
 	],
+	parseQuotes: true,
 	preserveLineBreaks: true,
 	allowNestedCodeFence3: true
 }
@@ -24,13 +25,12 @@ const mdParserOptions = {
  *
  * @param {HTMLElement} container
  * @param {string} md
- * @param {import("fastmd").ParserOptions=} options
+ * @param {import("fastmd").ParserOptions & AiChat.MarkdownRendererOptions} options
  */
 export const renderMarkdownToElement = (container, md, options = {}) => {
-	const renderer = createMarkdownRenderer(container);
+	const renderer = createMarkdownRenderer(container, options);
 	const parser = createMarkdownParser(renderer, {
 		...mdParserOptions,
-		parseQuotes: true,
 		...options
 	});
 	parser.write(md);
@@ -46,11 +46,13 @@ export const renderMarkdownToString = md => {
 	const root = <div />;
 
 	const renderer = createMarkdownRenderer(root, {
-		...mdParserOptions,
 		noHighlight: true,
 		noImage: true
 	});
-	const parser = createMarkdownParser(renderer);
+	const parser = createMarkdownParser(renderer, {
+		...mdParserOptions,
+		parseQuotes: false,
+	});
 	parser.write(md);
 	parser.end();
 
@@ -139,7 +141,6 @@ export const createMarkdownStream = () => {
 			output.replaceChildren();
 			parser = createStreamingMarkdownParser(output);
 			bufferIndex = 0;
-			rendererOptions.noHighlight = false;
 		}
 		if (!buffer || !parser) return;
 

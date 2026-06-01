@@ -1,4 +1,4 @@
-import {SSE_PROXY_BACKEND, SSE_PROXY_TRACE, SSE_RESUME_TIMEOUT} from "../config.js";
+import {SSE_PROXY_BACKEND, SSE_PROXY_MODERATION, SSE_PROXY_TRACE, SSE_RESUME_TIMEOUT} from "../config.js";
 import {EventEmitter} from "node:events";
 import {applyDelta, streamFetch} from "../../common/openai-api-utils.js";
 import fs from "node:fs/promises";
@@ -79,11 +79,17 @@ async function SSEHandler(logPath, ctx) {
 	if (!result) return;
 	const [url, authorization] = result;
 
+	const moderation = SSE_PROXY_MODERATION(url, authorization, ctx);
+	if (moderation && typeof moderation !== "function") {
+		ctx.send(400, moderation);
+		return;
+	}
+
 	const MAX_BODY_LENGTH = 20971520;
 	const needBlobProxy = ctx.searchParams.has("blobProxy");
 	let body;
 	let duplex;
-	if (SSE_PROXY_TRACE || needBlobProxy) {
+	if (SSE_PROXY_TRACE || needBlobProxy || moderation) {
 		body = await ctx.readAsString(MAX_BODY_LENGTH);
 	} else {
 		body = createLimiter(ctx.req, MAX_BODY_LENGTH);
@@ -102,11 +108,21 @@ async function SSEHandler(logPath, ctx) {
 	let hasError;
 	const startTime = Date.now();
 	try {
-		/*if (needBlobProxy) {
+		if (needBlobProxy || moderation) {
 			const obj = JSON.parse(body);
 
-			body = new ReadableStream
-		}*/
+			if (moderation) {
+				const result = await moderation(obj);
+				if (result) {
+					ctx.send(400, result);
+					return;
+				}
+			}
+
+			if (needBlobProxy) {
+				//body = new ReadableStream
+			}
+		}
 
 		await streamFetch(url+'/chat/completions', {
 			body,

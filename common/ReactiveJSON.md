@@ -55,16 +55,20 @@ const schema = {
 使用 `jsonPrompt` 发起请求，指定类型 ID 和 Schema 约束。
 
 ```javascript
-import { jsonPrompt, schemaWrapper } from "../core.js";
-import { $update, unconscious } from "unconscious";
+import {$update, unconscious} from "unconscious";
+import {messages} from "/src/states.js";
+import {schemaToPrompt} from "/common/schemaToTypeDef.js";
+import {jsonPrompt} from "/plugins/rpg/core.js";
 
 const ID = 'my/storyEngine';
-let messages = []; // 实际项目中建议使用响应式状态（如从 `unconscious` 创建的数组）
 
-async function sendAction(messages_, userInput) {
+async function sendAction(messages, userInput) {
+	// 你可以根据用户消息修改schema，如果需要
+	const schema_ = structuredClone(schema);
+
 	// 构造用户提示
 	const time = Date.now();
-	messages_.push({
+	messages.push({
 		id: -1, // 不存入数据库
 		role: "user",
 		time,
@@ -80,21 +84,20 @@ async function sendAction(messages_, userInput) {
 	let assistantResponse;
 	try {
 		// 调用模型
-		assistantResponse = await jsonPrompt(messages_, {
-			...schemaWrapper(schema_),
-            // 自定义请求体
+		assistantResponse = await jsonPrompt(schema_, messages, {
+			// 自定义请求体
 			reasoning: {enabled: enableThink},
 			max_tokens: 8000,
 		}, ID);
 	} catch (e) {
 		console.error(e);
 		// 出错了，恢复原始数据
-		messages_[messages_.length - 2] = originalPrompt;
+		messages[messages.length - 2] = originalPrompt;
 		return;
 	}
 
 	// 将 AI 回复替换消息数组，使用splice是为了兼容对话分支
-	messages_.splice(messages_.length - 2, 2,
+	messages.splice(messages.length - 2, 2,
 		originalPrompt,
 		{
 			...assistantResponse,
@@ -105,35 +108,16 @@ async function sendAction(messages_, userInput) {
 }
 ```
 
-### 第二步：注册渲染器
-
-用 `registerSchemaMessageRole` 挂载你的 UI 渲染函数。
-
-```javascript
-
-const composer = ({content}, output, input, index, length) => {
-	// 进行更复杂的判断决定序列化给 LLM 的是哪些文字
-	output.push({
-		role: "assistant",
-		content: JSON.stringify(content)
-	});
-};
-
-registerSchemaMessageRole(
-    ID,            // 必须与 jsonPrompt 的参数一致
-    '故事渲染器',   // 显示名称
-    renderStory,   // 渲染函数 (val) => JSX.Element[]
-    composer,      // 消息组合函数，用于决定哪些数据要发回LLM
-    schema         // 可选的 schema （可以和AI生成的不同，例如少些 required，或包含复杂的 allOf ），用于编辑时的校验
-);
-```
-
-### 第三步：构建响应式 UI
+### 第二步：构建响应式 UI
 
 渲染函数接收的是一个 **已解析的响应式代理对象**（即 `content` 字段）。  
 利用 `$foreach`、`$once` 和 lambda 表达式等实现增量渲染。
 
 ```javascript
+import {$foreach} from "unconscious";
+import {$once, createReactiveMarkdown, registerSchemaMessageRole} from "/common/ReactiveJSON.js";
+import "./myStyle.css"; // 加载样式！
+
 function renderStory(val) {
     return [
         // 基础文本：用箭头函数避免直接读取代理
@@ -159,7 +143,7 @@ function renderStory(val) {
         // 条件渲染的按钮，仅在有选项时挂载（避免无故出现 margin，padding，background 等）
         $once(val.suggested_choices, () => (
             <div class="choices" onClick.delegate={"button"}={({delegateTarget}) => {
-                sendAction(delegateTarget.textContent);
+                sendAction(messages, delegateTarget.textContent);
             }}>
                 {$foreach(val.suggested_choices, (choice) => (
                     <button>{choice}</button>
@@ -168,6 +152,39 @@ function renderStory(val) {
         ))
     ];
 }
+```
+
+### 第三步：注册渲染器
+
+用 `registerSchemaMessageRole` 挂载你的 UI 渲染函数。
+
+```javascript
+import {COMMAND_REGISTRY} from "/src/commands.js";
+import {registerSchemaMessageRole} from "/common/ReactiveJSON.js";
+
+const composer = ({content}, output, input, index, length) => {
+	// 可以进行更复杂的判断决定给 LLM 看哪些文字
+	output.push({
+		role: "assistant",
+		content: JSON.stringify(content)
+	});
+};
+
+registerSchemaMessageRole(
+    ID,            // 必须与 jsonPrompt 的参数一致
+    '故事渲染器',   // 显示名称
+    renderStory,   // 渲染函数 (val) => JSX.Element[]
+    composer,      // 消息组合函数，用于决定哪些数据要发回LLM
+    schema         // 可选的 schema （可以和AI生成的不同，例如少些 required，或包含复杂的 allOf ），用于编辑时的校验
+);
+
+// 注册命令
+COMMAND_REGISTRY["say"] = [
+	(args) => {
+		sendAction(messages, args[0].trim());
+	},
+	"开启或继续一段富文本故事"
+];
 ```
 
 ## 4. 关键技巧与陷阱
@@ -216,7 +233,7 @@ function renderStory(val) {
 
 1. **定义 Schema**：确保 LLM 输出既符合业务需要，又能被 UI 安全渲染。
 2. **注册渲染器**：使用 `registerSchemaMessageRole`，将角色 ID 与 UI 函数绑定。
-3. **调用模型**：`jsonPrompt` + `schemaWrapper` 发起请求，解析结果后 push 到响应式消息数组并 `$update`。
+3. **调用模型**：`jsonPrompt` 发起请求，解析结果后 push 到响应式消息数组。
 4. **增量渲染**：用 `$foreach` 处理列表，`$once` 处理一次性内容，`createReactiveMarkdown` 处理长文本。
 5. **交互封闭**：在 `$once` 或 `$foreach` 内部通过事件委托绑定用户操作，触发新一轮的 `sendAction`。
 

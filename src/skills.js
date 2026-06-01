@@ -145,9 +145,11 @@ toolScriptRegistry["use"] = {
 		this.undo(response, globalStorage);
 
 		const newToolNames = [];
-		for (const moduleName of modules) {
-			activatedModules.add(moduleName);
 
+		response.newModules = modules;
+		response.newTools = newToolNames;
+
+		for (const moduleName of modules) {
 			let {allowedTools: allowedToolsArr, onActivated: dynamicCallback} = optionalTools[moduleName];
 
 			if (dynamicCallback) {
@@ -155,6 +157,7 @@ toolScriptRegistry["use"] = {
 				allowedToolsArr = allowedToolsArr.map(t => t.name || t);
 			}
 
+			activatedModules.add(moduleName);
 			allowedToolsArr.forEach(name => {
 				if (!allowedTools.has(name)) {
 					allowedTools.add(name);
@@ -162,9 +165,6 @@ toolScriptRegistry["use"] = {
 				}
 			});
 		}
-
-		response.newModules = modules;
-		response.newTools = newToolNames;
 
 		if (response[TOOL_NAME].startsWith("use:skill:")) {
 			response.isSkill = true;

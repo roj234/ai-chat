@@ -1,4 +1,4 @@
-import {jsonPrompt, schemaWrapper} from "../core.js";
+import {jsonPrompt} from "../core.js";
 
 /** @type {OpenAI.ObjectSchema} */
 const schema = {
@@ -138,7 +138,7 @@ export async function generateCharacter(world, prompt) {
 		attr[id] = schema;
 	}
 
-	return await jsonPrompt([
+	return await jsonPrompt(schema, [
 		{
 			role: "system",
 			content: `你是一位顶级的跑团游戏（TRPG）与小说角色架构师。
@@ -178,22 +178,21 @@ ${world.factions.map(f => `- **${f.name}**：${f.description}`).join('\n')}
 ### 角色属性
 ${world.attribute_schema.map(f => {
 				let text = `- **${f.id} (${f.name})**：${f.description}  \n  评分标准：${f.rank_rule}`;
-				if (f.prefix) text += "  \n  属性前缀："+f.prefix;
-				if (f.postfix) text += "  \n  属性后缀："+f.postfix;
+				if (f.prefix) text += "  \n  属性前缀：" + f.prefix;
+				if (f.postfix) text += "  \n  属性后缀：" + f.postfix;
 				return text;
 			}).join('\n')}
 
 ## 格式规范
 \`\`\`json
-`+JSON.stringify(schema)+"\n```"
+` + JSON.stringify(schema) + "\n```"
 		},
 		{
 			role: "user",
 			content: prompt
 		}
 	], {
-		...schemaWrapper(schema),
-		reasoning: { enabled: false },
+		reasoning: {enabled: false},
 		//min_p: 0.1,
 		//temperature: 1.1,
 		max_tokens: 10000,

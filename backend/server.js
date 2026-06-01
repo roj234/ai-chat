@@ -10,13 +10,14 @@ import {WEBSOCKET_SYNC_ENABLE} from "./config.js";
 import {createZipRouter} from "./utils/zipRouter.js";
 
 const options = {
+	addr: { type: 'string', short: 'a', default: '127.0.0.1' },
 	port: { type: 'string', short: 'p', default: '3000' },
 	data: { type: 'string', default: 'data' },
 	static: { type: 'string', default: '' },
 	cert: { type: 'string', default: '' },
 	workspace: { type: 'string', default: '' }
 };
-const { values: { port, data, cert, workspace, static: zipPath } } = parseArgs({ options });
+const { values: { addr, port, data, cert, workspace, static: zipPath } } = parseArgs({ options });
 const PORT = parseInt(port, 10);
 
 let serverType;
@@ -68,20 +69,20 @@ if (WEBSOCKET_SYNC_ENABLE) {
 	createSyncManager(wss);
 }
 
-server.listen(PORT, () => {
+server.listen(PORT, addr, () => {
 	console.log(`
    █████╗ ██╗ ██████╗██╗  ██╗ █████╗ ████████╗
   ██╔══██╗██║██╔════╝██║  ██║██╔══██╗╚══██╔══╝
   ███████║██║██║     ███████║███████║   ██║   
   ██╔══██║██║██║     ██╔══██║██╔══██║   ██║   
   ██║  ██║██║╚██████╗██║  ██║██║  ██║   ██║   
-  ╚═╝  ╚═╝╚═╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   v2.0.0
+  ╚═╝  ╚═╝╚═╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   v{{PROJECT_VERSION}}
 
   >> 理性之人使自己适应世界，不理性之人坚持要世界适应自己。因此，一切进步都依赖于不理性之人。 —— 萧伯纳
   >> Copyright (c) 2025-2026 Roj234
 
-  Build:    2026-05-31T12:04:53.322Z (commit: bff8bc0*)`);
-	console.log(`  Status:   Listening on http://localhost:${PORT}`);
+  Build:    {{BUILD_TIME}} (commit: {{GIT_COMMIT}})`);
+	console.log(`  Status:   Listening on http://${addr}:${PORT}`);
 	if (workspace) {
 		console.log(`  Mode:     Containerd in ${JSON.stringify(workspace)}`);
 		return;
