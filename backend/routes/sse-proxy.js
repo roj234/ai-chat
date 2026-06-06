@@ -5,6 +5,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import {Transform} from 'node:stream';
 
+function log(str, ...args) {
+	console.log(`[SSE Proxy][${new Date().toLocaleTimeString()}] `+str, ...args);
+}
+
 /**
  *
  * @type {Map<string, AiChatBackend.SSEProxyRequest>}
@@ -71,15 +75,17 @@ function createLimiter(source, maxLength) {
 /**
  *
  * @param {string} logPath
+ * @param {string} apiPath
  * @param {AiChatBackend.RouteContext} ctx
  * @return {Promise<void>}
  */
-async function SSEHandler(logPath, ctx) {
+async function SSEHandler(logPath, apiPath, ctx) {
 	let result = authorize(ctx);
 	if (!result) return;
-	const [url, authorization] = result;
+	let [baseUrl, authorization] = result;
+	if (!baseUrl.endsWith("/")) baseUrl += '/';
 
-	const moderation = SSE_PROXY_MODERATION(url, authorization, ctx);
+	const moderation = SSE_PROXY_MODERATION(baseUrl, authorization, ctx);
 	if (moderation && typeof moderation !== "function") {
 		ctx.send(400, moderation);
 		return;
@@ -100,6 +106,17 @@ async function SSEHandler(logPath, ctx) {
 	let completion = {};
 	/** @type {AiChatBackend.SSEProxyRequest} */
 	let proxyRequest;
+	function writeTrace(data) {
+		return proxyRequest._append = proxyRequest._append.then(() =>
+			fs.appendFile(proxyRequest._fileName, '\n' + data)
+		);
+	}
+	function sendChunk(serialized) {
+		if (!ctx.res.closed) ctx.res.write(`data: ${serialized}\n\n`);
+		// log every chunk
+		if (SSE_PROXY_TRACE === 'packet') writeTrace(serialized);
+		proxyRequest.event.emit('data', serialized);
+	}
 
 	ctx.res.on('close', () => {
 		if (!proxyRequest) abort.abort();
@@ -107,6 +124,7 @@ async function SSEHandler(logPath, ctx) {
 
 	let hasError;
 	const startTime = Date.now();
+
 	try {
 		if (needBlobProxy || moderation) {
 			const obj = JSON.parse(body);
@@ -124,12 +142,17 @@ async function SSEHandler(logPath, ctx) {
 			}
 		}
 
-		await streamFetch(url+'/chat/completions', {
+		const optionalParams = baseUrl+apiPath;
+		if (SSE_PROXY_TRACE) log('请求发送', optionalParams);
+
+		await streamFetch(optionalParams, {
 			body,
 			duplex,
 			signal: abort.signal,
 			key: authorization
 		}, chunk => {
+			const now = Date.now();
+
 			if (!proxyRequest) {
 				const id = chunk.id;
 				activeRequests.set(id, proxyRequest = {
@@ -139,22 +162,23 @@ async function SSEHandler(logPath, ctx) {
 					event: new EventEmitter,
 					isFinished: false
 				});
-				console.log('SSE代理请求开始', id);
+				log('响应开始', id);
 
 				if (SSE_PROXY_TRACE) {
-					const fileName = `${logPath}/${encodeURIComponent(id)}_${Date.now()%1000}.jsonl`;
+					const fileName = `${logPath}/${encodeURIComponent(id)}_${now%1000}.jsonl`;
 					proxyRequest._fileName = fileName;
-					proxyRequest._inputPromise = fs.appendFile(fileName, body);
+					proxyRequest._append = fs.appendFile(fileName, body);
 				}
 
 				ctx.res.writeHead(200, { 'Content-Type': 'text/event-stream' });
 
-				chunk.resumable = { start: startTime, ft: Date.now() };
+				chunk.resumable = { start: startTime, ft: now };
 			}
 
-			if (!ctx.res.closed) ctx.res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+			const serialized = JSON.stringify(chunk);
+			sendChunk(serialized);
 
-			proxyRequest.event.emit('data', chunk);
+			proxyRequest.lastUpdated = now;
 
 			const {choices, text, ...rest} = chunk;
 			if (choices) {
@@ -172,20 +196,27 @@ async function SSEHandler(logPath, ctx) {
 			Object.assign(completion, rest);
 		});
 	} catch (err) {
+		const id = proxyRequest?.id;
 		if (err.name === 'AbortError') {
-			console.log('SSE代理请求中止');
+			log('请求中止', id);
 		} else {
-			console.log('SSE代理请求出错', err);
+			if (err.message === "fetch failed") {
+				err = err.cause;
+			}
 
-			const {status = 500, message} = err;
-			let obj = {
-				upstream_error: message
-			};
+			log('请求出错', id, err);
+
+			let {status = 500, message} = err;
 			try {
-				obj = JSON.parse(message);
+				message = JSON.parse(message);
 			} catch {}
+			const obj = message.error ? message : { error: message };
 
-			ctx.send(status, obj);
+			if (proxyRequest) {
+				sendChunk(obj);
+			} else {
+				ctx.send(status, obj);
+			}
 			hasError = true;
 
 			// 确保源连接被释放，避免 hang 住
@@ -193,21 +224,19 @@ async function SSEHandler(logPath, ctx) {
 		}
 	} finally {
 		if (proxyRequest) {
+			if (!hasError) log('响应结束', proxyRequest.id);
+
+			completion.resumable.end = true;
 			proxyRequest.isFinished = true;
 			proxyRequest.event.emit('end');
 			proxyRequest.event.removeAllListeners();
-
-			completion.resumable.end = true;
-			console.log('SSE代理请求结束', proxyRequest.id);
 
 			proxyRequest.timeoutId = setTimeout(() => {
 				activeRequests.delete(proxyRequest.id);
 			}, SSE_RESUME_TIMEOUT);
 
-			if (SSE_PROXY_TRACE) {
-				await proxyRequest._inputPromise.then(() =>
-					fs.appendFile(proxyRequest._fileName, '\n' + JSON.stringify(proxyRequest.data))
-				);
+			if (SSE_PROXY_TRACE === true) {
+				await writeTrace(JSON.stringify(proxyRequest.data));
 			}
 		}
 		abort.abort();
@@ -262,32 +291,43 @@ export function registerSSEProxyRoutes(router, dataPath) {
 		res.writeHead(200, { 'Content-Type': "application/json" });
 		res.end(cache.data);
 	});
-	router.post('/chat/completions', SSEHandler.bind(null, logPath));
-	router.post('/completions', SSEHandler.bind(null, logPath));
+	router.post('/chat/completions', SSEHandler.bind(null, logPath, "chat/completions"));
+	router.post('/completions', SSEHandler.bind(null, logPath, "completions"));
 
 	router.post('/resume/:id', async (ctx) => {
 		const {id} = ctx.params;
 		const state = activeRequests.get(id);
-		if (!state) return ctx.send(404, { success: false, error: "SSE代理会话已过期" });
+		if (!state) return ctx.send(404, { error: "no such session" });
 
 		ctx.res.setHeader('Content-Type', 'text/event-stream');
 
 		const {data, event, isFinished} = state;
 
-		const onData = (json) => {ctx.res.write(`data: ${JSON.stringify(json)}\n\n`);};
+		const onData = (text) => {ctx.res.write(`data: ${text}\n\n`);};
 		const onEnd = () => {
 			ctx.res.write(`data: [DONE]\n\n`);
 			ctx.res.end();
 		}
 
 		// 如果是多线程，这里可能需要加锁，但是JS是谦让式协程，所以没什么好担心的
-		onData(data);
+		onData(JSON.stringify(data));
 		if (isFinished) { onEnd(); return; }
 
 		event.on('data', onData);
 		event.once('end', onEnd);
 
 		ctx.res.on('close', () => {event.off('data', onData);});
+	});
+
+	router.get('/trace/:id', async (ctx) => {
+		const {id} = ctx.params;
+		const state = activeRequests.get(id);
+
+		if (state) {
+			return ctx.send(200, state);
+		}
+
+		ctx.send(404, { error: "no such session" });
 	});
 
 	router.post('/abort/:id', async (ctx) => {
@@ -300,7 +340,7 @@ export function registerSSEProxyRoutes(router, dataPath) {
 			state.abort.abort(); // 停止向 OpenAI 请求
 			return ctx.send(200, { success: true });
 		}
-		ctx.send(404, { success: false, error: "SSE代理会话已过期" });
+		ctx.send(404, { error: "no such session" });
 	});
 
 	router.get("/resume/list", (ctx) => {

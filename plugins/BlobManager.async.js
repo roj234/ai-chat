@@ -75,7 +75,7 @@ const container = <div className={"modal-overlay"}>
 			<button className="ri-close-line btn ghost" style="border:none" title={"关闭窗口"} onClick={() => container.remove()}></button>
 		</div>
 
-		<div style={"overflow:auto"}>
+		<div className={"blob-manager"} style={"overflow:auto"}>
 			<table>
 				<thead>
 				<tr>
@@ -94,23 +94,24 @@ const container = <div className={"modal-overlay"}>
 					const blobUrl = `${config.db_server}/blob/${item.hash}`;
 
 					return <tr>
-						<td><input type="checkbox" className="row-check" value={item.hash} /></td>
-						<td>{isImg ?
-							<img src={blobUrl} className="preview-img" onClick={() => showFull(blobUrl)}/> : '-'}</td>
-						<td style="word-break:break-all;font-size:14px">{item.name}<br/>{item.hash}</td>
+						<td><input type="checkbox" value={item.hash} /></td>
+						<td>{isImg ? <img src={blobUrl} onClick={() => showFull(blobUrl)}/> : '-'}</td>
+						<td style="text-align:left;word-break:break-all;font-size:14px">{item.name}<br/>{item.hash}</td>
 						<td>{item.type}</td>
 						<td>{formatSize(item.size)}</td>
 						<td title={new Date(item.lastModified).toISOString()}>{prettyTime(item.lastModified)}</td>
-						<td style={"display:flex;gap:8px"}>
-							<button className="ri-file-copy-line ghost" title={"复制"} onClick={({target}) => {
-								copyButtonAnimation("![blob]("+item.hash+")", target)
-							}}></button>
-							<a href={blobUrl} target="_blank" title={"下载"}
-							   className="ri-download-2-line btn primary"></a>
-							<button className="ri-delete-bin-line btn danger" title={"删除"} onClick={() => {
-								deleteItem(item.hash);
-							}}>
-							</button>
+						<td>
+							<div className={"btns"}>
+								<button className="ri-file-copy-line ghost" title={"复制"} onClick={({target}) => {
+									copyButtonAnimation("![blob](" + item.hash + ")", target)
+								}}></button>
+								<a href={blobUrl} target="_blank" title={"下载"}
+								   className="ri-download-2-line btn primary"></a>
+								<button className="ri-delete-bin-line btn danger" title={"删除"} onClick={() => {
+									deleteItem(item.hash);
+								}}>
+								</button>
+							</div>
 						</td>
 					</tr>
 				}, item => item.hash)}
@@ -118,9 +119,9 @@ const container = <div className={"modal-overlay"}>
 			</table>
 		</div>
 		<div className="pagination">
-			<button className="btn" onClick={() => changePage(-1)}>上一页</button>
-			<span id="pageInfo">第 {currentPage} 页  (共 {total} 条)</span>
-			<button className="btn" onClick={() => changePage(1)}>下一页</button>
+			<button className="btn ghost" onClick={() => changePage(-1)}>上一页</button>
+			<span>第 {currentPage} 页  (共 {total} 条)</span>
+			<button className="btn ghost" onClick={() => changePage(1)}>下一页</button>
 		</div>
 	</div>
 </div>;

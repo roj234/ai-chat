@@ -280,36 +280,3 @@ export const convertSTCharacter = json => {
 	return out;
 };
 //endregion
-
-/**
- * UTF-8 byte string (atob结果) 转字符串
- * @param {string} view
- * @return {string}
- */
-export const utf2str = view => {
-	let i = 0;
-	const len = view.length;
-
-	var out = "";
-
-	while (i < len) {
-		var c = view.charCodeAt(i++);
-		switch (c >> 4) {
-			case 0: case 1: case 2: case 3:
-			case 4: case 5: case 6: case 7:
-				out += String.fromCharCode(c);
-				break;
-			case 12:
-			case 13:
-				out += String.fromCharCode(((c & 0x1F) << 6) |
-					(view.charCodeAt(i++) & 0x3F));
-				break;
-			case 14:
-				out += String.fromCharCode(((c & 0x0F) << 12) |
-					((view.charCodeAt(i++) & 0x3F) << 6) |
-					(view.charCodeAt(i++) & 0x3F));
-				break;
-		}
-	}
-	return out;
-};

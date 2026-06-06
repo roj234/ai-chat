@@ -2,6 +2,7 @@ import {bakeSchema, decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
 import {brotliCompress, brotliDecompressSync, constants} from 'node:zlib';
 import {DB_COMPRESS_LEVEL, DB_COMPRESS_MIN_SIZE, DB_USE_MSGPACK_SCHEMA} from "../config.js";
 import {s2c_schema} from "../../common/MsgpackSchema.js";
+import {UTF8_TEXT_DECODER, UTF8_TEXT_ENCODER} from "unconscious/runtime_shared.js";
 
 const IS_SQLITE = true;
 
@@ -85,7 +86,7 @@ function decompressIfNeeded(data, schema) {
 	const [first] = data;
 	if (first === 123) { // '{' 不排除和msgpack的某些index重复。
 		try {
-			return JSON.parse(new TextDecoder().decode(data));
+			return JSON.parse(UTF8_TEXT_DECODER.decode(data));
 		} catch {}
 	}
 
@@ -107,7 +108,7 @@ function compressIfEnabled(data, schema) {
 		packed = encodeMsg(data, schema);
 	} else {
 		packed = JSON.stringify(data);
-		if (!IS_SQLITE) packed = new TextEncoder().encode(packed);
+		if (!IS_SQLITE) packed = UTF8_TEXT_ENCODER.encode(packed);
 	}
 
 	if (packed.length > DB_COMPRESS_MIN_SIZE) {

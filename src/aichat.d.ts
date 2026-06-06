@@ -28,7 +28,7 @@ declare namespace AiChat {
 
     type BaseMessage = OpenAI.Message & {
         // No 'tool' type here
-        role: string | 'system' | 'user' | 'assistant';
+        role: string | OpenAI.Role;
         id: number;
         time: number;
         error?: string;
@@ -41,6 +41,8 @@ declare namespace AiChat {
         name?: string;
     }
 
+    type FinishReason = 'length' | 'tool_calls' | 'stop' | 'error' | 'interrupt';
+
     type AssistantMessage = BaseMessage & {
         role: 'assistant';
         model: string;
@@ -51,7 +53,7 @@ declare namespace AiChat {
         reasoning_details?: OpenAI.ReasoningDetail[];
         tool_calls?: OpenAI.ToolCall[]; // or reactive
         tool_responses?: ToolResponse[];
-        finish_reason: 'length' | 'tool_calls' | 'stop' | 'error' | 'interrupt';
+        finish_reason: FinishReason;
     }
 
     export type MessageListItem = {
@@ -76,6 +78,8 @@ declare namespace AiChat {
         start?: number;
     };
 
+    type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+
     type Preset = {
         name: string,
 
@@ -86,7 +90,7 @@ declare namespace AiChat {
 
         max_tokens: number,
         systemPrompt: string,
-        reasoning: false | 'minimal' | 'low' | 'medium' | 'high',
+        reasoning: false | ReasoningEffort,
         CoTPrompt: string,
 
         edit: boolean,
@@ -200,17 +204,53 @@ declare namespace AiChat {
         key?: object;
     };
 
+    type FunctionToolInteractiveMode = false | true | "secure";
+    type FunctionToolReentrantMode = false | true | "stateless";
+
     type FunctionToolImpl<Payload> = {
-        interactive?: boolean | "secure";
-        autorun?: boolean | "on_import";
+        // 交互模式
+        // - false/默认: 自动执行，自动提交 (大部分工具)
+        // - true:      自动执行，手动提交 (如 ask_user 要求用户做出选择)
+        // - 'secure':  手动执行，显式允许 (如 run_process 可能执行任意命令)
+        interactive?: FunctionToolInteractiveMode;
+        // 重入模式
+        // 如果 interactive 为 'secure'，那么每个执行（包括本该是自动的）都可能要求用户交互（如果用户没有选择允许全部），这可能导致意外的执行顺序，因而不建议设置 reentrant 为 false 外的值
+        //
+        // - false/默认:    script()只执行一次，适用于状态存放在工具内或对话外的工具（如扔骰子(internal)，文件操作(external)）
+        // - true:         script()在切换到分支/导入时顺序执行，适用于状态存放在全局存储的工具（如变量更新(global)）
+        // - 'stateless':  script()在渲染前执行一次，适用于无状态工具（如 chart 从参数构造图表）
+        reentrant?: FunctionToolReentrantMode;
 
-        script: (parameters: Record<string, any>, response: ToolResponse & Payload, global_storage: Conversation) => any | Promise<any>;
-        undo?: (context: ToolResponse & Payload, global_storage: Conversation) => void;
-
-        renderer?: (context: ToolResponse & Payload, has_successor: boolean) => HTMLElement;
         /**
-         * 判断自己在列表项中是否需要重新生成HTML
-         * 往keys里面填任何对象就行
+         *
+         * @param parameters schema中定义的参数
+         * @param response 工具响应（任意对象），可以存入工具调用结果，以及renderer函数需要的数据
+         * @param global_storage 全局状态存储
+         */
+        script: (parameters: Record<string, any>, response: ToolResponse & Payload, global: Conversation) => any | Promise<any>;
+        /**
+         * 撤销script造成的更改
+         * reentrant=true 时建议指定 undo，除非*你真的知道你在做什么*
+         * 在切换到其他分支/删除时倒序执行 undo
+         * undo 必须能处理 script 完全没运行的情况（比如开头就报错了）
+         * @param context 和 script 中传入的 response 是同一个对象
+         * @param global_storage 全局状态存储
+         */
+        undo?: (context: ToolResponse & Payload, global: Conversation, toolCall: OpenAI.ToolCall) => void;
+
+        /**
+         * UI渲染函数
+         * @param context 和 script 中传入的 response 是同一个对象
+         * @param has_successor 是否不是最后一条消息，可以决定生成什么HTML
+         */
+        renderer?: (context: ToolResponse & Payload, has_successor: boolean, toolCall: OpenAI.ToolCall) => HTMLElement;
+        /**
+         * 判断是否需要重新生成HTML
+         * 往keys里面填任何对象
+         *
+         * @param keys 响应式列表的key
+         * @param context 和 script 中传入的 response 是同一个对象
+         * @param has_successor 是否不是最后一条消息
          */
         keyFunc?: (keys: Array, context: ToolResponse & Payload, has_successor: boolean) => void;
     }

@@ -141,7 +141,7 @@ const schema = {
 		additionalProperties: false,
 	},
 
-	interactive: 'uionly',
+	interactive: true,
 	script({suggestions}, response) {
 		response.options = suggestions;
 	},
@@ -188,9 +188,8 @@ const schema = {
 	}
 };
 
-registerTools("followups", "", [schema], {
+registerTools("followup_suggestions", "让模型生成相关问题(追尾)", [schema], {
 // TODO 实现manual的可以在UI里手动激活，现在只能通过命令激活
-//  还有需要实现动态处理变量，把autorun去掉，改成forward或者可重入？
 	hidden: 'manual',
 	systemPrompt: prompt
 })

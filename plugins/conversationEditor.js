@@ -8,6 +8,7 @@ import {updateConversation} from "../src/database.js";
 import {updateMessageUI} from "/src/components/MessageList.jsx";
 import {updateConversationListUI} from "/src/components/ConversationList.jsx";
 import {parseJsonLenient} from "unconscious/common/Json.js";
+import {BRANCH_MANAGER, enableBranches} from "../src/utils/BranchManager.js";
 
 SETTINGS.push({
 	type: "element",
@@ -19,9 +20,10 @@ SETTINGS.push({
 		<button className="btn ghost" onClick={async () => {
 			let jsonText, update, onclose;
 			let updatePromise = () => {
+				const conv = unconscious(selectedConversation);
 				serializeJSON({
-					...unconscious(selectedConversation),
-					messages: unconscious(messages)
+					...conv,
+					messages: conv[BRANCH_MANAGER]?.messages.slice(1) || unconscious(messages)
 				}, 2).then(text => {
 					jsonText = text;
 					update?.();
@@ -35,20 +37,24 @@ SETTINGS.push({
 				async (v) => {
 					const {messages: messages_, ...conversation} = await decodeObjects(parseJsonLenient(v));
 
-					const obj = unconscious(selectedConversation);
-					if (obj?.id !== conversation.id) {
+					const conv = unconscious(selectedConversation);
+					if (conv?.id !== conversation.id) {
 						console.warn("ID不相同，忽略");
 						return;
 					}
 
-					const msg = unconscious(messages);
-					msg.length = 0;
-					msg.push(...messages_);
+					Object.keys(conv).forEach(item => {delete conv[item];});
+					Object.assign(conv, conversation);
 
-					Object.keys(obj).forEach(item => {delete obj[item];});
-					Object.assign(obj, conversation);
+					if (conversation.bm_leaf) {
+						messages.value = enableBranches(conv, messages_);
+					} else {
+						const msg = unconscious(messages);
+						msg.length = 0;
+						msg.push(...messages_);
+					}
 
-					await updateConversation(obj, messages_, true);
+					await updateConversation(conv, messages_, true);
 
 					$update(updateMessageUI);
 					$update(updateConversationListUI);
@@ -57,7 +63,7 @@ SETTINGS.push({
 			);
 			const syncToEditor = () => {
 				if (skipNext) skipNext = false;
-				else update();
+				else updatePromise();
 			};
 
 			$watch([selectedConversation, messages], syncToEditor);

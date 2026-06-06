@@ -157,7 +157,7 @@ const read_file = {
 /** @type {AiChat.FunctionTool} */
 const read_image = {
 	name: "read_image",
-	description: "Read file as image",
+	description: "Load an image file from the workspace so it can be inspected visually.",
 	script: callAPI("read_image"),
 
 	parameters: {
@@ -309,8 +309,8 @@ const stat = {
 
 /** @type {AiChat.FunctionTool} */
 const spawn = {
-	name: "spawn_process",
-	description: "Spawn a process in sandbox",
+	name: "run_process",
+	description: "Run a native process in the sandbox. Use for build commands, tests, package manager commands, project scripts, external executables, etc.",
 
 	interactive: "secure",
 	script: callAPI("spawn"),
@@ -425,23 +425,24 @@ Typical workflow: \`read_file(format: "line_number")\` → spot the line number 
 }
 
 registerTools(
-	"fs",
-	"Manage files in the persistent sandbox. Use for persistent storage or multi‑file projects.",
+	"workspace_files",
+	"Read, write, list, create, rename, and delete files in the workspace.",
 	fsTools,
 	{ systemPrompt: fsPrompt }
 );
 
 let spawnPrompt;
 
-function checkEnv() {
+function checkEnv(tools) {
 	const fsServer = config.fs_server;
 	if (!fsServer) throw '请配置文件访问服务';
 	if (fsServer === ':browser:') throw '浏览器文件系统不支持运行程序';
+	return tools;
 }
 
 registerTools(
-	"spawn_process",
-	"Execute native programs in the persistent sandbox, e.g. environment setup or automation ('ffmpeg' transcoding).",
+	"run_process",
+	"Run native commands for package managers, builds, tests, scripts, etc. Use only when command-line execution is required.",
 	[spawn],
 	{
 		onActivated: checkEnv,
@@ -451,16 +452,16 @@ registerTools(
 
 				let {prompt} = await callAPI("env")();
 				if (prompt.startsWith("os: Windows")) {
-					prompt += "\n\nIMPORTANT: PowerShell and cmd have many escape and encoding issues (like '\\'). you MUST use bash / script if available."
 					if (!prompt.includes("bash: No")) {
-						prompt += "\nbash is emulated via msys/busybox, some commands/programs may not available.";
+						prompt += "\nbash is emulated via msys/busybox.";
 					}
+					prompt += "\n\nIMPORTANT: PowerShell and cmd have many escape and encoding issues (like '\\'). Use bash / script file if available."
 				}
 				spawnPrompt = `<environment-info>
 Environment and runtimes:
 ${prompt}
 
-Use script file (py / js / java, etc) if spawn_process tool doesn't fulfill your need.
+Use script file (py / js / java, etc) if run_process tool doesn't fulfill your need.
 </environment-info>`;
 			}
 			return spawnPrompt;

@@ -23,19 +23,19 @@ import "./search.js";
 // 切换数据库服务器时同步本地配置
 import "./configSync.js";
 
-// 文件系统和Agent工具组 (use:fs)
+// 文件系统和Agent工具组 (use:workspace_files / run_process)
 import "./tools/agent.js";
 // 图表工具 (use:chart)
-import "./tools/ChartCreator.js";
-// 角色扮演工具组 (use:roleplay) !WIP!
-import "./tools/rp_kit/roleplay.js";
-// 图片缩放工具 (use:zoom)
-import "./tools/zoom.js";
-// 代码解释器工具 (use:interpreter)
+import "./tools/chart.js";
+// 角色扮演工具组 (use:interactive_simulation)
+import "./tools/rp_kit/interactive_simulation.js";
+// 图片缩放工具 (use:zoom_in)
+import "./tools/zoom_in.js";
+// 代码解释器工具 (use:code_interpreter)
 // 注意目前只能用JS，如果想用Python可以看看Pyoxide
 import "./tools/interpreter.js";
 // 文生图和TTS插件，ComfyUI端点的工作流模板在 /media 文件夹
-import "./tools/txt2any.js";
+import "./tools/media_generator.js";
 
 // Mermaid流程图插件，如果你禁用，请
 // 1. 删除 /public 文件夹中的minfied js

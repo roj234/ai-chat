@@ -84,7 +84,7 @@ export const createUserInputComposer = (scroller) => {
 	bind(userInput, inputText);
 
 	async function onSend() {
-		if (await handleCommand(inputText)) return;
+		if (await handleCommand(inputText, userInput)) return;
 
 		// Abort previous if any
 		const aborter = unconscious(abortCompletion);

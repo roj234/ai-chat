@@ -4,17 +4,13 @@ import {getKV, setKV} from "/src/database.js";
 import {onLoad} from "/src/plugin.js";
 
 const systemPrompt = `<memory-management>
-## Memory Management Instructions
-1. **Identify Facts**: During the conversation, identify information that has long-term value (e.g., user's name, job, tech stack, likes/dislikes, past projects).
-2. **Use the Tool**: When you encounter such information, call the \`manage_user_memory\` tool immediately.
-   - Use \`add\` for new information.
-   - Use \`update\` if the user changes their mind or provides new details on a known topic.
-   - Use \`delete\` if the information is no longer true.
-3. **Be Concise**: Keep the \`content\` of the memory short and factual.
-4. **Silent Operation**: You can update memory in the background while responding to the user naturally.
-5. **Don't remember identity**: ID number, phone number etc...
+## Memory policy
+- Store long-term stable user facts when they are useful across conversations, such as preferences, tech stack, projects, role, or recurring constraints.
+- Do not store sensitive identifiers such as ID numbers, phone numbers, access tokens, private keys, or passwords.
+- Use add for new facts, update for changed facts, and delete for facts that are no longer true.
+- Keep memory entries short and factual.
 
-## Current Context (Memory)
+## Current memories
 Below are the facts you currently remember about this user. Use them to inform your responses:
 <memory>
 {{__MEMORIES__}}
@@ -75,13 +71,14 @@ const memoryTool = {
 				delete memories[id];
 			break;
 		}
+		return "done";
 	}
 };
 
 // TODO 也许不应该直接修改前缀，而是在新对话中生效？
 PLACEHOLDERS["__MEMORIES__"] = () => JSON.stringify(memories.value);
 
-registerTools("memory", "记忆工具", [memoryTool], {
+registerTools("memory_management", "长期记忆管理工具", [memoryTool], {
 	hidden: 'manual',
 	systemPrompt
 });

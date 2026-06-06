@@ -30,6 +30,7 @@ import {highlightJsonLike} from "./markdown/highlight.js";
 import {updateConversationListUI} from "./components/ConversationList.jsx";
 import {deepEntries} from "unconscious/common/json-schema-utils.js";
 import {applyDelta, streamFetch} from "/common/openai-api-utils.js";
+import {base64DecodeToUint8Array} from "unconscious/common/Base64.js";
 
 export const statusBadge = <span />;
 export const updateStatusText = (text, tone = '') => {
@@ -194,12 +195,14 @@ export async function submitUserChatMessage() {
 
 		updateStatusText(FINISH_REASON_LABEL[finishReason], tone ?? 'error');
 
-		promises.push(updateConversation(conversation_, unconscious(messages_)));
-
 		const has_resp = result.request_id && (finishReason !== 'error' || result.input_tokens);
-		if (has_resp) {
-			isIDB && await promises.at(-1).then(() => result.id = assistantMessage.id);
-			promises.push(appendBillingLog(result));
+		if (has_resp || messageHasContent(assistantMessage)) {
+			promises.push(updateConversation(conversation_, unconscious(messages_)));
+
+			if (has_resp) {
+				isIDB && await promises.at(-1).then(() => result.id = assistantMessage.id);
+				promises.push(appendBillingLog(result));
+			}
 		}
 
 		if (selectedConversation.id !== conversation_.id) {
@@ -357,6 +360,10 @@ function executeCompletionRequest(
 	});
 }
 
+function messageHasContent(assistantMessage) {
+	return assistantMessage.think?.content || assistantMessage.content || assistantMessage.tool_calls?.length;
+}
+
 /**
  *
  * @param {AiChat.Conversation} conversation
@@ -382,7 +389,9 @@ async function sendCompletionRequest(
 		 */
 		data,
 		/** @type {AiChat.AssistantMessage} */
-		assistantMessage, initialAssistantMessage,
+		assistantMessage,
+		/** @type {AiChat.AssistantMessage} */
+		initialAssistantMessage,
 		/** @type {string | Error} */
 		error,
 	} = await buildCompletionPayload(
@@ -669,7 +678,7 @@ async function sendCompletionRequest(
 				finishReason = 'error';
 
 				// 即便服务端Session过期了，也不要清除已经生成的内容
-				if (typeof err === 'string' && initialAssistantMessage) {
+				if (initialAssistantMessage && !messageHasContent(assistantMessage)) {
 					assistantMessage = messages[messages.length-1] = initialAssistantMessage;
 				}
 
@@ -805,7 +814,7 @@ async function buildCompletionPayload(
 
 	const resumeObj = resumableCompletions[conversation.id];
 	if (resumeObj) {
-		delete resumableCompletions[conversation.id];
+		//delete resumableCompletions[conversation.id];
 		if (Date.now() - resumeObj.time < RESUME_TIMEOUT) {
 			return {
 				url: config.endpoint+'/resume/'+resumeObj.id,
@@ -859,22 +868,24 @@ async function buildCompletionPayload(
 		const enableThink = isThinkingEnabled() && reasoningEffort;
 		const [reasoningPath, reasoningEnabledValue = 'true', reasoningDisabledValue = 'false'] = (config.reasoningPath||"reasoning.enabled").split(",");
 
-		jsonPathOp(body, reasoningPath, "set", JSON.parse(enableThink?reasoningEnabledValue:reasoningDisabledValue));
-		if (enableThink) {
-			const [reasoningEffortPath, reasoningEffortType = 's'] = (config.reasoningEffortPath || "reasoning.effort").split(",");
-			let fieldValue = reasoningEffort;
-			if (reasoningEffortType === 'i') {
-				if (reasoningEffort === "minimal") {
-					fieldValue = 1024;
-				} else {
-					fieldValue = ({
-						"low": 0.2,
-						"medium": 0.5,
-						"high": 0.8,
-					}[reasoningEffort]) * body.max_tokens;
+		if (config.forceThink !== 0) {
+			jsonPathOp(body, reasoningPath, "set", JSON.parse(enableThink?reasoningEnabledValue:reasoningDisabledValue));
+			if (enableThink) {
+				const [reasoningEffortPath, reasoningEffortType = 's'] = (config.reasoningEffortPath || "reasoning.effort").split(",");
+				let fieldValue = reasoningEffort;
+				if (reasoningEffortType === 'i') {
+					if (reasoningEffort === "minimal") {
+						fieldValue = 1024;
+					} else {
+						fieldValue = ({
+							"low": 0.2,
+							"medium": 0.5,
+							"high": 0.8,
+						}[reasoningEffort]) * body.max_tokens;
+					}
 				}
+				jsonPathOp(body, reasoningEffortPath, "set", fieldValue);
 			}
-			jsonPathOp(body, reasoningEffortPath, "set", fieldValue);
 		}
 	}
 	if (additionalBody) Object.assign(body, additionalBody);
@@ -1033,7 +1044,7 @@ const extractUsageMetrics = (json, log) => {
 
 	const {provider, usage, timings} = json;
 
-	if (provider) log.provider += "//" +provider;
+	if (provider && log.provider.indexOf('/') < 0) log.provider += "/"+provider;
 
 	if (usage) {
 		let {
@@ -1072,12 +1083,12 @@ const extractUsageMetrics = (json, log) => {
 /**
  *
  * @param {AiChat.AssistantMessage} assistantMessage
- * @param genImages
+ * @param {OpenAI.ImagePart[]} genImages
  */
 const streamResponseCompleted = (assistantMessage, genImages) => {
-	delete assistantMessage.id;
+	if (assistantMessage.id === -1) delete assistantMessage.id;
 
-	const {reasoning_details, tool_calls, think} = assistantMessage;
+	const {reasoning_details, tool_calls, think, content} = assistantMessage;
 
 	if (reasoning_details) {
 		let hasText;
@@ -1094,13 +1105,23 @@ const streamResponseCompleted = (assistantMessage, genImages) => {
 	}
 
 	if (genImages?.length) {
-		assistantMessage.content = [
-			{
-				type: "text",
-				text: assistantMessage.content
-			},
-			...genImages
-		]
+		const arr = [];
+		if (content) arr.push({
+			type: "text",
+			text: assistantMessage.content
+		});
+		genImages.forEach(part => {
+			const url = part.image_url.url;
+			if (typeof url === 'string') {
+				const idx = url.indexOf(',');
+				if (idx > 0) {
+					const type = url.slice(5, url.indexOf(';'));
+					part.image_url.url = new Blob([base64DecodeToUint8Array(url.slice(idx+1))], {type});
+				}
+			}
+		});
+		arr.push(...genImages);
+		assistantMessage.content = arr;
 	}
 };
 

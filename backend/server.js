@@ -6,18 +6,24 @@ import {parseArgs} from 'node:util';
 import {closeAllConnections, initServer} from './init.js';
 import {createSyncManager} from "./sync.js";
 import {WebSocketServer} from "ws";
-import {WEBSOCKET_SYNC_ENABLE} from "./config.js";
+import {reload, WEBSOCKET_SYNC_ENABLE} from "./config.js";
 import {createZipRouter} from "./utils/zipRouter.js";
 
 const options = {
 	addr: { type: 'string', short: 'a', default: '127.0.0.1' },
 	port: { type: 'string', short: 'p', default: '3000' },
-	data: { type: 'string', default: 'data' },
-	static: { type: 'string', default: '' },
 	cert: { type: 'string', default: '' },
-	workspace: { type: 'string', default: '' }
+	static: { type: 'string', default: '' },
+	config: { type: 'string', short: 'c', default: './config.js' },
+	data: { type: 'string', default: 'data' },
+	workspace: { type: 'string', default: '' },
 };
-const { values: { addr, port, data, cert, workspace, static: zipPath } } = parseArgs({ options });
+const { values: {
+	addr, port, cert,
+	static: zipPath,
+	config: configPath,
+	data, workspace,
+} } = parseArgs({ options });
 const PORT = parseInt(port, 10);
 
 let serverType;
@@ -34,33 +40,51 @@ if (cert) {
 	serverOptions = {}
 }
 
-const apiRouter = await initServer(data, "api", workspace);
-
-if (zipPath) {
-	let loading = 0;
-	const loadFrontend = async () => {
+async function fileWatcher(path, callback, uiName) {
+	let retries = 0;
+	const reloadFile = async () => {
 		try {
-			const fileBuffer = await fs.readFile(zipPath);
-			apiRouter.zipRouter = await createZipRouter(fileBuffer);
-			if (loading) console.log("前端文件重载成功");
-			loading = 0;
+			await callback(path, retries);
+			if (retries) console.log("[reload] "+uiName+" 加载成功");
+			retries = 0;
 		} catch (e) {
-			const timeout = 100 * Math.pow(2, loading++);
-			setTimeout(loadFrontend, timeout);
-			console.error("前端文件加载失败，将在 "+timeout+" ms后重试", e.code);
+			const timeout = 100 * Math.pow(2, retries++);
+			if (retries > 7) throw e;
+			setTimeout(reloadFile, timeout);
+			console.error("[reload] "+uiName+" 加载失败, "+timeout+" ms后重试", e.code);
 		}
 	};
-	await loadFrontend();
+	await reloadFile();
 
-	watch(zipPath, (eventType) => {
+	watch(path, (eventType) => {
 		if (eventType === 'change') {
-			if (!loading) {
-				console.log("正在重载前端");
-				loading = 1;
-				loadFrontend();
+			if (!retries) {
+				console.log("[reload] 正在重载 "+uiName);
+				retries = 1;
+				setTimeout(reloadFile, 100);
 			}
 		}
 	});
+}
+
+try {
+	await fileWatcher(configPath, async (configPath) => {
+		configPath += '?t='+(await fs.stat(configPath)).mtimeMs;
+		reload(configPath);
+	}, "配置文件");
+} catch (e) {
+	console.error("[config] 配置文件加载失败");
+	console.error(e);
+	process.exit(1);
+}
+
+const apiRouter = await initServer(data, "api", workspace);
+
+if (zipPath) {
+	await fileWatcher(zipPath, async (zipPath) => {
+		const fileBuffer = await fs.readFile(zipPath);
+		apiRouter.zipRouter = await createZipRouter(fileBuffer);
+	}, "前端");
 }
 
 const server = serverType.createServer(serverOptions, (req, res) => apiRouter.handle(req, res));
@@ -93,7 +117,7 @@ server.listen(PORT, addr, () => {
 
 // 封装一个优雅退出的函数
 function gracefulShutdown() {
-	console.log('正在关闭数据库...');
+	console.log('[shutdown] 正在关闭数据库...');
 	closeAllConnections();
 	process.exit(0);
 }
@@ -104,6 +128,6 @@ process.on('SIGINT', gracefulShutdown);
 process.on('SIGTERM', gracefulShutdown);
 // screen4w
 process.on('message', (m) => {
-	console.log("IPC message", m);
+	console.log("[shutdown] IPC message", m);
 	if (m === "shutdown") gracefulShutdown();
 });

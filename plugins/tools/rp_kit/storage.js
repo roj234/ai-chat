@@ -1,12 +1,13 @@
-import {$state, $update, debugSymbol, unconscious} from "unconscious";
-import {jsonPathOp, volatileEnvironment} from "/src/skills.js";
+import {$update, debugSymbol} from "unconscious";
+import {createStateListener, getToolParameters, jsonPathOp} from "/src/skills.js";
 import {parseJsonPath} from "unconscious/common/json-schema-utils.js";
 
-const actionLabels = {
-	set: '更新', add: '数值变动', append: '获得物品', merge: '属性修正', delete: '移除'
+const operationLabels = {
+	set: '更新', add: '数值变动', push: '获得物品', merge: '属性修正', delete: '移除'
 };
 
 const NOT_PERSIST_DATA = debugSymbol("NOT_PERSIST_DATA");
+export const RP_STATE_KEY = debugSymbol("RP_STATE_UPDATED");
 
 /**
  *
@@ -15,125 +16,130 @@ const NOT_PERSIST_DATA = debugSymbol("NOT_PERSIST_DATA");
  */
 export const storage = {
 	name: "manage_storage",
-	description: "存储和读取数据的工具。支持赋值、数学运算、列表追加及对象操作。",
+	description:
+		"Store, read, and update structured session state such as inventories, HP, task progress, scores, flags, and temporary simulation data."
+		+" Use this for state that must persist during the current scenario."
+		+" Do not use it for long-term user memory or file contents."
+	,
 	parameters: {
 		type: "object",
 		properties: {
-			action: {
-				enum: ["get", "set", "add", "append", "merge", "delete"],
-				description: "读取, 覆盖, 数值加减, 数组追加, 对象合并, 删除"
+			operation: {
+				enum: ["get", "set", "plus", "push", "merge", "delete"],
+				description: `"get" reads a value; "set" overwrites; "plus" increments/decrements a number; "push" pushes an item to an array; "merge" merges an object; "delete" removes a value`
 			},
-			key: {pattern: "^[a-zA-Z]+?[a-zA-Z0-9._]+$", description: "变量名，格式为JSONPath，如 user_pref.likes[0] ，存数据时，应该合理的设计路径，保证路径含义清晰且唯一。"},
+			key: {pattern: "^[a-zA-Z0-9.]+$", description: `Dot-path key such as "player.hp" or "inventory.items.0"`},
 			value: {
 				type: "value",
-				description: "值。仅 set, add, append, merge 需要, add 时传数字（负数为减）, get, delete 不使用该项。"
+				description: "Required only for set, plus, push, merge"
 			}
 		},
-		required: ["action", "key"],
+		required: ["operation", "key"],
 
 		// 云端不一定支持这种复杂的约束……事实上，它们甚至会瞎编工具名称
 		oneOf: [
 			{
 				type: "object",
 				properties: {
-					action: { enum: ["get", "delete"], },
+					operation: { enum: ["get", "delete"], },
 					key: { $ref: "#/properties/key" },
 				},
-				required: ["action", "key"]
+				required: ["operation", "key"]
 			},
 			{
 				type: "object",
 				properties: {
-					action: { enum: ["set", "append"], },
+					operation: { enum: ["set", "push"], },
 					key: { $ref: "#/properties/key" },
 					value: { type: "value", }
 				},
-				required: ["action", "key", "value"]
+				required: ["operation", "key", "value"]
 			},
 			{
 				type: "object",
 				properties: {
-					action: { const: "add", },
+					operation: { const: "plus", },
 					key: { $ref: "#/properties/key" },
 					value: { type: "number", }
 				},
-				required: ["action", "key", "value"]
+				required: ["operation", "key", "value"]
 			},
 			{
 				type: "object",
 				properties: {
-					action: { const: "merge", },
+					operation: { const: "merge", },
 					key: { $ref: "#/properties/key" },
 					value: { type: "object", }
 				},
-				required: ["action", "key", "value"]
+				required: ["operation", "key", "value"]
 			},
 		],
 	},
 
-	autorun: true, // 在对话载入时自动执行script
-	script({ action, key, value }, response)  {
-		let globalState = unconscious(volatileEnvironment.rp_state);
-		if (!globalState) volatileEnvironment.rp_state = $state(globalState = {});
+	reentrant: true,
+	script({ operation, key, value }, response, global)  {
+		let variables = global.variables;
+		if (!variables) variables = global.variables = {};
 
 		if (key.startsWith("\"")) key = JSON.parse(key);
-
-		const {value: newValue, undo} = jsonPathOp(globalState, key, action, value);
-
-		if (action !== "get") {
-			response[NOT_PERSIST_DATA] = {
-				key,
-				action,
-				value: JSON.stringify(value),
-				undo
-			};
-			$update(volatileEnvironment.rp_state);
+		if (operation === 'merge' || operation === 'plus') {
+			if (typeof value === 'string') value = JSON.parse(value);
 		}
 
-		if (action === "set") return "";
+		const {value: newValue, undo} = jsonPathOp(variables, parseJsonPath(key, '.'), operation, value);
+
+		if (operation !== "get") {
+			response.undo = undo;
+
+			const variableListener = createStateListener(global, "var_state");
+			$update(variableListener);
+		}
+
+		if (operation === "set") return "updated";
 		return newValue === undefined ? "undefined" : newValue;
 	},
-	renderer(response) {
-		const data = response[NOT_PERSIST_DATA];
-		if (!data) return;
+	renderer(response, has_successor, toolCall) {
+		const { key, operation, value } = getToolParameters(response, toolCall);
+		if (operation === 'get') return;
 
-		const { key, action, value } = data;
 		return (
 			<div className="var-change">
 				<span className="var-key">[{key}]</span>
-				<span>{actionLabels[action]}: </span>
+				<span>{operationLabels[operation]}: </span>
 				<span style={{color: '#2ecc71', fontWeight: 'bold'}}>
-					{action === 'add' && value > 0 ? `+${value}` : value}
+					{operation === 'plus' && value > 0 ? `+${value}` : value}
 				</span>
 			</div>
 		);
 	},
-	undo(response) {
-		const data = response[NOT_PERSIST_DATA];
-		if (!data) return;
-		const { key, action, undo } = data;
+	undo(response, global, toolCall) {
+		const { key, operation } = getToolParameters(response, toolCall);
 
-		const globalState = unconscious(volatileEnvironment.rp_state);
-		switch (action) {
+		const undo = response.undo;
+		const variables = global.variables;
+		if (operation === 'get' || !variables) return;
+
+		switch (operation) {
 			case 'delete':
 				if (undo._isArray) {
 					const paths = parseJsonPath(key);
 					const index = paths.pop();
-					const {value} = jsonPathOp(globalState, paths, 'get');
+					const {value} = jsonPathOp(variables, paths, 'get');
 					value.splice(index, 0, undo.value);
 				}
 			case 'set':
-			case 'add':
+			case 'plus':
 			case 'merge':
-				jsonPathOp(globalState, key, undo === undefined ? 'delete' : 'set', undo);
+				jsonPathOp(variables, key, undo === undefined ? 'delete' : 'set', undo);
 			break;
-			case 'append': {
-				const {value} = jsonPathOp(globalState, key, 'get');
+			case 'push': {
+				const {value} = jsonPathOp(variables, key, 'get');
 				value.length = undo;
 			}
 			break;
 		}
 
-		$update(volatileEnvironment.rp_state);
+		const variableListener = createStateListener(global, "var_state");
+		$update(variableListener);
 	}
 };

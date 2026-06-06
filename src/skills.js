@@ -10,6 +10,7 @@ import {COMMAND_REGISTRY} from "./commands.js";
 import {showToast} from "./components/Toast.js";
 
 export const TOOL_NAME = debugSymbol("TOOL_NAME");
+const TOOL_PARAM = debugSymbol("TOOL_PARAM");
 
 /**
  * @type {Record<string, string | function(): string>}
@@ -26,28 +27,24 @@ onLoad(() => {
 	];
 	COMMAND_REGISTRY.use_tools = [
 		async (args, params, element) => {
-			if (!selectedConversation.value) throw "不在对话中";
-			await toolScriptRegistry.use.script({modules: args}, {[TOOL_NAME]:"use"}, selectedConversation.value);
-			selectedConversation.activatedModules.add("use");
-			showToast("已启用，请注意这将会禁用模型手动启用工具的能力");
+			const conv = unconscious(selectedConversation);
+			if (!conv) throw "不在对话中";
+			await toolScriptRegistry.use.script({modules: args}, {[TOOL_NAME]:"use"}, conv);
+			conv.activatedModules.add("use");
+			showToast("已启用，注意这将禁用模型自行激活工具模块的能力");
 		},
 		"启用工具组"
 	];
 	COMMAND_REGISTRY.revoke_tools = [
 		async (args, params, element) => {
-			if (!selectedConversation.value) throw "不在对话中";
-			await toolScriptRegistry.use.undo({newModules: args}, selectedConversation.value);
+			const conv = unconscious(selectedConversation);
+			if (!conv) throw "不在对话中";
+			await toolScriptRegistry.use.undo({newModules: args}, conv);
 			showToast("已禁用");
 		},
 		"禁用工具组"
 	];
 });
-
-/**
- *
- * @type {import("unconscious").Reactive<Record<string, any>>}
- */
-export const volatileEnvironment = $state({});
 
 /**
  * 常开工具
@@ -131,8 +128,7 @@ const use_isRevoked = debugSymbol("use_isRevoked");
 
 toolScriptRegistry["use"] = {
 	name: "use",
-
-	autorun: "on_import",
+	reentrant: true,
 	async script({modules}, response, globalStorage) {
 		let {allowedTools, activatedModules} = globalStorage;
 		if (!allowedTools) {
@@ -261,7 +257,7 @@ export const getTools = async (conversation, allowNewSkills) => {
 			type: "function",
 			function: {
 				name: "use",
-				description: "按需激活特定功能，在你明确需要执行特定任务前，请勿调用此工具。\n\n" + (
+				description: "Activate one or more capability modules needed for the current task. Do not call this if request can be answered directly or just topic related to it.\n\n" + (
 					usableOptTools.map(name => name+": "+optionalTools[name].description).join("\n")
 				),
 				parameters: {
@@ -282,7 +278,11 @@ export const getTools = async (conversation, allowNewSkills) => {
 	tools_.push(...usableDefTools);
 
 	if (allowedTools) {
-		for (const name of allowedTools) tools_.push(tools[name]);
+		for (const name of allowedTools) {
+			const tool1 = tools[name];
+			if (!tool1) throw '工具 '+name+' 不存在';
+			tools_.push(tool1);
+		}
 	}
 	return [tools_, systemPrompt.join("\n\n")];
 };
@@ -420,49 +420,20 @@ export const onConversationChanged = callback => conversationChangedCallbacks.pu
 
 let lastId;
 $watch(selectedConversation, () => {
-	const changed = selectedConversation.id !== lastId;
-	if (changed) volatileEnvironment.value = {};
 	if (selectedConversation.ready) {
-		if (changed) {
-			lastId = selectedConversation.id;
-			const conv = unconscious(selectedConversation);
+		const conv = unconscious(selectedConversation);
+		if (conv.id !== lastId) {
+			lastId = conv.id;
 			const msg = unconscious(messages);
-			runAllTools(conv, msg, false);
+			redoToolCalls(conv, msg, 0);
 			for (const cb of conversationChangedCallbacks) {
 				cb(conv, msg);
 			}
 		}
 	} else {
-		lastId = -1;
+		lastId = null;
 	}
 });
-
-/**
- *
- * @param {AiChat.Conversation} conversation
- * @param {AiChat.AssistantMessage[]} messages
- * @param {boolean} isImporting
- */
-export const runAllTools = (conversation, messages, isImporting) => {
-	for (const {tool_calls, tool_responses} of messages) {
-		if (tool_calls)
-		for (let i = 0; i < tool_calls.length; i++) {
-			const {name, arguments: args} = tool_calls[i].function;
-
-			const impl = toolScriptRegistry[name];
-			if (tool_responses?.[i]) tool_responses[i][TOOL_NAME] = name;
-
-			const autorun = impl?.autorun;
-			if (isImporting ? autorun === "on_import" : autorun === true) {
-				try {
-					impl.script(JSON.parse(args || "null"), tool_responses[i], conversation);
-				} catch (e) {
-					console.error("Execute autorun tool", e);
-				}
-			}
-		}
-	}
-};
 
 /**
  *
@@ -482,7 +453,7 @@ export const runTools = async ({tool_calls, tool_responses}, globalStorage, forc
 
 		if (msg?.success != null) {
 			if (forceRerun !== i) return;
-			toolScriptRegistry[name].undo?.(msg, globalStorage);
+			toolScriptRegistry[name].undo?.(msg, globalStorage, tc);
 		}
 		msg = tool_responses[i] = {};
 
@@ -490,7 +461,7 @@ export const runTools = async ({tool_calls, tool_responses}, globalStorage, forc
 		msg.time = Date.now();
 
 		try {
-			const parameters = JSON.parse(tc.function.arguments);
+			const parameters = getToolParameters(msg, tc);
 
 			const fn = toolScriptRegistry[name];
 			let interactive = fn.interactive;
@@ -522,9 +493,9 @@ export const runTools = async ({tool_calls, tool_responses}, globalStorage, forc
 				result = await result;
 			}
 			if (typeof result !== "string") result = result instanceof ContentPart ? result.content : JSON.stringify(result);
-			if (interactive !== 'uionly') {
+			if (result !== undefined) { // checks undefined
 				msg.success = true;
-				msg.content = result || "";
+				msg.content = result;
 			}
 		} catch (e) {
 			console.error(e);
@@ -539,6 +510,59 @@ export const runTools = async ({tool_calls, tool_responses}, globalStorage, forc
 	else for (let i = 0; i < tool_calls.length; i++) await callTool(i);
 
 	return autoNext;
+};
+
+/**
+ * 撤销工具调用
+ * @param {AiChat.Conversation} global
+ * @param {AiChat.AssistantMessage[]} messages
+ * @param {number} first
+ */
+export const undoToolCalls = (global, messages, first) => {
+	for (let i = messages.length - 1; i >= first; i--) {
+		const {tool_calls, tool_responses} = messages[i];
+		if (tool_responses) {
+			for (let j = tool_responses.length - 1; j >= 0; j--) {
+				let toolResponse = tool_responses[j];
+				try {
+					toolScriptRegistry[toolResponse[TOOL_NAME]].undo?.(toolResponse, global, tool_calls[j]);
+				} catch (e) {
+					console.error(e);
+				}
+			}
+		}
+	}
+};
+
+/**
+ * 重做工具调用
+ * @param {AiChat.Conversation} global
+ * @param {AiChat.AssistantMessage[]} messages
+ * @param {number} first
+ * @param {boolean=} includeTrue
+ */
+export const redoToolCalls = (global, messages, first, includeTrue) => {
+	for (let i = first; i < messages.length; i++) {
+		const {tool_calls, tool_responses} = messages[i];
+		if (tool_calls) {
+			for (let i = 0; i < tool_calls.length; i++) {
+				const {name, arguments: args} = tool_calls[i].function;
+
+				const impl = toolScriptRegistry[name];
+				const toolResponse = tool_responses?.[i];
+				if (toolResponse) toolResponse[TOOL_NAME] = name;
+
+				const reentrant = impl?.reentrant;
+				if (reentrant && (includeTrue || reentrant === 'stateless')) {
+					try {
+						impl.script(JSON.parse(args), toolResponse, global);
+					} catch (e) {
+						console.error("Redo tool "+name, e);
+					}
+				}
+			}
+		}
+	}
 };
 
 /**
@@ -560,3 +584,32 @@ export const setSystemPrompt = system_prompt => {
 		messages.shift();
 	}
 };
+
+/**
+ * 获取缓存的解析的工具参数对象
+ * @param {AiChat.ToolResponse} response
+ * @param {OpenAI.ToolCall} toolcall
+ * @return {Record<string, any>}
+ */
+export const getToolParameters = (response, toolcall) => {
+	let parsed = response[TOOL_PARAM];
+	if (!parsed) parsed = response[TOOL_PARAM] = JSON.parse(toolcall.function.arguments);
+	return parsed;
+}
+
+const CONV_REACTIVE_MAP = debugSymbol("CONV_REACTIVE_MAP");
+
+/**
+ * 在全局存储上挂载一个响应式对象
+ * @param {AiChat.Conversation} conv
+ * @param {string} name
+ * @return {import("unconscious").Reactive<void>}
+ */
+export const createStateListener = (conv, name) => {
+	let map = conv[CONV_REACTIVE_MAP];
+	if (!map) map = conv[CONV_REACTIVE_MAP] = new Map;
+
+	let result = map.get(name);
+	if (!result) map.set(name, result = $state());
+	return result;
+}

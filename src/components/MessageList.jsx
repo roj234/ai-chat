@@ -24,7 +24,7 @@ import {
 	prettyError
 } from "../utils/utils.js";
 import "./MessageList.css";
-import {TOOL_NAME, toolScriptRegistry} from "../skills.js";
+import {toolScriptRegistry, undoToolCalls} from "../skills.js";
 import {getBillingLog} from "../database.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
 import {copyBranchAt, getBranchIndexCount, setBranchIndex, setLastMessage} from "../utils/BranchManager.js";
@@ -101,7 +101,7 @@ function chunkRenderer(m) {
 			case "tool":
 				try {
 					let has_successor = item.idx !== messages.length - 1;
-					return toolScriptRegistry[item.tool_name].renderer(item.response, has_successor);
+					return toolScriptRegistry[item.tool_name].renderer(item.response, has_successor, item.tool);
 				} catch (e) {
 					console.error(e);
 					return errorBlock(e, "工具UI渲染失败");
@@ -236,7 +236,8 @@ function chunkGather(message, chunks, index, messages) {
 						type: "tool",
 						tool_name: name,
 						idx: index,
-						response
+						response,
+						tool
 					});
 				}
 			}
@@ -436,7 +437,6 @@ const buttonHandler = (e) => {
 		break;
 		case "regen": {
 			if (selectedConversation.bm_leaf) {
-				// TODO
 				setLastMessage(messages[self.index-1]);
 			} else {
 				deleteMessage(self.index, messages.length);
@@ -518,12 +518,24 @@ const buttonHandler = (e) => {
 			if (isEditingSelf) {
 				if (message.think && !message.think.content) delete message.think;
 
-				$update(messages);
+				if (message.id === -1) {
+					delete message.id;
+					// cloned message
+					copyBranchAt(message);
+				} else {
+					$update(messages);
+				}
 				updateSelf();
 			} else {
 				// 如果编辑最后一条，并且是用户消息，那么不弹窗
 				if (selectedConversation.bm_leaf && (message !== messages.at(-1) || self.role !== "user")) {
-					const newBranch = () => selectedConversation[IN_EDIT_MODE] = copyBranchAt(message);
+					const newBranch = () => {
+						const clonedMessages = [...messages];
+						const clonedMessage = structuredClone(message);
+						clonedMessage.id = -1;
+						selectedConversation[IN_EDIT_MODE] = clonedMessages[self.index] = clonedMessage;
+						messages.value = clonedMessages;
+					};
 
 					if (config.branchEditHistory) {
 						SimpleModal({
@@ -552,21 +564,8 @@ const buttonHandler = (e) => {
  */
 function deleteMessage(start, end) {
 	const removed = messages.splice(start, end - start);
-	const globalStorage = unconscious(selectedConversation);
-	for (let i = removed.length - 1; i >= 0; i--){
-		const {tool_responses} = removed[i];
-		if (tool_responses) {
-			for (let j = tool_responses.length - 1; j >= 0; j--){
-				let toolResponse = tool_responses[j];
-				try {
-					toolScriptRegistry[toolResponse[TOOL_NAME]].undo?.(toolResponse, globalStorage);
-				} catch (e) {
-					console.error(e);
-				}
-			}
-		}
-	}
-
+	const global = unconscious(selectedConversation);
+	undoToolCalls(global, removed, 0);
 	$update(updateMessageUI);
 }
 
@@ -638,7 +637,7 @@ const combinedMessages = $computed((oldMessages) => {
 		};
 
 		const isAssistantMessage = message.role === "assistant";
-		let isReactiveElement = isAssistantMessage || MessageRoles[message.role]?.reactive;
+		let isReactiveElement = true || isAssistantMessage || MessageRoles[message.role]?.reactive;
 		if (typeof isReactiveElement === 'function') isReactiveElement = isReactiveElement(ref);
 
 		if (!oldMessage || isReactiveElement) chunkGather(message, chunks, i, arr);
@@ -682,12 +681,16 @@ const combinedMessages = $computed((oldMessages) => {
 				chunks.push({type: "usage"});
 				getBranchChunk(arr[ref.index], chunks);
 			}
+		} else {
+			getBranchChunk(message, chunks);
+			ref[PINNED] = isEditing(message);
+			ref.time = ref.key.time;
 		}
 
 		if (oldMessage) {
 			let prevChunks = oldMessage.content;
 
-			if (generationEnded) {
+			if (generationEnded && i === arr.length) {
 				// 因为流md渲染已经和常规渲染同构，不需要再次解析
 				const at = prevChunks.at(-1);
 				if (at?.type === "text") at.text = message.content;

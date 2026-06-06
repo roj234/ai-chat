@@ -1,6 +1,7 @@
 import {debugSymbol, unconscious} from "unconscious";
 import {showToast} from "../components/Toast.js";
 import {messages, selectedConversation} from "../states.js";
+import {redoToolCalls, undoToolCalls} from "../skills.js";
 
 export const BRANCH_MANAGER = debugSymbol("BranchManager");
 
@@ -89,6 +90,7 @@ function createBranchManager(conv, messages) {
 			let {parent} = m;
 			// 正常情况下是不会出现的，但是如果有人动原始的消息数组
 			if (import.meta.env.DEV && parent === m[INDEX]) {
+				console.log("found circular reference", m);
 				path.length = 0;
 				Array.prototype.push.apply(path, messages.slice(1).reverse());
 				break;
@@ -156,6 +158,7 @@ function createBranchManager(conv, messages) {
 	// ---------- 返回闭包对象 ----------
 	return {
 		get messages() { return messages; },
+		set messages(m) { messages = m; },
 		setLeaf(v) { leaf = v; },
 		getMessages() {
 			const path = getMessages();
@@ -253,13 +256,11 @@ export function disableBranches(conv) {
  * @param {AiChat.Message} message
  */
 export function copyBranchAt(message) {
+	const global = unconscious(selectedConversation);
 	/** @type {AiChat.BranchManager} */
-	const branchManager = selectedConversation[BRANCH_MANAGER];
-	const copiedMessage = structuredClone(message);
-	copiedMessage.id = -1;
-	branchManager.branchAt(branchManager.messages[message.parent], copiedMessage);
-	messages.value = branchManager.getMessages();
-	return copiedMessage;
+	const bm = global[BRANCH_MANAGER];
+	bm.branchAt(bm.messages[message.parent], message);
+	setMessages(bm.getMessages(), global);
 }
 
 /**
@@ -267,12 +268,26 @@ export function copyBranchAt(message) {
  * @param {AiChat.Message} message
  */
 export function setLastMessage(message) {
+	const global = unconscious(selectedConversation);
 	/** @type {AiChat.BranchManager} */
-	const branchManager = selectedConversation[BRANCH_MANAGER];
-	branchManager.setLeaf(message);
-	messages.value = branchManager.getMessages();
+	const bm = global[BRANCH_MANAGER];
+	bm.setLeaf(message);
+	setMessages(bm.getMessages(), global);
 }
 
+
+function setMessages(newMessages, global) {
+	const oldMessages = unconscious(messages);
+
+	messages.value = newMessages;
+
+	let prefix = 0;
+	for (; prefix < Math.min(oldMessages.length, newMessages.length); prefix++) {
+		if (oldMessages[prefix] !== newMessages[prefix]) break;
+	}
+	undoToolCalls(global, oldMessages, prefix);
+	redoToolCalls(global, newMessages, prefix, true);
+}
 
 /**
  *
@@ -280,10 +295,11 @@ export function setLastMessage(message) {
  * @param {number} branchIndex
  */
 export function setBranchIndex(message, branchIndex) {
+	const global = unconscious(selectedConversation);
 	/** @type {AiChat.BranchManager} */
-	const bm = selectedConversation[BRANCH_MANAGER];
+	const bm = global[BRANCH_MANAGER];
 	bm.switchBranch(bm.messages[message.parent], branchIndex);
-	messages.value = bm.getMessages();
+	setMessages(bm.getMessages(), global);
 }
 
 /**

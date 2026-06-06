@@ -82,7 +82,7 @@ const parseCommand = text => {
  * @param {import("unconscious").Reactive<string>} inputText
  * @returns {Promise<boolean>} 是否拦截了输入
  */
-export const handleCommand = async inputText => {
+export const handleCommand = async (inputText, element) => {
 	const text = inputText.value.trim();
 	if (!text.startsWith('/')) return false;
 
@@ -97,7 +97,7 @@ export const handleCommand = async inputText => {
 			// 清空输入框（除非是 help 指令想保留内容）
 			if (command !== 'help') inputText.value = "";
 
-			await execute(args, params, inputText);
+			await execute(args, params, element);
 		} else {
 			showToast(`未知指令: /${command}`, 'error');
 		}

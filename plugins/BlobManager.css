@@ -1,11 +1,23 @@
 
+.blob-manager {
+    & table { width: 100%; border-collapse: collapse; line-height: 1.4 }
+    & th, & td { text-align: center; padding: 6px }
+    & img {
+        max-width: 15vw; max-height: 10vh; object-fit: cover; cursor: pointer; border: 1px solid var(--border);
 
-.config-bar { margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid #eee; display: flex; gap: 10px; align-items: center; }
+        &:hover {
+            border-color: var(--accent);
+        }
+    }
+    & tr { border-bottom: 1px solid var(--border); }
+    & tr:hover { background: var(--chip-hover); }
 
-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-th, td { text-align: left; padding: 12px; border-bottom: 1px solid var(--border); }
-tr:hover { background: var(--chip-hover); }
+    & .btns {
+        display: flex;
+        gap: 0.25rem;
+        align-items: center;
+    }
+}
 
-.preview-img { max-width: 50px; max-height: 50px; object-fit: cover; border-radius: 4px; cursor: pointer; border: 1px solid #ddd; }
 
 .pagination { display: flex; gap: 10px; align-items: center; justify-content: center; }

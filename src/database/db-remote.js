@@ -4,6 +4,7 @@ import {initSync, SYNC_CONVERSATION, SYNC_MESSAGE} from "./SyncManager.js";
 import {decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
 import {c2s_schema, c2s_schema_version, s2c_schema, s2c_schema_version} from "/common/MsgpackSchema.js";
 import {SHA256} from "unconscious/common/SHA256.js";
+import {base64Encode} from "unconscious/common/Base64.js";
 
 let sync;
 
@@ -213,12 +214,6 @@ export const blobSetName = makeBatch("blob/set-name");
 
 export const deleteDatabase = async () => request('database', {method: 'DELETE'});
 
-const URLSAFE = {
-	'+': '-',
-	'/': '_',
-	'=': ''
-};
-
 /**
  * 计算 Blob 的 SHA-256 注意 前后端哈希函数需要统一否则会上传失败
  * @param {Blob} blob
@@ -245,7 +240,7 @@ export const blobHash = async blob => {
 		arrayBuffer = hasher.digest();
 	}
 
-	return btoa(String.fromCharCode(...new Uint8Array(arrayBuffer))).replaceAll(/[+\/=]/g, match => URLSAFE[match]);
+	return base64Encode(new Uint8Array(arrayBuffer), true);
 };
 
 const BLOB = Symbol();

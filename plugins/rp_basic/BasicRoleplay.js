@@ -24,13 +24,14 @@ import {Dropdown} from "/src/components/Dropdown.jsx";
 import {createTab} from "/src/components/SettingDialog.jsx";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {_CharacterEditor, _LorebookEditor, _PresetEditor, createPanel, markDirty} from "./PresetPanel.jsx";
-import {convertSTCharacter, convertSTLorebook, convertSTPreset, normalizeCRLF, utf2str} from "./convert.js";
+import {convertSTCharacter, convertSTLorebook, convertSTPreset, normalizeCRLF} from "./convert.js";
 import {applyMacro, applyPreset, applyRenderReplace, createDefaultCtx, DEFAULT_USER_NAME, makeStory} from "./prompt.js";
 import {LorebookList, PresetList} from "./TagList.jsx";
 import schema from "./schema.json";
 import {compileSchema, validateAndShowError} from "unconscious/common/json-schema-utils.js";
 import {onLoad} from "/src/plugin.js";
 import {openJsonEditor} from "/src/json_editor/editorProxy.js";
+import {base64DecodeToString} from "unconscious/common/Base64.js";
 
 compileSchema(schema);
 
@@ -466,7 +467,7 @@ registerDataImportHandler("image/png", async (file, batch) => {
 	const {chara} = readPNG(ab);
 	if (!chara) return;
 
-	const data = JSON.parse(utf2str(atob(chara)));
+	const data = JSON.parse(base64DecodeToString(chara));
 	const result = checkJSON(data, batch, file.name, file);
 	if (result) return await result;
 });

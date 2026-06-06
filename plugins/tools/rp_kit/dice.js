@@ -6,7 +6,7 @@
  */
 export const dice = {
 	name: "roll_dice",
-	description: "扔骰子",
+	description: "Produce random outcomes for probability-based events. Use only when an *actual random roll* is needed, not for deterministic math.",
 	parameters: {
 		type: "object",
 		properties: {

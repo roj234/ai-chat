@@ -1,11 +1,11 @@
 import {parseJsonLenient} from "unconscious/common/Json.js";
 import {clearDatabase, exportConversation, importConversation} from "./data-exchange.js";
-import {config, isMobile, messages, selectedConversation} from "./states.js";
+import {abortCompletion, config, isMobile, messages, selectedConversation} from "./states.js";
 import defaultCoTPrompt from "../media/thinkPrompt.txt?raw";
 import {createPreset} from "./components/PresetDropdown.jsx";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {disableBranches, enableBranches, setLastMessage} from "./utils/BranchManager.js";
-import {isPureObject} from "unconscious";
+import {isPureObject, unconscious} from "unconscious";
 
 const defaultSystemPrompt = `You are a helpful assistant.
 {{think}}
@@ -58,8 +58,9 @@ export const CUSTOM_CONTROLS = <>
 		<div className="tooltip">工具调用：使用工具绘制图表、进行计算</div>
 	</button>
 	<button className="ri-git-fork-line chip"
-			style:display={() => selectedConversation.value ? "" : "none"}
+			style:display={() => unconscious(selectedConversation) ? "" : "none"}
 			class:active={() => selectedConversation.bm_leaf}
+			disabled={() => unconscious(abortCompletion)}
 			onClick={() => {
 				if (!selectedConversation.bm_leaf) {
 					SimpleModal({
@@ -214,7 +215,8 @@ export const SETTINGS = [
 		type: "radio",
 		choices: {
 			"不能推理": false,
-			"仅能推理": true
+			"仅能推理": true,
+			"不存在": 0
 		}
 	},
 	{

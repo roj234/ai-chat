@@ -1,0 +1,189 @@
+
+body {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* 工具栏 */
+.toolbar {
+    background-color: #f3f4f6;
+    border-bottom: 1px solid #ddd;
+    padding: 0.5rem 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+}
+
+/* 标题输入组样式 */
+.title-group {
+    display: flex;
+    align-items: center;
+    flex: 1; /*甚至占据剩余空间*/
+    max-width: 500px;
+}
+
+.title-group .label {
+    font-size: 0.9rem;
+    color: #555;
+    margin-right: 0.5rem;
+    white-space: nowrap;
+}
+
+#file-title {
+    flex: 1;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 1rem;
+    font-weight: 500;
+    color: #333;
+}
+
+.toolbar button {
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    background-color: #fff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    margin-left: 0.5rem;
+}
+
+.toolbar button:hover {
+    background-color: #e5e7eb;
+}
+
+/* 主容器：左右分栏 */
+.container {
+    display: flex;
+    flex: 1;
+    overflow: hidden; /* 防止整个页面滚动 */
+}
+
+/* 编辑器 */
+
+#editor {
+    width: 50%;
+    display: flex;
+    height: calc(100% - 2rem);
+    padding: 1rem;
+    border: none;
+    border-right: 1px solid #ddd;
+    resize: none;
+    font-family: monospace;
+    font-size: 14px;
+    outline: none;
+    background-color: #fafafa;
+}
+
+/* 预览区 */
+.preview-pane {
+    width: 50%;
+    overflow-y: auto;
+    padding: 2rem;
+    background-color: white;
+    font-family: 宋体, sans-serif;
+}
+
+/* 简单的 Markdown 样式模拟 */
+.markdown-body {
+    padding: 2rem;
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.markdown-body img {
+    max-width: 100%;
+}
+
+blockquote {
+    border-left: 4px solid #ddd;
+    padding-left: 1rem;
+    color: #666;
+}
+
+pre {
+    background: #f6f8fa;
+    padding: 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+}
+
+/* =========================================
+   新增表格样式 - GitHub 风格
+   ========================================= */
+.markdown-body table {
+    border-collapse: collapse; /* 关键：合并相邻边框 */
+    width: 100%; /* 让表格占满容器宽度 */
+    margin-top: 0.8rem;
+    margin-bottom: 0.8rem;
+    display: block; /* 响应式：如果表格太宽允许横向滚动 */
+    overflow-x: auto;
+}
+
+@media screen {
+    /* 给单元格添加边框 */
+    .markdown-body th,
+    .markdown-body td {
+        padding: 6px 13px;
+        border: 1px solid #dfe2e5; /* 灰色边框 */
+    }
+
+    /* 表头样式 */
+    .markdown-body th {
+        font-weight: 600;
+        background-color: #f6f8fa; /* 浅灰背景 */
+    }
+
+    /* 隔行变色 (斑马纹)，提升阅读体验 */
+    .markdown-body tr:nth-child(2n) {
+        background-color: #f6f8fa;
+    }
+
+}
+
+@media print {
+    /* 隐藏不需要打印的部分 */
+    .toolbar,
+    #editor {
+        display: none !important;
+    }
+
+    /* 调整预览区以适应打印纸张 */
+    #app, .container {
+        height: auto;
+        overflow: visible;
+        display: block;
+    }
+
+    .preview-pane {
+        width: 100%;
+        overflow: visible;
+        padding: 0;
+        margin: 0;
+    }
+
+    .markdown-body {
+        max-width: 100%;
+        margin: 0;
+    }
+
+    /* 打印优化 */
+    a {
+        text-decoration: none;
+        color: black;
+    }
+
+    /* 打印时调整表格，确保打印出来好看 */
+    .markdown-body table {
+        display: table;
+        width: 100%;
+    }
+
+    /* 确保打印时边框颜色够深 */
+    .markdown-body th,
+    .markdown-body td {
+        border: 1px solid #000;
+    }
+}

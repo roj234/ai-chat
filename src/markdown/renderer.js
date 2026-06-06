@@ -83,7 +83,8 @@ export function createMarkdownRenderer(root, options = {}) {
 				case fastmd.CODE_FENCE: // ```type\n...\n```
 					slot = <code />;
 					parent = parent.appendChild(
-						<pre className="code-block">
+						options.noHighlight ? <pre /> :
+						(<pre className="code-block">
 							<div className="code-header sticky">
 								<span>text</span>
 								<span className="buttons">
@@ -91,7 +92,7 @@ export function createMarkdownRenderer(root, options = {}) {
 									<button className="ri-file-copy-line ghost" data-action="copy" title="复制代码"></button>
 								</span>
 							</div>
-						</pre>
+						</pre>)
 					);
 					break
 				case fastmd.TABLE:
@@ -143,9 +144,10 @@ export function createMarkdownRenderer(root, options = {}) {
 				delete node._value;
 
 				if (!options.stream) node.textContent = code;
-
-				const render = customCodeRenderer[language] || highlight;
-				render(code, language, node, true);
+				if (!options.noHighlight) {
+					const render = customCodeRenderer[language] || highlight;
+					render(code, language, node, true);
+				}
 			}
 		},
 		add_text(text, parser) {
@@ -191,7 +193,7 @@ export function createMarkdownRenderer(root, options = {}) {
 				}
 				case fastmd.CODE_FENCE: {
 					const code = node._value = (node._value || "") + text;
-					if (!options.stream) return;
+					if (!options.stream || options.noHighlight) return;
 
 					let language = node.lang;
 					const ccr = customCodeRenderer[language];
@@ -203,9 +205,7 @@ export function createMarkdownRenderer(root, options = {}) {
 						}
 					}
 
-					if (options.noHighlight || highlight(code, language, node)) {
-						break;
-					}
+					if (highlight(code, language, node)) break;
 					return;
 				}
 			}
@@ -217,7 +217,7 @@ export function createMarkdownRenderer(root, options = {}) {
 		set_attr(name, value) {
 			const node = nodes.at(-1);
 
-			if (name === fastmd.LANG) {
+			if (name === fastmd.LANG && !options.noHighlight) {
 				const owner = node.closest("pre.code-block");
 				let [language, filename] = value.split(":", 2);
 

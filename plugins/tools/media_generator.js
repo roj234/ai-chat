@@ -6,25 +6,25 @@ import {AudioPlayer} from "/src/components/AudioPlayer.jsx";
 import {$computed, $watch} from "unconscious";
 import {showToast} from "/src/components/Toast.js";
 import {compressImage, jsonFetch, limitMaxSide, loadingBlock, prettyError} from "/src/utils/utils.js";
-import "./txt2any.css";
+import "./media_generator.css";
 
 import comfyui_template from '/media/comfyui_workflow.json?raw';
 
 SETTINGS.push({
-	id: "api_img_endpoint",
+	id: "mg_img_api",
 	_tab: "tools",
 	name: "[t2a] 图像生成API (SD/Comfy)",
 	type: "input",
 	pattern: /^https?:\/\/.+(?:\/sdapi\/v1|\/prompt)$/,
 	placeholder: "http://localhost:1/sdapi/v1"
 },{
-	id: "api_comfy_workflow",
+	id: "mg_img_comfy_workflow",
 	_tab: "tools",
 	name: "[t2a] ComfyUI工作流",
 	type: "textbox",
 	placeholder: comfyui_template
 },{
-	id: "api_tts_endpoint",
+	id: "mg_tts_api",
 	_tab: "tools",
 	name: <>[t2a] 语音生成API<span className={"spacer"} /><a href={"https://github.com/roj234/qwen3-audio.cpp"}>服务端</a></>,
 	type: "input",
@@ -114,7 +114,7 @@ async function callSDAPI(endpoint, params = {}) {
 
 function generateImage(endpoint, params) {
 	if (endpoint.endsWith("/prompt")) {
-		return callComfyAPI(new URL(endpoint).origin, config.api_comfy_workflow || comfyui_template, params);
+		return callComfyAPI(new URL(endpoint).origin, config.mg_img_comfy_workflow || comfyui_template, params);
 	} else {
 		return callSDAPI(endpoint, params);
 	}
@@ -181,7 +181,7 @@ const generate_image = {
 		context.prompt = prompt;
 
 		const seed = parseInt(Math.random().toString(36).slice(2), 36);
-		return generateImage(config.api_img_endpoint, {
+		return generateImage(config.mg_img_api, {
 			batch_size: 1,
 			sampler_name: "Euler",
 			cfg_scale: negative_prompt ? 4 : 1,
@@ -222,7 +222,7 @@ const available_voices = {};
 
 async function updateVoices() {
 	try {
-		const voices = await jsonFetch(config.api_tts_endpoint+'/voices');
+		const voices = await jsonFetch(config.mg_tts_api+'/voices');
 		if (voices.length) {
 			available_voices.enum = voices.map(n => n.name);
 			available_voices.description = "当前存在的音色: \n\n"+voices.map(n => n.name+": "+n.description).join("\n\n");
@@ -239,7 +239,7 @@ async function updateVoices() {
 let on_tts_change;
 function initVoiceService() {
 	if (on_tts_change) return Promise.resolve();
-	on_tts_change = $computed(() => config.api_tts_endpoint);
+	on_tts_change = $computed(() => config.mg_tts_api);
 
 	return new Promise((resolve, reject) => {
 		$watch(on_tts_change, () => {
@@ -270,7 +270,7 @@ const generate_voice = {
 	// 这个工具需要显式的用户交互
 	interactive: true,
 	script: async ({ text, language, voice }, context) => {
-		const response = await fetch(config.api_tts_endpoint+'/audio/speech', {
+		const response = await fetch(config.mg_tts_api+'/audio/speech', {
 			method: 'POST',
 			headers: {'Content-Type': 'application/json'},
 			body: JSON.stringify({
@@ -343,7 +343,7 @@ const voice_design = {
 	},
 
 	async script({name, language, ref_text, instruct}, context) {
-		const result = await jsonFetch(config.api_tts_endpoint+'/voices/create', {
+		const result = await jsonFetch(config.mg_tts_api+'/voices/create', {
 			body: JSON.stringify({ name, language, ref_text, instruct })
 		});
 
@@ -354,11 +354,11 @@ const voice_design = {
 	}
 }
 
-registerTools("text_to_any", "生成声音、图像、视频等多媒体资源", [generate_image, generate_voice, voice_design], {
+registerTools("media_generator", "Generate images, audio, or video from text instructions.", [generate_image, generate_voice, voice_design], {
 	async onActivated() {
 		const tools = [];
 
-		if (config.api_tts_endpoint) {
+		if (config.mg_tts_api) {
 			try {
 				await initVoiceService();
 			} catch {}
@@ -367,7 +367,7 @@ registerTools("text_to_any", "生成声音、图像、视频等多媒体资源",
 			}
 		}
 
-		if (config.api_img_endpoint)
+		if (config.mg_img_api)
 			tools.push(generate_image);
 
 		return tools;

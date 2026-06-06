@@ -100,9 +100,12 @@ $watch(selectedConversation, () => {
 const CHART = debugSymbol("CHART");
 const OPTIONS = debugSymbol("OPTIONS");
 
-registerTools("chart", "绘制图表. 当需要可视化、比例、趋势分析或任何复杂的数据展示时，调用此工具。", [{
+registerTools("chart", "Create charts and data visualizations for numeric or structured data.", [{
 	name: "chart",
-	description: "Create a Chart.js chart",
+	description: "Create Chart.js visualizations from structured numeric data."
+		+" Use when visual comparison or trend understanding is useful."
+		+" Use after the data has already been prepared. If calculation, aggregation, or transformation is needed first, use code_interpreter before chart_renderer."
+	,
 	parameters: {
 		type: "object",
 		properties: {
@@ -153,7 +156,7 @@ registerTools("chart", "绘制图表. 当需要可视化、比例、趋势分析
 		required: ["type", "data", "height"]
 	},
 
-	autorun: true,
+	reentrant: 'stateless',
 	async script(options, context) {
 		if (!options.data.datasets.length) throw new Error('至少需要一个数据集');
 
@@ -161,7 +164,7 @@ registerTools("chart", "绘制图表. 当需要可视化、比例、趋势分析
 
 		context[OPTIONS] = options;
 		context[CHART] = $asyncState(() => {
-			return import('./Chart.js').then(m => {
+			return import('./chart.async.js').then(m => {
 				Chart = m.default;
 				const canvas = <canvas />;
 				new Chart(canvas, config);

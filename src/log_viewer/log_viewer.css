@@ -261,16 +261,6 @@ body {
     height: 7px;
     border-radius: 50%;
     background: var(--accent-green);
-    animation: pulse-dot 2s infinite;
-}
-@keyframes pulse-dot {
-    0%,
-    100% {
-        opacity: 1;
-    }
-    50% {
-        opacity: 0.35;
-    }
 }
 
 /* Stats cards */

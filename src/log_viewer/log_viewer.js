@@ -1,5 +1,5 @@
 import {$computed, $foreach, $state, $store, ONCE_EVENT, unconscious} from "unconscious";
-import Chart from "/plugins/tools/Chart.js";
+import Chart from "/plugins/tools/chart.async.js";
 import {s2c_schema, s2c_schema_version} from "/common/MsgpackSchema.js";
 import {decodeMsg} from "unconscious/common/msgpack.js";
 
@@ -736,12 +736,9 @@ const toggleAutoRefresh = () => {
 		clearInterval(autoRefreshInterval);
 		autoRefreshInterval = null;
 		$autoRefreshBtn.classList.remove('btn-active');
-		$refreshIndicator.innerHTML = '<span class="refresh-dot" style="background:#6b7385"></span> 自动刷新已关闭';
-		showToast('自动刷新已关闭');
 	} else {
 		autoRefreshInterval = setInterval(refreshData, 30000);
 		$autoRefreshBtn.classList.add('btn-active');
-		$refreshIndicator.innerHTML = '<span class="refresh-dot"></span> 每30秒自动刷新';
 		showToast('自动刷新已开启（30秒间隔）');
 	}
 };
@@ -755,8 +752,7 @@ const refreshData = async () => {
 		updateFilters();
 		applyFilters();
 		const now = new Date();
-		$refreshIndicator.innerHTML =
-			`<span class="refresh-dot"></span> 更新于 ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+		$refreshIndicator.innerHTML = `更新于 ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
 		showToast(`成功加载 ${logs.length} 条日志`);
 	} catch (err) {
 		console.error('获取日志失败:', err);
@@ -769,7 +765,7 @@ const refreshData = async () => {
 						<div className="state-icon">⚠️</div>
 						<div className="state-title">加载失败</div>
 						<div className="state-desc">${escapeHtml(err.message)}</div>
-						<button className="btn btn-sm btn-primary" onClick="refreshData()" style="margin-top:8px">🔄
+						<button className="btn btn-sm btn-primary" onClick={refreshData} style="margin-top:8px">🔄
 							重试
 						</button>
 					</div>
@@ -848,9 +844,7 @@ const topBar = () => {
 				   }}
 			/>
 			<span className="top-bar-spacer"></span>
-			<span className="refresh-indicator" ref={$refreshIndicator}>
-				<span className="refresh-dot"></span> 数据就绪
-            </span>
+			<span className="refresh-indicator" ref={$refreshIndicator}></span>
 		</div>
 	);
 }

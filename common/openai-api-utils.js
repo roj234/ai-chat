@@ -82,7 +82,7 @@ export const streamFetch = (url, {key = "", ...data} = {}, onToken) => fetch(url
 					if (data === '[DONE]') return;
 
 					const json = JSON.parse(data);
-					let error = json.error?.message;
+					let error = json.error;
 					try {
 						onToken(json);
 					} catch (e) {

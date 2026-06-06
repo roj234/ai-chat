@@ -9,8 +9,9 @@ import {formatSize} from "unconscious/common/Utils.js";
  * @param {File} file
  * @param {boolean} isFileTransferWindow
  * @param {OpenAI.ContentPart[]} attachments
+ * @param {boolean} forceBlob
  */
-export function blobToContentPart(file, isFileTransferWindow, attachments) {
+export function blobToContentPart(file, isFileTransferWindow, attachments, forceBlob) {
 	if (file.size > 104857600) {
 		showToast("文件 " + file.name + " 过大, 仅允许100MB以内的文件", "error");
 		return;
@@ -44,10 +45,11 @@ export function blobToContentPart(file, isFileTransferWindow, attachments) {
 				text: file
 			});
 		} else {
+			// 转为UTF-8编码
 			readAsString(file).then(text => {
 				attachments.push({
 					type: "text",
-					text: file.size > 16384 ? new File([text], file.name, {type: file.type}) : text
+					text: forceBlob || file.size > 16384 ? new File([text], file.name, {type: file.type}) : text
 				});
 			})
 		}
@@ -65,7 +67,7 @@ export const createFileUploader = attachments => <input type="file"
 	const isFileTransferWindow = selectedConversation.id === 0;
 
 	for (const file of target.files) {
-		blobToContentPart(file, isFileTransferWindow, attachments);
+		blobToContentPart(file, isFileTransferWindow, attachments, true);
 	}
 
 	target.value = '';
@@ -98,6 +100,7 @@ export const createAttachmentGallery = (attachments) => {
 					);
 
 				case "text":
+					console.log(att);
 					return (
 						<div className="attachment text-part" style={"--format: \"TXT\""}>
 							<div className="text-preview">

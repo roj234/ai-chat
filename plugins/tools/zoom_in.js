@@ -25,9 +25,9 @@ function listImages() {
 	return images;
 }
 
-registerTools("zoom", "Zoom in on a specific region of an image. 可用于识别图片细节或模糊文字", [{
-	name: 'zoom',
-	description: 'Zoom in on a specific region of an image by cropping it based on a bounding box',
+registerTools("zoom_in", "Zoom in on a specific region of an image to read small text or identify unclear details.", [{
+	name: 'zoom_in',
+	description: 'Zoom in on a specific region of an image to read small text or identify unclear details by cropping it based on a bounding box',
 	parameters: {
 		type: 'object',
 		properties: {

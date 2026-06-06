@@ -4,7 +4,7 @@ import {promisify} from 'node:util';
 import path from 'path';
 import {fileURLToPath} from 'url';
 import serverPackageInfo from './backend/package.json' with {type: 'json'};
-import {nodeResolve} from 'unconscious/vite/build-backend.js';
+import {configProxy, nodeResolve} from 'unconscious/vite/build-backend.js';
 
 const execFilePromise = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -17,12 +17,20 @@ const rollupConfig = {
 	],
 	plugins: [
 		nodeResolve(),
+		configProxy({
+			include: /[\\/]config\.js$/
+		}),
 		{
-			name: 'ny-plugin',
-			resolveId(id, importer) {
-				if (id.endsWith("/config.js")) return { id: './config.js', external: true };
-			},
+			name: 'my-plugin',
+			/**
+			 *
+			 * @param {string} code
+			 * @param {string} id
+			 * @return {Promise<{code: string, map: null}>}
+			 */
 			async transform(code, id) {
+				if (!/[\\/]server\.js$/.test(id)) return;
+
 				code = code.replaceAll("{{BUILD_TIME}}", new Date().toISOString());
 				code = code.replaceAll("{{PROJECT_VERSION}}", serverPackageInfo.version);
 

@@ -1,10 +1,6 @@
 import {$state, $update, $watch} from "unconscious";
 import {abortCompletion} from "/src/states.js";
 
-function format_output(choice) {
-	return `User has answered your questions: ${choice}. You can now continue with the user's answers in mind.`
-}
-
 /**
  *
  * @type {AiChat.FunctionTool<{data: {title: string, options: string[]}}>}
@@ -12,21 +8,27 @@ function format_output(choice) {
  */
 export const ask_user = {
 	name: "ask_user",
-	description: "向用户展示问题和一组建议选项，用户也可自由输入。",
+	description: "Ask the user to choose from suggested options or provide a custom answer."
+		+" Use when the next step requires user decision, clarification, or interactive branching."
+		+" You may call this tool multiple times at once." // parallel_tool_calls
+	,
 	parameters: {
 		type: "object",
 		properties: {
-			question: { type: "string", description: "The question", maxLength: 30 },
+			question: { type: "string", description: "Short question shown to the user.", maxLength: 100 },
 			options: {
 				type: "array",
+				description: "Suggested choices the user can pick from.",
+				minItems: 1,
+				maxItems: 6,
 				items: {
 					type: "string",
-					description: "Explanation of choice"
+					description: "A concise label or explanation."
 				}
 			},
 			custom: {
 				type: "boolean",
-				description: "Allow typing a custom answer",
+				description: "Whether the user may type a custom answer.",
 				default: true
 			}
 		},

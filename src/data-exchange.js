@@ -2,7 +2,6 @@ import {config, conversations, messages, selectedConversation, Shared} from "./s
 import {showToast} from "./components/Toast.js";
 import {deleteDatabase, getMessages, kvListGetValues, kvListSet, updateConversation} from "./database.js";
 import {prettyError} from "./utils/utils.js";
-import {runAllTools} from "./skills.js";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {ZipReader, ZipWriter} from "unconscious/common/zip-io.js";
 import {$computed, $state, $update, unconscious} from "unconscious";
@@ -28,7 +27,6 @@ export const importConversationData = async ({messages: messages_, id, ...conv},
 		}).forEach(message => {
 			delete message.id;
 		});
-		runAllTools(conv, messages_, true);
 	}
 
 	await updateConversation(conv, messages_, true);

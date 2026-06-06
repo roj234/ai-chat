@@ -1,8 +1,9 @@
-import {jsonPathOp, TOOL_NAME, volatileEnvironment} from "/src/skills.js";
-import {$computed, $disposable, $state, $watch, debugSymbol} from "unconscious";
-import morphdom from "morphdom";
+import {createStateListener, getToolParameters, onConversationChanged, TOOL_NAME} from "/src/skills.js";
+import {$state, $update, $watch, appendChild, debugSymbol, unconscious} from "unconscious";
 import {messages} from "/src/states.js";
 import {onLoad} from "/src/plugin.js";
+import {renderMarkdownToElement} from "/src/markdown/markdown.js";
+import {jsonPathOp} from "unconscious/common/json-schema-utils.js";
 
 const HTML = debugSymbol("UNPERSISTED_DATA");
 
@@ -12,66 +13,96 @@ const HTML = debugSymbol("UNPERSISTED_DATA");
  */
 export const dashboard = {
 	name: "init_dashboard",
-	description: "设置浮动状态看板的结构。用于显示关键状态（如属性、环境、任务进度）。",
+	description: "Create or update a floating visual dashboard."
+		+ " Use to display persistent structured state such as HP, inventory, progress, environment, scores, or mission status."
+		//+ " Dashboard fields should reference storage variables so they update automatically."
+		+ " Do not use for one-off text, simple summaries, or state that will not be updated."
+	,
 	parameters: {
 		type: "object",
 		properties: {
 			html: {
 				type: "string",
-				description: "看板内容。必须读取`manage_storage`工具保存的数据，例如: 'HP: <b style=\"color:red; width: calc(100% * {{player.hp}} / {{player.max_hp}})\">{{player.hp}}</b>'; 数据会自动更新"
+				description:
+					"Dashboard HTML/template. It should reference values stored by manage_storage, such as "
+					+ "`HP: <b>{{player.hp}}</b> / <b>{{player.max_hp}}</b>`. "
+					+ "Initialize or update the relevant storage keys first when needed. "
+					+ "Do not include scripts, event handlers, iframes, or external resources.",
 			}
 		},
 		required: ["html"]
 	},
 
-	autorun: true,
-	script({html}, self) {
-		volatileEnvironment.dashboard = html;
-		self[HTML] = html;
+	reentrant: true,
+	script({html}, self, global) {
+		global.dashboard = html;
+
+		const dashboard_listener = createStateListener(global, "dashboard");
+		$update(dashboard_listener);
+
+		return "done";
 	},
-	undo() {
-		for (let i = messages.length - 1; i >= 0; i--) {
-			let {tool_responses} = messages.value[i];
+	undo(ctx, global) {
+		const dashboard_listener = createStateListener(global, "dashboard");
+		$update(dashboard_listener);
+
+		const msgs = unconscious(messages);
+		for (let i = msgs.length - 1; i >= 0; i--) {
+			let {tool_calls, tool_responses} = msgs[i];
 			if (tool_responses) {
 				for (let j = tool_responses.length - 1; j >= 0; j--) {
 					let response = tool_responses[j];
 					if (response[TOOL_NAME] === "init_dashboard") {
-						volatileEnvironment.dashboard = response[HTML];
+						global.dashboard = getToolParameters(response, tool_calls[j]).html;
 						return;
 					}
 				}
 			}
 		}
-		volatileEnvironment.dashboard = null;
+		global.dashboard = null;
 	}
 };
 
-// 简单的变量替换引擎
-function parseTemplate(template, state) {
-	return template.replace(/\{\{(.+?)}}/g, (match, path) => {
-		return jsonPathOp(state, path, "get").value ?? match;
-	});
-}
+const dashboardState = $state();
+onLoad((app) => appendChild(app, dashboardState));
 
-// Dashboard 浮动组件
-const DashboardComponent = () => {
-	const html = volatileEnvironment.dashboard;
-	if (!html) return null;
+onConversationChanged((conv, messages) => {
+	const var_listener = createStateListener(conv, "var_state");
+	const dashboard_listener = createStateListener(conv, "dashboard");
 
-	const base = <div></div>;
-
-	let globalState = volatileEnvironment.rp_state;
-	if (!globalState) globalState = volatileEnvironment.rp_state = $state({});
-
-	const callback = () => {
-		morphdom(base, <div dangerouslySetInnerHTML={parseTemplate(html, globalState)}/>);
+	let listeners = [];
+	const runListeners = () => {
+		for (const [element, path] of listeners) {
+			element.textContent = jsonPathOp(conv.variables, path, "get").value ?? path;
+		}
 	};
-	$watch(globalState, callback);
-	$disposable(base, [globalState, callback])
-	return base;
-};
 
-// Dashboard
-onLoad(() => {
-	document.body.append(<div className={`rp-dashboard`}>{$computed(DashboardComponent, [volatileEnvironment])}</div>);
-})
+	$watch(dashboard_listener, () => {
+		listeners.length = 0;
+
+		const html = conv.dashboard;
+		if (!html) {
+			dashboardState.value = null;
+		} else {
+			const node = <div className={`rp-dashboard`} />;
+			renderMarkdownToElement(node, html.replace(/\{\{(.+?)}}/g, (match, path) => {
+				return '`'+path+'`';
+			}), {
+				noHighlight: true,
+				noImage: true
+			});
+
+			node.querySelectorAll("kbd").forEach(item => {
+				const span = <span />;
+				listeners.push([
+					span,
+					item.textContent
+				]);
+				item.replaceWith(span);
+			});
+			runListeners();
+			dashboardState.value = node;
+		}
+	});
+	$watch(var_listener, runListeners, false);
+});

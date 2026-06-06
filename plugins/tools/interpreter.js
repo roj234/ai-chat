@@ -10,8 +10,8 @@ function stopWorker() {
 const MAX_LOG_LENGTH = 5000;
 
 export const interpreter = {
-	name: "execute_javascript",
-	description: "Run javascript in WebWorker sandbox, 不支持 import/require, 仅能访问内置对象. 可用于数学计算、字符串处理、原型验证等.",
+	name: "code_interpreter",
+	description: "Run sandboxed JavaScript in a WebWorker-like environment for exact calculation, data transformation, string processing, simulation, and quick algorithm validation. It cannot use import/require or access external systems.",
 	parameters: {
 		type: "object",
 		properties: {
@@ -81,4 +81,4 @@ export const interpreter = {
 	}
 };
 
-registerTools("interpreter", "安全的执行 JavaScript 代码. 可用于数学计算、字符串处理、原型验证等。", [interpreter]);
+registerTools("code_interpreter", "Run sandboxed JavaScript for calculation, parsing, transformation, simulation, and validation.", [interpreter]);

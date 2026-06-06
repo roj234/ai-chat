@@ -172,5 +172,8 @@
     background: rgba(0, 0, 0, 0.75);
     color: var(--text);
     z-index: 1;
+    max-width: 30vw;
+    max-height: 40vh;
+    overflow: auto;
     box-shadow: 0 8px 32px rgba(0,0,0,0.5);
 }
