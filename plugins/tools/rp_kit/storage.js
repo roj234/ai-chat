@@ -1,13 +1,10 @@
-import {$update, debugSymbol} from "unconscious";
+import {$update} from "unconscious";
 import {createStateListener, getToolParameters, jsonPathOp} from "/src/skills.js";
 import {parseJsonPath} from "unconscious/common/json-schema-utils.js";
 
 const operationLabels = {
 	set: '更新', add: '数值变动', push: '获得物品', merge: '属性修正', delete: '移除'
 };
-
-const NOT_PERSIST_DATA = debugSymbol("NOT_PERSIST_DATA");
-export const RP_STATE_KEY = debugSymbol("RP_STATE_UPDATED");
 
 /**
  *
@@ -24,6 +21,7 @@ export const storage = {
 	parameters: {
 		type: "object",
 		properties: {
+			// TODO 太复杂了要改，比如拆成多个工具
 			operation: {
 				enum: ["get", "set", "plus", "push", "merge", "delete"],
 				description: `"get" reads a value; "set" overwrites; "plus" increments/decrements a number; "push" pushes an item to an array; "merge" merges an object; "delete" removes a value`
@@ -34,46 +32,7 @@ export const storage = {
 				description: "Required only for set, plus, push, merge"
 			}
 		},
-		required: ["operation", "key"],
-
-		// 云端不一定支持这种复杂的约束……事实上，它们甚至会瞎编工具名称
-		oneOf: [
-			{
-				type: "object",
-				properties: {
-					operation: { enum: ["get", "delete"], },
-					key: { $ref: "#/properties/key" },
-				},
-				required: ["operation", "key"]
-			},
-			{
-				type: "object",
-				properties: {
-					operation: { enum: ["set", "push"], },
-					key: { $ref: "#/properties/key" },
-					value: { type: "value", }
-				},
-				required: ["operation", "key", "value"]
-			},
-			{
-				type: "object",
-				properties: {
-					operation: { const: "plus", },
-					key: { $ref: "#/properties/key" },
-					value: { type: "number", }
-				},
-				required: ["operation", "key", "value"]
-			},
-			{
-				type: "object",
-				properties: {
-					operation: { const: "merge", },
-					key: { $ref: "#/properties/key" },
-					value: { type: "object", }
-				},
-				required: ["operation", "key", "value"]
-			},
-		],
+		required: ["operation", "key"]
 	},
 
 	reentrant: true,
@@ -143,3 +102,43 @@ export const storage = {
 		$update(variableListener);
 	}
 };
+
+if (false) {
+	storage.parameters.oneOf = [
+		{
+			type: "object",
+			properties: {
+				operation: { enum: ["get", "delete"], },
+				key: { $ref: "#/properties/key" },
+			},
+			required: ["operation", "key"]
+		},
+		{
+			type: "object",
+			properties: {
+				operation: { enum: ["set", "push"], },
+				key: { $ref: "#/properties/key" },
+				value: { type: "value", }
+			},
+			required: ["operation", "key", "value"]
+		},
+		{
+			type: "object",
+			properties: {
+				operation: { const: "plus", },
+				key: { $ref: "#/properties/key" },
+				value: { type: "number", }
+			},
+			required: ["operation", "key", "value"]
+		},
+		{
+			type: "object",
+			properties: {
+				operation: { const: "merge", },
+				key: { $ref: "#/properties/key" },
+				value: { type: "object", }
+			},
+			required: ["operation", "key", "value"]
+		},
+	];
+}

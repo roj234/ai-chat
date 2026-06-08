@@ -148,7 +148,7 @@ export function registerFsRoutes(router, allowExec) {
 			if (stats.size > 10485760) {
 				return ctx.send(400, { error: `File too big (${stats.size} bytes)` });
 			}
-			return readAsString(await fs.readFile(safePath, 'utf8'));
+			return readAsString(await fs.readFile(safePath));
 		},
 		async write(path, data, ctx) {
 			const safePath = pathFilter(ctx, path);
@@ -222,7 +222,7 @@ nlink: ${stats.nlink}`);
 				break;
 			}
 
-			const name = glob ? path.join(entry.parentPath, entry.name) : entry.name;
+			const name = glob ? path.join(entry.parentPath, entry.name).replace(ctx.sandboxRoot, "").replaceAll("\\", '/') : entry.name;
 			if (entry.isFile()) {
 				const fullPath = path.join(entry.parentPath, entry.name);
 				const stats = await fs.stat(fullPath);
@@ -270,7 +270,7 @@ nlink: ${stats.nlink}`);
 		})
 
 		router.post('/spawn', async (ctx) => {
-			const { program, arguments: args, directory, timeout = 10 } = await ctx.readAsObject();
+			const { program, arguments: args, directory = "", timeout = 10 } = await ctx.readAsObject();
 			const safeCwd = pathFilter(ctx, directory);
 			const result = await execFilePromise(program, args, {
 				cwd: safeCwd,

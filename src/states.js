@@ -6,11 +6,13 @@ import {onLoad} from "./plugin.js";
 /**
  * @type {boolean}
  */
-export let isMobile ;
+export let isMobile = IS_ANDROID_BUILD ;
 
-const mobileCheck = () => isMobile = matchMedia('(max-width: 768px)').matches;
-mobileCheck();
-onLoad(() => window.addEventListener('resize', mobileCheck));
+if (!IS_ANDROID_BUILD) {
+	const mobileCheck = () => isMobile = matchMedia('(max-width: 768px)').matches;
+	mobileCheck();
+	onLoad(() => window.addEventListener('resize', mobileCheck));
+}
 
 /**
  *

@@ -1,8 +1,9 @@
 import {SETTINGS} from "/src/settings.js";
+import {isIDB} from "/src/database.js";
 
 import "./BlobManager.css";
 
-if (DB_MODE !== "local") {
+if (!isIDB) {
 	SETTINGS.push({
 		type: "element",
 		name: "Blob管理器",

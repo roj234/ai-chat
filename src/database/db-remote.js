@@ -249,7 +249,7 @@ function _FakeBlob(obj) {this.$='BlobH';Object.assign(this, obj);}
 _FakeBlob.prototype = {
 	constructor: File,
 	toUrl() {return dbUrl+`blob/`+this.hash;},
-	async blob() {return this[BLOB] || (this[BLOB] = await (await fetch(this.toUrl())).blob());},
+	async blob() {return this[BLOB] || (this[BLOB] = await (await fetch(this.toUrl(), { cache: 'force-cache', integrity: 'sha256-'+this.hash })).blob());},
 	async toDataURL() {return (await this.blob()).toDataURL();},
 	async arrayBuffer() {return (await this.blob()).arrayBuffer();},
 	async bytes() {return (await this.blob()).bytes();},
@@ -288,7 +288,7 @@ export const uploadBlob = async blob => {
  * @return {Promise<Blob>}
  */
 export const getBlob = async ({hash, name}) => {
-	const serverData = await u_getBlobInfo(hash).catch(() => {});
+	const serverData = await u_getBlobInfo(hash).catch(() => {return{}});
 	if (name) serverData.name = name;
 	return new _FakeBlob({ hash, ...serverData });
 };

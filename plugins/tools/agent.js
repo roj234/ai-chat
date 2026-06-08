@@ -343,7 +343,7 @@ const spawn = {
 };
 
 let fsPrompt = `<file-misc>
-You may use bash/ripgrep via spawn_process tool to find in files.
+You may use bash/ripgrep via run_process tool to find in files.
 Grep pattern in list_directory tool may be used to recursively list directory.
 Root path is '/'
 </file-misc>`;
@@ -387,7 +387,7 @@ The anchor is \`1#fdb1\` and \`1234#e7b7\`.
 Without \`anchors\` format, you cannot use \`patch\`.
 
 2. **Plan your edit**: Decide the range to replace or insertion point.
-3. **Patch**: Use \`patch\` with:
+3. **Patch**: Use \`patch\` with arrays of:
    - \`start_anchor\`: first line to replace (inclusive).
    - \`end_anchor\`: line **after** the last line to replace (exclusive). Use \`"#EOF"\` for end‑of‑file.
    - Set \`start_anchor == end_anchor\` to **insert** before that line.
@@ -406,14 +406,14 @@ New lines: 2 (+2)
 
 - \`Range: [8, 8)\` means start == end → insertion (0 lines replaced).
 - New anchors are returned for changed lines only. Untouched lines keep their original anchors; their line numbers shift by the cumulative diff.
-- You can chain multiple patches in one call without re‑reading.
+- You MUST chain multiple patches in one patch call to avoid re‑reading / mangle anchors.
 
 ## String‑based editing (for one‑shot find‑and‑replace)
 
 Use \`replace\` when you have an exact string to swap once. The \`search\` must match **exactly one occurrence** in the file.
 
 To disambiguate when the search string appears multiple times, narrow the scope with:
-- \`start_line\` / \`end_line\` (both inclusive) — restrict the search to that line range.
+- \`start_line\` (inclusive) / \`end_line\` (exclusive) — restrict the search to that line range.
 
 Typical workflow: \`read_file(format: "line_number")\` → spot the line number → \`replace(search=..., replace=..., start_line=42, end_line=42)\`.
 

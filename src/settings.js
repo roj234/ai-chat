@@ -5,7 +5,9 @@ import defaultCoTPrompt from "../media/thinkPrompt.txt?raw";
 import {createPreset} from "./components/PresetDropdown.jsx";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {disableBranches, enableBranches, setLastMessage} from "./utils/BranchManager.js";
-import {isPureObject, unconscious} from "unconscious";
+import {$computed, $watch, isPureObject, unconscious} from "unconscious";
+import {webviewSetUserAgent} from "../vendor/jsBridge.js";
+import {onLoad} from "./plugin.js";
 
 const defaultSystemPrompt = `You are a helpful assistant.
 {{think}}
@@ -658,12 +660,30 @@ const toggleFullscreen = () => {
 // 手机上删掉对话框宽度
 if (isMobile) {
 	const index = SETTINGS.findIndex(({id}) => id === "width");
-	SETTINGS[index] = {
-		type: "element",
-		element: <div style={{display: "flex", justifyContent: "space-between"}}>
-			<button className="btn ghost" onClick={toggleFullscreen}>全屏</button>
-		</div>
-	};
+	if (IS_ANDROID_BUILD) {
+		const userAgent = navigator.userAgent;
+		SETTINGS[index] = {
+			id: "userAgent",
+			type: "input",
+			name: "UserAgent",
+			title: "用户代理字符串，可能需要修改以绕过风控",
+			_group: "model",
+			_tab: "model",
+			placeholder: userAgent
+		};
+		onLoad(() => {
+			$watch($computed(() => config.userAgent), () => {
+				webviewSetUserAgent(config.userAgent || userAgent);
+			});
+		});
+	} else {
+		SETTINGS[index] = {
+			type: "element",
+			element: <div style={{display: "flex", justifyContent: "space-between"}}>
+				<button className="btn ghost" onClick={toggleFullscreen}>全屏</button>
+			</div>
+		};
+	}
 }
 
 export const BODY_PARAMETERS = SETTINGS.filter(({id = "", _tab}) => (id !== 'antiSlop' && _tab === "sampling" || id === "max_tokens"));

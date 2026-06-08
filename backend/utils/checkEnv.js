@@ -13,7 +13,7 @@ async function execCommand(cmd) {
 	try {
 		const options = {
 			encoding: 'utf8',
-			timeout: 1000
+			timeout: 2000
 		};
 		const { stdout, stderr } = await execPromise(cmd, options);
 		// 有些工具（如 java -version）输出在 stderr，合并处理并提取第一行

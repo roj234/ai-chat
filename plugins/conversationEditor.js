@@ -17,7 +17,7 @@ SETTINGS.push({
 	title: "仅应用于测试",
 	element: <div className={"choice-scroll"}>
 		<button className="btn ghost" onClick={duplicateConversation}>另存为</button>
-		<button className="btn ghost" onClick={async () => {
+		{IS_ANDROID_BUILD ? null : <button className="btn ghost" onClick={async () => {
 			let jsonText, update, onclose;
 			let updatePromise = () => {
 				const conv = unconscious(selectedConversation);
@@ -71,6 +71,8 @@ SETTINGS.push({
 				$unwatch(selectedConversation, syncToEditor);
 				$unwatch(messages, syncToEditor);
 			});
-		}} disabled={() => !unconscious(selectedConversation)}>编辑当前对话的原始数据 <i className={"ri-external-link-line"} /></button>
+		}} disabled={() => !unconscious(selectedConversation)}>
+				编辑当前对话的原始数据 <i className={"ri-external-link-line"} />
+			</button>}
 	</div>
 });

@@ -37,6 +37,7 @@ const hoverMenu = <div className={"tag-dropdown"} style={"position:fixed"}>
 
 onLoad((app) => {
 	app.addEventListener("click", closeHoverMenu, {capture: true});
+	getKV("pinned").then(value => PINNED_ITEMS = new Set(value));
 });
 
 const GROUP_LABELS = ["置顶", "今天", "昨天", "7天内", "30天内"];
@@ -230,8 +231,6 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 
 		vl.render();
 	});
-
-	getKV("pinned").then(value => PINNED_ITEMS = new Set(value));
 
 	$watchWithCleanup(conversations, () => {
 		groupAndConvArr.length = 0;

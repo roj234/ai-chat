@@ -53,6 +53,16 @@ export function blobToContentPart(file, isFileTransferWindow, attachments, force
 				});
 			})
 		}
+	} else {
+		if (!isFileTransferWindow) {
+			showToast("未知的文件类型");
+			return;
+		}
+
+		attachments.push({
+			type: "text",
+			text: file
+		});
 	}
 }
 
@@ -100,7 +110,6 @@ export const createAttachmentGallery = (attachments) => {
 					);
 
 				case "text":
-					console.log(att);
 					return (
 						<div className="attachment text-part" style={"--format: \"TXT\""}>
 							<div className="text-preview">

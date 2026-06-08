@@ -1,6 +1,6 @@
 import {join} from 'node:path';
 import {createReadStream, createWriteStream} from 'node:fs';
-import {mkdir, rename, unlink} from 'node:fs/promises';
+import {access, mkdir, rename, unlink} from 'node:fs/promises';
 import {pipeline} from 'node:stream/promises';
 import {createHash} from 'node:crypto';
 
@@ -175,7 +175,7 @@ PRAGMA user_version = `+DB_VERSION);
 		const info = db.prepare('SELECT hash FROM blobs WHERE hash = ?').get(hash);
 		if (info) return ctx.send(400, { error: "already exist" });
 
-		const tempFile = join(tempDir, `${Math.random().toString(36).slice(2)}.tmp`);
+		let tempFile = join(tempDir, `${Math.random().toString(36).slice(2)}.tmp`);
 		const hasher = createHash('sha256');
 		let fileSize = 0;
 
@@ -210,8 +210,15 @@ PRAGMA user_version = `+DB_VERSION);
 
 			const bucket = getStoragePath(hashStr);
 			await mkdir(bucket, { recursive: true });
-			await rename(tempFile, join(bucket, hashStr));
 
+			const targetPath = join(bucket, hashStr);
+			await access(targetPath).catch(() => {
+				return rename(tempFile, targetPath).then(() => {
+					tempFile = null;
+				});
+			});
+
+			const now = Date.now();
 			db.prepare(`
                 INSERT INTO blobs (hash, type, name, size, lastModified) 
                 VALUES (?, ?, ?, ?, ?)
@@ -219,9 +226,9 @@ PRAGMA user_version = `+DB_VERSION);
             `).run(
 				hashBuf,
 				ctx.req.headers['content-type'] || 'application/octet-stream',
-				ctx.searchParams.get("name") || null,
+				ctx.searchParams.get("name") || '',
 				fileSize,
-				Math.max(0, Math.min(parseInt(ctx.searchParams.get("time")) || 0, Date.now()))
+				Math.max(0, Math.min(parseInt(ctx.searchParams.get("time")) || now, now))
 			);
 
 			ctx.send(201, { hash });
@@ -230,7 +237,7 @@ PRAGMA user_version = `+DB_VERSION);
 			ctx.send(500, { error: err.message });
 		}
 
-		await unlink(tempFile); // 删除重复的临时文件
+		if (tempFile) await unlink(tempFile); // 删除重复的临时文件
 	});
 
 	/**

@@ -127,6 +127,7 @@ const createApp = () => {
 
 	const toggleSettingUI = (id, display) => newSettingUI.showHide(id, display);
 
+	toggleSettingUI('prefillPath', false);
 	/**
 	 * @typedef {Array<string> | string | number | [number, number]} SomeType
 	 * @param {string} id

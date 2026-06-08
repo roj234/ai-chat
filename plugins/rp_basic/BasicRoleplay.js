@@ -152,8 +152,8 @@ function createSchemaEditColumn(typeId, template, editorConstructor) {
 					}}>
 				导出
 			</button>
-			<button className={"btn ghost"} disabled={() => !selectedItem.value} onClick={() => {
-				const key = typeId+":"+selectedItem.name;
+			{IS_ANDROID_BUILD ? null : <button className={"btn ghost"} disabled={() => !selectedItem.value} onClick={() => {
+				const key = typeId + ":" + selectedItem.name;
 
 				let skipNext;
 				const [updateValue, onClose] = openJsonEditor(key, () => {
@@ -175,7 +175,7 @@ function createSchemaEditColumn(typeId, template, editorConstructor) {
 				$watch(selectedItem, syncToEditor, false);
 				onClose(() => $unwatch(selectedItem, syncToEditor));
 			}}>编辑原始数据 <i className={"ri-external-link-line"}/>
-			</button>
+			</button>}
 		</div>
 		<br/>
 		{dropdown}

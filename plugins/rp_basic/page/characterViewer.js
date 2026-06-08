@@ -5,6 +5,7 @@ import {ZipWriter} from "unconscious/common/zip-io.js";
 import {openJsonEditor} from "/src/json_editor/editorProxy.js";
 import {highlightJsonLike} from "/src/markdown/highlight.js";
 import {streamFetch} from "/common/openai-api-utils.js";
+import {webviewDownloadFile} from "/vendor/jsBridge.js";
 
 const {db_server} = $store("config", undefined, {persist: true, deep: false});
 const BASE = db_server+'/cards';
@@ -199,12 +200,18 @@ async function showEditModal(name) {
 }
 
 export const downloadFile = (blob, ext, name) => {
-	const url = URL.createObjectURL(blob);
-	const a = document.createElement('a');
-	a.href = url;
-	a.download = `${name}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${ext}`;
-	a.click();
-	URL.revokeObjectURL(url);
+	const filename = `${name}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${ext}`;
+
+	if (IS_ANDROID_BUILD) {
+		webviewDownloadFile(blob, filename);
+	} else {
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = filename;
+		a.click();
+		URL.revokeObjectURL(url);
+	}
 };
 
 async function saveCard(name) {

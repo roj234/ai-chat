@@ -1,10 +1,11 @@
 import './ToolCallCard.css';
 import {$state, $update, $watch, appendChildren, isPureObject, unconscious} from "unconscious";
 import {JsonEditor} from "./JsonEditor.jsx";
-import {TOOL_NAME, toolScriptRegistry} from "../skills.js";
+import {runTools, TOOL_NAME, toolScriptRegistry} from "../skills.js";
 import {updateMessageUI} from "./MessageList.jsx";
 import {validateAndShowError} from "unconscious/common/json-schema-utils.js";
 import {onLoad} from "../plugin.js";
+import {selectedConversation} from "../states.js";
 
 /**
  *
@@ -85,14 +86,24 @@ export function ToolCallEditor(props) {
                             [TOOL_NAME]: fn.name
                         } : {};
 
-                        target.textContent = "已保存";
-                        target.disabled = true;
-                        setTimeout(() => {
-                            target.textContent = "保存";
-                            target.disabled = false;
-                        }, 1000);
+                        base.open = false;
                     }}>
                         保存
+                    </button>
+                    <button className={"btn warning"} title={"以当前参数（无需保存）执行工具"}
+                            disabled={() => !inputState.obj} onClick={({target}) => {
+                        const idx = index();
+
+                        const oldValue = fn.arguments;
+                        fn.arguments = JSON.stringify(inputState.obj);
+
+                        target.disabled = true;
+                        runTools(message, unconscious(selectedConversation), idx, true).then(reset).finally(() => {
+                            target.disabled = false;
+                            fn.arguments = oldValue;
+                        });
+                    }}>
+                        执行
                     </button>
                     <button className={"btn danger"} onClick={() => {
                         const idx = index();
@@ -117,7 +128,7 @@ export function ToolCallEditor(props) {
                 const schema = toolScriptRegistry[unconscious(toolName)]?.parameters;
                 if (schema) {
                     const error = validateAndShowError(obj, schema);
-                    if (error) inputState.value = { error };
+                    if (error) inputState.value = {error};
                 }
             }
         });

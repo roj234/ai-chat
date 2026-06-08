@@ -198,7 +198,8 @@ function chunkGather(message, chunks, index, messages) {
 	if (Array.isArray(content)) {
 		let images = [];
 
-		for (const chunk of content) {
+		for (let i = 0; i < content.length; i++){
+			const chunk = content[i];
 			if (chunk.type === "image_url") {
 				images.push(chunk);
 			} else {
@@ -206,7 +207,10 @@ function chunkGather(message, chunks, index, messages) {
 					chunks.push({type: "images", images});
 					images = [];
 				}
-				chunks.push(chunk);
+				chunks.push({
+					...chunk,
+					key: i
+				});
 			}
 		}
 

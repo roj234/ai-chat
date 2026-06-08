@@ -5,10 +5,11 @@ AiChat 是一个现代化的高性能纯 Web AI 前端，基于 [Unconscious](ht
 - AiChat 性能很好，AiChat 后端可选，AiChat 界面好看；这是我开发它的理由，我未能在 GitHub 找到适合我的 LLM 前端
 - 前端(gzipped) 1.5MB 可选后端(+所有依赖) 650KB
 
+![Banner](docs/banner.webp)
+
 > 说真的，如果你希望有一个点开`index.html`就能用的前端，那你恐怕只能选我  
 > 尽管我没有提供真正的`即点即用`版本，因为ESM按需导入不支持 `file://` —— 至少要一个静态文件服务  
 > 你可用`vite-single-file`插件自行构建即点即用版本  
-> BTW, 我很快会用 GitHub pages 部署一个云端版本
 
 ## 🚀 特性
 
@@ -66,9 +67,8 @@ AiChat 是一个现代化的高性能纯 Web AI 前端，基于 [Unconscious](ht
    - “就当它成功过”
    - [详细介绍](public/documents/agent-filesystem.md)
 
-![preview-main](docs/main.png)
-![preview-2](docs/preview.png)
-> 2.0.0 的截图，新版本有不少改动
+![preview-2](docs/preview.jpg)
+> 截图并不会实时更新，要你直接去Github Pages看看？
 
 ## 理念
 
@@ -115,23 +115,39 @@ AiChat 是一个现代化的高性能纯 Web AI 前端，基于 [Unconscious](ht
 
 ## 📦 快速开始
 
-### 环境要求
-- Node.js 22+ (建议 Node 24 LTS)
-
-### 部署
-
-请从 Release 下载构建好的版本，它是 Github Action 自动构建的  
+从右侧 [Release](https://github.com/Roj234/ai-chat/releases) 下载构建好的版本，它是 Github Action 自动构建的  
+> PC版: full_release.zip 并解压  
+> 安卓版: AiChat_&lt;版本&gt;.apk  
 如果你想手动构建或开发，[请查看这里](public/documents/build.md)
+
+### PC版(带后端)部署
+
+> 请先安装 Node.js 22+ (建议 Node 24 LTS)
 
 下载后直接点击 launch.bat / launch.sh 就可以启动了  
 下载的版本是自带后端的，启动的也是后端  
 默认的端口是 3000，你可以加入 `-p <端口> --data <数据目录>` 参数修改
+
+### 静态部署
 
 你可以把它部署在任何静态文件服务器上：
 - 使用Github pages的[在线版本](https://roj234.github.io/ai-chat/)
 - 找个`nginx`把`dist`扔进去就行
 - 使用 `llama-server` 加参数 `--path`
 - 基于WebView的安卓应用程序(未实现)
+
+### 安卓版本
+
+安卓版支持调用系统相机拍照上传  
+安卓版不支持很多调用MPA的功能，如JSON编辑器
+最低系统版本：12  
+权限：网络，相机  
+读写文件采用SAF API，不需要外部存储权限  
+当然系统自带文件选择器可能不好看，但是我不用写代码
+
+### 更新检查
+
+暂不支持，我很快会通过 GitHub 的 Release API 加
 
 ## 依赖
 - [Unconscious](https://github.com/Roj234/unconscious) - 轻量级响应式Web框架

@@ -7,6 +7,7 @@
 		"dev": "vite",
 		"build:client": "vite build",
 		"build:server": "node build_server.js",
+		"build:app": "vite build --config vite.app.config.js",
 		"build": "vite build && node build_server.js",
 		"preview": "vite preview"
 	},

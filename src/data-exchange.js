@@ -7,6 +7,7 @@ import {ZipReader, ZipWriter} from "unconscious/common/zip-io.js";
 import {$computed, $state, $update, unconscious} from "unconscious";
 import {reloadPresetList} from "./components/PresetDropdown.jsx";
 import {decodeObjects, serializeJSON} from "./utils/marshal.js";
+import {webviewDownloadFile} from "/vendor/jsBridge.js";
 
 const sleep = () => new Promise(resolve => setTimeout(resolve));
 
@@ -262,12 +263,18 @@ export const exportConversation = async (isConfig, _conv) => {
 };
 
 export const downloadFile = (blob, ext) => {
-	const url = URL.createObjectURL(blob);
-	const a = document.createElement('a');
-	a.href = url;
-	a.download = blob.name || `${APP_NAME}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${ext}`;
-	a.click();
-	URL.revokeObjectURL(url);
+	const filename = blob.name || `${APP_NAME}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${ext}`;
+
+	if (IS_ANDROID_BUILD) {
+		webviewDownloadFile(blob, filename);
+	} else {
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = filename;
+		a.click();
+		URL.revokeObjectURL(url);
+	}
 };
 
 export const clearDatabase = () => {

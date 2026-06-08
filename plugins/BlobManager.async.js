@@ -94,7 +94,7 @@ const container = <div className={"modal-overlay"}>
 					const blobUrl = `${config.db_server}/blob/${item.hash}`;
 
 					return <tr>
-						<td><input type="checkbox" value={item.hash} /></td>
+						<td><input className={"row-check"} type="checkbox" value={item.hash} /></td>
 						<td>{isImg ? <img src={blobUrl} onClick={() => showFull(blobUrl)}/> : '-'}</td>
 						<td style="text-align:left;word-break:break-all;font-size:14px">{item.name}<br/>{item.hash}</td>
 						<td>{item.type}</td>

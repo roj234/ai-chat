@@ -1,19 +1,23 @@
+
+if (IS_ANDROID_BUILD) /*#__PURE__*/ alert("App构建不应引入EditorProxy模块！");
+else {
+	window.editorProxy = {
+		onClose(name) {
+			const callbacks = windows.get(name);
+			if (callbacks) {
+				windows.delete(name);
+				for (let callback of callbacks) {
+					callback();
+				}
+			}
+		}
+	};
+}
+
 /**
  * @type {Map<string, Function[]>}
  */
 const windows = new Map;
-
-window.editorProxy = {
-	onClose(name) {
-		const callbacks = windows.get(name);
-		if (callbacks) {
-			windows.delete(name);
-			for (let callback of callbacks) {
-				callback();
-			}
-		}
-	}
-};
 
 /**
  *

@@ -17,6 +17,7 @@ import {$state, unconscious} from "unconscious";
 import {handleCommand} from "../commands.js";
 import SimpleModal from "./SimpleModal.jsx";
 import {getBlob, updateConversation} from "../database.js";
+import {webviewUploadImage} from "/vendor/jsBridge.js";
 
 
 export const createUserInputComposer = (scroller) => {
@@ -73,6 +74,12 @@ export const createUserInputComposer = (scroller) => {
 			<div className="controls">
 				<div className="controls hide-human">{CUSTOM_CONTROLS}</div>
 				<div className="spacer"></div>
+				{IS_ANDROID_BUILD && <button className="ri-camera-4-fill btn ghost" title="拍照上传"
+						 onClick={() => {
+							 webviewUploadImage().then(blob => {
+								 if (blob) blobToContentPart(blob, 0 === selectedConversation.id, attachments);
+							 })
+						 }}></button>}
 				<button className="ri-attachment-2 btn ghost" title="上传附件"
 						onClick={() => fileInput.click()}></button>
 				{sendButton}

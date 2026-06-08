@@ -1,0 +1,49 @@
+name: Deploy
+on:
+  #push:
+  #  branches:
+  #    - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          path: packages/ai-chat
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Clone unconscious
+        run: git clone https://github.com/roj234/unconscious.git packages/unconscious
+
+      - name: Clone streaming-markdown
+        run: git clone https://github.com/roj234/streaming-markdown.git packages/streaming-markdown
+
+      - name: Setup monorepo root
+        run: |
+          echo '{ "private": true, "workspaces": ["packages/*"] }' > package.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build
+        working-directory: packages/ai-chat
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: packages/ai-chat/dist/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
