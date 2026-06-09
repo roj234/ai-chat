@@ -1,17 +1,18 @@
 import {$asyncState, $state, $store, $watch, debugSymbol, unconscious} from 'unconscious';
 import {jsonFetch} from "./utils/utils.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
-import {onLoad} from "./plugin.js";
 
 /**
  * @type {boolean}
  */
-export let isMobile = IS_ANDROID_BUILD ;
+export let isMobile = IS_ANDROID_BUILD;
 
 if (!IS_ANDROID_BUILD) {
-	const mobileCheck = () => isMobile = matchMedia('(max-width: 768px)').matches;
-	mobileCheck();
-	onLoad(() => window.addEventListener('resize', mobileCheck));
+	const mediaQueryList = matchMedia('(max-width: 768px)');
+	mediaQueryList.onchange = () => {
+		isMobile = mediaQueryList.matches;
+	};
+	isMobile = mediaQueryList.matches;
 }
 
 /**
@@ -48,6 +49,7 @@ export const config = $store("config", {
 	sound: false,
 
 	generateTitle: false,
+	allowHTMLTags: ["basic"],
 
 	jsonSupport: 0,
 	max_tokens: 30000,
@@ -144,8 +146,3 @@ export const runningConversations = new Map;
 $watch(selectedConversation, () => {
 	abortCompletion.value = unconscious(runningConversations.get(selectedConversation.id)?.abort);
 });
-
-export const resumableCompletions = $store("resumable", {}, {persist: true, deep: false, ser: (value) => {
-	const s = JSON.stringify(value);
-	return s.length > 2 ? s : null;
-}});

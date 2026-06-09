@@ -1,15 +1,14 @@
 import {bakeSchema, decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
 import {brotliCompress, brotliDecompressSync, constants} from 'node:zlib';
 import {DB_COMPRESS_LEVEL, DB_COMPRESS_MIN_SIZE, DB_USE_MSGPACK_SCHEMA} from "../config.js";
-import {s2c_schema} from "../../common/MsgpackSchema.js";
-import {UTF8_TEXT_DECODER, UTF8_TEXT_ENCODER} from "unconscious/runtime_shared.js";
+import {UTF8_TEXT_ENCODER} from "unconscious/runtime_shared.js";
 
 const IS_SQLITE = true;
 
 // 注意，这些schema只能追加，规则和protobuf相同
 const conversation_schema = [
 	"activatedModules", "allowedTools", "grantedTools",
-	"bm_leaf", "bm_dummy"
+	"bm_leaf", "bm_dummy", "resumeId",
 ];
 const finish_reason = ["finish_reason", null, ["stop", "length", "tool_calls", "error", "interrupt"]];
 const message_schema = [
@@ -19,7 +18,14 @@ const message_schema = [
 		[
 			["type", null, ["text", "image_url", "input_audio"]],
 			"text",
-			["image_url", [["url", s2c_schema]]],
+			["image_url", [["url", [
+				["$", null, ["BlobH"]],
+				"hash",
+				"type",
+				"name",
+				"size",
+				"lastModified"
+			],]]],
 			["input_audio", ["data", "format"]]
 		]
 	],
@@ -74,6 +80,8 @@ export function deserializeRow(row, decompression = decompressGeneric) {
 	return v;
 }
 
+const UTF8_TEXT_DECODER = /* #__PURE__ */ new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
+
 /**
  *
  * @param {Uint8Array|string} data
@@ -83,15 +91,13 @@ export function deserializeRow(row, decompression = decompressGeneric) {
 function decompressIfNeeded(data, schema) {
 	if (typeof data === 'string') return JSON.parse(data);
 
-	const [first] = data;
-	if (first === 123) { // '{' 不排除和msgpack的某些index重复。
+	// 0xC1 是 msgpack 的保留字
+	if (data[0] === 0xC1) data = brotliDecompressSync(data.subarray(1));
+	if (data[0] === 123) { // '{' 不排除和msgpack的某些index重复。
 		try {
 			return JSON.parse(UTF8_TEXT_DECODER.decode(data));
 		} catch {}
 	}
-
-	// 0xC1 是 msgpack 的保留字
-	if (first === 0xC1) data = brotliDecompressSync(data.subarray(1));
 	return decodeMsg(data, {schema});
 }
 

@@ -1,5 +1,5 @@
 import {config, MessageRoles} from "/src/states.js";
-import {downloadFile, importConversationData, registerDataImportHandler} from "/src/data-exchange.js";
+import {importConversationData, registerDataImportHandler} from "/src/data-exchange.js";
 import {
 	$computed,
 	$foreach,
@@ -15,7 +15,7 @@ import {
 import {SETTINGS} from "/src/settings.js";
 import {updateMessageUI} from "/src/components/MessageList.jsx";
 
-import {cloneNamed, getTextContent} from "/src/utils/utils.js";
+import {cloneNamed, downloadFile, getTextContent} from "/src/utils/utils.js";
 import {readPNG} from "/common/upng.js";
 import {isIDB, kvListDel, kvListGet, kvListGetKeys, kvListSet} from "/src/database.js";
 import {onConversationChanged, registerTools} from "/src/skills.js";
@@ -261,16 +261,6 @@ SETTINGS.push(
 		choices: {
 			"单系统消息": 1,
 			"交替对话": 2
-		}
-	},
-	{
-		id: "st_extraElement",
-		name: "解析可能不安全的HTML标签",
-		type: "multiple",
-		_tab: "character",
-		choices: {
-			"样式(style)": "style",
-			"代码(script)": "script"
 		}
 	},
 );

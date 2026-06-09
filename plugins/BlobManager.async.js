@@ -1,5 +1,5 @@
 import {$foreach, $state} from "unconscious";
-import {config} from "/src/states.js";
+import {config, isMobile} from "/src/states.js";
 import SimpleModal from "../src/components/SimpleModal.jsx";
 import {formatSize, prettyTime} from "unconscious/common/Utils.js";
 import {copyButtonAnimation} from "../src/utils/utils.js";
@@ -66,7 +66,7 @@ const showFull = url => {
 };
 
 const container = <div className={"modal-overlay"}>
-	<div className="modal" style={"max-width:70vw"}>
+	<div className="modal" style={isMobile?"width:100vw":"max-width:70vw"}>
 		<div className="header" style={"display:flex;gap:8px"}>
 			<b>Blob 存储管理</b>
 			<button className="ri-loop-right-line btn primary" title={"刷新"} onClick={fetchList}></button>

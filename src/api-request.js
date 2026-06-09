@@ -8,7 +8,6 @@ import {
 	lastScrollDirection,
 	MessageRoles,
 	messages,
-	resumableCompletions,
 	runningConversations,
 	selectedConversation,
 	Shared,
@@ -20,7 +19,7 @@ import {showToast} from "./components/Toast.js";
 import {mergeReasoningDetails} from "./components/ThinkBlock.jsx";
 import failure from "../media/failure.js";
 import complete from "../media/complete.js";
-import {appendBillingLog, isIDB, updateConversation} from "./database.js";
+import {appendBillingLog, isIDB, kvListGet, updateConversation} from "./database.js";
 import {updateMessageUI} from "./components/MessageList.jsx";
 import {BODY_PARAMETERS, defaultCoTPrompt, defaultSystemPrompt, defaultTitlePrompt} from "./settings.js";
 import {createJsonStream} from "/common/StreamJsonSerializer.js";
@@ -150,21 +149,21 @@ export async function submitUserChatMessage() {
 
 		const assistantMessage = messages_.at(-1);
 
-		const resumeObj = resumableCompletions[conversation_.id];
+		const resumeId = conversation_.resumeId;
 		if (finishReason !== 'error' || assistantMessage.error?.trim() !== "network error"/* fetch */) {
-			if (resumeObj) {
+			if (resumeId) {
 				try {
-					promises.push(jsonFetch(config.endpoint+"/abort/"+resumeObj.id, {
+					promises.push(jsonFetch(config.endpoint+"/abort/"+resumeId, {
 						key: config.accessToken,
 						method: 'POST'
 					}));
 				} catch (e) {
 					showToast("Abort接口调用失败\n"+e, 'error');
 				}
-				delete resumableCompletions[conversation_.id];
+				delete conversation_.resumeId;
 			}
 		} else {
-			if (resumeObj) {
+			if (resumeId) {
 				showToast("连接意外中止\n在"+(RESUME_TIMEOUT/60000)+"分钟内点击重试按钮可以无缝继续对话", 'error');
 			}
 		}
@@ -186,7 +185,7 @@ export async function submitUserChatMessage() {
 		}
 
 		if (is_ok && assistantMessage.tool_calls) {
-			if ((config.maxToolTurns && countAgenticTurns(messages_) >= config.maxToolTurns) || !await runTools(assistantMessage, conversation_)) {
+			if ((config.maxToolTurns && !(countAgenticTurns(messages_) % config.maxToolTurns)) || !await runTools(assistantMessage, conversation_)) {
 				// 如果存在可能需要批准的工具调用
 				finishReason = 'interrupt';
 			}
@@ -512,7 +511,10 @@ async function sendCompletionRequest(
 					firstTokenTime = resumable.ft;
 
 					if (thinkState) thinkState.start = startTime;
-					if (!resumable.end && null != conversation.id) resumeObj = resumableCompletions[conversation.id] = { id };
+					if (!resumable.end && null != conversation.id) {
+						conversation.resumeId = id;
+						updateConversation(conversation);
+					}
 				}
 
 				log.latency = firstTokenTime - startTime;
@@ -812,12 +814,11 @@ async function buildCompletionPayload(
 	};
 	let path = '/chat/completions';
 
-	const resumeObj = resumableCompletions[conversation.id];
-	if (resumeObj) {
-		//delete resumableCompletions[conversation.id];
-		if (Date.now() - resumeObj.time < RESUME_TIMEOUT) {
+	const resumeId = conversation.resumeId;
+	if (resumeId != null) {
+		if (Date.now() - conversation.time < RESUME_TIMEOUT) {
 			return {
-				url: config.endpoint+'/resume/'+resumeObj.id,
+				url: config.endpoint+'/resume/'+resumeId,
 				data: {headers},
 				assistantMessage,
 				initialAssistantMessage
@@ -890,7 +891,7 @@ async function buildCompletionPayload(
 	}
 	if (additionalBody) Object.assign(body, additionalBody);
 
-	let [systemPrompt, systemBody] = buildSystemPrompt(conversation, config.systemPrompt || defaultSystemPrompt, toolPrompt);
+	let [systemPrompt, systemBody] = await buildSystemPrompt(conversation, config.systemPrompt || defaultSystemPrompt, toolPrompt);
 	if (systemPrompt) {
 		if (json_messages[0]?.role !== 'system')
 			json_messages.unshift({role: 'system', content: systemPrompt});
@@ -983,7 +984,7 @@ const isThinkingEnabled = () => (typeof config.forceThink === "boolean" ? config
  * @param {string} toolPrompt
  * @return {[prompt: string, body: {}]}
  */
-export const buildSystemPrompt = (conversation, prompt, toolPrompt) => {
+export const buildSystemPrompt = async (conversation, prompt, toolPrompt) => {
 	let body = {};
 
 	if (prompt.startsWith("---\n")) {
@@ -1012,25 +1013,40 @@ export const buildSystemPrompt = (conversation, prompt, toolPrompt) => {
 		prompt = content;
 	}
 
-	const transform = (prompt) => prompt.replaceAll(/\{\{(.+?)}}/g, (text, id) => {
-		switch (id) {
-			case "think":
-				return isThinkingEnabled() && config.reasoning === false ? (config.CoTPrompt || defaultCoTPrompt) : "";
-			case "tools":
-				return transform(toolPrompt || "");
-		}
+	const transform = (prompt) => {
+		let promises = [];
+		prompt = prompt.replaceAll(/\{\{([^}]+?)}}/g, (text, id) => {
+			switch (id) {
+				case "theme":
+					return matchMedia('(prefers-color-scheme: dark)') ? 'dark' : 'light';
+				case "date":
+					return new Date().toLocaleDateString();
+				case "think":
+					return isThinkingEnabled() && config.reasoning === false ? (config.CoTPrompt || defaultCoTPrompt) : "";
+				case "tools":
+					return transform(toolPrompt || "");
+			}
+			if (id.startsWith("ref:")) {
+				const rand = Math.random().toString(36).slice(2);
+				promises.push(kvListGet("preset", id.slice(4)).then((preset) => {
+					prompt = prompt.replace(rand, preset.systemPrompt);
+				}));
+				return rand;
+			}
 
-		let val = PLACEHOLDERS[id];
-		if (val != null) {
-			if (typeof val === "function")
-				val = val();
-			return val;
-		}
+			let val = PLACEHOLDERS[id];
+			if (val != null) {
+				if (typeof val === "function")
+					val = val();
+				return val;
+			}
 
-		return text;
-	}).trim();
+			return text;
+		});
+		return Promise.all(promises).then(() => prompt.trim());
+	}
 
-	return [transform(prompt), body];
+	return [await transform(prompt), body];
 };
 
 /**

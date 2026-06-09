@@ -1,6 +1,7 @@
 import {showToast} from "../components/Toast.js";
 import {$watch, debugSymbol, unconscious} from "unconscious";
 import {highlightJsonLike} from "../markdown/highlight.js";
+import {webviewDownloadFile} from "/vendor/jsBridge.js";
 
 export {jsonFetch} from "/common/openai-api-utils.js";
 
@@ -262,4 +263,24 @@ export const bind = (formElement, variable) => {
 	});
 
 	return formElement;
+};
+
+/**
+ *
+ * @param {Blob|File} blob
+ * @param {string} ext
+ */
+export const downloadFile = (blob, ext) => {
+	const filename = blob.name || `${APP_NAME}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${ext}`;
+
+	if (IS_ANDROID_BUILD) {
+		webviewDownloadFile(blob instanceof Blob ? blob : blob.toUrl(), filename);
+	} else {
+		const url = blob.toUrl();
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = filename;
+		a.click();
+		URL.revokeObjectURL(url);
+	}
 };

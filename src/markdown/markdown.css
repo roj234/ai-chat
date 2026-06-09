@@ -57,6 +57,12 @@ q:before, q:after { content: none; }
         margin: 0 var(--spacing-xs);
         word-break: break-word;
     }
+
+    & .checkbox {
+        pointer-events: none;
+        /*cursor: not-allowed;*/
+    }
+
     /* 统一表格 */
     & table {
         display: block;

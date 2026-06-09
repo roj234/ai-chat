@@ -483,8 +483,9 @@ export const runTools = async ({tool_calls, tool_responses}, globalStorage, forc
 							return;
 						}
 					}
+				} else {
+					autoNext = false;
 				}
-				autoNext = false;
 			}
 
 			let result = fn.script(parameters, msg, globalStorage);

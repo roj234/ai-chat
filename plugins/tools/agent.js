@@ -190,9 +190,8 @@ const write_file = {
 /** @type {AiChat.FunctionTool} */
 const patch_file = {
 	name: "patch",
-	description: "Patch ranges in a file using anchors. " +
-		"Each patch modifies the interval [start_anchor, end_anchor). " +
-		"If start == end, then new lines are inserted before that point. " +
+	description: "Patch one to multiple ranges in a file using anchors. " +
+		"Each patch modifies the interval [start_anchor, end_anchor]. " +
 		"Anchor format is \"line#hash\"",
 	script: callAPI("patch"),
 
@@ -205,21 +204,12 @@ const patch_file = {
 				items: {
 					type: "object",
 					properties: {
-						start_anchor: {
-							type: "string",
-							description: "inclusive"
-						},
-						end_anchor: {
-							type: "string",
-							description: "exclusive. Use \"#EOF\" for EOF"
-						},
-						lines: {
-							type: "array",
-							items: { type: "string" }
-						},
+						start_anchor: { type: "string" },
+						end_anchor: { type: "string" },
+						content: { type: "string" },
 					},
 
-					required: ["start_anchor", "end_anchor", "lines"]
+					required: ["start_anchor", "end_anchor", "content"]
 				}
 			}
 		},
@@ -241,8 +231,8 @@ const replace_file = {
 			path: { type: "string" },
 			search: { type: "string" },
 			replace: { type: "string" },
-			start_line: { type: "number", description: "inclusive" },
-			end_line: { type: "number", description: "exclusive" },
+			start_line: { type: "number" },
+			end_line: { type: "number" },
 			all: { type: "boolean", default: false }
 		},
 		required: ["path", "search", "replace"]
@@ -386,34 +376,29 @@ The anchor is \`1#fdb1\` and \`1234#e7b7\`.
 
 Without \`anchors\` format, you cannot use \`patch\`.
 
-2. **Plan your edit**: Decide the range to replace or insertion point.
-3. **Patch**: Use \`patch\` with arrays of:
+2. **Patch**: Use \`patch\` with arrays of:
    - \`start_anchor\`: first line to replace (inclusive).
-   - \`end_anchor\`: line **after** the last line to replace (exclusive). Use \`"#EOF"\` for end‑of‑file.
-   - Set \`start_anchor == end_anchor\` to **insert** before that line.
-   - \`lines\`: array of replacement lines (empty array to delete).
+   - \`end_anchor\`: last line to replace (inclusive).
+   - \`content\`: replacement lines.
 
 Response example:
 
 \`\`\`
 [Patch 1]
-Range: [8, 8)
-New lines: 2 (+2)
-[Content with anchors]
 8#90b8	倒数第二行
+[Patch 2]
 9#1fa9	最后一行
 \`\`\`
 
-- \`Range: [8, 8)\` means start == end → insertion (0 lines replaced).
-- New anchors are returned for changed lines only. Untouched lines keep their original anchors; their line numbers shift by the cumulative diff.
-- You MUST chain multiple patches in one patch call to avoid re‑reading / mangle anchors.
+- Return new anchors for changed lines. Untouched lines keep their original anchors; their line numbers shift by the cumulative diff.
+- You MUST chain multiple patches in one patch call to avoid mangle anchors.
 
-## String‑based editing (for one‑shot find‑and‑replace)
+## String‑based editing
 
-Use \`replace\` when you have an exact string to swap once. The \`search\` must match **exactly one occurrence** in the file.
+Use \`replace\` when you have an exact string to swap once. The \`search\` must **exactly occurrence once** in the file.
 
 To disambiguate when the search string appears multiple times, narrow the scope with:
-- \`start_line\` (inclusive) / \`end_line\` (exclusive) — restrict the search to that line range.
+- \`start_line\` / \`end_line\` (inclusive) — restrict the search to that line range.
 
 Typical workflow: \`read_file(format: "line_number")\` → spot the line number → \`replace(search=..., replace=..., start_line=42, end_line=42)\`.
 

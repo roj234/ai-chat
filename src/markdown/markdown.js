@@ -1,24 +1,41 @@
-import {copyButtonAnimation} from "../utils/utils.js";
-import {formatDate} from "unconscious/common/Utils.js";
+import {copyButtonAnimation, downloadFile} from "../utils/utils.js";
 
 import {createMarkdownRenderer} from "./renderer.js";
 import {createMarkdownParser} from "fastmd";
 
 import "./markdown.css";
 
-const mdParserOptions = {
-	allowedTags: [
+const tags = {
+	basic: [
 		"details", "summary",
-		"b", "i", "u", "p", "br", "em", "kbd", "q", "strong",
+		"b", "i", "u", "p", "br", "em", "kbd", "q", "strong", "code",
 		"h1", "h2", "h3", "h4", "h5", "h6",
 		"table", "th", "tr", "td", "thead", "tbody",
 		"ul", "ol", "li",
 		"section",  "div", "span", "hr", "mark",
 		"img", "a",
 	],
+	style: ["style"],
+	script: ["script"]
+};
+
+const mdParserOptions = {
+	allowedTags: tags.basic,
 	parseQuotes: true,
 	preserveLineBreaks: true,
 	allowNestedCodeFence3: true
+}
+
+/**
+ *
+ * @param {string[]} tagTypes
+ */
+export const setAllowHTMLTags = (tagTypes) => {
+	const arr = [];
+	for (let type of tagTypes) {
+		arr.push(...tags[type]);
+	}
+	mdParserOptions.allowedTags = arr;
 }
 
 /**
@@ -96,19 +113,12 @@ export const copyCodeEventHandler = (e) => {
 		}
 		break;
 		case "save": {
-			const url = URL.createObjectURL(new Blob([code._value || code.textContent]));
 			const span = btn.parentElement.previousElementSibling;
 			const filename = span.dataset.name;
 			const lang = span.innerHTML.toLowerCase();
 
-			// 也许chrome 124又改了什么
-			//const a = <a href={url} download={filename || APP_NAME+"-"+formatDate("Y-m-d H_i_s")+"."+(LANGUAGE_TO_EXT[lang] ?? lang)} />
-			const a = document.createElement('a');
-			a.href = url;
-			a.download = filename || APP_NAME+"-"+formatDate("Y-m-d H_i_s")+"."+(LANGUAGE_TO_EXT[lang] ?? lang);
-			a.click();
-
-			URL.revokeObjectURL(url);
+			const file = new File([code._value || code.textContent], filename);
+			downloadFile(file, LANGUAGE_TO_EXT[lang] ?? lang);
 		}
 		break;
 	}

@@ -1,18 +1,18 @@
 import {bakeSchema} from "unconscious/common/msgpack.js";
 
-export const s2c_schema_version = "6";
+export const s2c_schema_version = "7";
 export const s2c_schema = [];
 s2c_schema.push(
 	// generic
 	"id", "title", "time", "owner",
 	"type", "name",
-	["$", null, ["BlobH", "Map", "Set", "SET", "ARR", "DEL"]],
+	["$", s2c_schema, ["BlobH", "Map", "Set", "SET", "ARR", "DEL"]],
 	"hash", "size", "lastModified",
 	"error",
 
 	// conversation
 	"activatedModules", "allowedTools", "grantedTools",
-	"bm_leaf", "bm_dummy",
+	"bm_leaf", "bm_dummy", "resumeId",
 
 	// messages
 	["role", null, ["system", "user", "assistant"]],

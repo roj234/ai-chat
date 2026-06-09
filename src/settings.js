@@ -26,7 +26,7 @@ const defaultSystemPrompt = `You are a helpful assistant.
 </markdown-tools>
 </tools>
 <information>
-- Current date: ${new Date().toLocaleDateString()}
+- Current date: {{date}}
 </information>`;
 
 const defaultTitlePrompt = `基于以下用户-LLM对话内容，生成一个**20字以内**的中文标题，用于对话前端展示。标题需简洁、吸引人、概括核心主题。
@@ -185,7 +185,7 @@ export const SETTINGS = [
 		title: "单次回复的最大 token 数量。过小会导致回答被截断。\n如服务商支持，可启用‘助手消息预填充’。\n设为 0 表示无限制（不推荐）。",
 		type: "number",
 		min: 0,
-		max: 99999,
+		max: 65536,
 		_omit: 0
 	},
 	{
@@ -539,14 +539,26 @@ export const SETTINGS = [
 	},
 	{
 		_tab: "customize",
-		name: "界面高级选项",
+		name: "其它选项",
 		type: "multiple",
 		choices: {
 			"上滑隐藏输入框": "uiAutoHideInput",
-			"合并连续的工具调用": "combineToolCalls"
+			"合并连续的工具调用": "combineToolCalls",
+			"定期检查更新": "checkUpdate"
 		},
 		title: {
-			"合并连续的工具调用": "将多条工具调用消息合并为一条 (仅影响渲染, 需要重载对话)\n开启后无法编辑合并的对话"
+			"合并连续的工具调用": "将多条工具调用消息合并为一条 (仅影响渲染)\n无法编辑合并的对话"
+		}
+	},
+	{
+		_tab: "customize",
+		id: "allowHTMLTags",
+		name: "解析HTML标签",
+		type: "multiple",
+		choices: {
+			"基础": "basic",
+			"样式": "style",
+			"代码（危险！）": "script"
 		}
 	},
 	{
@@ -675,6 +687,13 @@ if (isMobile) {
 			$watch($computed(() => config.userAgent), () => {
 				webviewSetUserAgent(config.userAgent || userAgent);
 			});
+		});
+		SETTINGS.push({
+			type: "element",
+			name: "刷新页面",
+			element: <div className={"choice-scroll"}>
+				<button className="btn ghost" onClick={() => location.reload()}>刷新页面</button>
+			</div>
 		});
 	} else {
 		SETTINGS[index] = {

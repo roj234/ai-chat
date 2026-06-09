@@ -161,6 +161,7 @@ PRAGMA user_version = `+DB_VERSION);
 			'Content-Type': info.type,
 			'Content-Length': fileSize,
 			'Cache-Control': 'public, max-age=31536000, immutable',
+			'Content-Disposition': `attachment; filename="${encodeURIComponent(info.name)}"`,
 			'Last-Modified': lastModified,
 			'Accept-Ranges': 'bytes'
 		});

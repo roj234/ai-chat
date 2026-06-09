@@ -5,6 +5,9 @@ import {decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
 import {c2s_schema, c2s_schema_version, s2c_schema, s2c_schema_version} from "/common/MsgpackSchema.js";
 import {SHA256} from "unconscious/common/SHA256.js";
 import {base64Encode} from "unconscious/common/Base64.js";
+import {prettyError} from "../utils/utils.js";
+import {$store, $update, AS_IS, unconscious} from "unconscious";
+import SimpleModal from "../components/SimpleModal.jsx";
 
 let sync;
 
@@ -12,6 +15,15 @@ let sync;
 let dbUrl = config.db_server;
 
 let serverAcceptMsgpack;
+
+const messageQueue = $store("mq", [], { persist: true, deep: false,
+	ser(o) {
+		return o.length ? JSON.stringify(o) : undefined;
+	},
+	deser(s) {
+		return JSON.parse(s) || [];
+	}
+});
 
 export const serializeMsgpack = async (obj) => {
 	const mapping = new Map;
@@ -21,7 +33,7 @@ export const serializeMsgpack = async (obj) => {
 
 const request = async (path, {body, method} = {}) => {
 	if (!dbUrl.endsWith('/')) dbUrl += '/';
-	const res = await fetch(dbUrl+path, {
+	const init = {
 		headers: {
 			'Accept': 'application/vnd.msgpack,application/json',
 			'x-schema-version': s2c_schema_version,
@@ -30,7 +42,13 @@ const request = async (path, {body, method} = {}) => {
 		method,
 		body: body && await (serverAcceptMsgpack ? serializeMsgpack(body) : serializeJSON(body)),
 		referrerPolicy: "no-referrer"
-	});
+	};
+	let res;
+	try {
+		res = await fetch(dbUrl+path, init);
+	} catch {
+		throw "请求失败，请检查网络";
+	}
 
 	const decode = () => {
 		const contentType = res.headers.get('Content-Type');
@@ -71,16 +89,51 @@ const runBatch = () => {
 	const queue = batchQueue;
 	batchQueue = null;
 
+	const mq = unconscious(messageQueue);
+	let mqLength = mq.length;
+	if (mqLength) {
+		mq.forEach(item => queue.push([item, AS_IS, AS_IS]));
+		mq.length = 0;
+	}
+
 	request('batch', {
 		method: "POST",
 		body: queue.map(q => q[0])
 	}).then(items => {
-		for (let i = 0; i < queue.length; i++){
+		for (let i = 0; i < queue.length; i++) {
 			const item = items[i];
-			queue[i][item?.error ? 2 : 1](item);
+			const q = queue[i];
+			q[item?.error ? 2 : 1](item);
 		}
-	}).catch(err => {
-		for (let q of queue) q[2](err);
+
+		if (mqLength) {
+			$update(messageQueue);
+			requestIdleCallback(() => location.reload());
+		}
+	}).catch(async err => {
+		// all request failed
+		for (let q of queue) {
+			q[2](err);
+
+			/** @type {string} */
+			let action = q[0][0];
+			action = action.slice(action.indexOf("/")+1);
+			if (action.startsWith("set") || action.startsWith("upsert") || action.startsWith("delete")) {
+				mq.push(q[0]);
+			}
+		}
+
+		if (mq.length) {
+			$update(messageQueue);
+			SimpleModal({
+				title: "请求失败",
+				message: `刷新页面将会自动重放请求\n\n详细错误信息：`+prettyError(err),
+				confirmMessage: "刷新页面",
+				onConfirm() {
+					location.reload()
+				}
+			});
+		}
 	});
 };
 
@@ -170,8 +223,17 @@ const u_getKVList = makeBatch("kvs/value", true);
 const u_upsertKVList = makeBatch("kvs/upsert");
 const u_deleteKVList = makeBatch("kvs/delete");
 
-/** @type {Map<string, WeakRef<AiChat.IDBKVList & Object>>} */
+/** @type {Map<string, AiChat.IDBKVList & Object>} */
 const kvListCache = new Map;
+const KV_LIST_CACHE_SIZE = 50;
+const insertToKVListCache = (cacheKey, value) => {
+	if (kvListCache.size >= KV_LIST_CACHE_SIZE) {
+		const firstKey = kvListCache.keys().next().value;
+		kvListCache.delete(firstKey);
+	}
+	kvListCache.set(cacheKey, structuredClone(value));
+};
+
 
 /**
  * @param {string} type
@@ -182,25 +244,28 @@ export const kvListGet = async (type, name) => {
 	if (!name) return;
 
 	const cacheKey = type+":"+name;
-	const ref = kvListCache.get(cacheKey);
-	let val = ref?.deref();
+	let val = kvListCache.get(cacheKey);
 	if (!val) {
-		if (ref) {
-			kvListCache.forEach((value, key) => {
-				if (!value.deref()) kvListCache.delete(key);
-			});
-		}
-
 		val = await u_getKVList([type, name]);
 		delete val.type;
-		if (val) kvListCache.set(cacheKey, new WeakRef(structuredClone(val)));
+		if (val) insertToKVListCache(cacheKey, val);
 	}
 	return val;
 };
 
+/**
+ * @param {Object} value
+ * @param {string} type
+ * @param {string} name
+ * @return {Promise<*>}
+ */
 export const kvListSet = async (value, type, name) => {
 	if (type) value.type = type;
 	if (name) value.name = name;
+
+	const cacheKey = type+":"+name;
+	insertToKVListCache(cacheKey, value);
+
 	return u_upsertKVList(value);
 };
 
@@ -209,7 +274,7 @@ export const kvListDel = (type, name) => u_deleteKVList([type, name]);
 export const appendBillingLog = makeBatch("log/insert");
 export const getBillingLog = makeBatch("log");
 
-export const blobByName = makeBatch("blob-by-name");
+export const blobByName = makeBatch("blob/by-name");
 export const blobSetName = makeBatch("blob/set-name");
 
 export const deleteDatabase = async () => request('database', {method: 'DELETE'});
@@ -272,12 +337,17 @@ export const uploadBlob = async blob => {
 		await u_getBlobInfo(hash);
 	} catch {
 		let url = dbUrl+`blob/`+hash+"?name="+encodeURIComponent(blob.name||"")+"&time="+(blob.lastModified||"");
-		const resp = await fetch(url, {
-			method: 'POST',
-			headers: { 'Content-Type': blob.type },
-			body: blob
-		});
-		if (!resp.ok) throw await resp.text();
+		let res;
+		try {
+			res = await fetch(url, {
+				method: 'POST',
+				headers: { 'Content-Type': blob.type },
+				body: blob
+			});
+		} catch {
+			throw "上传失败，请检查网络";
+		}
+		if (!res.ok) throw await res.text();
 	}
 	return blob.hash = hash;
 };

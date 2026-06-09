@@ -28,7 +28,7 @@ const getInnerHTML = node => {
 	return html;
 };
 
-const allowedAttributes = new Set(["class", "style", "href", "width", "height", "align", "start", "checked", "lang", "title"]);
+const allowedAttributes = new Set(["class", "style", "href", "width", "height", "align", "start", "checked", "lang", "title", "open"]);
 
 /**
  * @param {HTMLElement} root
@@ -78,7 +78,7 @@ export function createMarkdownRenderer(root, options = {}) {
 					break
 				case fastmd.LIST_ORDERED:  slot = <ol />        ;break
 				case fastmd.LIST_ITEM:     slot = <li />        ;break
-				case fastmd.CHECKBOX:      slot = <input type="checkbox" disabled />; break
+				case fastmd.CHECKBOX:      slot = <input type="checkbox" className={"checkbox"} />; break
 				case fastmd.CODE_BLOCK: // \s{4}text
 				case fastmd.CODE_FENCE: // ```type\n...\n```
 					slot = <code />;

@@ -196,7 +196,6 @@ export const createUserInputComposer = (scroller) => {
 			if (selectedConversation.noAI && nickname) userMessage.name = nickname;
 
 			messages.push(userMessage);
-			if (config.reviewMessage) return;
 		} else {
 			if (sendButton.disabled) return;
 		}
@@ -218,6 +217,8 @@ export const createUserInputComposer = (scroller) => {
 			conversations.unshift(conv);
 			selectedConversation.value = conv;
 		}
+
+		if (config.reviewMessage && input) return;
 
 		for (;;) {
 			const result = await submitUserChatMessage();

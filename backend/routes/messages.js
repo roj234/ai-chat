@@ -100,11 +100,14 @@ export function registerMessageRoutes(batcher) {
 		owner = owner ?? await ctx.getVariable("conversationId");
 		if (!Number.isFinite(owner)) return { error: 'missing owner' };
 
+		let oldThink, oldContent;
 		if (Number.isFinite(id)) {
 			const row = ctx.db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
 			if (!row) return { error: 'no such id' };
 
 			const msg = deserializeMessage(row);
+			oldThink = msg.think?.constructor;
+			oldContent = row.content;
 			patch(msg, diff);
 			diff = msg;
 		}
@@ -114,7 +117,7 @@ export function registerMessageRoutes(batcher) {
 		if (typeof content !== "string") {
 			data.content = content;
 			if (Array.isArray(content)) {
-				const strContent = content.findIndex(item => item.type === "text");
+				const strContent = content.findIndex(item => typeof item.text === "string");
 				if (strContent < 0) {
 					content = '';
 				} else {
@@ -148,10 +151,18 @@ export function registerMessageRoutes(batcher) {
 		if (vectorDB) {
 			const isSearchable = data.role === "user" || data.role === "assistant";
 
-			if (isSearchable && content) vectorDB.set('m#'+id.toString(36), content);
+			if (isSearchable && content) {
+				if (content !== oldContent)
+					vectorDB.set('m#'+id.toString(36), content);
+			}
 			else vectorDB.delete('m#'+id.toString(36));
 
-			if (isSearchable && data.think?.content) vectorDB.set('M#'+id.toString(36), data.think.content);
+			const thinkContent = data.think?.content;
+			if (isSearchable && thinkContent) {
+				if (thinkContent !== oldThink)
+					vectorDB.set('M#'+id.toString(36), thinkContent);
+			}
+			// maybe if(oldThink) here
 			else vectorDB.delete('M#'+id.toString(36));
 		}
 

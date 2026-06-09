@@ -155,6 +155,9 @@ async function SSEHandler(logPath, apiPath, ctx) {
 
 			if (!proxyRequest) {
 				const id = chunk.id;
+				log('响应开始', id);
+				if (null == id) return;
+
 				activeRequests.set(id, proxyRequest = {
 					id,
 					abort,
@@ -162,7 +165,6 @@ async function SSEHandler(logPath, apiPath, ctx) {
 					event: new EventEmitter,
 					isFinished: false
 				});
-				log('响应开始', id);
 
 				if (SSE_PROXY_TRACE) {
 					const fileName = `${logPath}/${encodeURIComponent(id)}_${now%1000}.jsonl`;

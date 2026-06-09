@@ -1,10 +1,10 @@
 {
-  "appId": "com.example.aichat",
+  "appId": "com.roj234.aichat",
   "appName": {
     "default": "AiChat",
     "zh-CN": "爱聊天"
   },
-  "version": 3,
-  "versionName": "2.1.0",
+  "version": {{VERSION}},
+  "versionName": "{{VERSION_NAME}}",
   "icon": "logo.png"
 }

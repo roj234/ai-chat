@@ -16,6 +16,7 @@ import {
 import {submitUserChatMessage} from "../api-request.js";
 import {
 	copyButtonAnimation,
+	downloadFile,
 	errorBlock,
 	getTextContent,
 	IN_EDIT_MODE,
@@ -36,7 +37,6 @@ import "./MyLoading.jsx";
 import morphdom from "morphdom";
 import SimpleModal from "./SimpleModal.jsx";
 import {ToolCallEditor} from "./ToolCallEditor.jsx";
-import {downloadFile} from "../data-exchange.js";
 
 // region AiChat.ResponseContentPart[] 的生成和渲染函数
 /**
@@ -107,25 +107,71 @@ function chunkRenderer(m) {
 					return errorBlock(e, "工具UI渲染失败");
 				}
 			case "usage":
-				const logs = $state([]);
+				const logData = $state("加载中");
 
 				return (<div className="stats" onMouseEnter.once={() => {
-					Promise.all(messages.slice(m.index, m.end_index).map(m => getBillingLog(m.id))).then((billingLogs) => {
-						logs.value = billingLogs;
+					Promise.all(messages.slice(m.index, m.end_index).map(m => getBillingLog(m.id))).then((logs) => {
+						let totalInput = 0;
+						let totalCacheRead = 0;
+						let totalOutput = 0;
+						let totalReasoning = 0;
+						let totalCacheWrite = 0;
+						let totalCost = 0;
+						let totalTime = 0;
+						let avgTps = 0;
+
+						logs.forEach(item => {
+							if (!item) return;
+
+							let {
+								input_tokens = 0, cached_tokens = 0, output_tokens = 0, reasoning_tokens = 0, cache_write_tokens = 0,
+								cost = 0, duration = 0, tps
+							} = item;
+
+							duration /= 1000;
+
+							totalInput += input_tokens;
+							totalCacheRead += cached_tokens;
+							totalOutput += output_tokens;
+							totalReasoning += reasoning_tokens;
+							totalCacheWrite += cache_write_tokens;
+							totalCost += cost;
+							totalTime += duration;
+
+							avgTps += tps ?? output_tokens / duration;
+						});
+
+						const log = logs[0];
+						if (!log) {
+							logData.value = "无记录";
+							return;
+						}
+						logData.value = [
+							totalInput,
+							totalCacheRead,
+							totalOutput,
+							totalReasoning,
+							totalCacheWrite,
+							log.time,
+							log.latency / 1000,
+							totalTime,
+							totalCost,
+							log.currency,
+							avgTps / logs.length,
+							logs.at(-1).finish_reason
+						];
 					});
 				}} style={"--height:"+(30 + (m.end_index-m.index)*64)+"px"}>
 					<i className="ri-information-line"></i>
 					<div className="stats-popover">
-						{$foreach(logs, item => {
-							if (!item) return <div className="stats-row"><div className="stats-row-top">Token统计暂缺</div></div>;
+						{() => {
+							const item = unconscious(logData);
+							if (typeof item !== 'object') return <div className="stats-row"><div className="stats-row-top">{item || "数据暂缺"}</div></div>;
 
-							let {
-								input_tokens, cached_tokens = 0, output_tokens, reasoning_tokens = 0, cache_write_tokens = 0,
-								time, latency, cost, currency, duration, tps, finish_reason
-							} = item;
-							duration /= 1000;
-							latency /= 1000;
-							if (!tps) tps = output_tokens / (duration - latency);
+							let [
+								input_tokens, cached_tokens, output_tokens, reasoning_tokens, cache_write_tokens,
+								time, latency, duration, cost, currency, tps, finish_reason
+							] = item;
 
 							return <div className="stats-row">
 								<div className="stats-row-top">
@@ -133,17 +179,17 @@ function chunkRenderer(m) {
 										{tps ? tps.toFixed(2)+" TPS" : finish_reason}
 									</span>
 									&nbsp;
-									<span className="timestamp" title={`开始于: ${formatDate('Y-m-d H:i:s', time)}\nTTFT: ${latency.toFixed(2)}s`}>
+									<span className="timestamp" title={`开始于: ${formatDate('Y-m-d H:i:s', time)}\n首字延迟: ${latency.toFixed(2)}s`}>
 										{duration.toFixed(2)}s
 									</span>
 								</div>
 								<div className="stats-row-bottom">
-									{input_tokens ? <span title={"缓存读取: " + cached_tokens + "\n缓存写入: " + cache_write_tokens}>输入: <b>{input_tokens}</b> Tokens</span> : null}
-									{output_tokens ? <span title={"思考: " + reasoning_tokens}>输出: <b>{output_tokens}</b> Tokens</span> : null}
-									{cost ? (<span>价格: <b>{cost.toFixed(7)}</b> {currency}</span>) : null}
+									{input_tokens ? <span>↑ <b>{input_tokens}{cached_tokens?` (+${cached_tokens})`:null}</b> Tokens</span> : null}
+									{output_tokens ? <span title={"缓存写入: " + cache_write_tokens}>↓ <b>{output_tokens}{reasoning_tokens?` (${reasoning_tokens} 思考)`:null}</b> Tokens</span> : null}
+									{cost ? (<span>价格: <b>{currency === 'CNY' ? '￥' : '$'}{cost.toFixed(7)}</b></span>) : null}
 								</div>
 							</div>;
-						})}
+						}}
 					</div>
 				</div>);
 			case "branch":
@@ -682,7 +728,9 @@ const combinedMessages = $computed((oldMessages) => {
 			}
 			// show token usage & billing
 			else {
-				chunks.push({type: "usage"});
+				// 手动添加的消息不显示usage
+				if (message.finish_reason)
+					chunks.push({type: "usage"});
 				getBranchChunk(arr[ref.index], chunks);
 			}
 		} else {
@@ -708,7 +756,7 @@ const combinedMessages = $computed((oldMessages) => {
 	}
 
 	return out;
-}, [messages, updateMessageUI]);
+}, [messages, updateMessageUI, $computed(() => config.combineToolCalls)]);
 
 $watch([messages, updateMessageUI, abortCompletion], () => {
 	if (hoveringElement?.isConnected) updateButtons(hoveringMessage, hoveringElement);

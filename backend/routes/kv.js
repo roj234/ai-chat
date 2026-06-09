@@ -34,14 +34,14 @@ export function registerKVRoutes(batcher) {
 		if (!type || !name) return { error: 'type and name required' };
 
 		const row = db.prepare('SELECT * FROM kvs WHERE type = ? AND name = ?').get(type, name);
-		if (!row) return { error: 'Not found' };
+		if (!row) return { error: `${type} ${JSON.stringify(name)} not found` };
 
 		return deserializeRow(row);
 	};
 
 	batcher["kvs/upsert"] = async ({ type, name, ...data }, {db}) => {
 		if (!type || !name) return { error: 'type and name required' };
-		if ("error" in data) return { error: 'error cannot be key in data' };
+		if ("error" in data) return { error: '"error" in data' };
 
 		db.prepare('REPLACE INTO kvs (type, name, data) VALUES (?, ?, ?)').run(type, name, await compressGeneric(data));
 		return true;

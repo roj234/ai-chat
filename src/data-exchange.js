@@ -1,13 +1,12 @@
 import {config, conversations, messages, selectedConversation, Shared} from "./states.js";
 import {showToast} from "./components/Toast.js";
 import {deleteDatabase, getMessages, kvListGetValues, kvListSet, updateConversation} from "./database.js";
-import {prettyError} from "./utils/utils.js";
+import {downloadFile, prettyError} from "./utils/utils.js";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {ZipReader, ZipWriter} from "unconscious/common/zip-io.js";
 import {$computed, $state, $update, unconscious} from "unconscious";
 import {reloadPresetList} from "./components/PresetDropdown.jsx";
 import {decodeObjects, serializeJSON} from "./utils/marshal.js";
-import {webviewDownloadFile} from "/vendor/jsBridge.js";
 
 const sleep = () => new Promise(resolve => setTimeout(resolve));
 
@@ -259,21 +258,6 @@ export const exportConversation = async (isConfig, _conv) => {
 	} catch (e) {
 		console.error(e);
 		showToast('导出失败: ' + prettyError(e), 'error');
-	}
-};
-
-export const downloadFile = (blob, ext) => {
-	const filename = blob.name || `${APP_NAME}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${ext}`;
-
-	if (IS_ANDROID_BUILD) {
-		webviewDownloadFile(blob, filename);
-	} else {
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = filename;
-		a.click();
-		URL.revokeObjectURL(url);
 	}
 };
 

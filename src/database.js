@@ -14,7 +14,7 @@ const PREV_CONVERSATION = debugSymbol("CONVERSATION_IN_DB");
 export const DONE = Promise.resolve();
 
 export const databaseError = err => {
-	showToast("数据库错误!\n"+prettyError(err)+"\n新更改可能丢失，建议从页面导出剩余数据", 'error', 0);
+	showToast("数据库错误!\n"+prettyError(err)+"\n更改可能丢失，建议从设置导出当前对话", 'error', 0);
 };
 
 if (DB_MODE !== 'local') {

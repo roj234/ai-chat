@@ -94,13 +94,16 @@ export function ToolCallEditor(props) {
                             disabled={() => !inputState.obj} onClick={({target}) => {
                         const idx = index();
 
-                        const oldValue = fn.arguments;
+                        const oldName = fn.name;
+                        const oldArg = fn.arguments;
+                        fn.name = unconscious(toolName);
                         fn.arguments = JSON.stringify(inputState.obj);
 
                         target.disabled = true;
                         runTools(message, unconscious(selectedConversation), idx, true).then(reset).finally(() => {
                             target.disabled = false;
-                            fn.arguments = oldValue;
+                            fn.name = oldName;
+                            fn.arguments = oldArg;
                         });
                     }}>
                         执行

@@ -20,7 +20,7 @@ COMMAND_REGISTRY["setprompt"] = [
 			prompt = tmp;
 		}
 
-		[prompt] = buildSystemPrompt(selectedConversation, prompt);
+		[prompt] = await buildSystemPrompt(selectedConversation, prompt);
 		setSystemPrompt(prompt);
 		$update(updateMessageUI);
 	},

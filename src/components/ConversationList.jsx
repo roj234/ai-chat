@@ -250,7 +250,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 		}
 
 		const conv = unconscious(selectedConversation);
-		vl.dom.querySelector(".active")?.classList.remove("active");
+		vl.dom.querySelectorAll(".active").forEach(item => item.classList.remove("active"));
 		if (conv) {
 			const id = vl.findIndex(conv);
 			if (id >= 0) vl.getValue(id).classList.add("active");

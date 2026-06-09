@@ -25,15 +25,33 @@ jobs:
         with:
           path: packages/ai-chat
 
-      - name: Clone unconscious
-        run: git clone https://github.com/roj234/unconscious.git packages/unconscious
+      - name: Checkout unconscious
+        uses: actions/checkout@v6
+        with:
+          path: packages/unconscious
+          repository: roj234/unconscious
 
-      - name: Clone streaming-markdown
-        run: git clone https://github.com/roj234/streaming-markdown.git packages/streaming-markdown
+      - name: Checkout streaming-markdown
+        uses: actions/checkout@v6
+        with:
+          path: packages/streaming-markdown
+          repository: roj234/streaming-markdown
 
-      - name: Setup monorepo root
+      - name: Setup environment
         run: |
           echo '{ "private": true, "workspaces": ["packages/*"] }' > package.json
+          echo "BUILD_NUMBER=${{ github.run_number }}" >> $GITHUB_ENV
+
+          cd packages/ai-chat
+          VERSION_NAME=$(jq -r '.version' package.json)
+          VERSION="${{ github.run_number }}"
+
+          sed -i \
+            -e "s/{{VERSION_NAME}}/${VERSION_NAME}/g" \
+            -e "s/{{VERSION}}/${VERSION}/g" \
+            android-config/config.json
+
+          echo "✅ 替换完成：VERSION=${VERSION}  VERSION_NAME=${VERSION_NAME}"
 
       - name: Install dependencies
         run: npm install

@@ -19,6 +19,7 @@ import {
 } from "/backend/sync_const.js";
 import {updateMessageUI} from "../components/MessageList.jsx";
 import {clearDirtyFlags} from "../database.js";
+import {patch} from "unconscious/common/deepEqual.js";
 
 export {SYNC_MESSAGE, SYNC_CONVERSATION};
 
@@ -162,7 +163,7 @@ export function initSync(address) {
 
 				const index = msg.findIndex(item => item.id === message.id);
 				if (index >= 0) {
-					if (isUpdate) msg[index] = message;
+					if (isUpdate) patch(msg[index], message);
 					else msg.splice(index, 1);
 				} else if (isUpdate && conv.id === owner) {
 					msg.push(message);
@@ -176,7 +177,7 @@ export function initSync(address) {
 				const isUpdate = Object.keys(data).length > 1;
 
 				const index = conversations.findIndex(item => item.id === data.id);
-				if (index >= 0) data = Object.assign(conversations.splice(index, 1)[0], data);
+				if (index >= 0) data = patch(conversations.splice(index, 1)[0], data);
 				if (isUpdate) conversations.unshift(data);
 				else {
 					if (data.id === selectedConversation.id) {

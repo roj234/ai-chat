@@ -60,7 +60,7 @@ export function createHashLine(fs) {
 		if (cached && mtime <= cached.mtime) return cached;
 
 		const str = await fs.read(path, ctx);
-		const lines = str.split(/\r?\n/);
+		const lines = str.split(/\r?\n/).map(item => item.replaceAll("\t", "  "));
 		lines.anchors = lines.map(hashLine);
 		lines.mtime = mtime;
 		cache.set(path, new WeakRef(lines));
@@ -104,12 +104,14 @@ export function createHashLine(fs) {
 		const lines = await readLines(filePath, ctx);
 		const parsedPatches = [];
 
-		for (const { start_anchor, end_anchor, lines: patchLines } of patches) {
-			const start = parseHash(start_anchor, lines);
-			const end   = parseHash(end_anchor, lines);
-			if (start < 0) throw new Error(`Error locating anchor ${start_anchor}: The file may have changed significantly. Re-read to get fresh anchors.`);
-			if (end < 0)   throw new Error(`Error locating anchor ${end_anchor}: The file may have changed significantly. Re-read to get fresh anchors.`);
-			if (start > end) throw new Error('Resolved end line is before start line: The file may have changed significantly. Re-read to get fresh anchors.');
+		for (let { start_anchor, end_anchor, lines: patchLines, content } of patches) {
+			if (!patchLines) patchLines = content.split('\n');
+
+			let start = parseHash(start_anchor, lines), end   = parseHash(end_anchor, lines);
+			if (start < 0) throw (`Error locating anchor ${start_anchor}: The file may have changed significantly. Re-read to get fresh anchors.`);
+			if (end < 0)   throw (`Error locating anchor ${end_anchor}: The file may have changed significantly. Re-read to get fresh anchors.`);
+			if (start > end) throw ('Resolved end line is before start line: The file may have changed significantly. Re-read to get fresh anchors.');
+			end++;
 			parsedPatches.push({ start, end, patchLines });
 		}
 
@@ -118,7 +120,7 @@ export function createHashLine(fs) {
 			const cur = parsedPatches[i];
 			const prev = parsedPatches[i - 1];
 			if (cur.start < prev.end)
-				throw new Error(`Patch ${i + 1} (${cur.start}, ${cur.end}) overlaps with patch ${i} (${prev.start}, ${prev.end}).`);
+				throw (`Patch ${i + 1} [${cur.start}, ${cur.end}] overlaps with patch ${i} [${prev.start}, ${prev.end}].`);
 		}
 
 		const newLines = [];
@@ -141,7 +143,7 @@ export function createHashLine(fs) {
 			const newLen = patchLines.length;
 			const delta = newLen - oldLen;
 			patchReport += (patchReport ? '\n' : '') +
-				`[Patch ${i + 1}]\nRange: [${start + 1}, ${end + 1})\nNew lines: ${newLen} (${delta > 0 ? '+' + delta : delta})\n` +
+				`[Patch ${i + 1}]\n` + //Range: [${start + 1}, ${end + 1})\nNew lines: ${newLen} (${delta > 0 ? '+' + delta : delta})\n
 				HASHLINE_META_SEP_ANCHOR +
 				patchLines.map((line, j) => newAnchors[patchStart + j] + HASHLINE_CONTENT_SEP + line).join('\n');
 
@@ -158,7 +160,12 @@ export function createHashLine(fs) {
 	};
 
 	const replace = async ({ path, search, replace, all, start_line, end_line }, ctx) => {
-		const content = await fs.read(path, ctx);
+		const lines = await readLines(path, ctx);
+		const actualStart = (start_line ?? 1) - 1;
+		const actualEnd = end_line ?? lines.length;
+		const slice = lines.slice(actualStart, actualEnd);
+		if (!slice.length) throw (`line slice [${start_line}, ${end_line}] is empty!`);
+		const content = slice.join("\n");
 
 		let newContent;
 		if (all) {
@@ -169,10 +176,12 @@ export function createHashLine(fs) {
 				count++;
 				lastIdx = idx;
 			}
-			if (count === 0) throw new Error(`'search' was not found in the file.`);
-			if (count > 1) throw new Error(`Found ${count} occurrences of the search string — the search must uniquely identify a single location. Please expand the 'search' to include more surrounding context.`);
+			if (count === 0) throw (`'search' was not found in the file.`);
+			if (count > 1) throw (`Found ${count} occurrences of the search string — the search must uniquely identify a single location. Please expand the 'search' to include more surrounding context.`);
 			newContent = content.slice(0, lastIdx) + replace + content.slice(lastIdx + search.length);
 		}
+
+		newContent = lines.slice(0, actualStart).join("\n") + newContent + lines.slice(actualEnd).join("\n");
 
 		await fs.write(path, newContent, ctx);
 		cache.delete(path);

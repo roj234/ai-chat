@@ -10,6 +10,9 @@ declare namespace AiChat {
         /** 消息是否从DB加载完成 */
         ready?: boolean,
 
+        /** SSE Proxy 的断点续传ID */
+        resumeId?: string,
+
         /** 已激活的模块(技能) */
         activatedModules?: Set<string>,
         /** 允许使用的工具 */

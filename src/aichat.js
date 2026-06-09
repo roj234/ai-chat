@@ -1,7 +1,7 @@
-import {$unwatch, $update, $watch, appendChild, appendChildren, unconscious} from 'unconscious';
+import {$computed, $unwatch, $update, $watch, appendChild, appendChildren, unconscious} from 'unconscious';
 import Filter from 'unconscious/common/components/Filter.jsx';
 import {jsHide, prettyError} from "./utils/utils.js";
-import {ConversationList, updateConversationListUI} from "./components/ConversationList.jsx";
+import {ConversationList, LOCKED, updateConversationListUI} from "./components/ConversationList.jsx";
 import {SETTINGS} from "./settings.js";
 import {databaseError, getMessages, isIDB, listConversations, updateConversation} from "./database.js";
 import {
@@ -11,7 +11,6 @@ import {
 	isMobile,
 	lastScrollDirection,
 	messages,
-	resumableCompletions,
 	selectedConversation,
 	Shared,
 	state
@@ -26,6 +25,8 @@ import {createUserInputComposer} from "./components/UserInputComposer.jsx";
 import {onPluginLoaded} from "/plugins/PluginRegistry.js";
 import {callOnLoadHandler} from "./plugin.js";
 import {enableBranches} from "./utils/BranchManager.js";
+import {checkUpdate} from "../common/updater.js";
+import {setAllowHTMLTags} from "./markdown/markdown.js";
 
 const $ = sel => document.getElementById(sel);
 
@@ -35,7 +36,8 @@ const createApp = () => {
 	 */
 	let messagesPanel,
 		sidebar,
-		scroller;
+		scroller,
+		updateLink;
 
 	const SettingUI = <Filter config={SETTINGS} choices={config} onChange={onSettingChanged} showTitle={isMobile} />;
 	const newSettingUI = SettingDialog(SettingUI);
@@ -94,7 +96,7 @@ const createApp = () => {
 			<div className="spacer"></div>
 			<div className="sidebar-header">
 				<a style={{fontSize: "14px", userSelect: "none", fontWeight: 700, color: "var(--text)"}}
-				   href={"./docs.html"} target={"_blank"} title={"查看文档"}>爱聊天 | v{APP_VERSION}</a>
+				   ref={updateLink} target={"_blank"} title={"构建号: "+BUILD_NUMBER}>爱聊天 | v{APP_VERSION}</a>
 				<button className="ri-wrench-line btn ghost" title="设置" onClick={() => jsHide(newSettingUI)}></button>
 			</div>
 			<div className={"bg"} onClick={toggleSidebar}></div>
@@ -173,6 +175,16 @@ const createApp = () => {
 			});
 			SettingUI.sync(true);
 
+			if (config.checkUpdate) {
+				checkUpdate().then((info) => {
+					if (info.hasUpdate) {
+						updateLink.href = info.releaseUrl;
+						updateLink.title = "下载更新";
+						updateLink.append(<sup title={"发布时间: "+info.publishedAt} style={"color:red"}>*v{info.latestVersion}已可用</sup>);
+					}
+				});
+			}
+
 			// Hash加载消息
 			let id;
 			const hash = location.hash.slice(1);
@@ -191,6 +203,9 @@ const createApp = () => {
 				const loading = $("loading");
 				loading.style.opacity = 0;
 				setTimeout(() => loading.remove(), 500);
+
+				if (!arr) return;
+
 				if (!config.endpoint && !arr.length) import("./UserOnboard.js");
 
 				conversations.value = arr;
@@ -244,13 +259,13 @@ const createApp = () => {
 					if (prevId !== id)
 						scroller.scrollToBottom();
 
-					const resumeObj = resumableCompletions[id];
-					if (resumeObj) {
-						if (Date.now() - resumeObj.time < RESUME_TIMEOUT) {
+					if (conv.resumeId && !conv[LOCKED]) {
+						if (Date.now() - conv.time < RESUME_TIMEOUT) {
 							submitUserChatMessage();
-							showToast("正在继续上次意外中断的响应", 'ok');
+							showToast("尝试继续意外中断的请求", 'ok');
 						} else {
-							delete resumableCompletions[id];
+							delete conv.resumeId;
+							updateConversation(conv);
 						}
 					}
 
@@ -284,6 +299,10 @@ const createApp = () => {
 
 				backToBottomBtnShowHide();
 			});
+
+			$watch($computed(() => config.allowHTMLTags), () => {
+				setAllowHTMLTags(config.allowHTMLTags);
+			})
 		}
 	];
 };
@@ -333,6 +352,10 @@ addEventListener("load", () => {
 
 		const APP = $("app");
 		appendChildren(APP, app_);
+
+		if (IS_ANDROID_BUILD) {
+			$("versionCheck").remove();
+		}
 
 		if (!isIDB && !config.db_server) {
 			connectDatabase();

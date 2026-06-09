@@ -95,22 +95,23 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
     const {success, content, time, [TOOL_NAME]: tool_name} = message.tool_responses[idx] || {};
     const is_errored = false === success;
 
-    element.classList.toggle("tool-error", is_errored);
+    const classList = element.classList;
+    classList.toggle("tool-error", is_errored);
 
     const interactive = toolScriptRegistry[tool.function.name]?.interactive;
     let pending = interactive === "secure" && null == time;
-    const alreadyHasFlag = element.classList.contains("tool-pending");
-    element.classList.toggle("tool-pending", pending);
+    classList.toggle("tool-pending", pending);
 
     const setAuditState = (target, allowUnsafe) => {
         runTools(message, unconscious(selectedConversation), idx, allowUnsafe).then(() => {
             $update(messages);
         });
-
-        target.closest(".tool-body").remove();
     };
 
-    if (pending && !alreadyHasFlag) {
+    const pend_class_name = "pend-expand";
+    if (message.finish_reason && pending && !classList.contains(pend_class_name)) {
+        classList.add(pend_class_name);
+
         element.open = true;
         element.click();
         element.append(<div className={"tool-body"}>
@@ -125,7 +126,7 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
                     target.previousElementSibling.click();
 
                     const grantedTools = selectedConversation.grantedTools;
-                    if (grantedTools) selectedConversation.grantedTools = new Set([tool_name]);
+                    if (!grantedTools) selectedConversation.grantedTools = new Set([tool_name]);
                     else grantedTools.add(tool_name);
                 }} title={"在该对话中一直允许"}>
                     一直允许
@@ -138,6 +139,9 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
             </div>
         </div>)
         return;
+    } else if (!pending && classList.contains(pend_class_name)) {
+        classList.remove(pend_class_name);
+        element.lastElementChild.remove();
     }
 
     const is_ever_opened = element.childElementCount > 1;

@@ -90,6 +90,7 @@ export default defineConfig(async () => {
         DEFAULT_LLM_ENDPOINT: JSON.stringify(serverConfigInfo.SERVER_BASE_ADDR ? serverConfigInfo.SERVER_BASE_ADDR+"sse/v1" : ""),
         RESUME_TIMEOUT: JSON.stringify(serverConfigInfo.SSE_RESUME_TIMEOUT),
         IS_ANDROID_BUILD: JSON.stringify(false),
+        BUILD_NUMBER: JSON.stringify(process.env.BUILD_NUMBER || "0"),
     },
 
     plugins: [
