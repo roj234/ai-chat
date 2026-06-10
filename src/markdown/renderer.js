@@ -59,10 +59,8 @@ export function createMarkdownRenderer(root, options = {}) {
 				case fastmd.HEADING_4:     slot = <h4 />        ;break
 				case fastmd.HEADING_5:     slot = <h5 />        ;break
 				case fastmd.HEADING_6:     slot = <h6 />        ;break
-				case fastmd.ITALIC_AST:
-				case fastmd.ITALIC_UND:    slot = <em />        ;break
-				case fastmd.STRONG_AST:
-				case fastmd.STRONG_UND:    slot = <strong />    ;break
+				case fastmd.ITALIC_AST:    slot = <em />        ;break
+				case fastmd.STRONG_AST:    slot = <strong />    ;break
 				case fastmd.STRIKE:        slot = <s />         ;break
 				case fastmd.CODE_INLINE:   slot = <kbd />      ;break
 				case fastmd.RAW_URL:

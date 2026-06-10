@@ -35,9 +35,17 @@ global.compression = {
 	deserializeRow
 };
 
+/**
+ * @param router {AiChatBackend.Router}
+ * @param rootDir {string}
+ */
 const registerSSEProxy = (router, rootDir) => {
 	router.get("/sse/props", (ctx) => {
-		ctx.send(204, "");
+		ctx.res.writeHead(204, {
+			vary: "Authorization",
+			"cache-control": "public"
+		});
+		ctx.res.end();
 	});
 
 	router.push("sse/v1");

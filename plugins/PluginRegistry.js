@@ -3,6 +3,9 @@ import {registerDefaultTools} from "/src/skills.js";
 import "./rpg/example/StoryEngine.js";
 import "./cmdSetPrompt.js";
 
+// Blob ServiceWorker 缓存
+import "./blobCache.js";
+
 // JSON对话编辑器
 import "./conversationEditor.js";
 

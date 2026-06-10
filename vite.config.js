@@ -154,7 +154,8 @@ export default defineConfig(async () => {
                 jsonEditor: 'json_editor.html',
                 characterViewer: 'character_viewer.html',
                 docs: 'docs.html',
-                markdownPreview: 'markdown.html'
+                markdownPreview: 'markdown.html',
+                sw: "sw.js",
             },
 
             external(id) {
@@ -162,6 +163,10 @@ export default defineConfig(async () => {
             },
 
             output: {
+                entryFileNames(chunkInfo) {
+                    if (chunkInfo.name === 'sw') return '[name].js'
+                    return 'assets/[name]-[hash].js'
+                },
                 // 手动控制 chunk 拆分
                 manualChunks(id) {
                     if (id.includes('highlight.js/es/languages/')) {

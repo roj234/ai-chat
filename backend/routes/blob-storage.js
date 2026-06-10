@@ -128,40 +128,39 @@ PRAGMA user_version = `+DB_VERSION);
 				} else {
 					end = fileSize - 1;
 				}
-				if (end >= fileSize) end = fileSize - 1;
+			}
 
-				// 验证范围
-				if (start >= fileSize || start > end) {
-					ctx.res.writeHead(416, {
-						'Content-Range': `bytes */${fileSize}`,
-						'Content-Length': '0',
-						'Last-Modified': lastModified
-					});
-					ctx.res.end();
-					return;
-				}
-
-				const contentLength = end - start + 1;
-				ctx.res.writeHead(206, {
-					'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-					'Content-Length': contentLength.toString(),
-					'Content-Type': info.type,
-					'Cache-Control': 'public, max-age=31536000, immutable',
-					'Last-Modified': lastModified,
-					'Accept-Ranges': 'bytes'
+			if (!match || start < 0 || start >= fileSize || end >= fileSize || start > end) {
+				ctx.res.writeHead(416, {
+					'Content-Range': `bytes */${fileSize}`,
+					'Content-Length': '0',
+					'Last-Modified': lastModified
 				});
-
-				// 管道部分内容
-				await pipeline(createReadStream(dataPath, { start, end }), ctx.res);
+				ctx.res.end();
 				return;
 			}
+
+			const contentLength = end - start + 1;
+			ctx.res.writeHead(206, {
+				'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+				'Content-Length': contentLength.toString(),
+				'Content-Type': info.type,
+				'Cache-Control': 'public, max-age=31536000, immutable',
+				'Last-Modified': lastModified,
+				'Accept-Ranges': 'bytes'
+			});
+
+			// 管道部分内容
+			await pipeline(createReadStream(dataPath, { start, end }), ctx.res);
+			return;
+
 		}
 
 		ctx.res.writeHead(200, {
 			'Content-Type': info.type,
 			'Content-Length': fileSize,
 			'Cache-Control': 'public, max-age=31536000, immutable',
-			'Content-Disposition': `attachment; filename="${encodeURIComponent(info.name)}"`,
+			'Content-Disposition': `attachment; filename="${encodeURIComponent(ctx.searchParams.get("name") || info.name)}"`,
 			'Last-Modified': lastModified,
 			'Accept-Ranges': 'bytes'
 		});

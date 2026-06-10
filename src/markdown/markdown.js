@@ -8,9 +8,9 @@ import "./markdown.css";
 const tags = {
 	basic: [
 		"details", "summary",
-		"b", "i", "u", "p", "br", "em", "kbd", "q", "strong", "code",
+		"b", "i", "u", "p", "br", "em", "kbd", "q", "strong", "code", "ruby", "rp", "rt",
 		"h1", "h2", "h3", "h4", "h5", "h6",
-		"table", "th", "tr", "td", "thead", "tbody",
+		"table", "th", "tr", "td", "thead", "tbody", "pre",
 		"ul", "ol", "li",
 		"section",  "div", "span", "hr", "mark",
 		"img", "a",

@@ -134,7 +134,8 @@ export default defineConfig(async () => {
                 main: 'index.html',
                 logViewer: 'log_viewer.html',
                 //characterViewer: 'character_viewer.html',
-                docs: 'docs.html'
+                docs: 'docs.html',
+                sw: "sw.js",
             },
 
             external(id) {
@@ -142,6 +143,10 @@ export default defineConfig(async () => {
             },
 
             output: {
+                entryFileNames(chunkInfo) {
+                    if (chunkInfo.name === 'sw') return '[name].js'
+                    return 'assets/[name]-[hash].js'
+                },
                 //experimentalMinChunkSize: 10240,
             },
         }
