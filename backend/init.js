@@ -1,9 +1,7 @@
-import {DatabaseSync} from 'node:sqlite';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 
 import {Router} from "./router.js";
-import {VectorDB} from "./rag/VectorDB.js";
 import {registerMessageRoutes} from "./routes/messages.js";
 import {registerKVRoutes} from "./routes/kv.js";
 import {registerSearchRoutes} from "./routes/search.js";
@@ -15,19 +13,15 @@ import {registerSSEProxyRoutes} from "./routes/sse-proxy.js";
 
 import {
 	ALLOW_USER_NAMES,
-	ENABLE_FILE_TRANSFER,
 	RESPONSE_USE_MSGPACK_SCHEMA,
 	RESTRICT_USER_CREATION,
-	SEMANTIC_SEARCH_ENABLE,
-	SHUTDOWN_SQL,
-	STARTUP_SQL,
 	WEBSOCKET_SYNC_BASE,
 	WEBSOCKET_SYNC_ENABLE
 } from "./config.js";
 import {c2s_schema_version} from "../common/MsgpackSchema.js";
 
-import {compressGeneric, compressMessage, decompressGeneric, deserializeRow} from "./utils/compression.js";
-import {cachePreparedSql} from "./utils/sqliteUtils.js";
+import {compressGeneric, decompressGeneric, deserializeRow} from "./utils/compression.js";
+import {loadUserData} from "./utils/UserManager.js";
 
 global.compression = {
 	compressGeneric,
@@ -77,7 +71,7 @@ export async function initServer(dataPath, basePath = "api", workspacePath) {
 				return true;
 			}
 
-			const getData = () => ctx._db || (ctx._db = getUserData(dataPath, userId));
+			const getData = () => ctx._db || (ctx._db = loadUserData(dataPath, userId));
 
 			Object.defineProperty(ctx, "db", {
 				get: () => getData().sqlite,
@@ -172,109 +166,4 @@ export async function initServer(dataPath, basePath = "api", workspacePath) {
 	router.pop();
 
 	return router;
-}
-
-// dbManager.js 增加清理
-const MAX_CONNECTIONS = 4;
-const connections = new Map();
-const usageTimestamps = new Map();
-
-/**
- *
- * @param {DatabaseSync} sqlite
- * @param {AiChatBackend.VectorDB} vector
- */
-function closeConnection({sqlite, vector}) {
-	sqlite.exec(SHUTDOWN_SQL);
-	sqlite.close();
-
-	vector?.close();
-}
-
-export function closeAllConnections() {
-	for (const value of connections.values()) {
-		closeConnection(value);
-	}
-}
-
-function getUserData(dbPath, userId) {
-	usageTimestamps.set(userId, Date.now());
-
-	// 如果连接数超限，关闭最久未使用的
-	if (usageTimestamps.size > MAX_CONNECTIONS) {
-		let oldestUser = null, oldestTime = Infinity;
-		for (let [id, time] of usageTimestamps) {
-			if (time < oldestTime) {
-				oldestTime = time;
-				oldestUser = id;
-			}
-		}
-		if (oldestUser && Date.now() - oldestTime > 5000) {
-			closeConnection(connections.get(oldestUser));
-			connections.delete(oldestUser);
-			usageTimestamps.delete(oldestUser);
-		}
-	}
-
-	let db = connections.get(userId);
-	if (!db) connections.set(userId, db = {
-		sqlite: initDB(dbPath ? dbPath+"/"+userId+".db" : ":memory:"),
-		vector: dbPath && SEMANTIC_SEARCH_ENABLE ? new VectorDB(dbPath+"/"+userId+"_rag.db") : null
-	});
-	return db;
-}
-
-// 数据库版本号
-const DB_VERSION = 1;
-
-function initDB(dbPath) {
-	const db = new DatabaseSync(dbPath);
-	const { user_version } = db.prepare('PRAGMA user_version').get();
-	cachePreparedSql(db);
-
-	if (user_version === 0) {
-		db.exec(`
-CREATE TABLE conversations (
-	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	title TEXT DEFAULT '',
-	time INTEGER NOT NULL,
-	data BLOB NOT NULL
-);
-CREATE TABLE messages (
-	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	owner INTEGER NOT NULL REFERENCES conversations(id),
-	time INTEGER,
-	content TEXT NOT NULL,
-	data BLOB NOT NULL
-);
-CREATE TABLE kv (
-	key TEXT PRIMARY KEY,
-	value BLOB NOT NULL
-) WITHOUT ROWID;
-CREATE TABLE kvs (
-	type TEXT NOT NULL,
-    name TEXT NOT NULL,
-    data BLOB NOT NULL,
-    PRIMARY KEY (type, name)
-) WITHOUT ROWID;
-CREATE INDEX idx_messages_owner ON messages(owner);
-CREATE TABLE logs (
-	id INTEGER UNIQUE,
-	time INTEGER NOT NULL,
-	data BLOB NOT NULL
-);
-
-PRAGMA user_version = `+DB_VERSION); // logs 使用 rowid 做底层索引
-	} else if (user_version === DB_VERSION) {
-	} else {
-		throw new Error("数据库版本号错误，请补充迁移函数");
-	}
-
-	db.exec(STARTUP_SQL);
-	if (ENABLE_FILE_TRANSFER) {
-		db.prepare("INSERT INTO conversations (id, title, time, data) VALUES (0, '文件传输助手', ?, ?) ON CONFLICT(id) DO NOTHING").run(
-			Date.now(), compressMessage({ noAI: true })
-		);
-	}
-	return db;
 }

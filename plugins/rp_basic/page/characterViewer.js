@@ -7,9 +7,7 @@ import {highlightJsonLike} from "/src/markdown/highlight.js";
 import {streamFetch} from "/common/openai-api-utils.js";
 import {webviewDownloadFile} from "/vendor/jsBridge.js";
 
-const {db_server} = $store("config", undefined, {persist: true, deep: false});
-const BASE = db_server+'/cards';
-
+const cfg = $store("config", undefined, {persist: true, deep: false});
 const currentPage = $state(1);
 const pages = $state();
 const cards = $state();
@@ -102,9 +100,9 @@ Only output the translation result, no explanations, no additional text.`,
 }
 
 function api(path, opts = {}) {
-	const url = path.startsWith('http') ? path : BASE + path;
+	const url = path.startsWith('http') ? path : cfg.db_server + '/cards' + path;
 	const headers = opts.body !== undefined ? { 'Content-Type': 'application/json' } : {};
-	return fetch(url, { ...opts, headers: { ...headers, ...opts.headers } }).then(r => {
+	return fetch(url, { ...opts, headers: { ...headers, ...opts.headers, 'Authorization': 'Bearer '+cfg.db_pat } }).then(r => {
 		if (!r.ok && r.headers.get('Content-Type')?.includes('application/json')) {
 			return r.json().then(d => { throw new Error(d.error || r.statusText); });
 		}
@@ -142,7 +140,7 @@ const APP = <>
 
 		return <div className="card" onClick={() => showDetail(c.name)}>
 			<div className="card-img">
-				{c.image_hash ? <img src={db_server+`/blob/${c.image_hash}`} alt={c.name}/> : <div className="no-img">&#x1F3AD;</div>}
+				{c.image_hash ? <img src={cfg.db_server+`/blob/${c.image_hash}`} alt={c.name}/> : <div className="no-img">&#x1F3AD;</div>}
 			</div>
 			<div className="card-body">
 				<h3>{c.name}</h3>
@@ -216,7 +214,7 @@ export const downloadFile = (blob, ext, name) => {
 
 async function saveCard(name) {
 	const card = await api('/' + name);
-	const blob = card.image && await (await fetch(db_server+`/blob/${card.image.hash}`)).blob();
+	const blob = card.image && await (await fetch(cfg.db_server+`/blob/${card.image.hash}`)).blob();
 
 	if (!blob) {
 		downloadFile(new Blob([JSON.stringify(card)]), "json", name);
@@ -235,7 +233,7 @@ async function showDetail(name) {
 	const html = <>
 		<h2>{name} {creator && <small style="color:#78909c">by {creator}</small>}
 		</h2>
-		{image && <img src={db_server+`/blob/${image.hash}`}
+		{image && <img src={cfg.db_server+`/blob/${image.hash}`}
 							style="max-width:100%;max-height:300px;border-radius:8px;margin-bottom:16px;display:block"/>}
 		{tags?.length && <div className="form-group"><label>标签</label>
 			<p>{tags.join(', ')}</p>

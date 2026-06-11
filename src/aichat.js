@@ -237,6 +237,7 @@ const createApp = () => {
 				const conv = unconscious(selectedConversation);
 				app.classList.toggle("_human", !!conv?.noAI);
 				if (conv && !conv.ready) {
+					messages.value = [];
 					getMessages(conv).then(data => {
 						conv.ready = true;
 
@@ -330,16 +331,19 @@ function connectDatabase() {
 				}
 			}
 
-			if (!value.toLowerCase().startsWith("http") && !value.startsWith("/")) {
+			if (!value.toLowerCase().startsWith("http") && !value.startsWith('/')) {
 				if (!DB_SERVER) return false;
 				value = DB_SERVER + "v2/"+encodeURIComponent(value);
 			}
+			if (!value.endsWith('/')) value += '/';
 			config.db_server = value;
+			config._new = true;
 			location.reload();
 		},
 		onCancel(value) {
 			if (DB_MODE !== 'mixed') return false;
 			config.db_server = ':idb:';
+			config._new = true;
 			location.reload();
 		}
 	});

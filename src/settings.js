@@ -60,7 +60,7 @@ export const CUSTOM_CONTROLS = <>
 		<div className="tooltip">工具调用：使用工具绘制图表、进行计算</div>
 	</button>
 	<button className="ri-git-fork-line chip"
-			style:display={() => unconscious(selectedConversation) ? "" : "none"}
+			style:display={() => selectedConversation.ready ? "" : "none"}
 			class:active={() => selectedConversation.bm_leaf}
 			disabled={() => unconscious(abortCompletion)}
 			onClick={() => {
@@ -576,7 +576,7 @@ export const SETTINGS = [
 		type: "element",
 		_tab: ["general", "data"],
 		_id: "import",
-		name: "导入对话、预设及更多格式",
+		name: "导入对话、预设、备份及更多格式",
 		element: <div className={"choice-scroll"}>
 			<label className="btn ghost">导入
 				<input type="file" accept="application/zip,application/json,image/png" style="display:none;" multiple onChange={importConversation}/>
@@ -586,11 +586,10 @@ export const SETTINGS = [
 	{
 		type: "element",
 		_tab: "data",
-		name: "导出选中对话（未选中则全部）或预设（可能含密钥）",
 		element: <div className={"choice-scroll"}>
-			<button className="btn ghost" onClick={() => exportConversation(false)}>导出对话</button>
-			<button className="btn ghost" onClick={() => exportConversation(true)}>导出预设</button>
-			{/*<button className="btn ghost" onClick={() => exportConversation(true)}>导出所有</button>*/}
+			<button className="btn ghost" onClick={() => exportConversation(1)}>备份对话</button>
+			<button className="btn ghost" onClick={() => exportConversation(2)}>备份预设</button>
+			<button className="btn ghost" onClick={() => exportConversation(7)}>备份所有</button>
 		</div>
 	},
 	{
@@ -726,7 +725,7 @@ for (const [k, v] of [
 // 删除过时的配置项
 requestIdleCallback(() => {
 	const keys = new Set(Object.keys(config));
-	["name", "think", "tools"].forEach(name => keys.delete(name));
+	["name", "think", "tools", "_new"].forEach(name => keys.delete(name));
 
 	SETTINGS.forEach(({id, _group, type, choices}) => {
 		if (!id) {

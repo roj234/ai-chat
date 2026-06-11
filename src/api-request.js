@@ -260,23 +260,27 @@ const generateChatTitle = (conversation, messages) => {
 
 	updateStatusText('生成标题');
 
+	const body = {
+		model: config.titleModel || config.model,
+		messages: [{
+			role: "system",
+			content: config.titlePrompt || defaultTitlePrompt,
+		}, {
+			role: "user",
+			content: "对话摘要：\n用户:\n" + s1 + "\nLLM:\n" + s2
+		}],
+		max_tokens: 30,
+		temperature: 0.7,
+		stop: ["\n"],
+		stream: false
+	};
+
+	const [reasoningPath, reasoningEnabledValue, reasoningDisabledValue = 'false'] = (config.reasoningPath||"reasoning.enabled").split(",");
+	if (config.forceThink !== 0) jsonPathOp(body, reasoningPath, "set", JSON.parse(reasoningDisabledValue));
+
 	jsonFetch(config.endpoint+'/chat/completions', {
 		key: config.accessToken,
-		body: JSON.stringify({
-			model: config.titleModel,
-			messages: [{
-				role: "system",
-				content: config.titlePrompt || defaultTitlePrompt,
-			}, {
-				role: "user",
-				content: "对话摘要：\n用户:\n" + s1 + "\nLLM:\n" + s2
-			}],
-			max_tokens: 30,
-			temperature: 0.7,
-			stop: ["\n"],
-			reasoning: {enabled: false},
-			stream: false
-		})
+		body: JSON.stringify(body)
 	}).then(json => {
 		if (json.choices?.[0].finish_reason !== "stop") throw json;
 		conversation.title = json.choices?.[0].message?.content;

@@ -70,6 +70,9 @@ export const RESTRICT_USER_CREATION = false;
 /** 白名单用户列表：仅当 RESTRICT_USER_CREATION 为 true 时生效 */
 export const ALLOW_USER_NAMES = new Set(['admin', 'user']);
 
+/** 要求交互式登录（在控制台接受）并下发PAT */
+export const INTERACTIVE_LOGIN = false;
+
 // ==========================================
 // 3. 安全与数据库设置
 // ==========================================

@@ -148,7 +148,6 @@ export const createUserInputComposer = (scroller) => {
 			// 寻找匹配的标签并插入图片
 			while ((match = imageRegex.exec(text)) !== null) {
 				const [str, imageIdxStr, hash, fileName] = match;
-				console.log(match);
 
 				if (imageIdxStr) {
 					const imageIdx = parseInt(imageIdxStr, 10) - 1;
@@ -189,18 +188,19 @@ export const createUserInputComposer = (scroller) => {
 			}
 		}
 
+		const noAI = selectedConversation.noAI;
 		if (input) {
 			const userMessage = {role: 'user', content: input, time: Date.now()};
 
 			const nickname = config.nickname;
-			if (selectedConversation.noAI && nickname) userMessage.name = nickname;
+			if (noAI && nickname) userMessage.name = nickname;
 
 			messages.push(userMessage);
 		} else {
 			if (sendButton.disabled) return;
 		}
 
-		if (selectedConversation.noAI) return;
+		if (noAI) return;
 
 		if (null == selectedConversation.id) {
 			// 创建新对话

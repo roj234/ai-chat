@@ -32,7 +32,7 @@ const mdParserOptions = {
  */
 export const setAllowHTMLTags = (tagTypes) => {
 	const arr = [];
-	for (let type of tagTypes) {
+	if (tagTypes) for (let type of tagTypes) {
 		arr.push(...tags[type]);
 	}
 	mdParserOptions.allowedTags = arr;

@@ -12,7 +12,13 @@ import {patch} from "unconscious/common/deepEqual.js";
  */
 export function registerMessageRoutes(batcher) {
 	// 列出对话
-	batcher["conversations"] = (_, {db}) => {
+	batcher["conversations"] = (latestTimeStamp, {db}) => {
+		if (latestTimeStamp != null) {
+			if (!Number.isFinite(latestTimeStamp))
+				return { error: 'invalid timestamp' };
+			const firstRecord = db.prepare('SELECT id FROM conversations WHERE time > ?').get(latestTimeStamp);
+			if (!firstRecord) return { error: { status: 304 } };
+		}
 		return db.prepare('SELECT id, title, time FROM conversations ORDER BY time DESC').all();
 	};
 

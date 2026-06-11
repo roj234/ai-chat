@@ -60,7 +60,7 @@ export function createHashLine(fs) {
 		if (cached && mtime <= cached.mtime) return cached;
 
 		const str = await fs.read(path, ctx);
-		const lines = str.split(/\r?\n/).map(item => item.replaceAll("\t", "  "));
+		const lines = str.split(/\r?\n/).map(item => item.trimEnd().replaceAll("\t", "  "));
 		lines.anchors = lines.map(hashLine);
 		lines.mtime = mtime;
 		cache.set(path, new WeakRef(lines));
@@ -166,6 +166,9 @@ export function createHashLine(fs) {
 		const slice = lines.slice(actualStart, actualEnd);
 		if (!slice.length) throw (`line slice [${start_line}, ${end_line}] is empty!`);
 		const content = slice.join("\n");
+
+		search = search.split("\n").map(item => item.trimEnd()).join("\n");
+		replace = replace.split("\n").map(item => item.trimEnd()).join("\n");
 
 		let newContent;
 		if (all) {

@@ -1,6 +1,6 @@
 import {debugSymbol} from 'unconscious';
 import {config} from "./states.js";
-import {delta} from "unconscious/common/deepEqual.js";
+import {deepEqual, delta} from "unconscious/common/deepEqual.js";
 import {prettyError} from "./utils/utils.js";
 import * as idb from "./database/db-indexeddb.js";
 import * as remote from "./database/db-remote.js";
@@ -17,6 +17,8 @@ export const databaseError = err => {
 	showToast("数据库错误!\n"+prettyError(err)+"\n更改可能丢失，建议从设置导出当前对话", 'error', 0);
 };
 
+export const isIDB = DB_MODE === 'local' || config.db_server === ':idb:';
+
 if (DB_MODE !== 'local') {
 	SETTINGS.push({
 		id: "db_server",
@@ -27,10 +29,13 @@ if (DB_MODE !== 'local') {
 		pattern: (DB_MODE === "mixed" ? /^(?:(?:https?:\/\/)?.*\/api\/v2\/?|:idb:$)/ : /^(?:https?:\/\/)?.*\/api\/v2\/?/),
 		warning: "请输入合法的服务器地址",
 		placeholder: "/api/v2/username"
+	},{
+		id: "db_pat",
+		_tab: "data",
+		type: "secret",
+		placeholder: "个人访问密钥 (PAT)",
 	});
 }
-
-export const isIDB = DB_MODE === 'local' || config.db_server === ':idb:';
 
 const db = isIDB ? idb : remote;
 
@@ -44,10 +49,11 @@ export const {
 
 /**
  * 列出所有会话，按创建时间降序
+ * @param {number=} lastTimestamp 304 时间戳
  * @returns {Promise<Array<{id:number, title:string, time:number, messageId?:number}>>}
  */
-export const listConversations = async () => {
-	const conversations = await db.listConversations();
+export const listConversations = async (lastTimestamp) => {
+	const conversations = await db.listConversations(lastTimestamp);
 	conversations.forEach((conversation) => conversation.ready = false);
 	return conversations;
 };
@@ -121,11 +127,11 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 	if (!("id" in conversation)) {
 		conversation[MESSAGE_DIFF] = new Map;
 		const {ready, ...rest} = conversation;
+		conversation.id = null;
 		const promise = changed(rest).then(id => {
 			conversation.id = id;
 		});
 		if (isIDB) await promise;
-		conversation.id = null;
 		// 后端事务会自动提取新增的id，前端不需要处理
 	}
 
@@ -151,7 +157,7 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 				const snapshot = messagesInDB.get(id);
 				messagesInDB.delete(id);
 
-				diff = delta(snapshot, message, DIFF_IGNORE_KEYS);
+				diff = isIDB ? !deepEqual(snapshot, message, DIFF_IGNORE_KEYS) : delta(snapshot, message, DIFF_IGNORE_KEYS);
 				if (!diff) {
 					messagesInMemory.set(id, snapshot);
 					continue;
@@ -167,10 +173,11 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 			if (id) messagesInMemory.set(id, snapshot);
 
 			// 后面会写 owner 字段，浅拷贝
-			if (!diff) diff = {...snapshot};
+			if (typeof diff !== 'object') diff = {...snapshot};
 
 			function save() {
-				diff.id = id;
+				if (id != null) diff.id = id;
+				else delete diff.id;
 				diff.owner = conversation.id;
 				const saveTime = message.time;
 
@@ -200,7 +207,7 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 	}
 
 	let convDiff;
-	if (changed && (convDiff = delta(conversation[PREV_CONVERSATION], conversation, DIFF_IGNORE_KEYS))) {
+	if (changed && (convDiff = isIDB ? (!deepEqual(conversation[PREV_CONVERSATION], conversation, DIFF_IGNORE_KEYS) && conversation) : delta(conversation[PREV_CONVERSATION], conversation, DIFF_IGNORE_KEYS))) {
 		convDiff.id = conversation.id;
 		changed(convDiff);
 	}

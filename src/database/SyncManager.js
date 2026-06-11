@@ -18,7 +18,7 @@ import {
 	SYNC_UNLOCKED
 } from "/backend/sync_const.js";
 import {updateMessageUI} from "../components/MessageList.jsx";
-import {clearDirtyFlags} from "../database.js";
+import {clearDirtyFlags, databaseError, listConversations} from "../database.js";
 import {patch} from "unconscious/common/deepEqual.js";
 
 export {SYNC_MESSAGE, SYNC_CONVERSATION};
@@ -69,12 +69,6 @@ const setReadonly = (id) => {
 	setCurrentLocked(1, id);
 };
 
-const findConversation = id => {
-	const convList = unconscious(conversations);
-	const index = convList.findIndex(item => item.id === id);
-	return convList[index];
-};
-
 const setCurrentLocked = (locked, id) => {
 	const id1 = selectedConversation.id;
 	if (id1 == null || (id != null && id1 !== id)) return;
@@ -84,6 +78,7 @@ const setCurrentLocked = (locked, id) => {
 
 export function initSync(address) {
 	ws = new WebSocket(address);
+	let closeToast;
 
 	let timestamp;
 	const updater = setInterval(() => {
@@ -97,9 +92,21 @@ export function initSync(address) {
 		pendingEvents = [];
 	};
 	ws.onclose = () => {
-		showToast(<>同步服务已断开 <button className={"btn primary"} onClick={() => {
-			location.reload();
-		}}>刷新</button></>, "error", 0);
+		let lastTimestamp = 0;
+		for (let conv of unconscious(conversations)) {
+			lastTimestamp = Math.max(lastTimestamp, conv.time);
+		}
+
+		closeToast = showToast(<>同步服务已断开 <button className={"btn primary"} onClick={() => {
+			closeToast();
+			listConversations(lastTimestamp).then(arr => {
+				conversations.value = arr;
+				const id = selectedConversation.id;
+				if (id != null) selectedConversation.value = arr.find(item => item.id === id);
+			}).catch(err => {
+				if (err.status !== 304) databaseError(err);
+			});
+		}}>重连</button></>, "error", 0);
 		clearInterval(updater);
 	};
 	ws.onmessage = async (event) => {
@@ -111,14 +118,10 @@ export function initSync(address) {
 			// 状态更新
 			case SYNC_INIT: {
 				const [clients, locked] = data;
+				const set = new Set(locked);
+				unconscious(conversations).forEach(item => item[LOCKED] = set.has(item.id));
+				$update(updateConversationListUI);
 				showToast("同步服务已连接, 共 "+clients+" 个客户端", "ok");
-				if (locked.length) {
-					for (const item of locked) {
-						const conv = findConversation(item);
-						if (conv) conv[LOCKED] = 1;
-					}
-					$update(updateConversationListUI);
-				}
 			}
 			break;
 			case SYNC_READERS: {
@@ -128,7 +131,7 @@ export function initSync(address) {
 			break;
 			case SYNC_LOCKED:
 			case SYNC_UNLOCKED: {
-				const conv = findConversation(data);
+				const conv = unconscious(conversations).find(item => item.id === id);
 				if (conv) {
 					conv[LOCKED] = type === SYNC_LOCKED;
 					$update(updateConversationListUI);

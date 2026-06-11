@@ -3,11 +3,12 @@ import https from 'node:https';
 import fs from 'node:fs/promises';
 import {watch} from 'fs';
 import {parseArgs} from 'node:util';
-import {closeAllConnections, initServer} from './init.js';
+import {initServer} from './init.js';
 import {createSyncManager} from "./sync.js";
 import {WebSocketServer} from "ws";
 import {reload, WEBSOCKET_SYNC_ENABLE} from "./config.js";
 import {createZipRouter} from "./utils/zipRouter.js";
+import {closeAllConnections} from "./utils/UserManager.js";
 
 const options = {
 	addr: { type: 'string', short: 'a', default: '127.0.0.1' },

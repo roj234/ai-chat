@@ -8,7 +8,8 @@
  * @typedef WebViewApi
  * @property {Function} downloadFile
  * @property {Function} downloadBlob
- * @property {Function} blobSavePort
+ * @property {Function} serverPort
+ * @property {Function} getToken
  * @property {Function} uploadImage
  * @property {Function} setUserAgent
  */
@@ -34,8 +35,9 @@ window.__imageUploaded = (id, url) => {
 };
 
 const saveBlobByLocalHttp = (blob, filename) => {
-	const port = WebViewApi.blobSavePort();
-	const url = `http://127.0.0.1:${port}/save?filename=${encodeURIComponent(filename)}`;
+	const port = WebViewApi.serverPort();
+	const token = WebViewApi.getToken();
+	const url = `http://127.0.0.1:${port}/save?filename=${encodeURIComponent(filename)}&tk=${token}`;
 	return fetch(url, {
 		method: 'POST',
 		body: blob,

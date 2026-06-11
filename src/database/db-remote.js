@@ -37,7 +37,8 @@ const request = async (path, {body, method} = {}) => {
 		headers: {
 			'Accept': 'application/vnd.msgpack,application/json',
 			'x-schema-version': s2c_schema_version,
-			'Content-Type': serverAcceptMsgpack ? 'application/vnd.msgpack' : 'application/json'
+			'Content-Type': serverAcceptMsgpack ? 'application/vnd.msgpack' : 'application/json',
+			'Authorization': 'Bearer '+config.db_pat
 		},
 		method,
 		body: body && await (serverAcceptMsgpack ? serializeMsgpack(body) : serializeJSON(body)),
@@ -103,7 +104,8 @@ const runBatch = () => {
 		for (let i = 0; i < queue.length; i++) {
 			const item = items[i];
 			const q = queue[i];
-			q[item?.error ? 2 : 1](item);
+			const error = item?.error;
+			error ? q[2](error) : q[1](item);
 		}
 
 		if (mqLength) {
@@ -195,7 +197,7 @@ export const deleteMessage = (id, conversation) => {
 	return u_deleteMessage(id);
 };
 
-export const listConversations = () => {
+export const listConversations = (lastTimestamp) => {
 	makeBatch("sync")().then(syncServer => {
 		if (syncServer) {
 			if (syncServer.startsWith("/")) {
@@ -205,7 +207,7 @@ export const listConversations = () => {
 		}
 	});
 	makeBatch("msgpack")().then(version => serverAcceptMsgpack = version === c2s_schema_version);
-	return makeBatch("conversations")();
+	return makeBatch("conversations")(lastTimestamp);
 };
 
 export const searchMessages = keyword => request(`search?keyword=${encodeURIComponent(keyword)}`);
@@ -341,7 +343,10 @@ export const uploadBlob = async blob => {
 		try {
 			res = await fetch(url, {
 				method: 'POST',
-				headers: { 'Content-Type': blob.type },
+				headers: {
+					'Content-Type': blob.type,
+					'Authorization': 'Bearer '+config.db_pat
+				},
 				body: blob
 			});
 		} catch {

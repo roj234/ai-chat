@@ -181,29 +181,19 @@ const cleanMessages = messages => {
 	return messages;
 };
 
-export const exportConversation = async (isConfig, _conv) => {
-	const includePlugins = import.meta.env.DEV;
-
-	const mapping = new Map;
-	const replacer = (_, value) => {
-		return mapping.get(value) ?? value;
-	};
-
+/**
+ *
+ * @param {number} type
+ * @param _conv
+ * @return {Promise<void>}
+ */
+export const exportConversation = async (type, _conv) => {
 	const zw = ZipWriter();
 	await zw.add(APP_NAME, "1");
 
-	if (isConfig) {
-		const compression = {compress: true};
-
-		await zw.add("config.json", JSON.stringify(config), compression);
-
-		const kvList = await kvListGetValues(includePlugins ? "*" : "preset");
-		const jsonData = await serializeJSON(kvList, 0, zw);
-
-		await zw.add("kvList.json", jsonData, compression);
-	} else {
+	if (type&1) {
 		const conv = _conv || unconscious(selectedConversation);
-		if (conv) {
+		if (conv && type === 1) {
 			const { id: _a, ready: _b, ...data } = conv;
 
 			let messagePromise = unconscious(messages);
@@ -251,6 +241,16 @@ export const exportConversation = async (isConfig, _conv) => {
 			await Promise.all(callbacks);
 			close();
 		}
+	}
+	if (type&2) {
+		const compression = {compress: true};
+
+		await zw.add("config.json", JSON.stringify(config), compression);
+
+		const kvList = await kvListGetValues(type&4 ? "*" : "preset");
+		const jsonData = await serializeJSON(kvList, 0, zw);
+
+		await zw.add("kvList.json", jsonData, compression);
 	}
 
 	try {

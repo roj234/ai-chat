@@ -37,7 +37,8 @@ if (DB_MODE !== 'local') {
 			});
 			im.observe(element);
 			$watch($computed(() => config.blobCacheCapacity), () => {
-				setMaxCacheSize(config.blobCacheCapacity << 20).then(([before, after]) => {
+				const cap = config.blobCacheCapacity;
+				if (cap) setMaxCacheSize(cap << 20).then(([before, after]) => {
 					console.log("Size reduced: "+formatSize(before-after));
 				});
 			});

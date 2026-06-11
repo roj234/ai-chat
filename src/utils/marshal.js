@@ -1,5 +1,6 @@
 import {getBlob, uploadBlob} from "../database.js";
 import {deepEntries} from "unconscious/common/json-schema-utils.js";
+import {showToast} from "../components/Toast.js";
 
 const decodeDollar = async (v, zr) => {
 	const v1 = v.v;
@@ -52,7 +53,10 @@ export const encodeObjects = (input, replacer, zipWriter) => {
 		switch (fn) {
 			case Blob:
 			case File:
-				promises.push(zipWriter ? val.arrayBuffer().then(ab => {
+				promises.push(zipWriter ? val.arrayBuffer().catch(e => {
+					showToast("附件"+JSON.stringify(val.name??val.hash)+"读取失败，它将被替换为空文件", 'error');
+					return new ArrayBuffer(0);
+				}).then(ab => {
 					const blobIndex = zipWriter.fileCount().toString(36);
 
 					replacer.set(val, {

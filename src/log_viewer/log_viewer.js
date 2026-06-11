@@ -141,14 +141,15 @@ function setPresetRange(range) {
 	refreshData();
 }
 
-const store = $store("config", undefined, {persist: true, deep: false});
+const cfg = $store("config", undefined, {persist: true, deep: false});
 
 // ============ API CALL ============
 async function makeRequest(url, params) {
 	const res = await fetch(url, {
 		headers: {
 			'Accept': 'application/vnd.msgpack,application/json',
-			'x-schema-version': s2c_schema_version
+			'x-schema-version': s2c_schema_version,
+			'Authorization': 'Bearer '+cfg.db_pat
 		},
 		...params,
 		referrerPolicy: "no-referrer"
@@ -180,12 +181,12 @@ async function makeRequest(url, params) {
 }
 
 function fetchPrices() {
-	return makeRequest(store.db_server+"/database/fetch", { "method": "POST" });
+	return makeRequest(cfg.db_server+"/database/fetch", { "method": "POST" });
 }
 
 async function fetchLogs() {
 	const [ start, end ] = getTimeRange();
-	const url = store.db_server+`/logs?start=${start}&end=${end}`;
+	const url = cfg.db_server+`/logs?start=${start}&end=${end}`;
 	const logs = await makeRequest(url);
 	for (const item of logs) {
 		if (item.currency === "USD") {

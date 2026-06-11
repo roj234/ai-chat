@@ -5,8 +5,7 @@ import {onLoad} from "/src/plugin.js";
 import {showToast} from "../src/components/Toast.js";
 
 if (DB_MODE !== "local") {
-	const isNew = Object.keys(config.value).length === 2;
-	const old = config._old_config;
+	const isNew = config._new;
 	const db_server = config.db_server;
 
 	onLoad(() => {
@@ -17,7 +16,6 @@ if (DB_MODE !== "local") {
 				config.value = config_;
 				showToast("成功拉取配置", 'ok');
 			}).catch(() => {
-				config.value = old;
 				showToast("未能拉取配置\n可能之前未保存过\n正在使用切换前的配置", 'error');
 			}).finally(Shared.SettingUI.sync);
 		}
@@ -29,8 +27,7 @@ if (DB_MODE !== "local") {
 			updated = true;
 
 			setKV("config", unconscious(config)).then(() => {
-				config.value = {db_server: config.db_server, _old_config: unconscious(config)};
-				showToast("成功将配置保存到服务器", 'ok');
+				config._new = true;
 				location.reload();
 			})
 		}, false);
