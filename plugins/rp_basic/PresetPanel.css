@@ -24,8 +24,11 @@
         right: 0;
     }
 
-    & .filter {
+    &  > .filter {
         border: none;
+        overflow: auto;
+        scrollbar-gutter: stable;
+        padding-right: 4px;
     }
 
     /* 头部 */

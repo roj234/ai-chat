@@ -12,12 +12,10 @@ function getContentType(filename) {
 // ==================== 路由器工厂函数 ====================
 /**
  * 根据 ZIP Blob 创建一个 Node HTTP 请求处理函数
- * @param {Buffer} zipBlob
+ * @param {ReturnType<typeof ZipReader>} zip
  * @returns {(req: http.IncomingMessage, res: http.ServerResponse) => void}
  */
-export async function createZipRouter(zipBlob) {
-	const zip = await ZipReader(zipBlob);
-
+export function createZipRouter(zip) {
 	return async function zipRouter({req, res, path}) {
 		if (path.startsWith("/")) path = path.slice(1);
 		let entry = zip.entries().get(path);
@@ -55,9 +53,11 @@ export async function createZipRouter(zipBlob) {
 			return true;
 		}
 
+		const method = entry.method === 8 ? 'deflate' : entry.method === 92 ? 'br' : '';
+
 		// 决定是否直接发送 ZIP 中的原始 deflate 数据
 		const acceptEncoding = (req.headers['accept-encoding'] || '').toLowerCase();
-		const acceptsDeflate = acceptEncoding.includes('deflate');  // 即使是 'deflate, gzip' 也会匹配
+		const acceptsDeflate = acceptEncoding.includes(method);  // 即使是 'deflate, gzip' 也会匹配
 
 		let body;
 		let headers = {
@@ -71,20 +71,20 @@ export async function createZipRouter(zipBlob) {
 
 		let needDecompress;
 
-		if (entry.method === 8 && acceptsDeflate) {
+		if (method && acceptsDeflate) {
 			// ZIP 中是 deflate 压缩，且客户端接受 deflate → 直接发送原始压缩块
-			headers['Content-Encoding'] = 'deflate';
+			headers['Content-Encoding'] = method;
 			headers['Content-Length'] = entry.compressedSize;
 		} else {
 			headers['Content-Length'] = entry.uncompressedSize;
-			if (entry.method === 8) needDecompress = true;
+			if (method) needDecompress = true;
 		}
 
 		const buffer = Buffer.from(body);
 		res.writeHead(200, headers);
 
 		if (needDecompress) {
-			await pipeline(Readable.from(buffer), new DecompressionStream('deflate-raw'), res);
+			await pipeline(Readable.from(buffer), new DecompressionStream(method === 'deflate' ? 'deflate-raw' : 'br'), res);
 		} else {
 			await pipeline(Readable.from(buffer), res);
 		}

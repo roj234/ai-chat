@@ -49,18 +49,9 @@
             white-space: pre-wrap;
         }
 
-        & input[type="text"], textarea {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            font-size: 1em;
+        & input, textarea {
+            margin-top: 8px;
             background-color: var(--bg);
-
-            &:focus {
-                border-color: var(--accent);
-                box-shadow: 0 0 0 2px rgba(52, 181, 250, 0.2); /* Using --color-focused with opacity */
-            }
         }
     }
 

@@ -1,4 +1,4 @@
-import {$asyncState, $state, $store, $watch, debugSymbol, unconscious} from 'unconscious';
+import {$asyncState, $computed, $state, $store, $watch, debugSymbol, unconscious} from 'unconscious';
 import {jsonFetch} from "./utils/utils.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
 
@@ -8,11 +8,12 @@ import {deepEqual} from "unconscious/common/deepEqual.js";
 export let isMobile = IS_ANDROID_BUILD;
 
 if (!IS_ANDROID_BUILD) {
-	const mediaQueryList = matchMedia('(max-width: 768px)');
-	mediaQueryList.onchange = () => {
-		isMobile = mediaQueryList.matches;
+	const isMobileQuery = matchMedia('(max-width: 768px)');
+	const cb = () => {
+		isMobile = isMobileQuery.matches;
 	};
-	isMobile = mediaQueryList.matches;
+	isMobileQuery.onchange = cb;
+	cb();
 }
 
 /**
@@ -66,6 +67,28 @@ export const messages = $state([]);
  * @type {import("unconscious").Reactive<AiChat.Conversation>}
  */
 export const selectedConversation = $state(null);
+
+const conversationLoadedCallbacks = [];
+const conversationBeforeunloadCallbacks = [];
+export const onConversationLoaded = callback => conversationLoadedCallbacks.push(callback);
+export const onConversationBeforeunload = callback => conversationBeforeunloadCallbacks.push(callback);
+
+let prevConversation;
+$watch(selectedConversation, () => {
+	if (selectedConversation.ready) {
+		const conv = unconscious(selectedConversation);
+		if (conv.id !== prevConversation?.id) {
+			prevConversation = conv;
+			const msg = unconscious(messages);
+			for (const cb of conversationLoadedCallbacks) cb(conv, msg);
+		}
+	} else if (prevConversation) {
+		for (const cb of conversationBeforeunloadCallbacks) cb(prevConversation);
+		prevConversation = null;
+	}
+});
+
+
 /**
  * @type {import("unconscious").Reactive<AiChat.Conversation[]>}
  */
@@ -146,3 +169,21 @@ export const runningConversations = new Map;
 $watch(selectedConversation, () => {
 	abortCompletion.value = unconscious(runningConversations.get(selectedConversation.id)?.abort);
 });
+
+
+let nativeTheme;
+{
+	const root = document.querySelector(":root");
+	const colorSchemeQuery = matchMedia('(prefers-color-scheme: dark)');
+	const cb = () => {
+		nativeTheme = colorSchemeQuery.matches ? 'dark' : 'light';
+		root.setAttribute("data-theme", config.theme || nativeTheme);
+	};
+	$watch($computed(() => config.theme), cb);
+	colorSchemeQuery.onchange = cb;
+}
+
+/**
+ * @return {'light' | 'dark'}
+ */
+export const getCurrentTheme = () => config.theme || nativeTheme;

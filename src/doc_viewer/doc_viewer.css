@@ -55,6 +55,7 @@
     --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', 'Consolas', 'Monaco', monospace;
 
     --md-line-height: 1.5;
+    --md-kbd-border: #4a5568;
 }
 
 body {

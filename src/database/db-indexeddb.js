@@ -1,5 +1,6 @@
 import {getTextContent} from "../utils/utils.js";
 import {DONE} from "../database.js";
+import {sortMessages} from "/backend/sync_const.js";
 
 
 const DB_NAME = 'AiChat';
@@ -128,12 +129,7 @@ const transaction = (callback, write, ...database) => new Promise((resolve, reje
 export const getMessages = conversation => transaction((tx, resolve) => {
 	const request = tx.objectStore('messages').index('owner').getAll(conversation.id);
 	request.onsuccess = (event) => {
-		resolve(event.target.result.sort((a, b) => {
-			const b1 = a.role === "system";
-			const b2 = b.role === "system";
-			if (b1 !== b2) return b2 - b1;
-			return 0;
-		}));
+		resolve(sortMessages(event.target.result));
 	}
 }, false, 'messages');
 
@@ -237,9 +233,14 @@ export const searchMessages = keyword => {
 /**
  * 读取KV存储
  * @param {IDBValidKey} key
+ * @param {import("unconscious").Reactive<any>=} callback
  * @returns {Promise<any>}
  */
-export const getKV = key => transaction(tx => tx.objectStore('kv').get(key), false, 'kv');
+export const getKV = (key, callback) => {
+	let promise = transaction(tx => tx.objectStore('kv').get(key), false, 'kv');
+	if (callback) promise.then(v => callback.value = v);
+	return promise;
+}
 
 /**
  * 创建、更新或删除KV存储
@@ -262,9 +263,10 @@ export const kvListGetValues = type => transaction(tx => tx.objectStore('kvs').g
 /**
  * 读取KV存储列表的key
  * @param {IDBValidKey} type
+ * @param {import("unconscious").Reactive<AiChat.IDBKVList[]>=} callback
  * @returns {Promise<AiChat.IDBKVList[]>}
  */
-export const kvListGetKeys = type => transaction((tx, resolve) => {
+export const kvListGetKeys = (type, callback) => transaction((tx, resolve) => {
 	const results = [];
 
 	tx.objectStore('kvs').openCursor(IDBKeyRange.bound([type], [type, '\uffff'])).onsuccess = (event) => {
@@ -277,6 +279,7 @@ export const kvListGetKeys = type => transaction((tx, resolve) => {
 			});
 			cursor.continue();
 		} else {
+			if (callback) callback.value = results;
 			resolve(results);
 		}
 	};

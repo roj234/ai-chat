@@ -1,7 +1,8 @@
 import {$computed, $foreach, $state, $store, ONCE_EVENT, unconscious} from "unconscious";
 import Chart from "/plugins/tools/chart.async.js";
-import {s2c_schema, s2c_schema_version} from "/common/MsgpackSchema.js";
+import {msgpack_schema, msgpack_schema_version} from "/common/MsgpackSchema.js";
 import {decodeMsg} from "unconscious/common/msgpack.js";
+import {PROTOCOL_VERSION} from "/backend/sync_const.js";
 
 // ============ STATE ============
 let allLogs = [];
@@ -141,14 +142,17 @@ function setPresetRange(range) {
 	refreshData();
 }
 
-const store = $store("config", undefined, {persist: true, deep: false});
+const cfg = $store("config", undefined, {persist: true, deep: false});
 
 // ============ API CALL ============
 async function makeRequest(url, params) {
 	const res = await fetch(url, {
 		headers: {
 			'Accept': 'application/vnd.msgpack,application/json',
-			'x-schema-version': s2c_schema_version
+			'Content-Type': 'application/json',
+			'x-sv': msgpack_schema_version,
+			'x-pv': PROTOCOL_VERSION,
+			'Authorization': 'Bearer '+(cfg.db_pat||'')
 		},
 		...params,
 		referrerPolicy: "no-referrer"
@@ -162,7 +166,7 @@ async function makeRequest(url, params) {
 				return decodeMsg(new DataView(ab), {
 					//multiple: true,
 					bigint: true,
-					schema: s2c_schema
+					schema: msgpack_schema
 				});
 			});
 		}
@@ -180,18 +184,18 @@ async function makeRequest(url, params) {
 }
 
 function fetchPrices() {
-	return makeRequest(store.db_server+"/database/fetch", { "method": "POST" });
+	return makeRequest(cfg.db_server+"database/fetch", { "method": "POST" });
 }
 
 async function fetchLogs() {
 	const [ start, end ] = getTimeRange();
-	const url = store.db_server+`/logs?start=${start}&end=${end}`;
+	const url = cfg.db_server+`logs?start=${start}&end=${end}`;
 	const logs = await makeRequest(url);
 	for (const item of logs) {
 		if (item.currency === "USD") {
-			item.currency = "CNY";
 			item.cost /= 0.15;
 		}
+		item.currency = "CNY";
 	}
 	return logs;
 }
@@ -632,7 +636,7 @@ let foreachTable = $foreach(renderLogs, (log, i) => {
 			</td>
 		</tr>;
 
-	const self = <tr onClick={() => toggleRow(self, makeDetails)}>
+	const self = <tr onClick={() => toggleRow(log, self, makeDetails)}>
 		<td className="text-secondary mono" style="font-size:12px">{formatTime(log.time)}</td>
 		<td><span style="font-weight:500;color:#c8d0dc">{log.provider || '—'}</span></td>
 		<td className="mono" style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;"
@@ -713,9 +717,16 @@ function renderTable() {
 }
 
 // ============ GLOBAL FUNCTIONS ============
-const toggleRow = (row, makeDetails) => {
+const toggleRow = async (log, row, makeDetails) => {
 	const has = row.classList.toggle("expanded");
 	if (has) {
+		if (!log.request_id) {
+			const fullLog = (await makeRequest( cfg.db_server+`batch`, {
+				method: 'POST',
+				body: JSON.stringify([["log/by-rowid", log.rowid]])
+			}))[0];
+			if (fullLog) Object.assign(log, fullLog);
+		}
 		const newEl = makeDetails();
 		row.insertAdjacentElement("afterend", newEl);
 		newEl.scrollIntoView({ behavior: 'smooth', block: 'center' });

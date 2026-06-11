@@ -5,15 +5,13 @@ import {config, isMobile} from "/src/states.js";
 import {onLoad} from "/src/plugin.js";
 
 /** @type {import('unconscious').Reactive<Blob>} */
-const BG_BLOB = $state();
-/** @type {import('unconscious').Reactive<Blob>} */
-const FONT_BLOB = $state();
+const BG_BLOB = $state(), FONT_BLOB = $state();
 /** @type {import('unconscious').Reactive<'cover' | 'contain' | 'stretch' | 'tile' | 'center'>} */
 const BG_FIT = $computed(() => config.backgroundFit);
 
 onLoad(() => {
-	getKV("chat-background").then(blob => BG_BLOB.value = blob);
-	getKV("chat-font").then(blob => FONT_BLOB.value = blob);
+	getKV("chat-background", BG_BLOB);
+	getKV("chat-font", FONT_BLOB);
 
 	$watch([BG_BLOB, BG_FIT], () => {
 		const blob = unconscious(BG_BLOB);

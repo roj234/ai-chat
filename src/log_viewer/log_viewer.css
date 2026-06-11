@@ -79,7 +79,6 @@ body {
     position: sticky;
     top: 0;
     z-index: 100;
-    backdrop-filter: blur(12px);
 }
 .nav-brand {
     display: flex;
@@ -470,19 +469,15 @@ body {
     background: var(--bg-card);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
-    overflow: hidden;
     transition: all var(--transition);
 }
-/*.table-scroll {
+.table-scroll {
     overflow-x: auto;
-    max-height: 60vh;
-    overflow-y: auto;
-}*/
+}
 table {
     width: 100%;
     border-collapse: collapse;
     font-size: 13px;
-    min-width: 1100px;
 }
 table thead {
     position: sticky;

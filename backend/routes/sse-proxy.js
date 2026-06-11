@@ -5,9 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import {Transform} from 'node:stream';
 
-function log(str, ...args) {
-	console.log(`[SSE Proxy][${new Date().toLocaleTimeString()}] `+str, ...args);
-}
+const log = (str, ...args) => console.log(`[SSE Proxy] `+str, ...args);
 
 /**
  *
@@ -139,6 +137,8 @@ async function SSEHandler(logPath, apiPath, ctx) {
 
 			if (needBlobProxy) {
 				//body = new ReadableStream
+			} else {
+				body = JSON.stringify(obj);
 			}
 		}
 
@@ -150,8 +150,24 @@ async function SSEHandler(logPath, apiPath, ctx) {
 			duplex,
 			signal: abort.signal,
 			key: authorization
-		}, chunk => {
+		}, (chunk, isPlainJson) => {
 			const now = Date.now();
+
+			if (isPlainJson) {
+				const response = JSON.stringify(chunk);
+
+				// non-stream response
+				if (SSE_PROXY_TRACE) {
+					const fileName = `${logPath}/${encodeURIComponent(id)}_${now%1000}.jsonl`;
+					fs.appendFile(fileName, body)
+						.then(() => fs.appendFile(fileName, '\n'))
+						.then(() => fs.appendFile(fileName, response));
+				}
+
+				ctx.res.writeHead(200, { 'Content-Type': 'application/json' });
+				ctx.res.write(response);
+				return;
+			}
 
 			if (!proxyRequest) {
 				const id = chunk.id;

@@ -1,5 +1,5 @@
 import {URL} from 'node:url';
-import {c2s_schema, s2c_schema, s2c_schema_version} from "../common/MsgpackSchema.js";
+import {msgpack_schema, msgpack_schema_version} from "../common/MsgpackSchema.js";
 import {constants, createBrotliCompress, createGzip} from "node:zlib";
 import {RESPONSE_COMPRESS_LEVEL, RESPONSE_USE_MSGPACK_SCHEMA} from "./config.js";
 import {decodeMsg, encodeRawMsg} from "unconscious/common/msgpack.js";
@@ -100,15 +100,15 @@ export class Router {
 				},
 				variables: newVariables,
 				send(status, data) {
-					const {accept = "", ["x-schema-version"]: x_msv} = req.headers;
+					const {accept = "", ["x-sv"]: x_msv} = req.headers;
 					const acceptEncoding = (req.headers['accept-encoding'] || '').toLowerCase();
 
 					let outputStream = res;
 					let encoder, contentType;
-					if (RESPONSE_USE_MSGPACK_SCHEMA && accept.includes('application/vnd.msgpack') && x_msv === s2c_schema_version) {
+					if (RESPONSE_USE_MSGPACK_SCHEMA && accept.includes('application/vnd.msgpack') && x_msv === msgpack_schema_version) {
 						encoder = (data) => encodeRawMsg(data, (buf, shared) => {
 							outputStream.write(shared ? Buffer.from(buf) : buf);
-						}, s2c_schema);
+						}, msgpack_schema);
 						contentType = 'application/vnd.msgpack';
 					} else {
 						encoder = (data) => outputStream.write(Buffer.from(JSON.stringify(data)));
@@ -167,7 +167,7 @@ export class Router {
 						return JSON.parse(buffer.toString());
 					}
 					if (type === "application/vnd.msgpack") {
-						return decodeMsg(buffer, { schema: c2s_schema });
+						return decodeMsg(buffer, { schema: msgpack_schema });
 					}
 					throw new Error("unknown content-type");
 				},
@@ -183,7 +183,7 @@ export class Router {
 			} catch (err) {
 				console.error(err);
 
-				let msg = err.message;
+				let msg = err.message ?? err;
 				if (ctx.errorFilter) msg = ctx.errorFilter(msg, err);
 				try {
 					ctx.send(500, { error: msg });

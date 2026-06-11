@@ -3,7 +3,7 @@
 .skills {
     display: flex;
     padding: 10px 16px;
-    border: 1px dashed rgba(255, 255, 255, 0.2);
+    border: 1px dashed var(--skills-dashed-border);
     border-radius: 12px;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -32,7 +32,7 @@
 
 .tool-tag {
     background: rgba(59, 130, 246, 0.1);
-    color: #60a5fa;
+    color: var(--tool-tag-color);
     padding: 2px 8px;
     border-radius: 6px;
     font-weight: 600;
@@ -42,8 +42,8 @@
 
 .revoke-btn {
     background: transparent;
-    color: #f43f5e;
-    border: 1px solid #f43f5e;
+    color: var(--revoke-color);
+    border: 1px solid var(--revoke-color);
     padding: 4px 12px;
     border-radius: 8px;
     font-size: 0.75rem;
@@ -52,13 +52,13 @@
 }
 
 .revoke-btn:hover {
-    background: #f43f5e;
+    background: var(--revoke-color);
     color: white;
     box-shadow: 0 0 10px rgba(244, 63, 94, 0.3);
 }
 
 .revoked-status {
-    color: #64748b;
+    color: var(--revoked-status-color);
     padding: 5px 0;
     font-size: 0.75rem;
     font-style: italic;

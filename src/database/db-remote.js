@@ -1,19 +1,22 @@
 import {config} from "../states.js";
 import {decodeObjects, encodeObjects, serializeJSON} from "../utils/marshal.js";
-import {initSync, SYNC_CONVERSATION, SYNC_MESSAGE} from "./SyncManager.js";
+import {initSync} from "./sync_client.js";
 import {decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
-import {c2s_schema, c2s_schema_version, s2c_schema, s2c_schema_version} from "/common/MsgpackSchema.js";
+import {msgpack_schema, msgpack_schema_version} from "/common/MsgpackSchema.js";
 import {SHA256} from "unconscious/common/SHA256.js";
 import {base64Encode} from "unconscious/common/Base64.js";
 import {prettyError} from "../utils/utils.js";
 import {$store, $update, AS_IS, unconscious} from "unconscious";
 import SimpleModal from "../components/SimpleModal.jsx";
+import {delta} from "unconscious/common/deepEqual.js";
+import {PROTOCOL_VERSION, sortMessages} from "/backend/sync_const.js";
+import {DB_MESSAGES_DIFF} from "../database.js";
 
-let sync;
+let getClientId;
 
 /** @type {string} */
 let dbUrl = config.db_server;
-
+/** @type {boolean} */
 let serverAcceptMsgpack;
 
 const messageQueue = $store("mq", [], { persist: true, deep: false,
@@ -28,17 +31,25 @@ const messageQueue = $store("mq", [], { persist: true, deep: false,
 export const serializeMsgpack = async (obj) => {
 	const mapping = new Map;
 	await encodeObjects(obj, mapping);
-	return encodeMsg(obj, c2s_schema, mapping.size ? (value) => mapping.get(value) ?? value : null);
+	return encodeMsg(obj, msgpack_schema, mapping.size ? (value) => mapping.get(value) ?? value : null);
 };
 
 const request = async (path, {body, method} = {}) => {
-	if (!dbUrl.endsWith('/')) dbUrl += '/';
+	if (!dbUrl.endsWith('/')) config.db_server = dbUrl += '/';
+
+	const headers = {
+		'Accept': 'application/vnd.msgpack,application/json',
+		'Content-Type': serverAcceptMsgpack ? 'application/vnd.msgpack' : 'application/json',
+		'x-pv': PROTOCOL_VERSION,
+		'x-sv': msgpack_schema_version,
+	};
+	if (getClientId) headers["x-ci"] = getClientId();
+
+	const pat = config.db_pat;
+	if (pat) headers["Authorization"] = 'Bearer '+pat;
+
 	const init = {
-		headers: {
-			'Accept': 'application/vnd.msgpack,application/json',
-			'x-schema-version': s2c_schema_version,
-			'Content-Type': serverAcceptMsgpack ? 'application/vnd.msgpack' : 'application/json'
-		},
+		headers,
 		method,
 		body: body && await (serverAcceptMsgpack ? serializeMsgpack(body) : serializeJSON(body)),
 		referrerPolicy: "no-referrer"
@@ -56,9 +67,8 @@ const request = async (path, {body, method} = {}) => {
 		if (contentType === 'application/vnd.msgpack') {
 			return res.arrayBuffer().then(ab => {
 				return decodeMsg(new DataView(ab), {
-					//multiple: true,
 					bigint: true,
-					schema: s2c_schema
+					schema: msgpack_schema
 				});
 			});
 		}
@@ -85,6 +95,8 @@ const request = async (path, {body, method} = {}) => {
  */
 let batchQueue;
 
+let prevError;
+
 const runBatch = () => {
 	const queue = batchQueue;
 	batchQueue = null;
@@ -92,7 +104,8 @@ const runBatch = () => {
 	const mq = unconscious(messageQueue);
 	let mqLength = mq.length;
 	if (mqLength) {
-		mq.forEach(item => queue.push([item, AS_IS, AS_IS]));
+		// 如果切换了数据库服务器
+		if (!config._new) mq.forEach(item => queue.push([item, AS_IS, AS_IS]));
 		mq.length = 0;
 	}
 
@@ -103,7 +116,8 @@ const runBatch = () => {
 		for (let i = 0; i < queue.length; i++) {
 			const item = items[i];
 			const q = queue[i];
-			q[item?.error ? 2 : 1](item);
+			const error = item?.error;
+			error ? q[2](error) : q[1](item);
 		}
 
 		if (mqLength) {
@@ -125,8 +139,9 @@ const runBatch = () => {
 
 		if (mq.length) {
 			$update(messageQueue);
-			SimpleModal({
-				title: "请求失败",
+			prevError?.remove();
+			prevError = SimpleModal({
+				title: "请求失败 ("+mq.length+")",
 				message: `刷新页面将会自动重放请求\n\n详细错误信息：`+prettyError(err),
 				confirmMessage: "刷新页面",
 				onConfirm() {
@@ -156,69 +171,112 @@ const makeBatch = (key, unmarshal) => value => {
 };
 
 const u_upsertConversation = makeBatch("conversation/upsert");
-const u_deleteConversation = makeBatch("conversation/delete");
 
-export const upsertConversation = async conversation => {
-	const id = conversation.id = await u_upsertConversation(conversation);
-	sync?.on(SYNC_CONVERSATION, conversation);
-	return id;
-};
-export const deleteConversation = (id) => {
-	sync?.on(SYNC_CONVERSATION, {id});
-	return u_deleteConversation(id);
-};
+export const upsertConversation = async conversation => conversation.id = await u_upsertConversation(conversation);
+export const deleteConversation = makeBatch("conversation/delete");
 
 const u_getConversation = makeBatch("conversation", true);
 const u_messages = makeBatch("messages", true);
-const u_upsertMessage = makeBatch("message/upsert");
-const u_deleteMessage = makeBatch("message/delete");
 
 export const getMessages = conversation => {
 	const id = conversation.id;
+	const cachedMessage = conversation[DB_MESSAGES_DIFF];
+
+	const metadata = u_getConversation([id, cachedMessage && conversation.time]);
 	const messages = u_messages(id);
-	return u_getConversation(id).then(json => {
+
+	return metadata.then(json => {
 		for (const key of Object.keys(conversation)) delete conversation[key];
 		Object.assign(conversation, json);
 		conversation.id = id;
-		return messages;
+		return messages.catch(err => {
+			if (err.status !== 304) throw err;
+			return sortMessages([...cachedMessage.values()]);
+		});
 	});
 };
 
-export const upsertMessage = async message => {
-	const id = message.id = await u_upsertMessage(message);
-	sync?.on(SYNC_MESSAGE, message);
-	return id;
+const u_upsertMessage = makeBatch("message/upsert");
+export const upsertMessage = async message => message.id = await u_upsertMessage(message);
+export const deleteMessage = makeBatch("message/delete");
+
+const showIncompatibleDialog = backendVersion => {
+	SimpleModal({
+		title: "通信协议不兼容",
+		message: '前端版本 '+PROTOCOL_VERSION+'\n后端版本 '+backendVersion+'\n解决方法：更新后端/前端',
+		confirmMessage: "更换数据库服务",
+		onConfirm() {
+			config.db_server = '';
+			location.reload()
+		},
+		onCancel: null
+	});
 };
 
-export const deleteMessage = (id, conversation) => {
-	sync?.on(SYNC_MESSAGE, {id});
-	return u_deleteMessage(id);
-};
-
-export const listConversations = () => {
+export const listConversations = (lastTimestamp) => {
 	makeBatch("sync")().then(syncServer => {
 		if (syncServer) {
 			if (syncServer.startsWith("/")) {
-				syncServer = (<a href={syncServer} />).href;
+				syncServer = (<a href={syncServer} />).href.replace(/^http/, "ws");
 			}
-			sync = initSync(syncServer.replace(/^http/, "ws"));
+			getClientId = initSync(syncServer, kvRef, kvListCache);
 		}
 	});
-	makeBatch("msgpack")().then(version => serverAcceptMsgpack = version === c2s_schema_version);
-	return makeBatch("conversations")();
+	makeBatch("version")().catch(err => {
+		if (err.startsWith?.("unknown")) return ['Legacy'];
+	}).then(([protocolVersion, msgpackVersion]) => {
+		if (protocolVersion !== PROTOCOL_VERSION) {
+			showIncompatibleDialog(protocolVersion);
+		}
+		serverAcceptMsgpack = msgpackVersion === msgpack_schema_version;
+	});
+	return makeBatch("conversations")(lastTimestamp);
 };
 
 export const searchMessages = keyword => request(`search?keyword=${encodeURIComponent(keyword)}`);
 
-export const getKV = makeBatch("kv", true);
+const kvRef = new Map;
+
+const u_getKV = makeBatch("kv", true);
 const u_setKV = makeBatch("kv/set");
 const u_deleteKV = makeBatch("kv/delete");
 
-export const setKV = async (key, value) => value === undefined ? u_deleteKV(key) : u_setKV([key, value]);
+/**
+ *
+ * @param {string} key
+ * @param {import("unconscious").Reactive<*>=} callback
+ * @returns {Promise<*>}
+ */
+export const getKV = (key, callback) => {
+	let promise = u_getKV(key);
+	if (callback) promise.then(results => {
+		kvRef.set(key, callback);
+		callback.value = results;
+	});
+	return promise;
+};
+export const setKV = (key, value) => value === undefined ? u_deleteKV(key) : u_setKV([key, value]);
 
 // values这个接口主要是给备份(导出)用的
 export const kvListGetValues = makeBatch("kvs/values", true);
-export const kvListGetKeys = makeBatch("kvs");
+
+const u_getKVListKeys = makeBatch("kvs");
+
+/**
+ *
+ * @param {string} type
+ * @param {import("unconscious").Reactive<AiChat.IDBKVList[]>=} callback
+ * @returns {Promise<AiChat.IDBKVList[]>}
+ */
+export const kvListGetKeys = (type, callback) => {
+	let promise = u_getKVListKeys(type);
+	if (callback) promise.then(results => {
+		kvRef.set(':'+type, callback);
+		callback.value = results;
+	});
+	return promise;
+};
+
 const u_getKVList = makeBatch("kvs/value", true);
 const u_upsertKVList = makeBatch("kvs/upsert");
 const u_deleteKVList = makeBatch("kvs/delete");
@@ -253,20 +311,29 @@ export const kvListGet = async (type, name) => {
 	return val;
 };
 
+const KVLIST_IGNORE_KEYS = new Set(["name", "type"]);
+
 /**
  * @param {Object} value
  * @param {string} type
- * @param {string} name
+ * @param {string=} name
  * @return {Promise<*>}
  */
 export const kvListSet = async (value, type, name) => {
-	if (type) value.type = type;
 	if (name) value.name = name;
+	else name = value.name;
 
 	const cacheKey = type+":"+name;
+	const prev = kvListCache.get(cacheKey);
+	const diff = prev ? delta(prev, value, KVLIST_IGNORE_KEYS) : { $: 'SET', val: value };
+
 	insertToKVListCache(cacheKey, value);
 
-	return u_upsertKVList(value);
+	return u_upsertKVList({
+		type,
+		name,
+		...diff
+	});
 };
 
 export const kvListDel = (type, name) => u_deleteKVList([type, name]);
@@ -341,7 +408,10 @@ export const uploadBlob = async blob => {
 		try {
 			res = await fetch(url, {
 				method: 'POST',
-				headers: { 'Content-Type': blob.type },
+				headers: {
+					'Content-Type': blob.type,
+					'Authorization': 'Bearer '+(config.db_pat||'')
+				},
 				body: blob
 			});
 		} catch {

@@ -1,5 +1,5 @@
-import {config, messages, selectedConversation} from "./states.js";
-import {$state, $update, $watch, debugSymbol, unconscious} from "unconscious";
+import {config, messages, onConversationBeforeunload, onConversationLoaded, selectedConversation} from "./states.js";
+import {$state, $update, debugSymbol, unconscious} from "unconscious";
 import {loadingBlock, prettyError} from "./utils/utils.js";
 
 import "./skills.css";
@@ -110,6 +110,7 @@ export const set_title_body = {
 
 toolScriptRegistry["set_title"] = {
 	name: "set_title",
+	default: true,
 	script({title}, response, globalStorage) {
 		globalStorage.title = title;
 
@@ -129,6 +130,7 @@ const use_isRevoked = debugSymbol("use_isRevoked");
 toolScriptRegistry["use"] = {
 	name: "use",
 	reentrant: true,
+	default: true,
 	async script({modules}, response, globalStorage) {
 		let {allowedTools, activatedModules} = globalStorage;
 		if (!allowedTools) {
@@ -350,7 +352,8 @@ export const registerSkill = text => {
 		}
 	});
 	toolScriptRegistry[skill.name] = {
-		script() {return content.trim();}
+		script() {return content.trim();},
+		default: true,
 	};
 };
 
@@ -411,29 +414,15 @@ export const registerTools = (name, description, toolDefs, {onActivated, hidden,
  */
 export const registerDefaultTools = tools => {
 	for (const tool of tools) {
+		tool.default = true;
 		defaultTools.push(registerTool(tool));
 	}
 };
 
-const conversationChangedCallbacks = [];
-export const onConversationChanged = callback => conversationChangedCallbacks.push(callback);
+const CONV_REACTIVE_MAP = debugSymbol("CONV_REACTIVE_MAP");
 
-let lastId;
-$watch(selectedConversation, () => {
-	if (selectedConversation.ready) {
-		const conv = unconscious(selectedConversation);
-		if (conv.id !== lastId) {
-			lastId = conv.id;
-			const msg = unconscious(messages);
-			redoToolCalls(conv, msg, 0);
-			for (const cb of conversationChangedCallbacks) {
-				cb(conv, msg);
-			}
-		}
-	} else {
-		lastId = null;
-	}
-});
+onConversationLoaded((conv, msg) => redoToolCalls(conv, msg, 0));
+onConversationBeforeunload((conv) => delete conv[CONV_REACTIVE_MAP]);
 
 /**
  *
@@ -453,7 +442,7 @@ export const runTools = async ({tool_calls, tool_responses}, globalStorage, forc
 
 		if (msg?.success != null) {
 			if (forceRerun !== i) return;
-			toolScriptRegistry[name].undo?.(msg, globalStorage, tc);
+			if (msg.success) toolScriptRegistry[name].undo?.(msg, globalStorage, tc);
 		}
 		msg = tool_responses[i] = {};
 
@@ -464,6 +453,15 @@ export const runTools = async ({tool_calls, tool_responses}, globalStorage, forc
 			const parameters = getToolParameters(msg, tc);
 
 			const fn = toolScriptRegistry[name];
+			const {allowedTools} = globalStorage;
+			if (!(fn && (fn.default || allowedTools?.has(name)))) {
+				throw fn
+					? 'Call \'use\' to activate this tool.'
+					: optionalTools[name]
+						? 'This is a tool group, not real tool, call use(['+JSON.stringify(name)+']) to activate'
+						: 'Tool not exist';
+			}
+
 			let interactive = fn.interactive;
 			if (interactive) {
 				/*if (typeof interactive === "function") {
@@ -473,9 +471,7 @@ export const runTools = async ({tool_calls, tool_responses}, globalStorage, forc
 					if (!config.permitAllTools && !selectedConversation.grantedTools?.has(name)) {
 						autoNext = false;
 						if (forceRerun === true || (forceRerun === i && !allowUnsafe)) {
-							msg.success = false;
-							msg.content = "User doesn't permit this call";
-							return;
+							throw "User doesn't permit this call";
 						}
 
 						if (forceRerun !== i) {
@@ -597,8 +593,6 @@ export const getToolParameters = (response, toolcall) => {
 	if (!parsed) parsed = response[TOOL_PARAM] = JSON.parse(toolcall.function.arguments);
 	return parsed;
 }
-
-const CONV_REACTIVE_MAP = debugSymbol("CONV_REACTIVE_MAP");
 
 /**
  * 在全局存储上挂载一个响应式对象

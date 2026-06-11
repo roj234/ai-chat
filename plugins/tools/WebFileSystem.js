@@ -18,7 +18,6 @@ function next(glob, i) {
 /**
  * Converts a glob pattern (Unix style) to a RegExp pattern string.
  * Ported from Globs.toRegexPattern with isDos = false.
- * Throws an error if the pattern is invalid.
  */
 function globToRegexPattern(globPattern) {
 	let inGroup = false;
@@ -133,18 +132,12 @@ function globToRegexPattern(globPattern) {
 }
 
 /**
- * Creates a RegExp from a Unix glob pattern (full path).
- */
-function compileUnixGlob(pattern) {
-	return new RegExp(globToRegexPattern(pattern));
-}
-
-/**
  * Create a RegExp that matches a single file / directory name segment.
  * Throws if the segment contains '/'.
  */
 function segmentToRegex(segment) {
 	if (segment.includes('/')) throw new Error(`Segment must not contain '/': "${segment}"`);
+	if (segment === '**') return segment;
 	return new RegExp(globToRegexPattern(segment));
 }
 
@@ -153,10 +146,18 @@ function segmentToRegex(segment) {
 const MKDIRS = { create: true };
 
 /**
+ * @param {string} path
+ * @return {string[]}
+ */
+function parsePath(path) {
+	return path.split('/').filter(s => s && s !== '.');
+}
+
+/**
  * Resolve parent directory handle and entry name from a full path (relative to root).
  */
 async function resolveParent(rootHandle, filePath, options) {
-	const parts = filePath.split('/').filter(Boolean);
+	const parts = parsePath(filePath);
 	const name = parts.pop();
 	let parent = rootHandle;
 	for (const part of parts) {
@@ -166,13 +167,10 @@ async function resolveParent(rootHandle, filePath, options) {
 }
 
 /**
- * Resolve a directory handle from a path (leading / allowed).
+ * Resolve a directory handle from a path.
  */
 async function resolveDirectory(rootHandle, dirPath) {
-	if (dirPath === '' || dirPath === '/') return rootHandle;
-	const parts = dirPath.split('/').filter(Boolean);
-	if (parts[0] === '.') parts.shift();
-
+	const parts = parsePath(dirPath);
 	let handle = rootHandle;
 	for (const part of parts) {
 		handle = await handle.getDirectoryHandle(part);
@@ -181,7 +179,16 @@ async function resolveDirectory(rootHandle, dirPath) {
 }
 
 /**
+ *
  * @param {FileSystemDirectoryHandle} rootHandle
+ * @returns {{
+ * 		read_image({path: string}): Promise<Blob>,
+ * 		mkdirs({path: string}): Promise<string>,
+ * 		copy({src: string, dest: string, move?: boolean}): Promise<string>,
+ * 		stat({path: string}): Promise<string>,
+ * 		delete({path: string}): Promise<string>,
+ * 		list({path: string, glob?: string}): Promise<string>,
+ * }}
  */
 export function createWebFileSystem(rootHandle) {
 	const api = {
@@ -221,15 +228,17 @@ export function createWebFileSystem(rootHandle) {
 					await writable.close();
 				} else {
 					const newDir = await destDir.getDirectoryHandle(destName, MKDIRS);
+					const promises = [];
 					for await (const [childName, childHandle] of handle.entries()) {
-						await copyEntry(childHandle, newDir, childName);
+						promises.push(copyEntry(childHandle, newDir, childName));
 					}
+					await Promise.all(promises);
 				}
 			}
 
 			if (move) {
 				if (typeof srcHandle.move === 'function') {
-					await api.mkdirs({path: destParent.name});
+					// destParent already resolved with MKDIRS, no need for manual mkdirs
 					await srcHandle.move(destParent, destName);
 				} else {
 					// fallback: copy + delete
@@ -273,119 +282,91 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			return 'done';
 		},
 
+		/** List directory, optionally with a glob filter */
 		async list({path, glob: globStr}) {
-			const entries = globStr ? await glob(globStr, path) : await readdir(path);
+			const entries = globStr
+				? await glob(globStr, path)
+				: (await resolveDirectory(rootHandle, path)).entries();
 
 			let text = '';
 			let items = 0;
 			const MAX_COUNT = 1000;
-			for await (const [name, parentPath, isDir] of entries) {
+			for await (const [name, handle, relDir] of entries) {
 				if (items >= MAX_COUNT) {
 					text += `[TRUNCATED: Only first ${MAX_COUNT} files shown, retry with glob?`;
 					break;
 				}
 
-				const nameOrPath = globStr ? parentPath + '/' + name : name;
-				if (!isDir) {
-					const fullPath = parentPath + '/' + name;
-					const file = await resolveFile(fullPath);
-					text += JSON.stringify(nameOrPath)+"\tfile\t"+file.size+"\n";
+				const displayPath = relDir ? relDir + '/' + name : name;
+
+				if (handle.kind === 'directory') {
+					text += JSON.stringify(displayPath) + '\tdir\n';
 				} else {
-					text += JSON.stringify(nameOrPath)+"\tdir\n";
+					const file = await handle.getFile();
+					text += JSON.stringify(displayPath) + '\tfile\t' + file.size + '\n';
 				}
 				items++;
 			}
 			const result = text.trim();
-			return result ? "\"name\"\ttype\tsize\n"+result : "Empty folder";
+			return result ? '"name"\ttype\tsize\n' + result : '[No files]';
 		}
-	}
+	};
 
-	/* ── readdir ──────────────────────────── */
-	async function readdir(dirPath) {
-		const handle = await resolveDirectory(rootHandle, dirPath);
-		async function* entries() {
-			for await (const [name, entryHandle] of handle.entries()) {
-				yield [
-					name,
-					dirPath,
-					entryHandle.kind === 'directory'
-				];
-			}
-		}
-		return entries();
-	}
+	/**
+	 * Walk the filesystem matching a glob pattern.
+	 * Yields { name, relDir, handle } where handle is the FileSystemHandle.
+	 */
+	async function glob(pattern, searchRoot) {
+		const handle = await resolveDirectory(rootHandle, searchRoot);
+		const segments = parsePath(pattern).map(segmentToRegex);
 
-	async function glob(pattern, opts) {
-		const cwd = opts?.cwd || '/';
-		const startHandle = await resolveDirectory(rootHandle, cwd);
-
-		// Split pattern into segments; special handling for **
-		const segments = pattern.split('/').filter(Boolean);
-		const hasGlobStar = segments.some(s => s === '**');
-
-		// If no **, we can collect all files and test with a single regex (simpler fallback)
-		if (!hasGlobStar) {
-			const fullRegex = compileUnixGlob(pattern);
-			async function* collect(dirHandle, currentPath) {
-				for await (const [name, handle] of dirHandle.entries()) {
-					const childPath = currentPath + '/' + name;
-					if (handle.kind === 'file' && fullRegex.test(childPath)) {
-						yield [ name, currentPath ];
-					}
-					if (handle.kind === 'directory') {
-						yield* collect(handle, childPath);
-					}
-				}
-			}
-			return collect(startHandle, cwd === '/' ? '' : cwd);
-		}
-
-		// Walk with segment‑aware pruning
-		async function* walk(dirHandle, currentPath, segIdx) {
+		async function* walk(dirHandle, relDir, segIdx) {
 			if (segIdx >= segments.length) return;
 
 			const seg = segments[segIdx];
-			const isGlobStar = seg === '**';
 			const nextIdx = segIdx + 1;
-			const rest = nextIdx < segments.length;
+			const isLast = nextIdx >= segments.length;
 
-			// If current segment is **, we dive into sub‑directories while also trying to match
-			// zero directories (skip the **)
-			if (isGlobStar) {
-				// Match zero directories: continue with next segment from same directory
-				yield* walk(dirHandle, currentPath, nextIdx);
-				// Match one or more directories: enter every sub‑directory
-				for await (const [name, handle] of dirHandle.entries()) {
-					if (handle.kind === 'directory') {
-						yield* walk(handle, currentPath + '/' + name, segIdx);   // keep ** in front
+			if (seg === '**') {
+				if (isLast) {
+					yield* yieldChildren(dirHandle, relDir);
+				} else {
+					// ** matches zero directories
+					yield* walk(dirHandle, relDir, nextIdx);
+					// ** matches one-or-more directories
+					for await (const [name, entryHandle] of dirHandle.entries()) {
+						if (entryHandle.kind === 'directory') {
+							yield* walk(entryHandle, relDir ? relDir + '/' + name : name, segIdx);
+						}
 					}
 				}
 				return;
 			}
 
-			// Normal segment: create regex and filter entries
-			const regex = segmentToRegex(seg);
 			for await (const [name, handle] of dirHandle.entries()) {
-				if (!regex.test(name)) continue;
-				const childPath = currentPath + '/' + name;
+				if (!seg.test(name)) continue;
 
-				if (!rest) {
-					// Last segment: must be a file
-					if (handle.kind === 'file') {
-						yield [ name, currentPath ];
-					}
-				} else {
-					// Intermediate segment: must be a directory to go deeper
-					if (handle.kind === 'directory') {
-						yield* walk(handle, childPath, nextIdx);
-					}
+				if (isLast) {
+					yield [name, handle, relDir];
+				} else if (handle.kind === 'directory') {
+					yield* walk(handle, relDir ? relDir + '/' + name : name, nextIdx);
 				}
 			}
 		}
 
-		return walk(startHandle, cwd === '/' ? '' : cwd, 0);
+		async function* yieldChildren(dirHandle, relDir) {
+			for await (const [name, handle] of dirHandle.entries()) {
+				yield [name, handle, relDir];
+				if (handle.kind === 'directory') {
+					yield* yieldChildren(handle, relDir ? relDir + '/' + name : name);
+				}
+			}
+		}
+
+		return walk(handle, '', 0);
 	}
 
+	/** Resolve a File from a path relative to root handle */
 	async function resolveFile(path) {
 		const [parent, name] = await resolveParent(rootHandle, path);
 		const fileHandle = await parent.getFileHandle(name);
@@ -395,17 +376,30 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 	return {
 		...api,
 		...createHashLine({
+			/**
+			 * @param {string} path
+			 * @returns {Promise<string>}
+			 */
 			async read(path) {
 				const file = await resolveFile(path);
 				return readAsString(file);
 			},
+			/**
+			 * @param {string} path
+			 * @param {string} data
+			 * @returns {Promise<void>}
+			 */
 			async write(path, data) {
-				const [ parent, name ] = await resolveParent(rootHandle, path);
-				const fileHandle = await parent.getFileHandle(name, { create: true });
+				const [ parent, name ] = await resolveParent(rootHandle, path, MKDIRS);
+				const fileHandle = await parent.getFileHandle(name, MKDIRS);
 				const writable = await fileHandle.createWritable();
 				await writable.write(data);
 				await writable.close();
 			},
+			/**
+			 * @param {string} path
+			 * @returns {Promise<number>}
+			 */
 			async mtime(path) {
 				const file = await resolveFile(path);
 				return file.lastModified;

@@ -50,7 +50,7 @@ function createBranchManager(conv, messages) {
 		}
 	});
 
-	if (dynamic.length) conv.bm_dummy = dynamic;
+	if (dynamic.length && !conv.bm_dummy) conv.bm_dummy = dynamic;
 
 	const findDefaultLeaf = () => messages.findLast(item => !(item[CHILDREN]?.length));
 

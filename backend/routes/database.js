@@ -34,6 +34,7 @@ export function registerDatabaseRoutes(router, rootPath) {
 		const updateConversation = ctx.db.prepare(`UPDATE "conversations" SET data = ? WHERE id = ?`);
 		for (const row of conversations) {
 			const data = decompressConversation(row.data);
+			["id", "title", "time"].forEach(key => delete data[key]);
 			updateConversation.run(await compressConversation(data), row.id);
 		}
 
@@ -41,6 +42,7 @@ export function registerDatabaseRoutes(router, rootPath) {
 		const updateMessage = ctx.db.prepare(`UPDATE "messages" SET data = ? WHERE id = ?`);
 		for (const row of messages) {
 			const data = decompressMessage(row.data);
+			["id", "owner", "time"].forEach(key => delete data[key]);
 			updateMessage.run(await compressMessage(data), row.id);
 		}
 

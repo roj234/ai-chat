@@ -1,4 +1,5 @@
 import {compressGeneric, decompressGeneric, deserializeRow} from "../utils/compression.js";
+import {patch} from "unconscious/common/deepEqual.js";
 
 /**
  * @param {Record<string, function(body: any, ctx: Partial<AiChatBackend.RouteContext>): any>} batcher
@@ -39,11 +40,23 @@ export function registerKVRoutes(batcher) {
 		return deserializeRow(row);
 	};
 
-	batcher["kvs/upsert"] = async ({ type, name, ...data }, {db}) => {
+	batcher["kvs/upsert"] = async ({ type, name, ...diff }, {db}) => {
 		if (!type || !name) return { error: 'type and name required' };
-		if ("error" in data) return { error: '"error" in data' };
 
-		db.prepare('REPLACE INTO kvs (type, name, data) VALUES (?, ?, ?)').run(type, name, await compressGeneric(data));
+		if (diff.$ === 'SET') {
+			diff = diff.val;
+		} else {
+			const row = db.prepare('SELECT * FROM kvs WHERE type = ? AND name = ?').get(type, name);
+			if (!row) return { error: `${type} ${JSON.stringify(name)} not found` };
+
+			diff = patch(deserializeRow(row), diff);
+		}
+		if (typeof diff !== 'object') return { error: 'data must be object' };
+		if ("error" in diff) return { error: '"error" in data' };
+		delete diff.type;
+		delete diff.name;
+
+		db.prepare('REPLACE INTO kvs (type, name, data) VALUES (?, ?, ?)').run(type, name, await compressGeneric(diff));
 		return true;
 	};
 

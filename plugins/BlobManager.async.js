@@ -1,8 +1,8 @@
 import {$foreach, $state} from "unconscious";
 import {config, isMobile} from "/src/states.js";
-import SimpleModal from "../src/components/SimpleModal.jsx";
+import SimpleModal from "/src/components/SimpleModal.jsx";
 import {formatSize, prettyTime} from "unconscious/common/Utils.js";
-import {copyButtonAnimation} from "../src/utils/utils.js";
+import {copyButtonAnimation} from "/src/utils/utils.js";
 
 const pageSize = 20;
 
@@ -13,7 +13,7 @@ let table;
 
 const fetchList = async () => {
 	try {
-		const res = await fetch(`${config.db_server}/blobs?page=${currentPage}&limit=${pageSize}`);
+		const res = await fetch(`${config.db_server}blobs?page=${currentPage}&limit=${pageSize}`);
 		const result = await res.json();
 
 		blobs.value = result.data;
@@ -27,7 +27,7 @@ const deleteItem = hash => {
 	SimpleModal({
 		title: "确定要删除吗？",
 		onConfirm() {
-			fetch(`${config.db_server}/blob/${hash}`, {method: 'DELETE'}).then(fetchList);
+			fetch(`${config.db_server}blob/${hash}`, {method: 'DELETE'}).then(fetchList);
 		}
 	})
 };
@@ -40,7 +40,7 @@ const deleteSelected = () => {
 		onConfirm() {
 			const all = [];
 			for (let chk of checks) {
-				all.push(fetch(`${config.db_server}/blob/${chk.value}`, {method: 'DELETE'}));
+				all.push(fetch(`${config.db_server}blob/${chk.value}`, {method: 'DELETE'}));
 			}
 			Promise.all(all).then(fetchList);
 		}
@@ -72,7 +72,7 @@ const container = <div className={"modal-overlay"}>
 			<button className="ri-loop-right-line btn primary" title={"刷新"} onClick={fetchList}></button>
 			<span className={"spacer"}></span>
 			<button className="btn danger" onClick={deleteSelected}>删除选中</button>
-			<button className="ri-close-line btn ghost" style="border:none" title={"关闭窗口"} onClick={() => container.remove()}></button>
+			<button className="ri-close-line btn ghost" style="border:none" title={"关闭窗口"} onClick={() => container.remove(true)}></button>
 		</div>
 
 		<div className={"blob-manager"} style={"overflow:auto"}>

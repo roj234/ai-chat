@@ -4,6 +4,7 @@ import {cloneNamed, getTextContent, jsonFetch, prettyError} from "./utils/utils.
 import {
 	abortCompletion,
 	config,
+	getCurrentTheme,
 	isLlamaCppBackend,
 	lastScrollDirection,
 	MessageRoles,
@@ -26,7 +27,7 @@ import {createJsonStream} from "/common/StreamJsonSerializer.js";
 import {createAntiSlopSampler} from "./anti-slop-sampler.js";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {highlightJsonLike} from "./markdown/highlight.js";
-import {updateConversationListUI} from "./components/ConversationList.jsx";
+import {setConversationTitle, updateConversationListUI} from "./components/ConversationList.jsx";
 import {deepEntries} from "unconscious/common/json-schema-utils.js";
 import {applyDelta, streamFetch} from "/common/openai-api-utils.js";
 import {base64DecodeToUint8Array} from "unconscious/common/Base64.js";
@@ -260,27 +261,31 @@ const generateChatTitle = (conversation, messages) => {
 
 	updateStatusText('生成标题');
 
+	const body = {
+		model: config.titleModel || config.model,
+		messages: [{
+			role: "system",
+			content: config.titlePrompt || defaultTitlePrompt,
+		}, {
+			role: "user",
+			content: "对话摘要：\n用户:\n" + s1 + "\nLLM:\n" + s2
+		}],
+		max_tokens: 30,
+		temperature: 0.7,
+		stop: ["\n"],
+		stream: false
+	};
+
+	const [reasoningPath, reasoningEnabledValue, reasoningDisabledValue = 'false'] = (config.reasoningPath||"reasoning.enabled").split(",");
+	if (config.forceThink !== 0) jsonPathOp(body, reasoningPath, "set", JSON.parse(reasoningDisabledValue));
+
 	jsonFetch(config.endpoint+'/chat/completions', {
 		key: config.accessToken,
-		body: JSON.stringify({
-			model: config.titleModel,
-			messages: [{
-				role: "system",
-				content: config.titlePrompt || defaultTitlePrompt,
-			}, {
-				role: "user",
-				content: "对话摘要：\n用户:\n" + s1 + "\nLLM:\n" + s2
-			}],
-			max_tokens: 30,
-			temperature: 0.7,
-			stop: ["\n"],
-			reasoning: {enabled: false},
-			stream: false
-		})
+		body: JSON.stringify(body)
 	}).then(json => {
-		if (json.choices?.[0].finish_reason !== "stop") throw json;
-		conversation.title = json.choices?.[0].message?.content;
-		updateConversation(conversation);
+		const title = json.choices?.[0].message?.content;
+		if (!title) throw json;
+		setConversationTitle(conversation, title);
 	}).catch(err => {
 		console.error(err);
 		showToast("标题生成失败\n"+prettyError(err), 'error');
@@ -1013,38 +1018,56 @@ export const buildSystemPrompt = async (conversation, prompt, toolPrompt) => {
 		prompt = content;
 	}
 
-	const transform = (prompt) => {
-		let promises = [];
-		prompt = prompt.replaceAll(/\{\{([^}]+?)}}/g, (text, id) => {
+	/**
+	 * @param {string} prompt
+	 * @returns {Promise<string>}
+	 */
+	const transform = async (prompt) => {
+		let result = '';
+		let prev = 0, i;
+
+		while ((i = prompt.indexOf('{{', prev)) >= 0) {
+			result += prompt.slice(prev, i);
+
+			const end = prompt.indexOf('}}', i + 2);
+			if (end === -1) throw new Error('未闭合的占位符('+i+')');
+
+			const id = prompt.slice(i + 2, end).trim();
+			prev = end + 2;
+
 			switch (id) {
 				case "theme":
-					return matchMedia('(prefers-color-scheme: dark)') ? 'dark' : 'light';
+					result += getCurrentTheme();
+					break;
 				case "date":
-					return new Date().toLocaleDateString();
+					result += new Date().toLocaleDateString();
+					break;
 				case "think":
-					return isThinkingEnabled() && config.reasoning === false ? (config.CoTPrompt || defaultCoTPrompt) : "";
+					result += isThinkingEnabled() && config.reasoning === false ? (config.CoTPrompt || defaultCoTPrompt) : "";
+					break;
 				case "tools":
-					return transform(toolPrompt || "");
+					if (toolPrompt) result += toolPrompt.includes('{{') ? await transform(toolPrompt) : toolPrompt;
+					break;
+				default:
+					if (id.startsWith('ref:')) {
+						const preset = await kvListGet('preset', id.slice(4));
+						result += preset.systemPrompt;
+					} else {
+						let val = PLACEHOLDERS[id];
+						if (val != null) {
+							if (typeof val === "function")
+								val = val();
+							result += val;
+						} else {
+							throw new Error("未识别的占位符 {{"+id+"}}");
+						}
+					}
 			}
-			if (id.startsWith("ref:")) {
-				const rand = Math.random().toString(36).slice(2);
-				promises.push(kvListGet("preset", id.slice(4)).then((preset) => {
-					prompt = prompt.replace(rand, preset.systemPrompt);
-				}));
-				return rand;
-			}
+		}
+		result += prompt.slice(prev);
 
-			let val = PLACEHOLDERS[id];
-			if (val != null) {
-				if (typeof val === "function")
-					val = val();
-				return val;
-			}
-
-			return text;
-		});
-		return Promise.all(promises).then(() => prompt.trim());
-	}
+		return result.trim();
+	};
 
 	return [await transform(prompt), body];
 };

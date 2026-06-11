@@ -1,5 +1,5 @@
 import {PLACEHOLDERS, registerTools} from "/src/skills.js";
-import {$state, $watch} from "unconscious";
+import {$state, $update, $watch, unconscious} from "unconscious";
 import {getKV, setKV} from "/src/database.js";
 import {onLoad} from "/src/plugin.js";
 
@@ -21,7 +21,9 @@ Below are the facts you currently remember about this user. Use them to inform y
 - If the user contradicts a stored memory, ask for clarification or update the memory.
 </memory-management>`;
 
-const memories = $state({});
+/** @type {import('unconscious').Reactive<Record<string, string>>} */
+const memories = $state();
+const memoryChanged = $state();
 
 /**
  *
@@ -71,12 +73,13 @@ const memoryTool = {
 				delete memories[id];
 			break;
 		}
+		$update(memoryChanged);
 		return "done";
 	}
 };
 
 // TODO 也许不应该直接修改前缀，而是在新对话中生效？
-PLACEHOLDERS["__MEMORIES__"] = () => JSON.stringify(memories.value);
+PLACEHOLDERS["__MEMORIES__"] = () => JSON.stringify(unconscious(memories));
 
 registerTools("memory_management", "长期记忆管理工具", [memoryTool], {
 	hidden: 'manual',
@@ -84,8 +87,8 @@ registerTools("memory_management", "长期记忆管理工具", [memoryTool], {
 });
 
 onLoad(async () => {
-	memories.value = await getKV("memories") || {};
-	$watch(memories, () => {
-		setKV("memories", memories.value);
+	getKV("memories", memories);
+	$watch(memoryChanged, () => {
+		setKV("memories", unconscious(memories));
 	}, false);
 })

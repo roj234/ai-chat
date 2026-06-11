@@ -25,11 +25,6 @@ export const ask_user = {
 					type: "string",
 					description: "A concise label or explanation."
 				}
-			},
-			custom: {
-				type: "boolean",
-				description: "Whether the user may type a custom answer.",
-				default: true
 			}
 		},
 		required: ["question", "options"]
@@ -37,7 +32,7 @@ export const ask_user = {
 
 	interactive: true, // 要求用户必须做出选择
 	script({question, options, custom = true}, response) {
-		response.data = {question, options, custom};
+		response.data = {question, options};
 		return options[0];
 	},
 	keyFunc(keys, response, frozen) {
@@ -71,7 +66,7 @@ export const ask_user = {
 							</button>
 						))}
 
-						{response.data.custom ? <div className="choice-custom">
+						<div className="choice-custom">
 						<textarea
 							placeholder="召唤邪神"
 							ref={ta}
@@ -79,7 +74,7 @@ export const ask_user = {
 							onInput={() => content.value = ta.value}
 							value={content}
 						/>
-						</div> : null}
+						</div>
 					</div>
 
 				</>)

@@ -9,11 +9,11 @@ import {
 	selectedConversation
 } from "../states.js";
 import {statusBadge, submitUserChatMessage} from "../api-request.js";
-import {blobToContentPart, createAttachmentGallery, createFileUploader} from "./InputAttachment.jsx";
+import {blobToContentPart, createAttachmentGallery} from "./InputAttachment.jsx";
 import {CUSTOM_CONTROLS} from "../settings.js";
 import {createSendButton} from "./SendButton.jsx";
 import {bind} from "../utils/utils.js";
-import {$state, unconscious} from "unconscious";
+import {$computed, $state, $watch, unconscious} from "unconscious";
 import {handleCommand} from "../commands.js";
 import SimpleModal from "./SimpleModal.jsx";
 import {getBlob, updateConversation} from "../database.js";
@@ -23,7 +23,37 @@ import {webviewUploadImage} from "/vendor/jsBridge.js";
 export const createUserInputComposer = (scroller) => {
 	/** @type {import("unconscious").Reactive<OpenAI.ContentPart[]>} */
 	const attachments = $state([]);
-	const fileInput = createFileUploader(attachments);
+	const fileInput = <input type="file" multiple onChange={({target}) => {
+
+		const isFileTransferWindow = selectedConversation.id === 0;
+
+		for (const file of target.files) {
+			blobToContentPart(file, isFileTransferWindow, attachments, true);
+		}
+
+		target.value = '';
+	}}/>;
+
+	$watch([selectedConversation, $computed(() => config.modalities)], () => {
+		if (selectedConversation.id === 0) {
+			fileInput.accept = "*";
+			return;
+		}
+
+		// 文本文件
+		const mime = ["text/plain"/*, "application/json", "text/html", "image/svg"*/];
+
+		if (config.modalities.includes("audio")) {
+			mime.push("audio/wav,audio/mp3,audio/flac,audio/ogg");
+		}
+		if (config.modalities.includes("image")) {
+			mime.push("image/png,image/jpeg,image/bmp,image/gif,image/apng,image/webp");
+		}
+		if (config.modalities.includes("video")) {
+			mime.push("video/mp4,video/avi,video/m4v");
+		}
+		fileInput.accept = mime.join(",");
+	})
 
 	/**
 	 * @type {HTMLElement}
@@ -148,7 +178,6 @@ export const createUserInputComposer = (scroller) => {
 			// 寻找匹配的标签并插入图片
 			while ((match = imageRegex.exec(text)) !== null) {
 				const [str, imageIdxStr, hash, fileName] = match;
-				console.log(match);
 
 				if (imageIdxStr) {
 					const imageIdx = parseInt(imageIdxStr, 10) - 1;
@@ -189,18 +218,19 @@ export const createUserInputComposer = (scroller) => {
 			}
 		}
 
+		const noAI = selectedConversation.noAI;
 		if (input) {
 			const userMessage = {role: 'user', content: input, time: Date.now()};
 
 			const nickname = config.nickname;
-			if (selectedConversation.noAI && nickname) userMessage.name = nickname;
+			if (noAI && nickname) userMessage.name = nickname;
 
 			messages.push(userMessage);
 		} else {
 			if (sendButton.disabled) return;
 		}
 
-		if (selectedConversation.noAI) return;
+		if (noAI) return;
 
 		if (null == selectedConversation.id) {
 			// 创建新对话

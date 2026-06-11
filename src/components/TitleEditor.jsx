@@ -1,6 +1,6 @@
-import {conversations, isMobile, selectedConversation} from "../states.js";
-import {$state, $update} from "unconscious";
-import {updateConversation} from "../database.js";
+import {isMobile, selectedConversation} from "../states.js";
+import {$state, unconscious} from "unconscious";
+import {setConversationTitle} from "./ConversationList.jsx";
 
 export function TitleEditor() {
 	//row = <div className='input-warp'>{input}</div>;
@@ -9,11 +9,9 @@ export function TitleEditor() {
 	const isEditing = $state(false);
 	const handler = () => {
 		const after = isEditing.value ^= true;
-		const conv = selectedConversation.value;
+		const conv = unconscious(selectedConversation);
 		if (!after) {
-			title.textContent = conv.title = input.value;
-			$update(conversations);
-			updateConversation(conv);
+			setConversationTitle(conv, title.textContent = input.value);
 		} else {
 			input.value = conv.title;
 			requestAnimationFrame(() => input.focus());

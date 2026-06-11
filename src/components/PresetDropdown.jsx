@@ -12,9 +12,7 @@ import {presetKeys, presetKeysAlways} from "../settings.js";
  */
 export const presets = $state([]);
 
-export async function reloadPresetList() {
-	presets.value = await kvListGetKeys("preset");
-}
+export const reloadPresetList = () => kvListGetKeys("preset", presets);
 onLoad(reloadPresetList);
 
 

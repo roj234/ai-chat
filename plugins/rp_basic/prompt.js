@@ -183,7 +183,7 @@ export const applyPreset = ({prompts, regexps}, ctx, jsonMessages, prefill) => {
 
 
 export const createDefaultCtx = char => ({
-	char: char.name,
+	char: char.char || char.name,
 	user: char.user || config.nickname || DEFAULT_USER_NAME
 });
 

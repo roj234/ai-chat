@@ -147,6 +147,8 @@ export function createMarkdownRenderer(root, options = {}) {
 					render(code, language, node, true);
 				}
 			}
+
+			return node.nodeName;
 		},
 		add_text(text, parser) {
 			const node = nodes.at(-1);

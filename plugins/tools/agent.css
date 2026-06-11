@@ -1,0 +1,56 @@
+
+.file-protocols {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    text-align: left;
+
+    & > div {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+
+        & > span {
+            color: var(--text-muted);
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        & > button {
+            padding: 8px 16px;
+            font-weight: 700;
+            color: var(--text-on-accent);
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: box-shadow 0.2s;
+
+            &.api {
+                background: #4a90d9;
+                box-shadow: 0 0 12px rgba(74, 144, 217, 0.6);
+            }
+            &.local {
+                background: #27ae60;
+                box-shadow: 0 0 12px rgba(39, 174, 96, 0.6);
+            }
+            &.config {
+                background: #8e44ad;
+                box-shadow: 0 0 12px rgba(142, 68, 173, 0.6);
+            }
+            &.opfs {
+                background: #e67e22;
+                box-shadow: 0 0 12px rgba(230, 126, 34, 0.6);
+            }
+
+            &:disabled {
+                background: #555;
+                cursor: not-allowed;
+                box-shadow: none;
+            }
+        }
+    }
+}
+
+.agent-popup button:hover {
+    transform: translateY(-1px);
+}

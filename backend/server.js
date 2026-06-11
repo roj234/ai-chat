@@ -3,11 +3,16 @@ import https from 'node:https';
 import fs from 'node:fs/promises';
 import {watch} from 'fs';
 import {parseArgs} from 'node:util';
-import {closeAllConnections, initServer} from './init.js';
-import {createSyncManager} from "./sync.js";
+import {createRouter} from './init.js';
+import {createSyncManager, createSyncValidateMiddleware} from "./sync_service.js";
 import {WebSocketServer} from "ws";
-import {reload, WEBSOCKET_SYNC_ENABLE} from "./config.js";
+import {INTERACTIVE_LOGIN, PAT_SERVER_SALT, reload, WEBSOCKET_SYNC_ENABLE} from "./config.js";
 import {createZipRouter} from "./utils/zipRouter.js";
+import {closeAllConnections} from "./utils/UserManager.js";
+import {PROTOCOL_VERSION} from "./sync_const.js";
+import {ZipReader} from "unconscious/common/zip-io.js";
+import {injectLogger} from "./utils/logger.js";
+import path from "node:path";
 
 const options = {
 	addr: { type: 'string', short: 'a', default: '127.0.0.1' },
@@ -25,6 +30,7 @@ const { values: {
 	data, workspace,
 } } = parseArgs({ options });
 const PORT = parseInt(port, 10);
+const DATA_PATH = path.resolve(data);
 
 let serverType;
 let serverOptions;
@@ -39,6 +45,8 @@ if (cert) {
 	serverType = http;
 	serverOptions = {}
 }
+
+injectLogger();
 
 async function fileWatcher(path, callback, uiName) {
 	let retries = 0;
@@ -69,8 +77,13 @@ async function fileWatcher(path, callback, uiName) {
 
 try {
 	await fileWatcher(configPath, async (configPath) => {
-		configPath += '?t='+(await fs.stat(configPath)).mtimeMs;
-		reload(configPath);
+		await reload(configPath + '?t='+(await fs.stat(configPath)).mtimeMs);
+		if (INTERACTIVE_LOGIN && !PAT_SERVER_SALT) {
+			let js = await fs.readFile(configPath, 'utf-8');
+			js = js.replace(/PAT_SERVER_SALT\s*=\s*(['"`])\1/, `PAT_SERVER_SALT = '${crypto.randomUUID()}'`);
+			await fs.writeFile(configPath, js, 'utf-8');
+			await reload(configPath + '?t='+(await fs.stat(configPath)).mtimeMs);
+		}
 	}, "配置文件");
 } catch (e) {
 	console.error("[config] 配置文件加载失败");
@@ -78,19 +91,34 @@ try {
 	process.exit(1);
 }
 
-const apiRouter = await initServer(data, "api", workspace);
+const router = await createRouter(DATA_PATH, "api", workspace);
 
+let frontendVersion = 'bundled';
 if (zipPath) {
 	await fileWatcher(zipPath, async (zipPath) => {
 		const fileBuffer = await fs.readFile(zipPath);
-		apiRouter.zipRouter = await createZipRouter(fileBuffer);
+		const zip = await ZipReader(fileBuffer);
+		const meta = await zip.getText("/INFO");
+		if (meta) {
+			const ver = JSON.parse(meta);
+			frontendVersion = ver.v;
+			if (ver.b) frontendVersion += " (b"+ver.b+")";
+			if (ver.t) frontendVersion += " at "+new Date(ver.t).toISOString();
+		}
+
+		router.zipRouter = createZipRouter(zip);
 	}, "前端");
 }
 
-const server = serverType.createServer(serverOptions, (req, res) => apiRouter.handle(req, res));
+const server = serverType.createServer(serverOptions, (req, res) => router.handle(req, res));
 if (WEBSOCKET_SYNC_ENABLE) {
-	const wss = new WebSocketServer({ server, path: "/api/sync", maxPayload: 131072 });
-	createSyncManager(wss);
+	const wss = new WebSocketServer({
+		server,
+		path: "/api/sync",
+		maxPayload: 4096,
+		verifyClient: createSyncValidateMiddleware(DATA_PATH)
+	});
+	router.sync = createSyncManager(wss);
 }
 
 server.listen(PORT, addr, () => {
@@ -100,7 +128,7 @@ server.listen(PORT, addr, () => {
   ███████║██║██║     ███████║███████║   ██║   
   ██╔══██║██║██║     ██╔══██║██╔══██║   ██║   
   ██║  ██║██║╚██████╗██║  ██║██║  ██║   ██║   
-  ╚═╝  ╚═╝╚═╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   v{{PROJECT_VERSION}}
+  ╚═╝  ╚═╝╚═╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   v{{PROJECT_VERSION}} (Protocol ${PROTOCOL_VERSION})
 
   >> 理性之人使自己适应世界，不理性之人坚持要世界适应自己。因此，一切进步都依赖于不理性之人。 —— 萧伯纳
   >> Copyright (c) 2025-2026 Roj234
@@ -112,7 +140,7 @@ server.listen(PORT, addr, () => {
 		return;
 	}
 	console.log(`  Mode:     Database service in ${data === '' ? 'memory' : JSON.stringify(data)}`);
-	console.log(`  Frontend: ${zipPath?"bundled":"no"}`);
+	console.log(`  Frontend: ${zipPath?frontendVersion:"no"}`);
 });
 
 // 封装一个优雅退出的函数

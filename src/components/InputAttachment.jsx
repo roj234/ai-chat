@@ -1,7 +1,7 @@
 import {indexInParent} from "../utils/utils.js";
 import {$foreach} from "unconscious";
 import {showToast} from "./Toast.js";
-import {config, selectedConversation} from "../states.js";
+import {config} from "../states.js";
 import {readAsString} from "/common/chardet.js";
 import {formatSize} from "unconscious/common/Utils.js";
 
@@ -65,23 +65,6 @@ export function blobToContentPart(file, isFileTransferWindow, attachments, force
 		});
 	}
 }
-
-/**
- * @param {import("unconscious").Reactive<OpenAI.ContentPart[]>} attachments
- * @return {JSX.Element}
- */
-export const createFileUploader = attachments => <input type="file"
-														accept="image/png,image/jpeg,image/bmp,image/gif,audio/wav,audio/mp3,audio/flac,text/plain"
-														multiple onChange={({target}) => {
-
-	const isFileTransferWindow = selectedConversation.id === 0;
-
-	for (const file of target.files) {
-		blobToContentPart(file, isFileTransferWindow, attachments, true);
-	}
-
-	target.value = '';
-}}/>;
 
 /**
  *

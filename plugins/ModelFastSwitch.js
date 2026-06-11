@@ -1,6 +1,6 @@
 import {CUSTOM_CONTROLS} from "/src/settings.js";
 import {loadPreset, presets} from "/src/components/PresetDropdown.jsx";
-import {$foreach} from "unconscious";
+import {$computed, $foreach} from "unconscious";
 import {config} from "/src/states.js";
 
 const main = <div className={"pretty-select up"} style={"width: auto; max-width: 200px"}>
@@ -13,7 +13,7 @@ const main = <div className={"pretty-select up"} style={"width: auto; max-width:
 		onClick.stop.delegate{"li"}={({target}) => {
 		loadPreset(target.textContent);
 	}}>
-		{$foreach(presets, (item) =>
+		{$foreach($computed(() => presets.filter(item => !item.name.startsWith("_"))), (item) =>
 			<li className={"ellipsis"} style={"display:block"} title={item.name}>{item.name}</li>, (item) => item.name)}
 	</ul>
 </div>;

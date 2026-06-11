@@ -28,7 +28,7 @@
     & textarea {
         background: transparent;
         color: transparent; /* 文字透明 */
-        caret-color: white; /* 光标可见 */
+        caret-color: var(--text); /* 光标可见 */
         resize: none;
     }
 
@@ -41,7 +41,7 @@
         &:before {
             position: absolute;
             content: "";
-            border: 1px solid red;
+            border: 1px solid var(--error);
             height: calc(var(--font-size) * var(--line-height));
         }
     }

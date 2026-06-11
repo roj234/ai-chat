@@ -84,7 +84,8 @@ jobs:
           mkdir ai-chat
           
           cd dist
-          zip -r ../ai-chat/dist.zip . -x "server.js"
+          zip -r ../dist.zip . -x "server.js" -x "dist.brip"
+          cp dist.brip ../ai-chat/
           cd ..
           
           cp dist/server.js ai-chat
@@ -94,11 +95,17 @@ jobs:
           cp misc/launch.sh ai-chat
           zip -r ./full_release.zip ./ai-chat
 
-      - name: Upload artifact
+      - name: Upload full_release.zip
         uses: actions/upload-artifact@v7
         with:
           name: release
           path: packages/ai-chat/full_release.zip
+
+      - name: Upload dist.zip
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: packages/ai-chat/dist.zip
 
   build-apk:
     needs: build
@@ -124,6 +131,12 @@ jobs:
           name: release
           path: release-files
 
+      - name: Download frontend package
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: release-files
+
       - name: Download APK
         uses: actions/download-artifact@v4
         with:
@@ -138,7 +151,7 @@ jobs:
           body: |
             ${{ github.event.head_commit.message }}
           files: |
-            release-files/full_release.zip
+            release-files/*.zip
             release-files/*.apk
           draft: false
           prerelease: false

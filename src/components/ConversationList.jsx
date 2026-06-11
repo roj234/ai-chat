@@ -1,7 +1,7 @@
 import './ConversationList.css';
 import {VirtualList} from 'unconscious/common/VirtualList.js';
 import {formatDate} from 'unconscious/common/Utils.js';
-import {$state, $update, $watchWithCleanup, debugSymbol, ONCE_EVENT, unconscious} from 'unconscious';
+import {$state, $update, $watch, $watchWithCleanup, debugSymbol, ONCE_EVENT, unconscious} from 'unconscious';
 import {deleteConversation, getKV, setKV, updateConversation} from "../database.js";
 import {conversations, isMobile, messages, runningConversations, selectedConversation} from "../states.js";
 import SimpleModal from "./SimpleModal.jsx";
@@ -37,7 +37,13 @@ const hoverMenu = <div className={"tag-dropdown"} style={"position:fixed"}>
 
 onLoad((app) => {
 	app.addEventListener("click", closeHoverMenu, {capture: true});
-	getKV("pinned").then(value => PINNED_ITEMS = new Set(value));
+
+	const tmp = $state();
+	getKV("pinned", tmp);
+	$watch(tmp, () => {
+		PINNED_ITEMS = new Set(unconscious(tmp) || []);
+		$update(conversations);
+	}, false);
 });
 
 const GROUP_LABELS = ["置顶", "今天", "昨天", "7天内", "30天内"];
@@ -52,32 +58,46 @@ const groupConversations = () => {
 
 	// idb sorted this
 	conversations.forEach(conv => {
-		let name;
+		let groupName;
 
 		if (PINNED_ITEMS.has(conv.id)) {
-			name = 0;
+			groupName = 0;
 		} else {
 			const date = new Date(conv.time);
 			const timestamp = date.setHours(0, 0, 0, 0);
 			if (timestamp === today) {
-				name = 1;
+				groupName = 1;
 			} else if (timestamp === yesterday) {
-				name = 2;
+				groupName = 2;
 			} else if (timestamp > sevenDaysAgo) {
-				name = 3;
+				groupName = 3;
 			} else if (timestamp > thirtyDaysAgo) {
-				name = 4;
+				groupName = 4;
 			} else {
-				name = date.getFullYear()+"-"+(date.getMonth()+1);
+				groupName = date.getFullYear()+"-"+(date.getMonth()+1);
 			}
 		}
 
-		const group = groups.get(name);
-		if (!group) groups.set(name, [conv]);
+		const group = groups.get(groupName);
+		if (!group) groups.set(groupName, [conv]);
 		else group.push(conv);
 	});
 
 	return groups;
+};
+
+/**
+ *
+ * @param {AiChat.Conversation} conv
+ * @param {string} title
+ */
+export const setConversationTitle = (conv, title) => {
+	conv.title = title;
+	$update(updateConversationListUI);
+	if (unconscious(selectedConversation) === conv) {
+		$update(selectedConversation);
+	}
+	updateConversation(conv);
 };
 
 /**
@@ -115,14 +135,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 						value: conv.title,
 						onConfirm(val) {
 							if (!val) return false;
-							const id = vl.findIndex(conv);
-
-							conv.title = val;
-							// 重新计算时间
-							$update(conversations);
-							updateConversation(conv);
-
-							vl.setItem(id, conv);
+							setConversationTitle(conv, val);
 						}
 					});
 				return;

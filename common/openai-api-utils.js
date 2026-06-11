@@ -48,7 +48,7 @@ export const streamFetch = (url, {key = "", ...data} = {}, onToken) => fetch(url
 	method: "POST",
 	headers: {
 		'Content-Type': "application/json",
-		'Authorization': key ? "Bearer " + key : undefined
+		'Authorization': "Bearer "+(key||'')
 	},
 	referrerPolicy: 'no-referrer',
 	...data
@@ -61,6 +61,8 @@ export const streamFetch = (url, {key = "", ...data} = {}, onToken) => fetch(url
 			message: await res.text()
 		};
 	}
+	const contentType = res.headers.get('content-type');
+	if (contentType === 'application/json') return onToken(await res.json(), true);
 
 	const reader = res.body.getReader();
 

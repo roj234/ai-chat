@@ -1,5 +1,5 @@
-import {initServer} from "./init.js";
-import {createSyncManager} from "./sync.js";
+import {createRouter} from "./init.js";
+import {createSyncManager, createSyncValidateMiddleware} from "./sync_service.js";
 import {WebSocketServer} from "ws";
 
 /**
@@ -10,10 +10,12 @@ export function serverDevPlugin({prefix = '/api'} = {}) {
 	return {
 		name: 'server-dev',
 		async configureServer(server) {
-			const router = await initServer("data");
-
-			const wss = new WebSocketServer({ noServer: true });
-			createSyncManager(wss);
+			const router = await createRouter("data");
+			const wss = new WebSocketServer({
+				noServer: true,
+				verifyClient: createSyncValidateMiddleware("data")
+			});
+			router.sync = createSyncManager(wss);
 
 			// 监听原生 HTTP Server 的 upgrade 事件
 			server.httpServer.on('upgrade', (request, socket, head) => {

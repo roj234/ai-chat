@@ -1,4 +1,4 @@
-import {config, MessageRoles} from "/src/states.js";
+import {config, MessageRoles, onConversationLoaded} from "/src/states.js";
 import {importConversationData, registerDataImportHandler} from "/src/data-exchange.js";
 import {
 	$computed,
@@ -18,7 +18,7 @@ import {updateMessageUI} from "/src/components/MessageList.jsx";
 import {cloneNamed, downloadFile, getTextContent} from "/src/utils/utils.js";
 import {readPNG} from "/common/upng.js";
 import {isIDB, kvListDel, kvListGet, kvListGetKeys, kvListSet} from "/src/database.js";
-import {onConversationChanged, registerTools} from "/src/skills.js";
+import {registerTools} from "/src/skills.js";
 import {showToast} from "/src/components/Toast.js";
 import {Dropdown} from "/src/components/Dropdown.jsx";
 import {createTab} from "/src/components/SettingDialog.jsx";
@@ -147,8 +147,13 @@ function createSchemaEditColumn(typeId, template, editorConstructor) {
 			<button className={"btn ghost"} disabled={() => !selectedItem.value}
 					onClick={() => {
 						const value = structuredClone(unconscious(selectedItem));
+						const dirty = value._dirty;
+						delete value._dirty;
 						value.type = typeId;
-						downloadFile(new Blob([JSON.stringify(value)]), "json");
+						let filename = definition[typeId][0] + ' ' + value.name;
+						if (dirty) filename += " (已修改)";
+
+						downloadFile(new File([JSON.stringify(value)], filename+".json", {lastModified: value.time}));
 					}}>
 				导出
 			</button>
@@ -194,7 +199,10 @@ const [presetBar, openPresetPanel, presetList, currentPreset] = createSchemaEdit
 const [charBar, openCharPanel, characterList, currentCharacter] = createSchemaEditColumn("st|char", {name: "新角色"}, _CharacterEditor);
 const [lorebookBar, openLorebookPanel, lorebookList, currentLorebook] = createSchemaEditColumn("st|lorebook", {name: "新的世界"}, _LorebookEditor);
 
-charBar[0].append(<button className={"btn ghost"} title={"请先保存再创建故事"} disabled={() => !currentCharacter.name} onClick={() => {
+charBar[0].append(<button className={"btn ghost"} title={"请先保存再创建故事"} disabled={() => {
+	const chr = unconscious(currentCharacter);
+	return !chr?.name || !unconscious(characterList).find(item => item.name === chr.name);
+}} onClick={() => {
 	createConversation(unconscious(currentCharacter));
 }}>创建故事</button>);
 
@@ -266,9 +274,9 @@ SETTINGS.push(
 );
 
 onLoad(() => {
-	kvListGetKeys("st|preset").then(arr => presetList.value = arr);
-	kvListGetKeys("st|char").then(arr => characterList.value = arr);
-	kvListGetKeys("st|lorebook").then(arr => lorebookList.value = arr);
+	kvListGetKeys("st|preset", presetList);
+	kvListGetKeys("st|char", characterList);
+	kvListGetKeys("st|lorebook", lorebookList);
 })
 
 //region 工具调用世界书 实验性
@@ -345,7 +353,7 @@ registerTools("st", "", [lorebookTool], {hidden: true});
 //endregion
 
 // 对话从数据库加载完成回调
-onConversationChanged((conv, messages) => {
+onConversationLoaded((conv, messages) => {
 	//reset
 	lorebookToolKey.length = 0;
 	lorebookToolContent = {};
@@ -602,7 +610,7 @@ MessageRoles["st|char"] = {
 			const hasSystemMessage = output[0].role === "system";
 			if (hasSystemMessage) prefix = applyMacro(output[0].content, macro)+"\n\n";
 
-			if (preset.prompts?.length) {
+			if (preset?.prompts?.length) {
 				const content = applyPreset(preset, {
 					...macro,
 					personaDescription: char.userdesc || config.st_userdesc,

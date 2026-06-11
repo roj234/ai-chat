@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="src/aichat.css" />
     <link rel="preload" as="font" crossorigin href="vendor/remixicon/remixicon.woff2" />
     <script type="module" src="src/aichat.js" async></script>
+    <script>document.querySelector(":root").setAttribute("data-theme", matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')</script>
 </head>
 <body class="app" id="app">
 {{loading}}

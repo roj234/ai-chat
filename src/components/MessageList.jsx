@@ -44,7 +44,8 @@ import {ToolCallEditor} from "./ToolCallEditor.jsx";
  * @param {AiChat.AssistantMessage} m
  * @return {AppendObserver}
  */
-function chunkRenderer(m) {
+const chunkRenderer = m => {
+	const currentKeys = new NestedMap();
 	return $foreach(m.content, (item) => {
 		switch (item.type) {
 			default: {
@@ -206,11 +207,11 @@ function chunkRenderer(m) {
 										disabled={item.current === item.total-1}></button>
 							</div>);
 		}
-	}, chunkKeyFunc.bind(null,m), {
+	}, chunkKeyFunc.bind(currentKeys,m), {
 		morphChild: MORPH_CHILD_HANDLER,
-		currentKeys: new NestedMap()
+		currentKeys
 	});
-}
+};
 
 /**
  * @param {AiChat.Message} message
@@ -218,7 +219,7 @@ function chunkRenderer(m) {
  * @param {number} index
  * @param {AiChat.Message[]} messages
  */
-function chunkGather(message, chunks, index, messages) {
+const chunkGather = (message, chunks, index, messages) => {
 	const role = message.role;
 	const getChunks = MessageRoles[role]?.getChunks;
 	if (getChunks) {
@@ -303,7 +304,7 @@ function chunkGather(message, chunks, index, messages) {
 	}
 
 	if (getChunks) getChunks(message, chunks, index, isEditing, messages, 1);
-}
+};
 
 /**
  * @param {AiChat.AssistantMessage} message
@@ -332,8 +333,22 @@ function chunkKeyFunc(message, chunk) {
 	switch (type) {
 		default: keys.push(type); break;
 		case "error": keys.push("error", chunk.error); break;
-		// stream markdown renderer would handle this now!
-		case "text": keys.push("text"); break;
+		case "text": {
+			keys.push(chunk.text);
+
+			// really tricky, right?
+			/** @type{string} */
+			const trick = chunk.trick;
+			if (trick) {
+				const oldKey = [key, trick];
+				const node = this.get(oldKey);
+				if (node) {
+					this.set(keys, node);
+					this.delete(oldKey);
+				}
+			}
+		}
+		break;
 		case "think": add(chunk.think.title ? [chunk.think.title, chunk.think.content] : chunk.think); break;
 		case "tool_call": keys.push(chunk.tool); break;
 		case "tool": {
@@ -405,7 +420,7 @@ function updateButtons(m, container) {
 	const mayChange = (!isLast || notGenerating) && EditableMessageRoles.has(role) && !key.isOther;
 	const isComposite = end_index > index + 1;
 	// 不支持编辑组合消息（工具调用）
-	if (mayChange && !isComposite) buttons.push(isEditing_ ? saveBtn : editBtn);
+	if (notGenerating && mayChange && !isComposite) buttons.push(isEditing_ ? saveBtn : editBtn);
 	if (!isEditing_) {
 		// 有内容才能复制
 		if ((!isLast || notGenerating) && (key[MessageCopyHandler] || unconscious(content).find(item => item.text))) buttons.push(copyBtn);
@@ -419,8 +434,8 @@ function updateButtons(m, container) {
 					buttons.push(regenBtn);
 				}
 			}
+			if (mayChange) buttons.push(deleteBtn);
 		}
-		if (mayChange) buttons.push(deleteBtn);
 	} else {
 		if (m.role === "assistant") {
 			if (!key.think) {
@@ -722,15 +737,12 @@ const combinedMessages = $computed((oldMessages) => {
 			generationEnded = message.finish_reason !== '';
 			ref[PINNED] = !generationEnded || isEditing(message);
 			if (!generationEnded) {
-				if (!message.time) chunks.push({ type: "loading" });
-				else if (!message.content && !message.think)
-					chunks.push({ type: "text", text: "" });
+				if (!message.time || (!message.content && !message.think)) chunks.push({ type: "loading" });
 			}
 			// show token usage & billing
 			else {
 				// 手动添加的消息不显示usage
-				if (message.finish_reason)
-					chunks.push({type: "usage"});
+				if (message.finish_reason) chunks.push({type: "usage"});
 				getBranchChunk(arr[ref.index], chunks);
 			}
 		} else {
@@ -742,10 +754,17 @@ const combinedMessages = $computed((oldMessages) => {
 		if (oldMessage) {
 			let prevChunks = oldMessage.content;
 
+			// 如果这个markdown已经被流式渲染了，那么就不要再重新渲染一遍了（key变化）
+			// 为了保证其它地方的修改能被正常应用，这里依赖了很多隐式条件，比如上面几行的usage和branch，还有用这个-1节省时间而不是findLast
 			if (generationEnded && i === arr.length) {
-				// 因为流md渲染已经和常规渲染同构，不需要再次解析
-				const at = prevChunks.at(-1);
-				if (at?.type === "text") at.text = message.content;
+				const lastType = prevChunks.at(-1)?.type;
+				if (lastType !== 'usage' && lastType !== 'branch') {
+					const old = prevChunks.findLast(item => item.text != null);
+					const now = chunks.findLast(item => item.text === message.content);
+					if (old && now && old.text !== now.text) {
+						now.trick = old.text;
+					}
+				}
 			}
 
 			// 因为用虚拟列表了，不会有多大开销的，大部分都没有渲染，没有监听器

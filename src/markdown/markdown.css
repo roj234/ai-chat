@@ -50,7 +50,7 @@ q:before, q:after { content: none; }
         background: var(--muted);
     }
     & kbd {
-        border: 1px solid #4a5568;
+        border: 1px solid var(--md-kbd-border);
         padding: 2px;
         border-radius: var(--border-radius-sm);
         color: oklch(0.6 0.18 18deg);

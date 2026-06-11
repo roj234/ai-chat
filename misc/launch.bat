@@ -15,5 +15,5 @@ if not exist config.js (
   cls
 )
 
-node server.js --static dist.zip
+node server.js --static dist.brip
 pause

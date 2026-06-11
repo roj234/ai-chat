@@ -1,9 +1,7 @@
-import {DatabaseSync} from 'node:sqlite';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 
 import {Router} from "./router.js";
-import {VectorDB} from "./rag/VectorDB.js";
 import {registerMessageRoutes} from "./routes/messages.js";
 import {registerKVRoutes} from "./routes/kv.js";
 import {registerSearchRoutes} from "./routes/search.js";
@@ -15,19 +13,19 @@ import {registerSSEProxyRoutes} from "./routes/sse-proxy.js";
 
 import {
 	ALLOW_USER_NAMES,
-	ENABLE_FILE_TRANSFER,
+	INTERACTIVE_LOGIN,
 	RESPONSE_USE_MSGPACK_SCHEMA,
 	RESTRICT_USER_CREATION,
-	SEMANTIC_SEARCH_ENABLE,
-	SHUTDOWN_SQL,
-	STARTUP_SQL,
 	WEBSOCKET_SYNC_BASE,
 	WEBSOCKET_SYNC_ENABLE
 } from "./config.js";
-import {c2s_schema_version} from "../common/MsgpackSchema.js";
+import {msgpack_schema_version} from "../common/MsgpackSchema.js";
 
-import {compressGeneric, compressMessage, decompressGeneric, deserializeRow} from "./utils/compression.js";
-import {cachePreparedSql} from "./utils/sqliteUtils.js";
+import {compressGeneric, decompressGeneric, deserializeRow} from "./utils/compression.js";
+import {loadUserData} from "./utils/UserManager.js";
+import {PROTOCOL_VERSION} from "./sync_const.js";
+import {checkPAT} from "./utils/PAT.js";
+import {registerPairingRoutes} from "./routes/pairing.js";
 
 global.compression = {
 	compressGeneric,
@@ -60,9 +58,8 @@ const registerSSEProxy = (router, rootDir) => {
  * @param {string=} workspacePath
  * @return {Promise<AiChatBackend.Router>}
  */
-export async function initServer(dataPath, basePath = "api", workspacePath) {
-	const ROOT_DIR = path.resolve(dataPath);
-	const workspace = path.resolve(workspacePath || ROOT_DIR+"/workspace");
+export async function createRouter(dataPath, basePath = "api", workspacePath) {
+	const workspace = path.resolve(workspacePath || dataPath+"/workspace");
 
 	/** @type {AiChatBackend.Router} */
 	const router = new Router((ctx) => {
@@ -77,7 +74,7 @@ export async function initServer(dataPath, basePath = "api", workspacePath) {
 				return true;
 			}
 
-			const getData = () => ctx._db || (ctx._db = getUserData(dataPath, userId));
+			const getData = () => ctx._db || (ctx._db = loadUserData(dataPath, userId));
 
 			Object.defineProperty(ctx, "db", {
 				get: () => getData().sqlite,
@@ -85,13 +82,29 @@ export async function initServer(dataPath, basePath = "api", workspacePath) {
 			Object.defineProperty(ctx, "vectorDB", {
 				get: () => getData().vector,
 			});
+
+			if (INTERACTIVE_LOGIN) {
+				const pat = (ctx.req.headers.authorization || '').slice("Bearer ".length);
+				if (!pat) {
+					if (!ctx.path.endsWith("/login") && !/\/blobs$|\/blob\/[a-zA-Z0-9_-]+$/.test(ctx.path)) {
+						ctx.send(401, {error: "unauthorized"});
+						return true;
+					}
+				} else {
+					const valid = checkPAT(pat, ctx);
+					if (!valid) {
+						ctx.send(401, {error: "invalid token"});
+						return true;
+					}
+				}
+			}
 		}
 	});
 
 	router.push(basePath);
 
 	router.push("fs");
-	registerFsRoutes(router, true);
+	await registerFsRoutes(router, workspacePath);
 	router.pop();
 
 	if (workspacePath) {
@@ -99,7 +112,7 @@ export async function initServer(dataPath, basePath = "api", workspacePath) {
 		return router;
 	}
 
-	registerSSEProxy(router, ROOT_DIR);
+	registerSSEProxy(router, dataPath);
 
 	for await (const entry of fs.glob("plugins/*/index.js", { cwd: import.meta.dirname, withFileTypes: true })) {
 		if (entry.isFile()) {
@@ -109,24 +122,41 @@ export async function initServer(dataPath, basePath = "api", workspacePath) {
 
 	router.push('v2/:userId');
 
-	registerSSEProxy(router, ROOT_DIR);
+	registerSSEProxy(router, dataPath);
 
 	const batchTypes = {
-		sync: (_, ctx) => WEBSOCKET_SYNC_ENABLE ? WEBSOCKET_SYNC_BASE(ctx) : null,
-		msgpack: () => RESPONSE_USE_MSGPACK_SCHEMA && c2s_schema_version
+		/**
+		 * @param {AiChatBackend.RouteContext} ctx
+		 */
+		sync: (_, ctx) => {
+			if (!WEBSOCKET_SYNC_ENABLE) return null;
+			const base = WEBSOCKET_SYNC_BASE(ctx);
+			const queries = [];
+
+			const userId = ctx.params.userId;
+			if (userId) queries.push("u="+encodeURIComponent(userId));
+			if (INTERACTIVE_LOGIN) queries.push("t="+encodeURIComponent(ctx.req.headers.authorization.slice(7)));
+			return base+"?"+queries.join("&");
+		},
+		version: () => [PROTOCOL_VERSION, RESPONSE_USE_MSGPACK_SCHEMA && msgpack_schema_version]
 	};
 
-	// batch接口统一处理大部分请求
-	router.post('/batch', async (ctx) => {
-		const body = await ctx.readAsObject(4194304);
+	/**
+	 *
+	 * @param {AiChatBackend.RouteContext} ctx
+	 * @param {Array<[string, *]>} body
+	 * @return {Promise<*[]>}
+	 */
+	async function handleBatch(ctx, body) {
 		const rejectors = ctx.variables;
+		const sync = router.sync;
 		let out = [];
 		const promises = [];
-		for (const [type, value] of body) {
+		for (const [func, value] of body) {
 			let result;
-			const handler = batchTypes[type];
+			const handler = batchTypes[func];
 			if (!handler) {
-				result = { error: "unknown endpoint "+type };
+				result = { error: "unknown function "+func };
 			} else {
 				try {
 					const resp = handler(value, ctx);
@@ -142,9 +172,11 @@ export async function initServer(dataPath, basePath = "api", workspacePath) {
 						}).then(result => {
 							toReject.forEach(reject => reject("No value specified"));
 							out[size] = result;
+							sync?.onBatch(ctx, func, value, result);
 						}));
 					} else {
 						result = resp;
+						sync?.onBatch(ctx, func, value, result);
 					}
 				} catch (e) {
 					rejectors.forEach(reject => reject(e));
@@ -158,123 +190,28 @@ export async function initServer(dataPath, basePath = "api", workspacePath) {
 		}
 
 		await Promise.all(promises);
+		return out;
+	}
+
+	router.post('/batch', async (ctx) => {
+		const body = await ctx.readAsObject(4194304);
+		const out = await handleBatch(ctx, body);
 		return ctx.send(200, out);
 	});
+
+	if (INTERACTIVE_LOGIN) {
+		registerPairingRoutes(router);
+	}
 
 	registerMessageRoutes(batchTypes);
 	registerKVRoutes(batchTypes);
 	registerSearchRoutes(router);
 	registerLogRoutes(router, batchTypes);
-	registerDatabaseRoutes(router, ROOT_DIR);
-	registerBlobRoutes(router, batchTypes, ROOT_DIR+'/blobs');
+	registerDatabaseRoutes(router, dataPath);
+	registerBlobRoutes(router, batchTypes, dataPath+'/blobs');
 
 	router.pop();
 	router.pop();
 
 	return router;
-}
-
-// dbManager.js 增加清理
-const MAX_CONNECTIONS = 4;
-const connections = new Map();
-const usageTimestamps = new Map();
-
-/**
- *
- * @param {DatabaseSync} sqlite
- * @param {AiChatBackend.VectorDB} vector
- */
-function closeConnection({sqlite, vector}) {
-	sqlite.exec(SHUTDOWN_SQL);
-	sqlite.close();
-
-	vector?.close();
-}
-
-export function closeAllConnections() {
-	for (const value of connections.values()) {
-		closeConnection(value);
-	}
-}
-
-function getUserData(dbPath, userId) {
-	usageTimestamps.set(userId, Date.now());
-
-	// 如果连接数超限，关闭最久未使用的
-	if (usageTimestamps.size > MAX_CONNECTIONS) {
-		let oldestUser = null, oldestTime = Infinity;
-		for (let [id, time] of usageTimestamps) {
-			if (time < oldestTime) {
-				oldestTime = time;
-				oldestUser = id;
-			}
-		}
-		if (oldestUser && Date.now() - oldestTime > 5000) {
-			closeConnection(connections.get(oldestUser));
-			connections.delete(oldestUser);
-			usageTimestamps.delete(oldestUser);
-		}
-	}
-
-	let db = connections.get(userId);
-	if (!db) connections.set(userId, db = {
-		sqlite: initDB(dbPath ? dbPath+"/"+userId+".db" : ":memory:"),
-		vector: dbPath && SEMANTIC_SEARCH_ENABLE ? new VectorDB(dbPath+"/"+userId+"_rag.db") : null
-	});
-	return db;
-}
-
-// 数据库版本号
-const DB_VERSION = 1;
-
-function initDB(dbPath) {
-	const db = new DatabaseSync(dbPath);
-	const { user_version } = db.prepare('PRAGMA user_version').get();
-	cachePreparedSql(db);
-
-	if (user_version === 0) {
-		db.exec(`
-CREATE TABLE conversations (
-	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	title TEXT DEFAULT '',
-	time INTEGER NOT NULL,
-	data BLOB NOT NULL
-);
-CREATE TABLE messages (
-	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	owner INTEGER NOT NULL REFERENCES conversations(id),
-	time INTEGER,
-	content TEXT NOT NULL,
-	data BLOB NOT NULL
-);
-CREATE TABLE kv (
-	key TEXT PRIMARY KEY,
-	value BLOB NOT NULL
-) WITHOUT ROWID;
-CREATE TABLE kvs (
-	type TEXT NOT NULL,
-    name TEXT NOT NULL,
-    data BLOB NOT NULL,
-    PRIMARY KEY (type, name)
-) WITHOUT ROWID;
-CREATE INDEX idx_messages_owner ON messages(owner);
-CREATE TABLE logs (
-	id INTEGER UNIQUE,
-	time INTEGER NOT NULL,
-	data BLOB NOT NULL
-);
-
-PRAGMA user_version = `+DB_VERSION); // logs 使用 rowid 做底层索引
-	} else if (user_version === DB_VERSION) {
-	} else {
-		throw new Error("数据库版本号错误，请补充迁移函数");
-	}
-
-	db.exec(STARTUP_SQL);
-	if (ENABLE_FILE_TRANSFER) {
-		db.prepare("INSERT INTO conversations (id, title, time, data) VALUES (0, '文件传输助手', ?, ?) ON CONFLICT(id) DO NOTHING").run(
-			Date.now(), compressMessage({ noAI: true })
-		);
-	}
-	return db;
 }

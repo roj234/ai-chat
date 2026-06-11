@@ -9,6 +9,9 @@ namespace AiChatBackend {
         get(url: string, handler: function(RouteContext): void | Promise<void>);
         put(url: string, handler: function(RouteContext): void | Promise<void>);
         delete(url: string, handler: function(RouteContext): void | Promise<void>);
+
+        zipRouter?: ZipRouter
+        sync?: SyncManager
     }
 
     type RouteContext = {
@@ -51,5 +54,9 @@ namespace AiChatBackend {
         data: OpenAI.AssistantMessage[],
         event: EventEmitter,
         isFinished: boolean
+    }
+
+    type SyncManager = {
+        onBatch(ctx: RouteContext, func: string, body: *): void;
     }
 }

@@ -1,6 +1,6 @@
 import {config, conversations, messages, selectedConversation, Shared} from "./states.js";
 import {showToast} from "./components/Toast.js";
-import {deleteDatabase, getMessages, kvListGetValues, kvListSet, updateConversation} from "./database.js";
+import {deleteDatabase, getMessages, isIDB, kvListGetValues, kvListSet, updateConversation} from "./database.js";
 import {downloadFile, prettyError} from "./utils/utils.js";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {ZipReader, ZipWriter} from "unconscious/common/zip-io.js";
@@ -181,29 +181,19 @@ const cleanMessages = messages => {
 	return messages;
 };
 
-export const exportConversation = async (isConfig, _conv) => {
-	const includePlugins = import.meta.env.DEV;
-
-	const mapping = new Map;
-	const replacer = (_, value) => {
-		return mapping.get(value) ?? value;
-	};
-
+/**
+ *
+ * @param {number} type
+ * @param _conv
+ * @return {Promise<void>}
+ */
+export const exportConversation = async (type, _conv) => {
 	const zw = ZipWriter();
 	await zw.add(APP_NAME, "1");
 
-	if (isConfig) {
-		const compression = {compress: true};
-
-		await zw.add("config.json", JSON.stringify(config), compression);
-
-		const kvList = await kvListGetValues(includePlugins ? "*" : "preset");
-		const jsonData = await serializeJSON(kvList, 0, zw);
-
-		await zw.add("kvList.json", jsonData, compression);
-	} else {
+	if (type&1) {
 		const conv = _conv || unconscious(selectedConversation);
-		if (conv) {
+		if (conv && type === 1) {
 			const { id: _a, ready: _b, ...data } = conv;
 
 			let messagePromise = unconscious(messages);
@@ -252,6 +242,16 @@ export const exportConversation = async (isConfig, _conv) => {
 			close();
 		}
 	}
+	if (type&2) {
+		const compression = {compress: true};
+
+		await zw.add("config.json", JSON.stringify(config), compression);
+
+		const kvList = await kvListGetValues(type&4 ? "*" : "preset");
+		const jsonData = await serializeJSON(kvList, 0, zw);
+
+		await zw.add("kvList.json", jsonData, compression);
+	}
 
 	try {
 		downloadFile(zw.finish(), "zip");
@@ -263,7 +263,7 @@ export const exportConversation = async (isConfig, _conv) => {
 
 export const clearDatabase = () => {
 	SimpleModal({
-		message: '删除所有数据（对话、预设、历史记录）？',
+		message: isIDB ? '删除所有数据（对话、预设、历史记录）？' : '重建后端数据库（压缩），有可能出现问题，请备份',
 		accent: 'danger',
 		onConfirm() {
 			deleteDatabase().then(() => {

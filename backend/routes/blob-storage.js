@@ -38,10 +38,12 @@ CREATE TABLE blobs (
     lastModified INTEGER NOT NULL
 ) WITHOUT ROWID;
 PRAGMA user_version = `+DB_VERSION);
-		} else if (user_version === DB_VERSION) {
-			return;
-		} else {
-			throw new Error("数据库版本号错误，请补充迁移函数");
+		} else if (user_version < DB_VERSION) {
+			if (user_version <= 1) {
+
+			}
+
+			db.exec(`PRAGMA user_version = `+DB_VERSION);
 		}
 	});
 

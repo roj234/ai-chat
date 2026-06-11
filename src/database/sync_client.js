@@ -8,9 +8,14 @@ import {LOCKED, updateConversationListUI} from "../components/ConversationList.j
 import {
 	SYNC_CONFLICT,
 	SYNC_CONVERSATION,
+	SYNC_CONVERSATION_DEL,
 	SYNC_INIT,
+	SYNC_KV,
+	SYNC_KVS,
+	SYNC_KVS_DEL,
 	SYNC_LOCKED,
 	SYNC_MESSAGE,
+	SYNC_MESSAGE_DEL,
 	SYNC_PING,
 	SYNC_READERS,
 	SYNC_RELEASED,
@@ -18,10 +23,10 @@ import {
 	SYNC_UNLOCKED
 } from "/backend/sync_const.js";
 import {updateMessageUI} from "../components/MessageList.jsx";
-import {clearDirtyFlags} from "../database.js";
+import {clearDirtyFlags, databaseError, listConversations} from "../database.js";
 import {patch} from "unconscious/common/deepEqual.js";
-
-export {SYNC_MESSAGE, SYNC_CONVERSATION};
+import {decodeMsg} from "unconscious/common/msgpack.js";
+import {msgpack_schema} from "/common/MsgpackSchema.js";
 
 let body;
 
@@ -69,12 +74,6 @@ const setReadonly = (id) => {
 	setCurrentLocked(1, id);
 };
 
-const findConversation = id => {
-	const convList = unconscious(conversations);
-	const index = convList.findIndex(item => item.id === id);
-	return convList[index];
-};
-
 const setCurrentLocked = (locked, id) => {
 	const id1 = selectedConversation.id;
 	if (id1 == null || (id != null && id1 !== id)) return;
@@ -82,8 +81,9 @@ const setCurrentLocked = (locked, id) => {
 	$update(updateConversationListUI);
 };
 
-export function initSync(address) {
+export function initSync(address, kvRef, kvCache) {
 	ws = new WebSocket(address);
+	let closeToast;
 
 	let timestamp;
 	const updater = setInterval(() => {
@@ -92,33 +92,51 @@ export function initSync(address) {
 		}
 	}, 60000);
 
+	let clientId;
+
+	ws.binaryType = 'arraybuffer';
 	ws.onopen = () => {
 		for (const [type, data] of pendingEvents) on(type, data);
 		pendingEvents = [];
 	};
 	ws.onclose = () => {
-		showToast(<>同步服务已断开 <button className={"btn primary"} onClick={() => {
-			location.reload();
-		}}>刷新</button></>, "error", 0);
+		let lastTimestamp = 0;
+		for (let conv of unconscious(conversations)) {
+			lastTimestamp = Math.max(lastTimestamp, conv.time);
+		}
+
+		closeToast = showToast(<>同步服务已断开 <button className={"btn primary"} onClick={({target}) => {
+			target.disabled = true;
+			target.textContent = '连接中';
+			listConversations(lastTimestamp).then(arr => {
+				conversations.value = arr;
+				const id = selectedConversation.id;
+				if (id != null) selectedConversation.value = arr.find(item => item.id === id);
+				closeToast();
+			}).catch(err => {
+				if (err.status !== 304) databaseError(err);
+				else closeToast();
+			}).finally(() => {
+				target.disabled = false;
+				target.textContent = '重连';
+			});
+		}}>重连</button><button className={"btn danger"} onClick={() => location.reload()}>刷新</button></>, "error", 0);
 		clearInterval(updater);
 	};
-	ws.onmessage = async (event) => {
+	ws.onmessage = async ({data: buf}) => {
 		timestamp = Date.now();
 
-		let [type, data] = JSON.parse(event.data);
+		let [type, data] = typeof buf === 'string' ? JSON.parse(buf) : decodeMsg(new DataView(buf), { schema: msgpack_schema });
 		data = await decodeObjects(data);
 		switch (type) {
 			// 状态更新
 			case SYNC_INIT: {
-				const [clients, locked] = data;
-				showToast("同步服务已连接, 共 "+clients+" 个客户端", "ok");
-				if (locked.length) {
-					for (const item of locked) {
-						const conv = findConversation(item);
-						if (conv) conv[LOCKED] = 1;
-					}
-					$update(updateConversationListUI);
-				}
+				let clients, locked;
+				[clients, locked, clientId] = data;
+				const set = new Set(locked);
+				unconscious(conversations).forEach(item => item[LOCKED] = set.has(item.id));
+				$update(updateConversationListUI);
+				showToast("同步服务已连接 ("+clients+")", "ok");
 			}
 			break;
 			case SYNC_READERS: {
@@ -128,7 +146,7 @@ export function initSync(address) {
 			break;
 			case SYNC_LOCKED:
 			case SYNC_UNLOCKED: {
-				const conv = findConversation(data);
+				const conv = unconscious(conversations).find(item => item.id === data);
 				if (conv) {
 					conv[LOCKED] = type === SYNC_LOCKED;
 					$update(updateConversationListUI);
@@ -154,12 +172,13 @@ export function initSync(address) {
 			}
 			break;
 			// 消息状态更新
-			case SYNC_MESSAGE: {
-				const {owner, ...message} = data;
-				const isUpdate = Object.keys(message).length > 1;
-
+			case SYNC_MESSAGE:
+			case SYNC_MESSAGE_DEL: {
 				const conv = unconscious(selectedConversation);
 				const msg = unconscious(messages);
+
+				const {owner, ...message} = data;
+				const isUpdate = type === SYNC_MESSAGE;
 
 				const index = msg.findIndex(item => item.id === message.id);
 				if (index >= 0) {
@@ -173,16 +192,35 @@ export function initSync(address) {
 				break;
 			}
 			// 对话状态更新
-			case SYNC_CONVERSATION: {
-				const isUpdate = Object.keys(data).length > 1;
-
+			case SYNC_CONVERSATION:
+			case SYNC_CONVERSATION_DEL: {
 				const index = conversations.findIndex(item => item.id === data.id);
 				if (index >= 0) data = patch(conversations.splice(index, 1)[0], data);
-				if (isUpdate) conversations.unshift(data);
-				else {
-					if (data.id === selectedConversation.id) {
-						showToast("当前对话已被其它客户端删除", 'error', 0);
-						beginConversation();
+				if (type === SYNC_CONVERSATION) conversations.unshift(data);
+				else if (data.id === selectedConversation.id) {
+					showToast("当前对话已被其它客户端删除", 'error', 0);
+					beginConversation();
+				}
+			}
+			break;
+			case SYNC_KV: {
+				const [key, value] = data;
+				const val = kvRef.get(key);
+				if (val) val.value = value;
+			}
+			break;
+			case SYNC_KVS:
+			case SYNC_KVS_DEL: {
+				const [type, name] = data;
+				kvCache.delete(type+':'+name);
+
+				const val = kvRef.get(':'+type);
+				if (val) {
+					const idx = unconscious(val).findIndex(item => item.name === name);
+					if (type === SYNC_KVS_DEL) {
+						val.splice(idx, 1);
+					} else if (idx < 0) {
+						val.unshift({name});
 					}
 				}
 			}
@@ -190,7 +228,7 @@ export function initSync(address) {
 		}
 	}
 
-	return { on }
+	return () => clientId;
 }
 
 const readerCount = new Map;

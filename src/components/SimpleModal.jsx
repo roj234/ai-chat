@@ -25,9 +25,10 @@ const SimpleModal = ({
 		onCancel
 }) => {
 	let inputValue = '';
+	const ignoreCancel = onCancel === null;
 
 	const handleClose = () => {
-		if (false === onCancel?.(inputValue)) {
+		if (ignoreCancel || false === onCancel?.(inputValue)) {
 			return;
 		}
 		element.remove();
@@ -40,20 +41,37 @@ const SimpleModal = ({
 		element.remove();
 	};
 
+	let input;
+	const onFocusBlur = e => {
+		const isFocus = e.type === "focus";
+		input.style.height = isFocus ? "500px" : "";
+	};
+
+	const self = (h) => {
+		return (e) => {
+			if (e.target === element) h(e);
+		}
+	};
+
 	const element = (
-		<div className="modal-overlay" onClick={handleClose}>
+		<div className="modal-overlay" onContextMenu.self.prevent={handleClose}>
 			<div className="modal" onClick={(e) => e.stopPropagation()}>
 				<div className="header"><b>{title}</b></div>
 				<div className="body">
 					{message && <p>{message}</p>}
-					{type === 'input' ? <textarea
+					{type === 'input' ? <input className={"text-input"}
 						onChange={(e) => inputValue = e.target.value}
+						placeholder={placeholder}
+						value={value}
+					/> : type === 'textarea' ? input = <textarea className={"text-input"}
+						onChange={(e) => inputValue = e.target.value}
+						onFocus={onFocusBlur} onBlur={onFocusBlur}
 						placeholder={placeholder}
 					>{value}</textarea> : null}
 				</div>
 				<div className="footer">
 					<button className={"btn " + accent} onClick={handleConfirm}>{confirmMessage}</button>
-					{onConfirm && <button className="btn ghost" onClick={handleClose}>取消</button>}
+					{onConfirm && !ignoreCancel && <button className="btn ghost" onClick={handleClose}>取消</button>}
 				</div>
 			</div>
 		</div>

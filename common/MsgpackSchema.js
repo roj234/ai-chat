@@ -1,12 +1,12 @@
 import {bakeSchema} from "unconscious/common/msgpack.js";
 
-export const s2c_schema_version = "7";
-export const s2c_schema = [];
-s2c_schema.push(
+export const msgpack_schema_version = "9";
+export const msgpack_schema = [];
+msgpack_schema.push(
 	// generic
 	"id", "title", "time", "owner",
 	"type", "name",
-	["$", s2c_schema, ["BlobH", "Map", "Set", "SET", "ARR", "DEL"]],
+	["$", msgpack_schema, ["BlobH", "Map", "Set", "SET", "ARR", "DEL", "STR"]],
 	"hash", "size", "lastModified",
 	"error",
 
@@ -21,7 +21,7 @@ s2c_schema.push(
 		[
 			["type", null, ["text", "image_url", "input_audio"]],
 			"text",
-			["image_url", [["url", s2c_schema]]],
+			["image_url", [["url", msgpack_schema]]],
 			["input_audio", ["data", "format"]]
 		]
 	],
@@ -58,9 +58,7 @@ s2c_schema.push(
 	"input_tokens", "output_tokens", "reasoning_tokens", "cached_tokens", "cache_write_tokens",
 	"duration", "latency", "cost",
 	["currency", null, ["USD", "CNY"]],
+	"rowid",
 );
 
-export const c2s_schema_version = s2c_schema_version;
-export const c2s_schema = s2c_schema;
-
-bakeSchema(s2c_schema);
+bakeSchema(msgpack_schema);

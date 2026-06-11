@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AiChat测试工具</title>
+    <link rel="stylesheet" href="vendor/normalize.css" />
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.3);
+            max-width: 33vw;
+            width: 100%;
+            padding: 20px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2em;
+            font-weight: 600;
+        }
+
+        /* 统计卡片 */
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        .stat-card {
+            background: #fff;
+            border-radius: 16px;
+            padding: 20px 30px;
+            text-align: center;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+            min-width: 120px;
+            transition: transform 0.2s ease;
+        }
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        .stat-value {
+            font-size: 3em;
+            font-weight: 700;
+            line-height: 1;
+        }
+        .stat-value.passed {
+            color: #10b981;
+        }
+        .stat-value.failed {
+            color: #ef4444;
+        }
+        .stat-label {
+            color: #6b7280;
+            margin-top: 8px;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* 进度条 */
+        .progress-bar-container {
+            background: #e5e7eb;
+            border-radius: 10px;
+            height: 12px;
+            margin-bottom: 25px;
+            overflow: hidden;
+        }
+        .progress-bar {
+            height: 100%;
+            border-radius: 10px;
+            transition: width 0.5s ease-in-out, background 0.5s;
+            width: 0%;
+            background: #10b981;
+        }
+
+        /* 错误信息区域 */
+        .errors-header {
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .error-badge {
+            background: #ef4444;
+            color: #fff;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8em;
+            font-weight: 700;
+        }
+
+        .error-list {
+            max-height: 50vh;
+            overflow-y: auto;
+        }
+        .error-list:empty::after {
+            content: '暂无错误 ✨';
+            display: block;
+            text-align: center;
+            color: #9ca3af;
+            padding: 20px;
+        }
+        .error-item {
+            background: #fff;
+            border-left: 4px solid #ef4444;
+            padding: 12px 14px;
+            margin-bottom: 8px;
+            color: #4b5563;
+            font-size: 0.9em;
+            word-break: break-word;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+            animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        /* 按钮区域 */
+        .button-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        .btn {
+            padding: 14px 28px;
+            border: none;
+            border-radius: 12px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            letter-spacing: 0.3px;
+            flex: 1;
+            min-width: 140px;
+        }
+        .btn-primary {
+            background: #6366f1;
+            color: white;
+            box-shadow: 0 8px 20px rgba(99, 102, 241, 0.4);
+        }
+        .btn-primary:hover:not(:disabled) {
+            background: #4f46e5;
+            box-shadow: 0 12px 25px rgba(99, 102, 241, 0.5);
+            transform: translateY(-2px);
+        }
+        .btn-primary:disabled {
+            background: #a5b4fc;
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+
+        /* 提示 */
+        .tip {
+            text-align: center;
+            color: #9ca3af;
+            font-size: 0.8em;
+            margin-top: 15px;
+        }
+        .tip code {
+            background: #e5e7eb;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-family: monospace;
+            color: #6366f1;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🧪 AiChat测试工具</h1>
+
+    <!-- 统计卡片 -->
+    <div class="stats">
+        <div class="stat-card">
+            <div class="stat-value passed" id="passCount">0</div>
+            <div class="stat-label">✅ 通过</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value failed" id="failCount">0</div>
+            <div class="stat-label">❌ 失败</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" style="color:#6366f1;" id="totalCount">0</div>
+            <div class="stat-label">📋 总计</div>
+        </div>
+    </div>
+
+    <!-- 进度条 -->
+    <div class="progress-bar-container">
+        <div class="progress-bar" id="progressBar"></div>
+    </div>
+
+    <!-- 错误信息 -->
+    <div class="errors-header">
+        <span>📝 错误</span>
+        <span class="error-badge" id="errorBadge">0</span>
+    </div>
+    <ul class="error-list" id="errorList"></ul>
+
+    <!-- 按钮 -->
+    <div class="button-group">
+        <button class="btn btn-primary" id="runBtn">▶️ 开始测试</button>
+    </div>
+</div>
+<script type="module" src="test/index.js"></script>
+</body>
+</html>

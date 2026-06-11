@@ -24,6 +24,7 @@ export function Dropdown({items, selection, onChanged, dir = 'down'}) {
 		main.classList.remove("open");
 	};
 
+	console.log(items);
 	let options;
 	const main = <div className={"pretty-select "+dir}>
 		<div className="input" onClick.stop={() => main.classList.toggle("open")}>
@@ -32,7 +33,7 @@ export function Dropdown({items, selection, onChanged, dir = 'down'}) {
 		</div>
 
 		<ul ref={options} className="dropdown"
-			onClick.capture.stop.delegate{".ri-delete-bin-line"}={({target}) => {
+			onClick.capture.delegate{".ri-delete-bin-line"}.stop={({target}) => {
 
 			if (target.classList.toggle("clicked")) {
 				setTimeout(() => {
