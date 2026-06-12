@@ -6,6 +6,7 @@ import {openJsonEditor} from "/src/json_editor/editorProxy.js";
 import {highlightJsonLike} from "/src/markdown/highlight.js";
 import {streamFetch} from "/common/openai-api-utils.js";
 import {webviewDownloadFile} from "/vendor/jsBridge.js";
+import {PROTOCOL_VERSION} from "/backend/sync_const.js";
 
 const cfg = $store("config", undefined, {persist: true, deep: false});
 const currentPage = $state(1);
@@ -102,7 +103,12 @@ Only output the translation result, no explanations, no additional text.`,
 function api(path, opts = {}) {
 	const url = path.startsWith('http') ? path : cfg.db_server + '/cards' + path;
 	const headers = opts.body !== undefined ? { 'Content-Type': 'application/json' } : {};
-	return fetch(url, { ...opts, headers: { ...headers, ...opts.headers, 'Authorization': 'Bearer '+cfg.db_pat } }).then(r => {
+	return fetch(url, { ...opts, headers: {
+		...headers,
+		...opts.headers,
+		'x-pv': PROTOCOL_VERSION,
+		'Authorization': 'Bearer '+(cfg.db_pat||'')
+	} }).then(r => {
 		if (!r.ok && r.headers.get('Content-Type')?.includes('application/json')) {
 			return r.json().then(d => { throw new Error(d.error || r.statusText); });
 		}

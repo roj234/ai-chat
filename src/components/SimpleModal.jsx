@@ -25,9 +25,10 @@ const SimpleModal = ({
 		onCancel
 }) => {
 	let inputValue = '';
+	const ignoreCancel = onCancel === null;
 
 	const handleClose = () => {
-		if (false === onCancel?.(inputValue)) {
+		if (ignoreCancel || false === onCancel?.(inputValue)) {
 			return;
 		}
 		element.remove();
@@ -53,7 +54,7 @@ const SimpleModal = ({
 				</div>
 				<div className="footer">
 					<button className={"btn " + accent} onClick={handleConfirm}>{confirmMessage}</button>
-					{onConfirm && <button className="btn ghost" onClick={handleClose}>取消</button>}
+					{onConfirm && !ignoreCancel && <button className="btn ghost" onClick={handleClose}>取消</button>}
 				</div>
 			</div>
 		</div>

@@ -81,6 +81,20 @@ const groupConversations = () => {
 };
 
 /**
+ *
+ * @param {AiChat.Conversation} conv
+ * @param {string} title
+ */
+export const setConversationTitle = (conv, title) => {
+	conv.title = title;
+	$update(updateConversationListUI);
+	if (unconscious(selectedConversation) === conv) {
+		$update(selectedConversation);
+	}
+	updateConversation(conv);
+};
+
+/**
  * 渲染对话列表，按时间分组，支持选择、编辑标题、删除。
  * @param {Object} props
  * @param {Conversation[]} props.conversations - 对话数组
@@ -115,14 +129,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 						value: conv.title,
 						onConfirm(val) {
 							if (!val) return false;
-							const id = vl.findIndex(conv);
-
-							conv.title = val;
-							// 重新计算时间
-							$update(conversations);
-							updateConversation(conv);
-
-							vl.setItem(id, conv);
+							setConversationTitle(conv, val);
 						}
 					});
 				return;

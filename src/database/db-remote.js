@@ -8,6 +8,9 @@ import {base64Encode} from "unconscious/common/Base64.js";
 import {prettyError} from "../utils/utils.js";
 import {$store, $update, AS_IS, unconscious} from "unconscious";
 import SimpleModal from "../components/SimpleModal.jsx";
+import {delta} from "unconscious/common/deepEqual.js";
+import {PROTOCOL_VERSION, sortMessages} from "/backend/sync_const.js";
+import {DB_MESSAGES_DIFF} from "../database.js";
 
 let sync;
 
@@ -32,13 +35,14 @@ export const serializeMsgpack = async (obj) => {
 };
 
 const request = async (path, {body, method} = {}) => {
-	if (!dbUrl.endsWith('/')) dbUrl += '/';
+	if (!dbUrl.endsWith('/')) config.db_server = dbUrl += '/';
 	const init = {
 		headers: {
 			'Accept': 'application/vnd.msgpack,application/json',
-			'x-schema-version': s2c_schema_version,
+			'x-sv': s2c_schema_version,
+			'x-pv': PROTOCOL_VERSION,
 			'Content-Type': serverAcceptMsgpack ? 'application/vnd.msgpack' : 'application/json',
-			'Authorization': 'Bearer '+config.db_pat
+			'Authorization': 'Bearer '+(config.db_pat||'')
 		},
 		method,
 		body: body && await (serverAcceptMsgpack ? serializeMsgpack(body) : serializeJSON(body)),
@@ -93,7 +97,8 @@ const runBatch = () => {
 	const mq = unconscious(messageQueue);
 	let mqLength = mq.length;
 	if (mqLength) {
-		mq.forEach(item => queue.push([item, AS_IS, AS_IS]));
+		// 如果切换了数据库服务器
+		if (!config._new) mq.forEach(item => queue.push([item, AS_IS, AS_IS]));
 		mq.length = 0;
 	}
 
@@ -177,12 +182,19 @@ const u_deleteMessage = makeBatch("message/delete");
 
 export const getMessages = conversation => {
 	const id = conversation.id;
+	const cachedMessage = conversation[DB_MESSAGES_DIFF];
+
+	const metadata = u_getConversation([id, cachedMessage && conversation.time]);
 	const messages = u_messages(id);
-	return u_getConversation(id).then(json => {
+
+	return metadata.then(json => {
 		for (const key of Object.keys(conversation)) delete conversation[key];
 		Object.assign(conversation, json);
 		conversation.id = id;
-		return messages;
+		return messages.catch(err => {
+			if (err.status !== 304) throw err;
+			return sortMessages([...cachedMessage.values()]);
+		});
 	});
 };
 
@@ -197,6 +209,19 @@ export const deleteMessage = (id, conversation) => {
 	return u_deleteMessage(id);
 };
 
+const showIncompatibleDialog = backendVersion => {
+	SimpleModal({
+		title: "通信协议不兼容",
+		message: '前端版本 '+PROTOCOL_VERSION+'\n后端版本 '+backendVersion+'\n解决方法：更新后端/前端',
+		confirmMessage: "清空数据库服务",
+		onConfirm() {
+			config.db_server = '';
+			location.reload()
+		},
+		onCancel: null
+	});
+};
+
 export const listConversations = (lastTimestamp) => {
 	makeBatch("sync")().then(syncServer => {
 		if (syncServer) {
@@ -206,7 +231,14 @@ export const listConversations = (lastTimestamp) => {
 			sync = initSync(syncServer.replace(/^http/, "ws"));
 		}
 	});
-	makeBatch("msgpack")().then(version => serverAcceptMsgpack = version === c2s_schema_version);
+	makeBatch("version")().catch(err => {
+		if (err.startsWith?.("unknown")) return ['Legacy'];
+	}).then(([protocolVersion, msgpackVersion]) => {
+		if (protocolVersion !== PROTOCOL_VERSION) {
+			showIncompatibleDialog(protocolVersion);
+		}
+		serverAcceptMsgpack = msgpackVersion === c2s_schema_version;
+	});
 	return makeBatch("conversations")(lastTimestamp);
 };
 
@@ -255,20 +287,29 @@ export const kvListGet = async (type, name) => {
 	return val;
 };
 
+const KVLIST_IGNORE_KEYS = new Set(["name", "type"]);
+
 /**
  * @param {Object} value
  * @param {string} type
- * @param {string} name
+ * @param {string=} name
  * @return {Promise<*>}
  */
 export const kvListSet = async (value, type, name) => {
-	if (type) value.type = type;
 	if (name) value.name = name;
+	else name = value.name;
 
 	const cacheKey = type+":"+name;
+	const prev = kvListCache.get(cacheKey);
+	const diff = prev ? delta(prev, value, KVLIST_IGNORE_KEYS) : { $: 'SET', val: value };
+
 	insertToKVListCache(cacheKey, value);
 
-	return u_upsertKVList(value);
+	return u_upsertKVList({
+		type,
+		name,
+		...diff
+	});
 };
 
 export const kvListDel = (type, name) => u_deleteKVList([type, name]);
@@ -345,7 +386,7 @@ export const uploadBlob = async blob => {
 				method: 'POST',
 				headers: {
 					'Content-Type': blob.type,
-					'Authorization': 'Bearer '+config.db_pat
+					'Authorization': 'Bearer '+(config.db_pat||'')
 				},
 				body: blob
 			});

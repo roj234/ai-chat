@@ -556,6 +556,12 @@ export function _CharacterEditor(char, isOpen, close) {
 			id: "userdesc",
 			placeholder: "填写以覆盖默认设置",
 			type: "textbox"
+		},
+		{
+			name: "角色名字",
+			id: "char",
+			placeholder: "填写以覆盖默认设置",
+			type: "input"
 		}
 	];
 	const charOptions = <Filter choices={char} config={config} showTitle={true} onChange={(k, v, chr) => {

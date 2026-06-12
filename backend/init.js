@@ -13,6 +13,7 @@ import {registerSSEProxyRoutes} from "./routes/sse-proxy.js";
 
 import {
 	ALLOW_USER_NAMES,
+	INTERACTIVE_LOGIN,
 	RESPONSE_USE_MSGPACK_SCHEMA,
 	RESTRICT_USER_CREATION,
 	WEBSOCKET_SYNC_BASE,
@@ -22,6 +23,9 @@ import {c2s_schema_version} from "../common/MsgpackSchema.js";
 
 import {compressGeneric, decompressGeneric, deserializeRow} from "./utils/compression.js";
 import {loadUserData} from "./utils/UserManager.js";
+import {PROTOCOL_VERSION} from "./sync_const.js";
+import {checkPAT} from "./utils/PAT.js";
+import {registerPairingRoutes} from "./routes/pairing.js";
 
 global.compression = {
 	compressGeneric,
@@ -79,6 +83,22 @@ export async function initServer(dataPath, basePath = "api", workspacePath) {
 			Object.defineProperty(ctx, "vectorDB", {
 				get: () => getData().vector,
 			});
+
+			if (INTERACTIVE_LOGIN) {
+				const pat = (ctx.req.headers.authorization || '').slice("Bearer ".length);
+				if (!pat) {
+					if (!ctx.path.endsWith("/login") && !/\/blobs$|\/blob\/[a-zA-Z0-9_-]+$/.test(ctx.path)) {
+						ctx.send(401, {error: "unauthorized"});
+						return true;
+					}
+				} else {
+					const valid = checkPAT(pat, ctx);
+					if (!valid) {
+						ctx.send(401, {error: "invalid token"});
+						return true;
+					}
+				}
+			}
 		}
 	});
 
@@ -107,7 +127,7 @@ export async function initServer(dataPath, basePath = "api", workspacePath) {
 
 	const batchTypes = {
 		sync: (_, ctx) => WEBSOCKET_SYNC_ENABLE ? WEBSOCKET_SYNC_BASE(ctx) : null,
-		msgpack: () => RESPONSE_USE_MSGPACK_SCHEMA && c2s_schema_version
+		version: () => [PROTOCOL_VERSION, RESPONSE_USE_MSGPACK_SCHEMA && c2s_schema_version]
 	};
 
 	// batch接口统一处理大部分请求
@@ -154,6 +174,10 @@ export async function initServer(dataPath, basePath = "api", workspacePath) {
 		await Promise.all(promises);
 		return ctx.send(200, out);
 	});
+
+	if (INTERACTIVE_LOGIN) {
+		registerPairingRoutes(router);
+	}
 
 	registerMessageRoutes(batchTypes);
 	registerKVRoutes(batchTypes);

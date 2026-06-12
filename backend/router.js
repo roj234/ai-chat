@@ -100,7 +100,7 @@ export class Router {
 				},
 				variables: newVariables,
 				send(status, data) {
-					const {accept = "", ["x-schema-version"]: x_msv} = req.headers;
+					const {accept = "", ["x-sv"]: x_msv} = req.headers;
 					const acceptEncoding = (req.headers['accept-encoding'] || '').toLowerCase();
 
 					let outputStream = res;

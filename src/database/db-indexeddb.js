@@ -1,5 +1,6 @@
 import {getTextContent} from "../utils/utils.js";
 import {DONE} from "../database.js";
+import {sortMessages} from "/backend/sync_const.js";
 
 
 const DB_NAME = 'AiChat';
@@ -128,12 +129,7 @@ const transaction = (callback, write, ...database) => new Promise((resolve, reje
 export const getMessages = conversation => transaction((tx, resolve) => {
 	const request = tx.objectStore('messages').index('owner').getAll(conversation.id);
 	request.onsuccess = (event) => {
-		resolve(event.target.result.sort((a, b) => {
-			const b1 = a.role === "system";
-			const b2 = b.role === "system";
-			if (b1 !== b2) return b2 - b1;
-			return 0;
-		}));
+		resolve(sortMessages(event.target.result));
 	}
 }, false, 'messages');
 

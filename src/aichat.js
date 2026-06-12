@@ -27,6 +27,7 @@ import {callOnLoadHandler} from "./plugin.js";
 import {enableBranches} from "./utils/BranchManager.js";
 import {checkUpdate} from "../common/updater.js";
 import {setAllowHTMLTags} from "./markdown/markdown.js";
+import {streamFetch} from "../common/openai-api-utils.js";
 
 const $ = sel => document.getElementById(sel);
 
@@ -196,6 +197,8 @@ const createApp = () => {
 			listConversations().catch(err => {
 				if (err.error === "no such user") {
 					connectDatabase();
+				} else if (err.status === 401) {
+					return executeLogin();
 				} else {
 					databaseError(err);
 				}
@@ -308,7 +311,31 @@ const createApp = () => {
 	];
 };
 
-function connectDatabase() {
+export const executeLogin = async () => new Promise((resolve, reject) => {
+	const abort = new AbortController;
+	let modal;
+	streamFetch(config.db_server+"login", { signal: abort.signal }, ({code, token}) => {
+		if (code) {
+			modal = SimpleModal({
+				title: "交互式登录",
+				message: "在服务端输入\n    /accept "+code+"\n以登录",
+				onCancel: null,
+				confirmMessage: "取消",
+				accent: "danger",
+				onConfirm() {abort.abort();}
+			})
+		}
+		if (token) {
+			config.db_pat = token;
+			setTimeout(() => location.reload());
+		}
+	}).catch((e) => {
+		modal?.remove();
+		showToast("登陆失败\n"+prettyError(e), 'error', 0);
+	});
+});
+
+const connectDatabase = () => {
 	SimpleModal({
 		type: "input",
 		title: "连接数据库",
@@ -331,12 +358,16 @@ function connectDatabase() {
 				}
 			}
 
+			let pat;
+			[value, pat] = value.trim().split("\n");
+
 			if (!value.toLowerCase().startsWith("http") && !value.startsWith('/')) {
 				if (!DB_SERVER) return false;
 				value = DB_SERVER + "v2/"+encodeURIComponent(value);
 			}
 			if (!value.endsWith('/')) value += '/';
 			config.db_server = value;
+			if (pat) config.db_pat = pat;
 			config._new = true;
 			location.reload();
 		},
@@ -347,7 +378,7 @@ function connectDatabase() {
 			location.reload();
 		}
 	});
-}
+};
 
 // Mount
 addEventListener("load", () => {

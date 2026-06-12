@@ -106,7 +106,7 @@ export function initSync(address) {
 			}).catch(err => {
 				if (err.status !== 304) databaseError(err);
 			});
-		}}>重连</button></>, "error", 0);
+		}}>重连</button><button className={"btn danger"} onClick={() => location.reload()}>刷新</button></>, "error", 0);
 		clearInterval(updater);
 	};
 	ws.onmessage = async (event) => {

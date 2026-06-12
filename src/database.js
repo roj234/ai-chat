@@ -9,8 +9,8 @@ import {SETTINGS} from "./settings.js";
 import {BRANCH_MANAGER} from "./utils/BranchManager.js";
 import {LOCKED} from "./components/ConversationList.jsx";
 
-const MESSAGE_DIFF = debugSymbol("MESSAGE_IN_DB");
-const PREV_CONVERSATION = debugSymbol("CONVERSATION_IN_DB");
+export const DB_MESSAGES_DIFF = debugSymbol("DB_MESSAGES_DIFF");
+export const DB_CONVERSATION_DIFF = debugSymbol("DB_CONVERSATION_DIFF");
 export const DONE = Promise.resolve();
 
 export const databaseError = err => {
@@ -41,22 +41,18 @@ const db = isIDB ? idb : remote;
 
 export const {
 	deleteDatabase,
+	/**
+	 * 列出所有会话，按创建时间降序
+	 * @param {number=} lastTimestamp 304 时间戳
+	 * @returns {Promise<Array<{id:number, title:string, time:number}>>}
+	 */
+	listConversations,
 	getKV, setKV,
 	kvListGetValues, kvListSet, kvListDel, kvListGetKeys, kvListGet,
 	searchMessages,
 	uploadBlob, getBlob
 } = db;
 
-/**
- * 列出所有会话，按创建时间降序
- * @param {number=} lastTimestamp 304 时间戳
- * @returns {Promise<Array<{id:number, title:string, time:number, messageId?:number}>>}
- */
-export const listConversations = async (lastTimestamp) => {
-	const conversations = await db.listConversations(lastTimestamp);
-	conversations.forEach((conversation) => conversation.ready = false);
-	return conversations;
-};
 
 /**
  * 清除对话的脏标记
@@ -66,7 +62,7 @@ export const listConversations = async (lastTimestamp) => {
  */
 export const clearDirtyFlags = (conversation, id, message) => {
 	/** @type {Map<number, AiChat.Message>} */
-	const m = conversation[MESSAGE_DIFF];
+	const m = conversation[DB_MESSAGES_DIFF];
 	if (message) m.set(id, structuredClone(message));
 	else m.delete(id);
 }
@@ -76,15 +72,13 @@ export const clearDirtyFlags = (conversation, id, message) => {
  * @param {AiChat.Conversation} conversation 对话
  * @returns {Promise<AiChat.Message[]>}
  */
-export const getMessages = conversation => {
-	if (conversation.ready == null) return Promise.resolve([]);
-
-	return db.getMessages(conversation).then(messages => {
+export const getMessages = conversation => (
+	db.getMessages(conversation).then(messages => {
 		/** @type {Map<number, AiChat.Message>} */
 		const m = new Map();
 
-		conversation[PREV_CONVERSATION] = structuredClone(conversation);
-		conversation[MESSAGE_DIFF] = m;
+		conversation[DB_CONVERSATION_DIFF] = structuredClone(conversation);
+		conversation[DB_MESSAGES_DIFF] = m;
 
 		for (let message of messages) {
 			delete message.owner;
@@ -92,8 +86,8 @@ export const getMessages = conversation => {
 		}
 
 		return messages;
-	});
-};
+	})
+);
 
 const DIFF_IGNORE_KEYS = new Set(["id", "ready"]);
 const WAITING = debugSymbol("UPDATE_WAIT")
@@ -117,7 +111,7 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 	let promises = [];
 	let changed = (diff) => {
 		changed = null;
-		conversation[PREV_CONVERSATION] = structuredClone(conversation);
+		conversation[DB_CONVERSATION_DIFF] = structuredClone(conversation);
 		const updateAndThen = db.upsertConversation(diff);
 		promises.push(updateAndThen);
 		return updateAndThen;
@@ -125,7 +119,7 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 
 	// 新对话
 	if (!("id" in conversation)) {
-		conversation[MESSAGE_DIFF] = new Map;
+		conversation[DB_MESSAGES_DIFF] = new Map;
 		const {ready, ...rest} = conversation;
 		conversation.id = null;
 		const promise = changed(rest).then(id => {
@@ -141,7 +135,7 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 		/**
 		 * @type {Map<number, AiChat.Message>}
 		 */
-		const messagesInDB = conversation[MESSAGE_DIFF];
+		const messagesInDB = conversation[DB_MESSAGES_DIFF];
 		/**
 		 * @type {Map<number, AiChat.Message>}
 		 */
@@ -184,7 +178,7 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 				return db.upsertMessage(diff).then((id) => {
 					message.id = id;
 					// messagesInMemory 可能已经变了，取最新的值
-					conversation[MESSAGE_DIFF].set(id, snapshot);
+					conversation[DB_MESSAGES_DIFF].set(id, snapshot);
 
 					// 消息在RTT内又修改了，重新更新
 					if (message.time !== saveTime) {
@@ -203,11 +197,11 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 			messagesInDB.forEach((value, id) => promises.push(db.deleteMessage(id, conversation)));
 		}
 
-		conversation[MESSAGE_DIFF] = messagesInMemory;
+		conversation[DB_MESSAGES_DIFF] = messagesInMemory;
 	}
 
 	let convDiff;
-	if (changed && (convDiff = isIDB ? (!deepEqual(conversation[PREV_CONVERSATION], conversation, DIFF_IGNORE_KEYS) && conversation) : delta(conversation[PREV_CONVERSATION], conversation, DIFF_IGNORE_KEYS))) {
+	if (changed && (convDiff = isIDB ? (!deepEqual(conversation[DB_CONVERSATION_DIFF], conversation, DIFF_IGNORE_KEYS) && conversation) : delta(conversation[DB_CONVERSATION_DIFF], conversation, DIFF_IGNORE_KEYS))) {
 		convDiff.id = conversation.id;
 		changed(convDiff);
 	}

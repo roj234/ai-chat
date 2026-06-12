@@ -1,11 +1,9 @@
-import {createStateListener, getToolParameters, onConversationChanged, TOOL_NAME} from "/src/skills.js";
-import {$state, $update, $watch, appendChild, debugSymbol, unconscious} from "unconscious";
-import {messages} from "/src/states.js";
+import {createStateListener, getToolParameters, TOOL_NAME} from "/src/skills.js";
+import {$state, $update, $watch, appendChild, unconscious} from "unconscious";
+import {messages, onConversationLoaded} from "/src/states.js";
 import {onLoad} from "/src/plugin.js";
 import {renderMarkdownToElement} from "/src/markdown/markdown.js";
 import {jsonPathOp} from "unconscious/common/json-schema-utils.js";
-
-const HTML = debugSymbol("UNPERSISTED_DATA");
 
 /**
  * Dashboard 工具：管理全局浮动 UI
@@ -66,8 +64,7 @@ export const dashboard = {
 const dashboardState = $state();
 onLoad((app) => appendChild(app, dashboardState));
 
-onConversationChanged((conv, messages) => {
-	const var_listener = createStateListener(conv, "var_state");
+onConversationLoaded((conv, messages) => {
 	const dashboard_listener = createStateListener(conv, "dashboard");
 
 	let listeners = [];
@@ -77,6 +74,8 @@ onConversationChanged((conv, messages) => {
 		}
 	};
 
+	let var_listener;
+
 	$watch(dashboard_listener, () => {
 		listeners.length = 0;
 
@@ -84,6 +83,11 @@ onConversationChanged((conv, messages) => {
 		if (!html) {
 			dashboardState.value = null;
 		} else {
+			if (!var_listener) {
+				var_listener = createStateListener(conv, "var_state");
+				$watch(var_listener, runListeners, false);
+			}
+
 			const node = <div className={`rp-dashboard`} />;
 			renderMarkdownToElement(node, html.replace(/\{\{(.+?)}}/g, (match, path) => {
 				return '`'+path+'`';
@@ -104,5 +108,4 @@ onConversationChanged((conv, messages) => {
 			dashboardState.value = node;
 		}
 	});
-	$watch(var_listener, runListeners, false);
 });

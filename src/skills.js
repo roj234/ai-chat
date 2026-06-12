@@ -1,5 +1,5 @@
-import {config, messages, selectedConversation} from "./states.js";
-import {$state, $update, $watch, debugSymbol, unconscious} from "unconscious";
+import {config, messages, onConversationBeforeunload, onConversationLoaded, selectedConversation} from "./states.js";
+import {$state, $update, debugSymbol, unconscious} from "unconscious";
 import {loadingBlock, prettyError} from "./utils/utils.js";
 
 import "./skills.css";
@@ -415,25 +415,10 @@ export const registerDefaultTools = tools => {
 	}
 };
 
-const conversationChangedCallbacks = [];
-export const onConversationChanged = callback => conversationChangedCallbacks.push(callback);
+const CONV_REACTIVE_MAP = debugSymbol("CONV_REACTIVE_MAP");
 
-let lastId;
-$watch(selectedConversation, () => {
-	if (selectedConversation.ready) {
-		const conv = unconscious(selectedConversation);
-		if (conv.id !== lastId) {
-			lastId = conv.id;
-			const msg = unconscious(messages);
-			redoToolCalls(conv, msg, 0);
-			for (const cb of conversationChangedCallbacks) {
-				cb(conv, msg);
-			}
-		}
-	} else {
-		lastId = null;
-	}
-});
+onConversationLoaded((conv, msg) => redoToolCalls(conv, msg, 0));
+onConversationBeforeunload((conv) => delete conv[CONV_REACTIVE_MAP]);
 
 /**
  *
@@ -597,8 +582,6 @@ export const getToolParameters = (response, toolcall) => {
 	if (!parsed) parsed = response[TOOL_PARAM] = JSON.parse(toolcall.function.arguments);
 	return parsed;
 }
-
-const CONV_REACTIVE_MAP = debugSymbol("CONV_REACTIVE_MAP");
 
 /**
  * 在全局存储上挂载一个响应式对象

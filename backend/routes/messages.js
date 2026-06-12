@@ -6,18 +6,19 @@ import {
 	deserializeRow
 } from "../utils/compression.js";
 import {patch} from "unconscious/common/deepEqual.js";
+import {sortMessages} from "../sync_const.js";
 
 /**
  * @param {Record<string, function(body: any, ctx: Partial<AiChatBackend.RouteContext>): any>} batcher
  */
 export function registerMessageRoutes(batcher) {
 	// 列出对话
-	batcher["conversations"] = (latestTimeStamp, {db}) => {
-		if (latestTimeStamp != null) {
-			if (!Number.isFinite(latestTimeStamp))
-				return { error: 'invalid timestamp' };
-			const firstRecord = db.prepare('SELECT id FROM conversations WHERE time > ?').get(latestTimeStamp);
-			if (!firstRecord) return { error: { status: 304 } };
+	batcher["conversations"] = (timestamp, {db}) => {
+		if (timestamp != null) {
+			if (!Number.isFinite(timestamp)) return { error: 'invalid timestamp' };
+
+			const modCheck = db.prepare('SELECT time FROM conversations WHERE time >= ? LIMIT 2').all(timestamp);
+			if (modCheck.length === 1 && modCheck[0].time === timestamp) return { error: { status: 304 } };
 		}
 		return db.prepare('SELECT id, title, time FROM conversations ORDER BY time DESC').all();
 	};
@@ -26,14 +27,18 @@ export function registerMessageRoutes(batcher) {
 	batcher["conversation/upsert"] = async ({ id, ...diff }, ctx) => {
 		const setConversationId = ctx.setVariable("conversationId");
 
-		if (Number.isFinite(id)) {
-			const row = ctx.db.prepare('SELECT * FROM conversations WHERE id = ?').get(id);
-			if (!row) return { error: 'no such id' };
+		if (diff.$ === 'SET') {
+			diff = diff.val;
+		} else {
+			if (Number.isFinite(id)) {
+				const row = ctx.db.prepare('SELECT * FROM conversations WHERE id = ?').get(id);
+				if (!row) return { error: 'no such id' };
 
-			const conv = deserializeRow(row, decompressConversation);
-			patch(conv, diff);
-			diff = conv;
+				const conv = deserializeRow(row, decompressConversation);
+				diff = patch(conv, diff);
+			}
 		}
+		if (typeof diff !== 'object') return { error: 'data must be object' };
 
 		const { title = '', time = Date.now(), ...data } = diff;
 
@@ -68,11 +73,13 @@ export function registerMessageRoutes(batcher) {
 	};
 
 	// 读取对话元数据
-	batcher["conversation"] = (id, ctx) => {
+	batcher["conversation"] = ([id, timestamp], ctx) => {
 		if (!Number.isFinite(id)) return { error: 'illegal id' };
 
 		const {db} = ctx;
 		const conv = db.prepare('SELECT * FROM conversations WHERE id = ?').get(id);
+		if (conv?.time === timestamp) ctx._skipMessages = true;
+
 		return conv ? deserializeRow(conv, decompressConversation) : { error: 'not found' };
 	}
 
@@ -88,17 +95,13 @@ export function registerMessageRoutes(batcher) {
 
 	// 列出对话消息
 	batcher["messages"] = (id, ctx) => {
+		if (ctx._skipMessages) return { error: { status: 304 } };
+
 		if (!Number.isFinite(id)) return { error: 'illegal id' };
 
 		/** @type {AiChat.Message[]} */
 		const messages = ctx.db.prepare('SELECT id, content, time, data FROM messages WHERE owner = ? ORDER BY id').all(id);
-
-		return messages.map(deserializeMessage).sort((a, b) => {
-			const b1 = a.role === "system";
-			const b2 = b.role === "system";
-			if (b1 !== b2) return b2 - b1;
-			return 0;
-		});
+		return sortMessages(messages.map(deserializeMessage));
 	}
 
 	// 创建或更新消息
@@ -107,16 +110,20 @@ export function registerMessageRoutes(batcher) {
 		if (!Number.isFinite(owner)) return { error: 'missing owner' };
 
 		let oldThink, oldContent;
-		if (Number.isFinite(id)) {
-			const row = ctx.db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
-			if (!row) return { error: 'no such id' };
+		if (diff.$ === 'SET') {
+			diff = diff.val;
+		} else {
+			if (Number.isFinite(id)) {
+				const row = ctx.db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
+				if (!row) return { error: 'no such id' };
 
-			const msg = deserializeMessage(row);
-			oldThink = msg.think?.constructor;
-			oldContent = row.content;
-			patch(msg, diff);
-			diff = msg;
+				const msg = deserializeMessage(row);
+				oldThink = msg.think?.constructor;
+				oldContent = row.content;
+				diff = patch(msg, diff);
+			}
 		}
+		if (typeof diff !== 'object') return { error: 'data must be object' };
 
 		let { content, time = null, ...data } = diff;
 

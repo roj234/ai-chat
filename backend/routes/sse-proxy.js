@@ -5,9 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import {Transform} from 'node:stream';
 
-function log(str, ...args) {
-	console.log(`[SSE Proxy][${new Date().toLocaleTimeString()}] `+str, ...args);
-}
+const log = (str, ...args) => console.log(`[SSE Proxy] `+str, ...args);
 
 /**
  *

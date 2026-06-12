@@ -66,6 +66,28 @@ export const messages = $state([]);
  * @type {import("unconscious").Reactive<AiChat.Conversation>}
  */
 export const selectedConversation = $state(null);
+
+const conversationLoadedCallbacks = [];
+const conversationBeforeunloadCallbacks = [];
+export const onConversationLoaded = callback => conversationLoadedCallbacks.push(callback);
+export const onConversationBeforeunload = callback => conversationBeforeunloadCallbacks.push(callback);
+
+let prevConversation;
+$watch(selectedConversation, () => {
+	if (selectedConversation.ready) {
+		const conv = unconscious(selectedConversation);
+		if (conv.id !== prevConversation?.id) {
+			prevConversation = conv;
+			const msg = unconscious(messages);
+			for (const cb of conversationLoadedCallbacks) cb(conv, msg);
+		}
+	} else if (prevConversation) {
+		for (const cb of conversationBeforeunloadCallbacks) cb(prevConversation);
+		prevConversation = null;
+	}
+});
+
+
 /**
  * @type {import("unconscious").Reactive<AiChat.Conversation[]>}
  */

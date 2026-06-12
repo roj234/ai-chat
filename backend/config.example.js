@@ -1,8 +1,8 @@
 /**
- * AIChat 配置文件模版
- *
- * 注意：修改此文件后需重启服务以生效。
- * 建议在生产环境中通过环境变量或专门的配置文件管理敏感信息。
+ * AIChat 配置文件
+ * 修改此文件立即生效。
+ * 有关把key写在独立的文件里，或使用正则表达式过滤敏感词等高级功能，见 文档 -> 服务端配置
+ * 当然，修改那些文件不会立即生效，你可以touch一下这个文件
  */
 
 // ==========================================
@@ -10,7 +10,7 @@
 // ==========================================
 
 /** 是否启用语义搜索功能（需要向量数据库支持） */
-export const SEMANTIC_SEARCH_ENABLE = true;
+export const SEMANTIC_SEARCH_ENABLE = false;
 
 /** 向量化 API 地址 (如 OpenAI, llama-server 或 我的参考实现) */
 export const SEMANTIC_SEARCH_API_BASE = 'http://localhost:5002/api/v1/embeddings';
@@ -25,7 +25,7 @@ export const SEMANTIC_SEARCH_API_MODEL = "qwen3-embedding-0.6b";
 export const SEMANTIC_SEARCH_EMBEDDING_SIZE = 1024;
 
 /**
- * 文本分块 (Chunking) 策略
+ * 文本分块略
  * 用于处理长文本超过嵌入模型上下文的情况
  */
 export const SEMANTIC_SEARCH_CHUNK_MODE = {
@@ -72,6 +72,12 @@ export const ALLOW_USER_NAMES = new Set(['admin', 'user']);
 
 /** 要求交互式登录（在控制台接受）并下发PAT */
 export const INTERACTIVE_LOGIN = false;
+
+/** 服务器盐值，修改以作废所有PAT，如果是空字符串，下次服务器启动时会随机生成 */
+export const PAT_SERVER_SALT = '';
+
+/** 只接受在这个时间后签发的PAT */
+export const PAT_VALID_AFTER = new Date("2026-01-01").getTime() / 1000;
 
 // ==========================================
 // 3. 安全与数据库设置
@@ -178,7 +184,8 @@ export const SSE_RESUME_TIMEOUT = 1000 * 60 * 15;
 
 /**
  * 日志钩子，可以在这里做一些计费和别名相关的操作，这个函数只影响日志记录
- * - 代码在入库时调用，改变代码不会影响数据库中的结果
+ * - 入库时调用，改变代码不影响过去的数据
+ * - 但你依然需要保证幂等性，因为有重建（压缩）数据库接口，会对每一条历史消息调用这个函数
  * @param {AiChat.BillingLog} log
  * @return {string}
  */
@@ -203,6 +210,8 @@ export const LOG_HOOK = (log) => {
 // ==========================================
 // 6. 数据压缩与序列化 (Optimization)
 //  - 修改这些选项不会影响之前的数据
+//  - 设置压缩级别为 0 来禁用 br
+//  - 禁用了 br 也有关不掉的 gzip
 // ==========================================
 
 /** 是否使用 Msgpack 替代 JSON 序列化扩展字段（体积更小，速度更快） */

@@ -112,7 +112,10 @@
             "required": ["name", "depth", "content"],
             "additionalProperties": false
           }
-        }
+        },
+        "user": { "type": "string" },
+        "userdesc": { "type": "string" },
+        "char": { "type": "string" }
       },
       "required": [
         "type", "creator", "creatorNotes", "tags",
@@ -127,6 +130,7 @@
       "properties": {
         "type": { "const": "st|lorebook" },
         "name": { "type": "string" },
+        "time": { "type": "integer" },
         "pages": {
           "type": "array",
           "items": { "$ref": "#/$defs/MyLorebookPage" }
@@ -170,6 +174,7 @@
       "properties": {
         "type": { "const": "st|preset" },
         "name": { "type": "string" },
+        "time": { "type": "integer" },
         "prompts": {
           "type": "array",
           "default": [],

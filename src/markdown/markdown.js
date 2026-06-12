@@ -8,7 +8,7 @@ import "./markdown.css";
 const tags = {
 	basic: [
 		"details", "summary",
-		"b", "i", "u", "p", "br", "em", "kbd", "q", "strong", "code", "ruby", "rp", "rt",
+		"b", "i", "u", "p", "br", "em", "kbd", "q", "strong", "code", "ruby", "rp", "rt", "sup", "sub",
 		"h1", "h2", "h3", "h4", "h5", "h6",
 		"table", "th", "tr", "td", "thead", "tbody", "pre",
 		"ul", "ol", "li",
@@ -117,7 +117,7 @@ export const copyCodeEventHandler = (e) => {
 			const filename = span.dataset.name;
 			const lang = span.innerHTML.toLowerCase();
 
-			const file = new File([code._value || code.textContent], filename);
+			const file = new (filename?File:Blob)([code._value || code.textContent], filename);
 			downloadFile(file, LANGUAGE_TO_EXT[lang] ?? lang);
 		}
 		break;

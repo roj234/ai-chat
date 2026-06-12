@@ -48,7 +48,7 @@ export const streamFetch = (url, {key = "", ...data} = {}, onToken) => fetch(url
 	method: "POST",
 	headers: {
 		'Content-Type': "application/json",
-		'Authorization': key ? "Bearer " + key : undefined
+		'Authorization': "Bearer "+(key||'')
 	},
 	referrerPolicy: 'no-referrer',
 	...data

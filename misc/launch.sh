@@ -14,4 +14,4 @@ if [ ! -f config.js ]; then
     read -p "Press [Enter] key to continue starting the server..."
 fi
 
-node server.js --static dist.zip
+node server.js --static dist.brip

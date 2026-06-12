@@ -2,6 +2,7 @@ import {$computed, $foreach, $state, $store, ONCE_EVENT, unconscious} from "unco
 import Chart from "/plugins/tools/chart.async.js";
 import {s2c_schema, s2c_schema_version} from "/common/MsgpackSchema.js";
 import {decodeMsg} from "unconscious/common/msgpack.js";
+import {PROTOCOL_VERSION} from "/backend/sync_const.js";
 
 // ============ STATE ============
 let allLogs = [];
@@ -148,8 +149,9 @@ async function makeRequest(url, params) {
 	const res = await fetch(url, {
 		headers: {
 			'Accept': 'application/vnd.msgpack,application/json',
-			'x-schema-version': s2c_schema_version,
-			'Authorization': 'Bearer '+cfg.db_pat
+			'x-sv': s2c_schema_version,
+			'x-pv': PROTOCOL_VERSION,
+			'Authorization': 'Bearer '+(cfg.db_pat||'')
 		},
 		...params,
 		referrerPolicy: "no-referrer"

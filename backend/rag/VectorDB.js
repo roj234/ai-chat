@@ -171,7 +171,7 @@ export class VectorDB {
 		const buf = Buffer.alloc(this.recordSize);
 		buf.write(id, 'utf8');
 
-		const view = new DataView(buf.buffer, ID_LENGTH);
+		const view = new DataView(buf.buffer, buf.byteOffset, ID_LENGTH);
 		for (let i = 0; i < this.dimension; i++) {
 			view.setFloat16(i * 2, floatVector[i]);
 		}
