@@ -610,7 +610,7 @@ MessageRoles["st|char"] = {
 			const hasSystemMessage = output[0].role === "system";
 			if (hasSystemMessage) prefix = applyMacro(output[0].content, macro)+"\n\n";
 
-			if (preset.prompts?.length) {
+			if (preset?.prompts?.length) {
 				const content = applyPreset(preset, {
 					...macro,
 					personaDescription: char.userdesc || config.st_userdesc,

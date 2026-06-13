@@ -4,7 +4,7 @@
     align-items: center;
     justify-content: space-between;
     padding: var(--spacing-xs) var(--spacing-sm);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--safe-image-subtle-bg);
     border-radius: var(--border-radius-md);
     height: 40px;
 
@@ -20,8 +20,8 @@
 .spinner {
     width: 16px;
     height: 16px;
-    border: 2px solid rgba(0,0,0,0.1);
-    border-top-color: #1890ff;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }

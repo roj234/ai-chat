@@ -10,10 +10,10 @@
     box-sizing: border-box;
     gap: 12px;
     border-radius: var(--border-radius-md);
-    border: 1px solid #3f4147;
+    border: 1px solid var(--audio-border);
     color: var(--text);
 
-    background-color: #2b2d31; /* 贴近截图的深灰背景 */
+    background-color: var(--audio-bg);
 
     /* 按钮通用重置 */
     & button {
@@ -29,7 +29,7 @@
     /* 时间显示 */
     & .time-display {
         font-size: 13px;
-        color: #b5bac1;
+        color: var(--audio-muted);
         white-space: nowrap;
         min-width: 80px;
         text-align: center;
@@ -42,7 +42,7 @@
         cursor: pointer;
     }
     & input[type="range"]::-webkit-slider-runnable-track {
-        background: #4f545c;
+        background: var(--audio-track);
         height: 4px;
         border-radius: 2px;
     }
@@ -51,7 +51,7 @@
         height: 12px;
         width: 12px;
         border-radius: 50%;
-        background: #ffffff;
+        background: var(--audio-thumb);
         margin-top: -4px;
         box-shadow: 0 0 2px rgba(0,0,0,0.5);
     }
@@ -80,13 +80,13 @@
 
     /* 下载链接 */
     & .download-btn {
-        color: #dbdee1;
+        color: var(--audio-download);
         text-decoration: none;
         font-size: 16px;
         padding: 4px;
         transition: color 0.15s;
     }
     & .download-btn:hover {
-        color: #ffffff;
+        color: var(--audio-download-hover);
     }
 }

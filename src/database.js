@@ -23,6 +23,7 @@ if (DB_MODE !== 'local') {
 	SETTINGS.push({
 		id: "db_server",
 		_tab: ["general", "data"],
+		_sync: false,
 		name: "数据库服务器",
 		title: "提供文件管理、消息搜索、多租户等功能\n修改后需要刷新页面"+(DB_MODE === "mixed" ? "\n填写 :idb: 使用本地数据库" : ""),
 		type: "input",
@@ -32,6 +33,7 @@ if (DB_MODE !== 'local') {
 	},{
 		id: "db_pat",
 		_tab: "data",
+		_sync: false,
 		type: "secret",
 		placeholder: "个人访问密钥 (PAT)",
 	});

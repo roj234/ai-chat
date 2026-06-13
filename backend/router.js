@@ -183,7 +183,7 @@ export class Router {
 			} catch (err) {
 				console.error(err);
 
-				let msg = err.message;
+				let msg = err.message ?? err;
 				if (ctx.errorFilter) msg = ctx.errorFilter(msg, err);
 				try {
 					ctx.send(500, { error: msg });

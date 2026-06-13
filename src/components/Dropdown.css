@@ -4,8 +4,14 @@
     width: 100%;
     user-select: none;
 
-    --chip-bg: rgb(28, 30, 34);
     --border-radius: 0px;
+
+    &.up {
+        border-top: 1px solid var(--border);
+    }
+    &.down {
+        border-bottom: 1px solid var(--border);
+    }
 
     & .input {
         display: flex;
@@ -13,7 +19,6 @@
         justify-content: space-between;
         padding: 8px 12px;
         background-color: var(--bg);
-        border-top: 1px solid var(--border);
         color: var(--muted);
         font-size: 13px;
         cursor: pointer;
@@ -50,6 +55,7 @@
 
     .up & {
         bottom: 100%;
+        border-top: 1px solid var(--border);
 
         .open & {
             display: block;
@@ -58,6 +64,7 @@
     }
     .down & {
         top: 100%;
+        border-bottom: 1px solid var(--border);
 
         .open & {
             display: block;
@@ -68,8 +75,8 @@
     position: absolute;
     left: 0;
     right: 0;
-    background-color: var(--chip-bg);
-    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    background-color: var(--card);
+    box-shadow: var(--shadow);
     display: none;
     z-index: 1;
 
@@ -95,7 +102,7 @@
 
     &.selected {
         border-color: var(--chip-active-border);
-        color: #c9d1d9;
+        color: var(--text);
     }
 
     & i {
@@ -111,7 +118,7 @@
         }
 
         &.clicked {
-            color: red;
+            color: var(--error);
         }
     }
 }

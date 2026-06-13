@@ -38,15 +38,63 @@
     --font-size-sm: 0.8rem;
     --font-size-xs: 0.75rem;
 
-    --shadow: 0 4px 6px -1px rgb(0 0 0), 0 2px 4px -2px rgb(0 0 0);
+    /* 暗色阴影 — 深邃且无重影 */
+    --shadow: 0 4px 12px oklch(0 0 0 / 0.4), 0 2px 4px oklch(0 0 0 / 0.3);
+
+    /* 语义扩展 —— dark */
+    --text-on-accent: oklch(1 0 0);
+    --accent-hover: oklch(0.75 0.182 260.738);
+    --secondary-bg: oklch(0.37 0.03 260);
+    --secondary-hover: oklch(0.43 0.03 260);
+    --ghost-hover: rgba(255,255,255,0.1);
+    --delete-hover: oklch(0.7 0.2 20);
+    --no-msg-overlay: rgba(32,32,32,0.5);
+    --sidebar-backdrop: rgba(0,0,0,0.3);
+    --error-text-color: oklch(0.82 0.08 20);
+    --error-block-border: rgba(220,38,38,0.35);
+    --katex-error-color: oklch(0.65 0.22 25);
+    --scrollbar-thumb: oklch(0.3 0.03 260);
+    --scrollbar-thumb-hover: oklch(0.4 0.03 260);
+    --scrollbar-thumb-active: oklch(0.5 0.03 260);
+
+    /* 组件层 —— dark */
+    --think-shimmer-bg: rgba(255,255,255,0.05);
+    --think-shimmer: rgba(255,255,255,0.2);
+
+    --stats-overlay-bg: rgba(30,31,35,0.95);
+    --stats-overlay-text-dim: rgba(255,255,255,0.3);
+    --stats-overlay-text: rgba(255,255,255,0.6);
+    --stats-overlay-accent: #4caf50;
+
+    --audio-bg: #2b2d31;
+    --audio-border: #3f4147;
+    --audio-muted: #b5bac1;
+    --audio-track: #4f545c;
+    --audio-thumb: #ffffff;
+    --audio-download: #dbdee1;
+    --audio-download-hover: #ffffff;
+
+    --md-kbd-border: #4a5568;
+
+    --tool-pending-bg: #2a2118;
+    --tool-pending-border: #4d381d;
+    --tool-pending-accent: #f59e0b;
+
+    --safe-image-subtle-bg: rgba(255,255,255,0.05);
+
+    --focus-ring: rgba(52,181,250,0.2);
+
+    --skills-dashed-border: rgba(255,255,255,0.2);
+    --tool-tag-color: #60a5fa;
+    --revoke-color: #f43f5e;
+    --revoked-status-color: #64748b;
+
     --panel-width: 800px;
     --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-
     --md-line-height: 1.4;
 }
 
-@media (prefers-color-scheme: light) {
-    :root {
+:root[data-theme="light"] {
         color-scheme: light;
 
         --bg: #ffffff;
@@ -58,11 +106,66 @@
         --text-lighter: #4b5563;
         --muted: #6b7280;
         --chip-bg: #eeeeee;
-        --chip-hover: #f9fafb;
         --chip-active: rgba(72, 143, 253, 0.3);
+        --chip-active-border: #93c5fd;
         --focus: #60a5fa;
-        --system: green;
-    }
+        --error: oklch(0.52 0.18 21);
+        --error-bg: oklch(0.52 0.18 21 / 0.08);
+        --ok: oklch(0.5 0.13 160);
+        --user: #1d4ed8;
+        --assistant: oklch(0.72 0.04 80);
+        --system: oklch(0.45 0.06 168);
+
+        /* 亮色阴影 */
+        --shadow: 0 4px 12px oklch(0 0 0 / 0.08), 0 2px 4px oklch(0 0 0 / 0.04);
+
+        /* 语义扩展 —— light */
+        --text-on-accent: oklch(1 0 0);
+        --accent-hover: #2563eb;
+        --secondary-bg: oklch(0.9 0.01 260);
+        --secondary-hover: oklch(0.83 0.01 260);
+        --ghost-hover: rgba(0,0,0,0.06);
+        --delete-hover: oklch(0.55 0.2 20);
+        --no-msg-overlay: rgba(245,245,245,0.8);
+        --sidebar-backdrop: rgba(0,0,0,0.15);
+        --error-text-color: oklch(0.42 0.12 20);
+        --error-block-border: oklch(0.55 0.18 21 / 0.3);
+        --katex-error-color: oklch(0.5 0.2 25);
+        --scrollbar-thumb: oklch(0.75 0.01 260);
+        --scrollbar-thumb-hover: oklch(0.65 0.01 260);
+        --scrollbar-thumb-active: oklch(0.55 0.01 260);
+
+        /* 组件层 —— light */
+        --think-shimmer-bg: rgba(0,0,0,0.04);
+        --think-shimmer: rgba(0,0,0,0.08);
+
+        --stats-overlay-bg: rgba(255,255,255,0.97);
+        --stats-overlay-text-dim: rgba(0,0,0,0.4);
+        --stats-overlay-text: rgba(0,0,0,0.65);
+        --stats-overlay-accent: #2d7a3a;
+
+        --audio-bg: #f1f5f9;
+        --audio-border: #cbd5e1;
+        --audio-muted: #64748b;
+        --audio-track: #cbd5e1;
+        --audio-thumb: #334155;
+        --audio-download: #334155;
+        --audio-download-hover: #0f172a;
+
+        --md-kbd-border: #d1d5db;
+
+        --tool-pending-bg: #fffbeb;
+        --tool-pending-border: #fcd34d;
+        --tool-pending-accent: #d97706;
+
+        --safe-image-subtle-bg: rgba(0,0,0,0.04);
+
+        --focus-ring: rgba(59,130,246,0.2);
+
+        --skills-dashed-border: rgba(0,0,0,0.12);
+        --tool-tag-color: #2563eb;
+        --revoke-color: #dc2626;
+        --revoked-status-color: #6b7280;
 }
 
 
@@ -143,8 +246,9 @@ button[class^="ri-"] {
 
 .btn.primary {
     background: var(--accent);
+    color: var(--text-on-accent);
     &:not(:disabled):hover {
-        background: oklch(0.75 0.182 260.738);
+        background: var(--accent-hover);
     }
 }
 
@@ -154,16 +258,16 @@ button[class^="ri-"] {
     /* font-size: 0.9em; */
     height: 26px;
 }
-.btn.secondary { background: oklch(0.37 0.03 260); }
-.btn.secondary:hover { background: oklch(0.43 0.03 260); }
+.btn.secondary { background: var(--secondary-bg); }
+.btn.secondary:hover { background: var(--secondary-hover); }
 
 .btn.ghost {
     background: transparent;
     border: 1px solid var(--border);
 }
-.ghost:not(:disabled):hover { background: rgba(255,255,255,0.1); }
+.ghost:not(:disabled):hover { background: var(--ghost-hover); }
 .danger {background-color: var(--error-bg);}
-.danger:not(:disabled):hover {background-color: var(--error);}
+.danger:not(:disabled):hover {background-color: var(--error); color: var(--text-on-accent);}
 .btn:disabled { opacity: 0.6; cursor: not-allowed !important; }
 
 /* 滚动条 */
@@ -173,9 +277,9 @@ button[class^="ri-"] {
 }
 ::-webkit-scrollbar { width: 0.625rem; }
 ::-webkit-scrollbar-track { }
-::-webkit-scrollbar-thumb { background: oklch(0.3 0.03 260); }
-::-webkit-scrollbar-thumb:hover { background: oklch(0.4 0.03 260); }
-::-webkit-scrollbar-thumb:active { background: oklch(0.5 0.03 260); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+::-webkit-scrollbar-thumb:active { background: var(--scrollbar-thumb-active); }
 
 /* 粘性定位 */
 .sticky {
@@ -302,7 +406,7 @@ button[class^="ri-"] {
 /* 错误块 */
 .error-block, .tool-call.tool-error {
     background: var(--error-bg);
-    border: 1px solid rgba(220, 38, 38, 0.35);
+    border: 1px solid var(--error-block-border);
 }
 
 .error-block {
@@ -318,7 +422,7 @@ button[class^="ri-"] {
 
 .error-text {
     margin-top: var(--spacing-sm);
-    color: oklch(0.7 0.1 20); white-space: pre-wrap; word-break: break-word;
+    color: var(--error-text-color); white-space: pre-wrap; word-break: break-word;
 }
 
 .tool-call.tool-error {
@@ -327,7 +431,7 @@ button[class^="ri-"] {
 }
 
 .katex-error {
-    text-decoration: underline wavy red;
+    text-decoration: underline wavy var(--katex-error-color);
     text-decoration-thickness: 1px;
     text-underline-offset: 4px;
     cursor: help;
@@ -350,6 +454,7 @@ button[class^="ri-"] {
     width: max-content;
     padding: var(--spacing-xs) var(--spacing-md);
     background: rgba(0,0,0,0.8);
+    color: #E6EAF3;
     border-radius: var(--border-radius-sm);
     text-align: center;
 }
@@ -394,7 +499,7 @@ button[class^="ri-"] {
             inset: 0;
 
             /* 将模糊和半透明背景放在这里 */
-            background: rgba(32, 32, 32, 0.5);
+            background: var(--no-msg-overlay);
             backdrop-filter: blur(5px);
 
             z-index: -1; /* 确保它在文字下方 */
@@ -426,10 +531,13 @@ button[class^="ri-"] {
 
 .spacer { flex: 1; }
 
-/* Badge & 通知 */
+/* Badge & 通知 之后可能要删 */
 .badge {
+    opacity: 0.7;
+    pointer-events: none;
     font-size: 12px; color: var(--muted);
-    padding: var(--spacing-xs) var(--spacing-sm); border: 1px solid var(--border); border-radius: 999px;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border: 1px solid var(--border);
 }
 .hint { color: var(--muted); font-size: 12px; }
 
@@ -461,7 +569,7 @@ button[class^="ri-"] {
 
     &:hover {
         transform: scale(1.05);
-        box-shadow: 0 8px 16px -4px rgb(0 0 0 / 0.3);
+        box-shadow: var(--shadow);
     }
 
     & img {
@@ -509,7 +617,7 @@ button[class^="ri-"] {
         box-shadow: var(--shadow);
 
         &:hover {
-            background: oklch(0.7 0.2 20);
+            background: var(--delete-hover);
             transform: scale(1.1);
         }
     }
@@ -581,7 +689,7 @@ button[class^="ri-"] {
                 background: var(--card);
                 border: 1px solid var(--border);
                 border-radius: 20px;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                box-shadow: var(--shadow);
             }
         }
     }
@@ -624,7 +732,7 @@ button[class^="ri-"] {
             width: 20vw;
             right: -20vw;
             top: 0;
-            background: rgba(0, 0, 0, 0.3);
+            background: var(--sidebar-backdrop);
         }
     }
 

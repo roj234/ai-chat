@@ -72,6 +72,7 @@ export function createHashLine(fs) {
 		const first = start != null ? start - 1 : 0;
 		const last  = end != null ? Math.min(end, lines.length) : lines.length;
 		if (first < 0) throw new Error('Start line must > 0');
+		if (first > lines.length) throw new Error("Start line > total lines ("+lines.length+"), no lines will be returned");
 		if (first > last) throw new Error('Resolved end line is before start line');
 
 		let limit = max_chars;
@@ -184,7 +185,11 @@ export function createHashLine(fs) {
 			newContent = content.slice(0, lastIdx) + replace + content.slice(lastIdx + search.length);
 		}
 
-		newContent = lines.slice(0, actualStart).join("\n") + newContent + lines.slice(actualEnd).join("\n");
+		newContent = [
+			lines.slice(0, actualStart).join("\n"),
+			newContent,
+			lines.slice(actualEnd).join("\n")
+		].filter(Boolean).join("\n");
 
 		await fs.write(path, newContent, ctx);
 		cache.delete(path);

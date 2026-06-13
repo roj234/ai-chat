@@ -298,10 +298,9 @@ const stat = {
 };
 
 /** @type {AiChat.FunctionTool} */
-const spawn = {
-	name: "run_process",
-	description: "Run a native process in the sandbox. Use for build commands, tests, package manager commands, project scripts, external executables, etc.",
-
+const run_program = {
+	name: "run_program",
+	description: "Execute a program with an array of arguments.",
 	interactive: "secure",
 	script: callAPI("spawn"),
 
@@ -316,10 +315,9 @@ const spawn = {
 					type: "string",
 				}
 			},
-			directory: {
+			cwd: {
 				type: "string",
 				default: ".",
-				description: "Working directory",
 			},
 			timeout: {
 				type: "integer",
@@ -331,12 +329,37 @@ const spawn = {
 		required: ["description", "program", "arguments"]
 	}
 };
+/** @type {AiChat.FunctionTool} */
+const shell = {
+	name: "shell",
+	description: "Run a command string through a shell.",
+	interactive: "secure",
+	script: callAPI("shell"),
 
-let fsPrompt = `<file-misc>
-You may use bash/ripgrep via run_process tool to find in files.
+	parameters: {
+		type: "object",
+		properties: {
+			description: { type: "string" },
+			command: { type: "string", },
+			cwd: {
+				type: "string",
+				default: ".",
+			},
+			timeout: {
+				type: "integer",
+				default: 10,
+				maximum: 120,
+				description: "(in seconds)"
+			}
+		},
+		required: ["description", "command"]
+	}
+};
+
+let fsPrompt = `<file-tools>
 Grep pattern in list_directory tool may be used to recursively list directory.
-Root path is '/'
-</file-misc>`;
+Root path is '.', always use relative path.
+</file-tools>`;
 const fsTools = [read_file, read_image, write_file, replace_file, delete_file, mkdir, copy_or_move, list_path, stat];
 if (config.fs_hashline) {
 	read_file.parameters.properties.format = {
@@ -426,28 +449,53 @@ function checkEnv(tools) {
 }
 
 registerTools(
-	"run_process",
-	"Run native commands for package managers, builds, tests, scripts, etc. Use only when command-line execution is required.",
-	[spawn],
+	"run_program",
+	"Run native programs / commands for package managers, builds, tests, scripts, etc. Use only when command-line execution is required.",
+	[run_program, shell],
 	{
 		onActivated: checkEnv,
 		async systemPrompt() {
+			let shellInfo = '';
+
 			if (!spawnPrompt) {
 				checkEnv();
 
 				let {prompt} = await callAPI("env")();
 				if (prompt.startsWith("os: Windows")) {
 					if (!prompt.includes("bash: No")) {
-						prompt += "\nbash is emulated via msys/busybox.";
+						shellInfo = "emulated bash";
+					} else {
+						shellInfo = "powershell\n   - Powershell have many escape and encoding issues. Use script file if available."
 					}
-					prompt += "\n\nIMPORTANT: PowerShell and cmd have many escape and encoding issues (like '\\'). Use bash / script file if available."
+				} else {
+					shellInfo = 'bash';
 				}
-				spawnPrompt = `<environment-info>
+				if (!prompt.includes("ripgrep: No")) {
+					prompt += "\n\nYou may use \`rg\` (ripgrep) to find in files.";
+				}
+				spawnPrompt = `<system-environment>
 Environment and runtimes:
 ${prompt}
+</system-environment>
+<command-execution>
+Two tools are available for running commands in the sandbox:
 
-Use script file (py / js / java, etc) if run_process tool doesn't fulfill your need.
-</environment-info>`;
+1. **run_program** — Execute a program with an array of arguments.
+   - Escaping-safe (no shell interpretation), ideal for complex arguments.
+   - Use for: package managers (npm, pip, cargo), compilers, interpreters (python, node, java), tests, builds.
+
+2. **shell** — Run a command string through a shell.
+   - Use when you need pipelines (\`|\`), redirections (\`>\`, \`<\`, \`2>&1\`), chaining (\`&&\`, \`||\`), or shell syntax.
+   - Shell: ${shellInfo}
+
+**Guidelines**
+- Prefer a reusable script file (Python, JS, shell, etc.) over repeating near-same commands.
+- Use \`run_program\` when you don't need shell features (safer, no escaping pitfalls).
+- Use \`shell\` only when you must: pipelines, redirections, chaining, or shell built-ins.
+- Always use relative path.
+- Working directory defaults to \`/\`; timeout max 120 seconds.
+- Large output will be redirected to files.
+</command-execution>`;
 			}
 			return spawnPrompt;
 		}
