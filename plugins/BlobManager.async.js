@@ -72,7 +72,7 @@ const container = <div className={"modal-overlay"}>
 			<button className="ri-loop-right-line btn primary" title={"刷新"} onClick={fetchList}></button>
 			<span className={"spacer"}></span>
 			<button className="btn danger" onClick={deleteSelected}>删除选中</button>
-			<button className="ri-close-line btn ghost" style="border:none" title={"关闭窗口"} onClick={() => container.remove()}></button>
+			<button className="ri-close-line btn ghost" style="border:none" title={"关闭窗口"} onClick={() => container.remove(true)}></button>
 		</div>
 
 		<div className={"blob-manager"} style={"overflow:auto"}>

@@ -105,7 +105,7 @@ export async function initServer(dataPath, basePath = "api", workspacePath) {
 	router.push(basePath);
 
 	router.push("fs");
-	registerFsRoutes(router, true);
+	await registerFsRoutes(router, true);
 	router.pop();
 
 	if (workspacePath) {

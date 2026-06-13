@@ -86,6 +86,8 @@ declare namespace AiChat {
     type Preset = {
         name: string,
 
+        theme?: 'light' | 'dark';
+
         endpoint: string,
         accessToken: string,
         model: string,

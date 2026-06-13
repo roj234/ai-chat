@@ -1,11 +1,13 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {execFile} from 'node:child_process';
+import {execFile, spawn} from 'node:child_process';
 import {promisify} from 'node:util';
 import {readBOM} from "../../common/chardet.js";
 import iconv from "iconv-lite";
 import {getEnvironmentPrompt} from "../utils/checkEnv.js";
 import {createHashLine} from "../../common/hash-line.js";
+import {createWriteStream} from 'node:fs';
+
 
 const execFilePromise = promisify(execFile);
 
@@ -133,7 +135,7 @@ function modeToString(mode) {
  * @param {AiChatBackend.Router} router
  * @param {boolean} allowExec
  */
-export function registerFsRoutes(router, allowExec) {
+export async function registerFsRoutes(router, allowExec) {
 	// 辅助：发送非 JSON 响应（如图片、文本）
 	const sendRaw = (res, status, contentType, data) => {
 		res.writeHead(status, { 'Content-Type': contentType });
@@ -222,7 +224,7 @@ nlink: ${stats.nlink}`);
 				break;
 			}
 
-			const name = glob ? path.join(entry.parentPath, entry.name).replace(ctx.sandboxRoot, "").replaceAll("\\", '/') : entry.name;
+			const name = glob ? path.join(entry.parentPath, entry.name).replace(ctx.sandboxRoot, ".").replaceAll("\\", '/') : entry.name;
 			if (entry.isFile()) {
 				const fullPath = path.join(entry.parentPath, entry.name);
 				const stats = await fs.stat(fullPath);
@@ -265,20 +267,123 @@ nlink: ${stats.nlink}`);
 	});
 
 	if (allowExec) {
+		console.log("正在检测环境，这可能需要几秒钟（特别是容器内）...");
+		const envPrompt = await getEnvironmentPrompt();
+		console.log(envPrompt);
+
+		let defaultShell = 'bash';
+		if (envPrompt.startsWith("os: Windows")) {
+			defaultShell = envPrompt.includes("bash: No") ? 'powershell' : "bashemu";
+		}
+
+		console.log("\n默认 shell: "+defaultShell);
+
 		router.get('/env', async (ctx) => {
-			return ctx.send(200, { prompt: await getEnvironmentPrompt() })
-		})
+			return ctx.send(200, { prompt: envPrompt })
+		});
+
+		const OUTPUT_LIMIT = 20000;
+		const HALF = Math.floor(OUTPUT_LIMIT / 2);
+
+		/**
+		 * 统一执行命令并限制输出大小，按到达顺序交错拼接 stdout/stderr
+		 * @param {string} command     - 要执行的程序或 shell 命令
+		 * @param {string[]} args      - 程序参数（shell 模式时传空数组）
+		 * @param {object}   options   - { cwd, timeout(ms), shell(boolean|string), safeCwd(用于落盘) }
+		 * @returns {Promise<{code: number, text: string}>}
+		 */
+		async function executeCommand(command, args, { cwd, timeout, shell = false, dir }) {
+			const child = spawn(command, args, {
+				cwd,
+				stdio: ['ignore', 'pipe', 'pipe'],
+				shell: shell || false,            // 为字符串时 spawn 会将其作为 shell 路径
+			});
+
+			let head = '', tail = '';
+			let totalChars = 0;
+
+			let filename = '';
+			let file = null;
+
+			/** @param {string} chunk */
+			const onData = (chunk) => {
+				totalChars += chunk.length;
+
+				if (file) {
+					file.write(chunk);
+					tail = (tail + chunk).slice(-HALF);
+				} else {
+					tail += chunk;
+					if (tail.length > OUTPUT_LIMIT) {
+						filename = `/command-log-${Date.now()}-${Math.random().toString(36).slice(2)}.log`;
+
+						file = createWriteStream(path.join(cwd, filename), { flags: 'w' });
+						file.write(tail);
+
+						head = tail.slice(0, HALF);
+						tail = tail.slice(-HALF);
+					}
+				}
+			};
+
+			child.stdout.on('data', (data) => onData(data.toString()));
+			child.stderr.on('data', (data) => onData(data.toString()));
+
+			// 进程结束（含超时）处理
+			const result = await new Promise((resolve) => {
+				let timer = setTimeout(() => child.kill('SIGTERM'), timeout);
+
+				child.on('error', (err) => {
+					clearTimeout(timer);
+					resolve({ code: -1, text: err.message });
+				});
+
+				child.on('close', (code, signal) => {
+					clearTimeout(timer);
+					let text;
+					if (!file) {
+						text = tail;
+					} else {
+						if (file) file.end();
+						text = head
+							+ `\n<Output too large (${totalChars} chars). Full output saved to: ${JSON.stringify(dir+filename)}>\n`
+							+ tail;
+					}
+					resolve({ code: signal ? "TIMEOUT" : code, text });
+				});
+			});
+
+			return { code: result.code ?? 0, text: result.text };
+		}
 
 		router.post('/spawn', async (ctx) => {
-			const { program, arguments: args, directory = "", timeout = 10 } = await ctx.readAsObject();
-			const safeCwd = pathFilter(ctx, directory);
-			const result = await execFilePromise(program, args, {
-				cwd: safeCwd,
-				timeout: timeout * 1000
-			}).catch(({code, stdout, stderr}) => ({
-				code, stdout, stderr
-			}));
-			sendText(ctx.res, `Exit code ${result.code || 0}\n`+result.stdout+result.stderr);
+			const { program, arguments: args, cwd = '', timeout = 10 } = await ctx.readAsObject();
+			const { code, text } = await executeCommand(program, args, {
+				cwd: pathFilter(ctx, cwd),
+				dir: '.',
+				timeout: timeout * 1000,
+				shell: false,
+			});
+			sendText(ctx.res, `Exit code ${code}\n${text}`);
+		});
+
+		router.post('/shell', async (ctx) => {
+			let { command, cwd = '', timeout = 10, shell = defaultShell } = await ctx.readAsObject();
+			let args = [];
+
+			if (shell === 'bashemu') {
+				shell = false;
+				args = ['-c', command];
+				command = 'bash';
+			}
+
+			const { code, text } = await executeCommand(command, args, {
+				cwd: pathFilter(ctx, cwd),
+				dir: '.',
+				timeout: timeout * 1000,
+				shell,
+			});
+			sendText(ctx.res, `Exit code ${code}\n${text}`);
 		});
 	}
 }

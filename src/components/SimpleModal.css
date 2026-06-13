@@ -59,7 +59,7 @@
 
             &:focus {
                 border-color: var(--accent);
-                box-shadow: 0 0 0 2px rgba(52, 181, 250, 0.2); /* Using --color-focused with opacity */
+                box-shadow: 0 0 0 2px var(--focus-ring);
             }
         }
     }

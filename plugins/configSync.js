@@ -5,16 +5,15 @@ import {onLoad} from "/src/plugin.js";
 import {showToast} from "../src/components/Toast.js";
 
 if (DB_MODE !== "local") {
-	const isNew = config._new;
-	const db_server = config.db_server;
+	const {db_server, db_pat, _new: isNew} = config;
 
 	onLoad(() => {
 		if (isNew) {
 			getKV("config").then(config_ => {
 				if (!config_) throw "";
 				config_.db_server = db_server;
+				config_.db_pat = db_pat;
 				config.value = config_;
-				showToast("成功拉取配置", 'ok');
 			}).catch(() => {
 				showToast("未能拉取配置\n可能之前未保存过\n正在使用切换前的配置", 'error');
 			}).finally(Shared.SettingUI.sync);
@@ -22,11 +21,17 @@ if (DB_MODE !== "local") {
 
 		let updated;
 		$watch($computed(() => config.db_server), () => {
-			if (config.db_server === db_server) return;
+			const new_server = config.db_server;
+			if (new_server === db_server || new_server === db_server+'/') return;
 			if (updated) return;
 			updated = true;
 
-			setKV("config", unconscious(config)).then(() => {
+			const copyConfig = structuredClone(unconscious(config));
+			delete copyConfig.db_server;
+			delete copyConfig.db_pat;
+
+			setKV("config", copyConfig).then(() => {
+				if (new_server !== ':idb:' && db_server !== ':idb:') delete config.db_pat;
 				config._new = true;
 				location.reload();
 			})

@@ -551,6 +551,16 @@ export const SETTINGS = [
 		}
 	},
 	{
+		id: "theme",
+		_tab: "customize",
+		name: "锁定主题",
+		type: "radio",
+		choices: {
+			"亮色": "light",
+			"暗色": "dark"
+		},
+	},
+	{
 		_tab: "customize",
 		id: "allowHTMLTags",
 		name: "解析HTML标签",

@@ -4,6 +4,7 @@ import {cloneNamed, getTextContent, jsonFetch, prettyError} from "./utils/utils.
 import {
 	abortCompletion,
 	config,
+	getCurrentTheme,
 	isLlamaCppBackend,
 	lastScrollDirection,
 	MessageRoles,
@@ -1036,7 +1037,7 @@ export const buildSystemPrompt = async (conversation, prompt, toolPrompt) => {
 
 			switch (id) {
 				case "theme":
-					result += matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+					result += getCurrentTheme();
 					break;
 				case "date":
 					result += new Date().toLocaleDateString();

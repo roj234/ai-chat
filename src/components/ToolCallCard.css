@@ -28,7 +28,11 @@
     & .args {
         max-height: 256px;
         padding: 8px 10px;
-        background: var(--panel-2);
+
+        /* TODO copy from hljs style */
+        color: #abb2bf;
+        background: #282c34;
+
         border: 1px solid var(--border);
         border-radius: 8px;
         overflow: auto;
@@ -55,9 +59,9 @@
     }
 
     &.tool-pending {
-        background-color: #2a2118; /* 深琥珀色背景 */
-        border: 1px solid #4d381d; /* 弱化的边框线 */
-        border-left: 4px solid #f59e0b; /* 左侧明显的琥珀色警告条 */
+        background-color: var(--tool-pending-bg);
+        border: 1px solid var(--tool-pending-border);
+        border-left: 4px solid var(--tool-pending-accent);
         border-radius: 4px;
 
         & .rerun-btn {
@@ -65,8 +69,8 @@
         }
         & .warning {
             background: transparent;
-            border: 1px solid #f59e0b;
-            color: #f59e0b;
+            border: 1px solid var(--tool-pending-accent);
+            color: var(--tool-pending-accent);
             cursor: pointer;
 
             &:hover {

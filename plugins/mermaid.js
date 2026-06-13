@@ -1,4 +1,5 @@
 import {registerCodeBlockRenderer} from "/src/markdown/markdown.js";
+import {getCurrentTheme} from "/src/states.js";
 
 let mermaid;
 let renderQueue;
@@ -10,7 +11,7 @@ registerCodeBlockRenderer("mermaid", (code, language, node, is_finished) => {
 			mermaid = module.default;
 			mermaid.initialize({
 				startOnLoad: false,
-				theme: matchMedia('(prefers-color-scheme: dark)') ? 'dark' : 'default',
+				theme: getCurrentTheme() === 'dark' ? 'dark' : 'default',
 				securityLevel: "antiscript"
 			});
 		});

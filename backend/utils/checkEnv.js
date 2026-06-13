@@ -56,7 +56,7 @@ async function detectEnv() {
 		ripgrepResult
 	] = await Promise.all([
 		'git --version',
-		'bash --version',
+		'bash --help',
 		'python3 --version',
 		'python --version',
 		'javac -version',
@@ -73,7 +73,7 @@ async function detectEnv() {
 		'kotlin -version',
 		'tsc --version',
 		'dart --version',
-		'ripgrep --version',
+		'rg --version',
 	].map(execCommand));
 
 	const env = {};
