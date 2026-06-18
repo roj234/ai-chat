@@ -5,7 +5,7 @@ AiChat 是一个现代化的高性能纯 Web AI 前端，基于 [Unconscious](ht
 - AiChat 性能很好，AiChat 后端可选，AiChat 界面好看；这是我开发它的理由，我未能在 GitHub 找到适合我的 LLM 前端
 - 前端(gzipped) 1.5MB 可选后端(+所有依赖) 650KB
 
-![Banner](docs/banner.webp)
+![Banner](media/banner.webp)
 
 > 说真的，如果你希望有一个点开`index.html`就能用的前端，那你恐怕只能选我  
 > 尽管我没有提供真正的`即点即用`版本，因为ESM按需导入不支持 `file://` —— 至少要一个静态文件服务  
@@ -61,13 +61,14 @@ AiChat 是一个现代化的高性能纯 Web AI 前端，基于 [Unconscious](ht
    - 我实现了Hashline机制（Tag=行号+哈希），这可以提升模型`部分修改文件`的能力
      - 但不一定更好
   - 命令执行没有沙盒，你**可以而且应该**在容器内部署一个文件操作服务
+  - 提供了API统一操作本机文件、远程文件服务、OPFS、以及虚拟的配置文件系统
 - **真正的编辑**：“你不能只在自己红温的时候支持模型应该能被打断和修改”  
   传统 Agent 的工作流是线性的、自动的、不可逆的。  
   本项目允许你修改历史中任何一条消息的思考，内容，工具调用参数和结果
    - “就当它成功过”
    - [详细介绍](public/documents/agent-filesystem.md)
 
-![preview-2](docs/preview.jpg)
+![preview-2](media/preview.jpg)
 > 截图并不会实时更新，要你直接去Github Pages看看？
 
 ## 理念
@@ -87,8 +88,8 @@ AiChat 是一个现代化的高性能纯 Web AI 前端，基于 [Unconscious](ht
   - 参考实现：`backend/init.js`
 
 > **唯一必须的，只是LLM端点。**  
-> 如果你不需要它作为Agent，那么不需要文件访问服务  
-> 如果你想要网络搜索/真正的RAG，注册一个工具有何不可？  
+> 如果不需要执行命令，那么不需要文件访问服务  
+> 如果想要更多的工具：MCP，启动！(2.20.0已支持MCP)  
 > 如果我的naive实现满足不了你日益增长的需求，尝试做一个更好的，而不是让我做一些自己用不上的功能（比如鉴权）
 
 [我的 llama.cpp 分支](https://github.com/Roj234/llama.cpp) 提供下列可选功能：
@@ -119,6 +120,10 @@ AiChat 是一个现代化的高性能纯 Web AI 前端，基于 [Unconscious](ht
 > PC版: full_release.zip 并解压  
 > 安卓版: AiChat_&lt;版本&gt;.apk  
 如果你想手动构建或开发，[请查看这里](public/documents/build.md)
+
+浏览器需求：Chrome 118+  
+在 118-124 上测试  
+这个最低标准你可以认为未来五年内不会改变，因为我有一部手机系统WebView是120
 
 ### PC版(带后端)部署
 
@@ -182,13 +187,15 @@ AiChat 是一个现代化的高性能纯 Web AI 前端，基于 [Unconscious](ht
 
 ## 其他页面
 
-### 请求和计费日志查看器
+### 请求和计费日志查看器 (log_viewer.html)
 - 暂时必须使用后端
 - 因为本项目的数据库驱动程序比较耦合，暂时还拆不出来
-![日志查看器](docs/logViewer.png)
+![日志查看器](media/logViewer.png)
 
-### AI原生 JSON Schema 编辑器
-- 所谓 AI Native，指编辑器的主要功能就是 AI，你可以和 AI 聊天让它修改 Schema
-- 目前还不支持回退，也不支持多轮对话，但是对我来说已经算比较好用了
-- 不支持多轮对话的主要代价是，每次你需要明确的提出要修改的字段名，而不能用“之前”，“它”，“然后”什么的，其他倒是没什么
-![Schema编辑器](docs/schemaEditor.png)
+### Markdown 渲染测试工具 (markdown.html)
+
+### 角色卡查看器 (character_viewer.html)
+
+### 文档 (docs.html)
+
+### 测试工具 (test.html)

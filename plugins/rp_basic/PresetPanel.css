@@ -24,8 +24,11 @@
         right: 0;
     }
 
+    & .filter {
+        background: var(--card);
+    }
+
     &  > .filter {
-        border: none;
         overflow: auto;
         scrollbar-gutter: stable;
         padding-right: 4px;
@@ -95,18 +98,20 @@
         margin: 0 0.5rem;
     }
 
+    & li {
+        border-bottom: 1px solid var(--border);
+        transition: background 0.15s;
+        &:hover {
+            background: rgba(255, 255, 255, 0.04);
+        }
+    }
+
     /* 单个列表项 */
     & .summary {
         display: flex;
         align-items: center;
         gap: 0.6rem;
         padding: var(--spacing-sm) var(--spacing-lg);
-        border-bottom: 1px solid var(--border);
-        transition: background 0.15s;
-
-        &:hover {
-            background: rgba(255, 255, 255, 0.04);
-        }
 
         & .index {
             color: var(--muted);
@@ -126,17 +131,8 @@
 
         /* 开关 */
         & .switch {
-            position: relative;
-            display: inline-block;
             width: 42px;
             height: 24px;
-            flex-shrink: 0;
-        }
-
-        & .switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
         }
 
         & .slider {
@@ -158,14 +154,6 @@
             background: #ddd;
             border-radius: 50%;
             transition: transform 0.25s;
-        }
-
-        & .switch input:checked + .slider {
-            background: var(--accent);
-        }
-
-        & .switch input:checked + .slider::before {
-            transform: translateX(18px);
         }
     }
 

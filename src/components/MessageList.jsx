@@ -85,9 +85,7 @@ const chunkRenderer = m => {
 						}
 					}} />;
 				} else {
-					const container = <div className="md" />;
-					renderMarkdownToElement(container, text);
-					return container;
+					return renderMarkdownToElement(<div className="md"/>, text);
 				}
 			}
 			case "images":
@@ -214,38 +212,16 @@ const chunkRenderer = m => {
 };
 
 /**
- * @param {AiChat.Message} message
+ *
+ * @param {string} content
  * @param {AiChat.ResponseContentPart[]} chunks
- * @param {number} index
- * @param {AiChat.Message[]} messages
+ * @param {AiChat.Message} message
  */
-const chunkGather = (message, chunks, index, messages) => {
-	const role = message.role;
-	const getChunks = MessageRoles[role]?.getChunks;
-	if (getChunks) {
-		const isPostHook = getChunks(message, chunks, index, isEditing, messages);
-		if (!isPostHook) return;
-	} else if (!EditableMessageRoles.has(role)) {
-		chunks.push({
-			type: "error",
-			title: "不支持的角色，插件是否加载？",
-			error: message
-		})
-		return;
-	}
-
-	let {think, reasoning_details, content, tool_calls, error, finish_reason} = message;
-
-	if (think) {
-		const child = { type: "think", think };
-		if (reasoning_details) child.reasoning_details = reasoning_details;
-		chunks.push(child);
-	}
-
+const defaultRenderContent = (message, chunks, content) => {
 	if (Array.isArray(content)) {
 		let images = [];
 
-		for (let i = 0; i < content.length; i++){
+		for (let i = 0; i < content.length; i++) {
 			const chunk = content[i];
 			if (chunk.type === "image_url") {
 				images.push(chunk);
@@ -268,6 +244,38 @@ const chunkGather = (message, chunks, index, messages) => {
 			key: message,
 			text: content
 		});
+	}
+};
+
+/**
+ * @param {AiChat.Message} message
+ * @param {AiChat.ResponseContentPart[]} chunks
+ * @param {number} index
+ * @param {AiChat.Message[]} messages
+ */
+const chunkGather = (message, chunks, index, messages) => {
+	let {think, reasoning_details, content, tool_calls, error, finish_reason} = message;
+
+	if (think) {
+		const child = { type: "think", think };
+		if (reasoning_details) child.reasoning_details = reasoning_details;
+		chunks.push(child);
+	}
+
+	const role = message.role;
+	const renderContent = MessageRoles[role]?.renderContent;
+	if (renderContent) {
+		renderContent(message, chunks, index, isEditing, messages, defaultRenderContent);
+	} else {
+		if (typeof content !== 'string' && !EditableMessageRoles.has(role)) {
+			chunks.push({
+				type: "error",
+				title: "未定义的消息类型，无法渲染内容。",
+				error: content
+			});
+		} else {
+			defaultRenderContent(message, chunks, content);
+		}
 	}
 
 	if (tool_calls) {
@@ -302,8 +310,6 @@ const chunkGather = (message, chunks, index, messages) => {
 	if (error) {
 		chunks.push({ type: "error", error, key: message });
 	}
-
-	if (getChunks) getChunks(message, chunks, index, isEditing, messages, 1);
 };
 
 /**
@@ -746,7 +752,10 @@ const combinedMessages = $computed((oldMessages) => {
 				getBranchChunk(arr[ref.index], chunks);
 			}
 		} else {
+			// 自定义消息角色
+			if (message.finish_reason) chunks.push({type: "usage"});
 			getBranchChunk(message, chunks);
+
 			ref[PINNED] = isEditing(message);
 			ref.time = ref.key.time;
 		}

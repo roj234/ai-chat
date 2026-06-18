@@ -92,9 +92,6 @@ export const getMessages = conversation => (
 const DIFF_IGNORE_KEYS = new Set(["id", "ready"]);
 const WAITING = debugSymbol("UPDATE_WAIT")
 
-// TODO conversation.ready 切到这个，但是用符号不会触发响应式更新
-export const READY = debugSymbol("ready");
-
 /**
  * 更新会话
  * @param {AiChat.Conversation} conversation

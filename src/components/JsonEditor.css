@@ -21,8 +21,12 @@
         outline: none;
     }
 
-    & textarea, & code {
+    & textarea, & pre {
         font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    }
+
+    & pre::-webkit-scrollbar {
+        display: none;
     }
 
     & textarea {

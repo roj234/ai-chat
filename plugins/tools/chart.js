@@ -100,8 +100,8 @@ $watch(selectedConversation, () => {
 const CHART = debugSymbol("CHART");
 const OPTIONS = debugSymbol("OPTIONS");
 
-registerTools("chart", "Create charts and data visualizations for numeric or structured data.", [{
-	name: "chart",
+registerTools("Chart", "Create charts and data visualizations for numeric or structured data.", [{
+	name: "Chart",
 	description: "Create Chart.js visualizations from structured numeric data."
 		+" Use when visual comparison or trend understanding is useful."
 		+" Use after the data has already been prepared. If calculation, aggregation, or transformation is needed first, use code_interpreter before chart_renderer."

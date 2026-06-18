@@ -43,7 +43,9 @@ const request = async (path, {body, method} = {}) => {
 		'x-pv': PROTOCOL_VERSION,
 		'x-sv': msgpack_schema_version,
 	};
-	if (getClientId) headers["x-ci"] = getClientId();
+
+	const clientId = getClientId?.();
+	if (clientId) headers["x-ci"] = clientId;
 
 	const pat = config.db_pat;
 	if (pat) headers["Authorization"] = 'Bearer '+pat;
@@ -65,6 +67,7 @@ const request = async (path, {body, method} = {}) => {
 		const contentType = res.headers.get('Content-Type');
 		if (contentType === 'application/json') return res.json();
 		if (contentType === 'application/vnd.msgpack') {
+			serverAcceptMsgpack = true;
 			return res.arrayBuffer().then(ab => {
 				return decodeMsg(new DataView(ab), {
 					bigint: true,
@@ -224,11 +227,10 @@ export const listConversations = (lastTimestamp) => {
 	});
 	makeBatch("version")().catch(err => {
 		if (err.startsWith?.("unknown")) return ['Legacy'];
-	}).then(([protocolVersion, msgpackVersion]) => {
+	}).then(([protocolVersion]) => {
 		if (protocolVersion !== PROTOCOL_VERSION) {
 			showIncompatibleDialog(protocolVersion);
 		}
-		serverAcceptMsgpack = msgpackVersion === msgpack_schema_version;
 	});
 	return makeBatch("conversations")(lastTimestamp);
 };
@@ -428,7 +430,12 @@ export const uploadBlob = async blob => {
  * @return {Promise<Blob>}
  */
 export const getBlob = async ({hash, name}) => {
-	const serverData = await u_getBlobInfo(hash).catch(() => {return{}});
+	const serverData = await u_getBlobInfo(hash).catch((e) => {
+		return {
+			size: -1,
+			type: e
+		}
+	});
 	if (name) serverData.name = name;
 	return new _FakeBlob({ hash, ...serverData });
 };

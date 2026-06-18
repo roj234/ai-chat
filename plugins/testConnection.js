@@ -4,7 +4,7 @@ import {config, Shared} from "/src/states.js";
 import {provider_presets} from "/media/provider_presets.js";
 import {onLoad} from "/src/plugin.js";
 import SimpleModal from "../src/components/SimpleModal.jsx";
-import {jsonPathOp} from "unconscious/common/json-schema-utils.js";
+import {jsonEval} from "unconscious/common/json-schema-utils.js";
 
 const EMPTY_WAV = `UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=`;
 const EMPTY_BMP = `Qk06AAAAAAAAADYAAAAoAAAAAQAAAAEAAAABABgAAAAAAAQAAAATCwAAEwsAAAAAAAAAAAAA/wAAAA==`;
@@ -30,8 +30,8 @@ const check = (body, flag) => {
 	body.model = config.model;
 
 	if (flag !== 2) {
-		const [reasoningPath, reasoningEnabledValue = 'true', reasoningDisabledValue = 'false'] = (config.reasoningPath||"reasoning.enabled").split(",");
-		jsonPathOp(body, reasoningPath, "set", JSON.parse(flag === 3 ? reasoningEnabledValue : reasoningDisabledValue));
+		const [reasoningPath, reasoningEnabledValue = 'true', reasoningDisabledValue = 'false'] = (config.reasoningPath||"reasoning/enabled").split(",");
+		jsonEval(body, reasoningPath, "set", JSON.parse(flag === 3 ? reasoningEnabledValue : reasoningDisabledValue));
 	}
 
 	let p = jsonFetch(config.endpoint+(config.mode === "chat" ? '/chat/completions' : '/completions'), {

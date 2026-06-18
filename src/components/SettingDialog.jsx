@@ -39,8 +39,8 @@ createTab("sampling", "采样", "ri-filter-line");
 createTab("prompt", "提示词", "ri-menu-2-line");
 createTab("customize", "个性化", "ri-brush-line");
 createTab("appearance", "外观", "ri-brush-line");
-createTab("data", "数据管理", "ri-database-2-line");
-createTab("tools", "工具调用", "ri-server-line");
+createTab("data", "数据", "ri-database-2-line");
+createTab("tools", "工具", "ri-wrench-line");
 
 const setTransparent = f => document.body?.classList.toggle("tr", f);
 

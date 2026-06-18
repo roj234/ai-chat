@@ -7,6 +7,7 @@ import {ZipReader, ZipWriter} from "unconscious/common/zip-io.js";
 import {$computed, $state, $update, unconscious} from "unconscious";
 import {reloadPresetList} from "./components/PresetDropdown.jsx";
 import {decodeObjects, serializeJSON} from "./utils/marshal.js";
+import {BRANCH_MANAGER} from "./utils/BranchManager.js";
 
 const sleep = () => new Promise(resolve => setTimeout(resolve));
 
@@ -196,13 +197,13 @@ export const exportConversation = async (type, _conv) => {
 		if (conv && type === 1) {
 			const { id: _a, ready: _b, ...data } = conv;
 
-			let messagePromise = unconscious(messages);
+			let messagePromise = conv[BRANCH_MANAGER]?.messages || unconscious(messages);
 			try {
 				messagePromise = await getMessages(conv);
 			} catch {}
 			data.messages = cleanMessages(messagePromise);
 
-			const jsonData = await serializeJSON(data.messages, 0, zw);
+			const jsonData = await serializeJSON(data, 0, zw);
 			if (zw.fileCount() === 1) {
 				downloadFile(new Blob([jsonData], { type: "application/json" }), "json");
 				return;

@@ -43,7 +43,7 @@ export function ToolCallCard(props) {
                             }).finally(() => {
                                 target.disabled = false;
                             });
-                        }} title={"执行该工具，返回值可能改变\n警告：无法撤销工具导致的外部更改"}>
+                        }} title={"确保知道自己在做什么！\n点击：撤销然后重做\n警告：错误使用可能导致状态不一致甚至数据丢失"}>
                         重新执行</button>}
                     </div>
                     <pre ref={output} className="args" dangerouslySetInnerHTML={highlightJsonLike(response_content.value ?? "/* 尚未运行 */")}></pre>
@@ -70,8 +70,14 @@ export function ToolCallCard(props) {
         }
     };
 
+    let title;
+    try {
+        title = !isReactive(tool) && toolScriptRegistry[name]?.title?.(tool, message.tool_responses[idx]);
+    } catch (e) {
+        console.error("工具标题生成异常", e);
+    }
     const base = <details className={"tool-call"} onClick.once={initializeHtml}>
-        <summary className="tool-header" title={"展开工具参数"}><b>{name}</b></summary>
+        <summary className="tool-header" title={"展开工具参数\n"+name}><b>{title || name}</b></summary>
     </details>;
 
     morphToolCallCard(props, base);

@@ -1,0 +1,64 @@
+{
+  $schema: "http://json-schema.org/draft-07/schema#",
+  title: "开场事件",
+
+  type: "object",
+  properties: {
+    // CoT 推演
+    design: {
+      type: "string",
+      description: "【开局推演】分析主角当前的处境。结合其背景、弱点以及传入的【暗线前奏】，构思一个极具戏剧性、且迫使主角立刻做出反应的具体场景（如：正在被追杀、从冷冻舱苏醒发现飞船警报大作、在酒馆被人用枪指着头）。约150字。"
+    },
+
+    // 场景定调
+    time_and_location: {
+      type: "string",
+      description: "具体的发生时间与精细地点（如：永夜历312年 猎魔人公会地下三层的发霉牢房 / 某个暴雨倾盆的周二午夜 霓虹闪烁的垃圾场）。"
+    },
+    environment_rendering: {
+      type: "string",
+      description: "环境与感官渲染。重点描写光影、气味、温度或诡异的声响，为后续文本奠定氛围基调。一到两句话即可。"
+    },
+
+    // 主菜：开场白
+    event_prologue: {
+      type: "string",
+      description: "【核心开场白】以『第二人称（你）』进行长篇叙述。不要平铺直叙地介绍世界观，而是直接描写当前正在发生的动作和危机（In medias res 手法）。在文中自然地融入主角的外貌特征或背景痕迹，并巧妙地埋入【暗线前奏】的伏笔。结尾必须停在一个时间紧迫、需要玩家立刻做出抉择的生死悬念上。字数不少于400字，采用段落排版。"
+    },
+
+    // 状态监控
+    initial_status: {
+      type: "object",
+      properties: {
+        description: {
+          type: "string",
+          description: "主角此时此刻的生理与心理状态（可能带有初始的轻微受难，例如：剧烈的宿醉、左臂有一道流血的新鲜裂口、处于某种能力被封印的虚弱期）。"
+        },
+        variables: {
+          type: "object",
+          description: "初始化变量"
+        }
+      },
+
+      required: ["description", "variables"],
+      additionalProperties: false
+    },
+
+    // 引导选项（给不知道怎么开始的用户）
+    suggested_actions: {
+      type: "array",
+      minItems: 2,
+      maxItems: 4,
+      description: "给玩家提供的、符合其性格标签与技能的初始行动建议。",
+      items: {
+        type: "string",
+        description: "具体的行动选项描述（例如：『拔出腰间的生锈铁剑，正面迎战无头骑士。』或『利用[暗影亲和]天赋，立刻翻窗遁入下水道逃生。』）"
+      }
+    }
+  },
+  required: [
+    "design", "time_and_location", "environment_rendering",
+    "event_prologue", "initial_status", "suggested_actions"
+  ],
+  additionalProperties: false
+}

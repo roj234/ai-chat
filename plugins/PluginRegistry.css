@@ -1,0 +1,221 @@
+
+:root {
+    --msidebar-width: 280px;
+}
+
+/* 主容器 */
+.plugin-manager {
+    max-width: 960px;
+
+    & .modal-header {
+        display: flex;
+        align-items: center;
+
+        gap: 8px;
+        font-weight: 600;
+
+        & .badge {
+            background: var(--accent);
+            color: white;
+            font-size: 12px;
+            padding: 2px 10px;
+            border-radius: 20px;
+        }
+    }
+
+    /* 主内容区：flex 左右 */
+    & .interface {
+        display: flex;
+        flex: 1;
+        min-height: 460px;
+    }
+
+    /* 左侧边栏 */
+    & .msidebar {
+        width: var(--msidebar-width);
+        border-right: 1px solid var(--border);
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+
+        &>.item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 8px;
+            border-left: 3px solid transparent;
+            transition: background 0.15s ease, border-color 0.15s ease;
+            position: relative;
+
+            &:hover {
+                background: var(--chip-active);
+            }
+            &.active {
+                border-color: var(--chip-active-border);
+            }
+            &.ds-drag {
+                opacity: 0.5;
+                background: var(--chip-bg);
+                box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
+            }
+        }
+        &>.ds-shadow {
+            border: 1px dashed var(--chip-active-border);
+        }
+    }
+
+    /* 拖拽手柄 */
+    & .drag-handle {
+        color: var(--muted);
+        font-size: 18px;
+        line-height: 1;
+        cursor: grab;
+        flex-shrink: 0;
+        user-select: none;
+    }
+
+    & .drag-handle:active {
+        cursor: grabbing;
+    }
+
+    /* 插件信息（名称 + 作者） */
+    & .plugin-info {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        font-size: 14px;
+    }
+
+    & .plugin-author {
+        font-size: 12px;
+        color: var(--text-lighter);
+    }
+
+    /* 右侧详情面板 */
+    & .detail-panel {
+        flex: 1;
+        padding: 0 24px;
+        overflow-y: auto;
+    }
+
+    & .detail {
+        animation: fadeSlide 0.2s ease;
+    }
+
+    @keyframes fadeSlide {
+        from { opacity: 0; transform: translateY(4px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* 详情头部 */
+    & .detail-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    & .detail-header h2 {
+        font-size: 20px;
+    }
+
+    & .status-badge {
+        font-size: 12px;
+        font-weight: 600;
+        padding: 4px 14px;
+        border-radius: 20px;
+        background: #f1f3f5;
+        color: #6b7280;
+        letter-spacing: 0.2px;
+    }
+
+    & .status-badge.enabled {
+        background: #d1fae5;
+        color: #065f46;
+    }
+
+    & .detail-meta {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 14px;
+        margin-bottom: 20px;
+    }
+
+    & .meta-item {
+        font-size: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    & .meta-item .label {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--text-lighter);
+    }
+
+    & .meta-item a {
+        word-break: break-all;
+    }
+
+    & .md {
+        font-size: 14px;
+        color: var(--text-lighter);
+        margin-bottom: 22px;
+        padding: 0 8px;
+        background: var(--bg);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+    }
+
+    /* 滚动条 */
+    ::-webkit-scrollbar {
+        width: 6px;
+    }
+    ::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+        background: var(--muted);
+        border-radius: 3px;
+    }
+}
+
+
+/* 适配各种宽度和高度的开关组件 */
+.switch {
+    appearance: none;
+    cursor: pointer;
+    width: 32px;
+    height: 20px;
+    border-radius: 999px;
+    background: var(--muted);
+    position: relative;
+    transition: background 0.2s;
+
+    &::after {
+        content: "";
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        height: calc(100% - 4px);
+        aspect-ratio: 1;
+        border-radius: 50%;
+        background: white;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        transition: left 0.2s, transform 0.2s;
+    }
+}
+
+.switch:checked {
+    background: var(--ok);
+
+    &::after {
+        left: calc(100% - 2px);
+        transform: translateX(-100%);
+    }
+}

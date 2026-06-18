@@ -1,5 +1,5 @@
 import {config, isLlamaCppBackend, models, setIsLlamaCppBackend, updateModels} from "/src/states.js";
-import {$asyncState, $computed, $disposable, $foreach, $state, $unwatch, $update, $watch} from "unconscious";
+import {$asyncState, $cleanup, $computed, $foreach, $state, $unwatch, $update, $watch} from "unconscious";
 import {isLanAddress} from "/common/isLanAddress.js";
 import "./llamaCpp.css";
 import {jsonFetch, prettyError, throttled} from "/src/utils/utils.js";
@@ -16,12 +16,12 @@ const _stateChanging = $state("");
 let emptyMessageTokens = -1;
 {
 	let userInput;
-	async function countTokens(text) {
+	const countTokens = async text => {
 		if (emptyMessageTokens < 0) {
 			emptyMessageTokens = await _countTokens("");
 		}
 		return await _countTokens(text) - emptyMessageTokens;
-	}
+	};
 	const _countTokens = (text) => {
 		return jsonFetch(config.endpoint+"/messages/count_tokens", {
 			key: config.accessToken,
@@ -54,7 +54,6 @@ let emptyMessageTokens = -1;
 		userInput.addEventListener("input", delayedCountTokens);
 	});
 }
-
 
 /**
  * @type {import("unconscious").ReactivePromise<boolean>}
@@ -131,7 +130,7 @@ SETTINGS.push({
 			</div>;
 
 			updateModelInfo.observe(div);
-			$disposable(div, () => {updateModelInfo.unobserve(div);});
+			$cleanup(div, () => {updateModelInfo.unobserve(div);});
 			return div;
 		} else {
 			return null;
@@ -154,7 +153,7 @@ SETTINGS.push({
  * @param {AiChat.ApiModel} model
  * @return {Promise<Record<string, any>>}
  */
-function llamaModelManage(model) {
+const llamaModelManage = model => {
 	const action = model.status.value === "unloaded" ? "load" : "unload";
 	const id = model.id;
 
@@ -187,4 +186,4 @@ function llamaModelManage(model) {
 	}).catch(e => {
 		showToast(prettyError(e), "error");
 	});
-}
+};

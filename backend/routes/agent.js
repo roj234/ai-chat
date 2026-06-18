@@ -5,7 +5,8 @@ import {readBOM} from "../../common/chardet.js";
 import iconv from "iconv-lite";
 import {getEnvironmentPrompt} from "../utils/checkEnv.js";
 import {createHashLine} from "../../common/hash-line.js";
-import {createWriteStream} from 'node:fs';
+import {createReadStream, createWriteStream} from 'node:fs';
+import {pipeline} from "node:stream/promises";
 
 /**
  * 路径索引（暂未使用，保留）
@@ -55,7 +56,9 @@ async function readAsString(buffer) {
 
 	if (charset) return tryDecode(buffer, charset);
 
-	return tryDecode(buffer, 'UTF-8') || tryDecode(buffer, 'GB18030');
+	const text = tryDecode(buffer, 'UTF-8') || tryDecode(buffer, 'GB18030');
+	if (text == null) throw "[Cannot read binary file]";
+	return text;
 }
 
 /**
@@ -159,20 +162,44 @@ export async function registerFsRoutes(router, allowExec) {
 		}
 	});
 
+	router.post('/root', (ctx) => {
+		sendText(ctx.res, ctx.sandboxRoot);
+	});
 	router.post('/read', async (ctx) => {
 		sendText(ctx.res, await hashLine.read(await ctx.readAsObject(), ctx));
 	});
 	router.post('/patch', async (ctx) => {
 		sendText(ctx.res, await hashLine.patch(await ctx.readAsObject(), ctx));
 	});
-	router.post('/replace', async (ctx) => {
-		sendText(ctx.res, await hashLine.replace(await ctx.readAsObject(), ctx));
+	router.post('/edit', async (ctx) => {
+		sendText(ctx.res, await hashLine.edit(await ctx.readAsObject(), ctx));
 	});
 	router.post('/write', async (ctx) => {
 		sendText(ctx.res, await hashLine.write(await ctx.readAsObject(), ctx));
 	});
+	router.post('/append', async (ctx) => {
+		const { path, content, newline = true } = await ctx.readAsObject();
+		const safePath = pathFilter(ctx, path);
 
-	router.post('/read_image', async (ctx) => {
+		let needNewline;
+		if (newline) {
+			try {
+				const size = (await fs.stat(safePath)).size;
+				if (size) {
+					const fd = await fs.open(safePath, 'r');
+					const buf = Buffer.allocUnsafe(1);
+					await fd.read(buf, 0, 1, size - 1);
+					await fd.close();
+					needNewline = buf[0] !== 0x0a;
+				}
+			} catch {}
+		}
+
+		await fs.appendFile(safePath, needNewline ? '\n'+content : content, 'utf8');
+		sendText(ctx.res, "done");
+	});
+
+	router.post('/readImage', async (ctx) => {
 		const { path: filePath } = await ctx.readAsObject();
 		const safePath = pathFilter(ctx, filePath);
 		const stats = await fs.stat(safePath);
@@ -181,11 +208,14 @@ export async function registerFsRoutes(router, allowExec) {
 		}
 
 		const ext = safePath.slice(safePath.lastIndexOf('.') + 1).toLowerCase();
-		// 图片直接返回二进制
-		if (['png', 'jpg', 'bmp', 'jpeg'].includes(ext)) {
-			// TODO pipe
-			const data = await fs.readFile(safePath);
-			return sendRaw(ctx.res, 200, `image/${ext}`, data);
+
+		if (['png', 'jpg', 'bmp', 'jpeg', 'webp'].includes(ext)) {
+			ctx.res.writeHead(200, {
+				'Content-Type': `image/${ext}`,
+				'Content-Length': stats.size,
+			});
+
+			return pipeline(createReadStream(safePath), ctx.res);
 		}
 
 		ctx.send(400, { error: `File extension is current not allowed` });
@@ -205,33 +235,41 @@ ctime: ${new Date(stats.ctimeMs).toISOString()}
 nlink: ${stats.nlink}`);
 	});
 	router.post('/list', async (ctx) => {
-		const { path: filePath, glob } = await ctx.readAsObject();
+		const { path: filePath, glob = '*', json = false } = await ctx.readAsObject();
 		const safePath = pathFilter(ctx, filePath);
-		const entries = glob
+		const entries = glob !== '*'
 			? await fs.glob(glob, { cwd: safePath, withFileTypes: true })
 			: await fs.readdir(safePath, { withFileTypes: true });
 
-		let text = '';
+		let prefix = '';
 		let items = 0;
-		const MAX_COUNT = 1000;
+
+		const MAX_COUNT = 500;
+		const result = [];
 		for await (const entry of entries) {
 			if (items >= MAX_COUNT) {
-				text += `[TRUNCATED: Only first ${MAX_COUNT} files shown, retry with glob?`;
+				prefix = `[TRUNCATED: Only first ${MAX_COUNT} files shown, use a more specific glob or path]\n`;
 				break;
 			}
 
-			const name = glob ? path.join(entry.parentPath, entry.name).replace(ctx.sandboxRoot, ".").replaceAll("\\", '/') : entry.name;
+			const name = glob !== '*' ? path.join(entry.parentPath, entry.name).slice(safePath.length+1).replaceAll("\\", '/') : entry.name;
 			if (entry.isFile()) {
 				const fullPath = path.join(entry.parentPath, entry.name);
 				const stats = await fs.stat(fullPath);
-				text += JSON.stringify(name)+"\tfile\t"+stats.size+"\n";
-			} else {
-				text += JSON.stringify(name)+"\tdir\n";
+
+				result.push([name, "file", stats.size]);
+			} else if (name) {
+				// 跳过 '.' 当前目录
+				result.push([name, "dir"]);
 			}
-			items++;
 		}
-		const result = text.trim();
-		sendText(ctx.res, result ? "\"name\"\ttype\tsize\n"+result : "Empty folder");
+
+		if (json) {
+			ctx.send(200, result);
+			return;
+		}
+
+		sendText(ctx.res, result.length ? prefix+result.map(item => item.join("\t")).join("\n") : "[No result]");
 	});
 
 	// 基础操作
@@ -288,7 +326,7 @@ nlink: ${stats.nlink}`);
 		 * @param {object}   options   - { cwd, timeout(ms), shell(boolean|string), safeCwd(用于落盘) }
 		 * @returns {Promise<{code: number, text: string}>}
 		 */
-		async function executeCommand(command, args, { cwd, timeout, shell = false, dir }) {
+		async function executeCommand(command, args, { cwd, timeout, shell = false, dir, noTruncate = false }) {
 			const child = spawn(command, args, {
 				cwd,
 				stdio: ['ignore', 'pipe', 'pipe'],
@@ -310,8 +348,8 @@ nlink: ${stats.nlink}`);
 					tail = (tail + chunk).slice(-HALF);
 				} else {
 					tail += chunk;
-					if (tail.length > OUTPUT_LIMIT) {
-						filename = `/command-log-${Date.now()}-${Math.random().toString(36).slice(2)}.log`;
+					if (!noTruncate && tail.length > OUTPUT_LIMIT) {
+						filename = `/command-log-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.log`;
 
 						file = createWriteStream(path.join(cwd, filename), { flags: 'w' });
 						file.write(tail);
@@ -353,9 +391,10 @@ nlink: ${stats.nlink}`);
 		}
 
 		router.post('/spawn', async (ctx) => {
-			const { program, arguments: args, cwd = '', timeout = 10 } = await ctx.readAsObject();
+			const { program, arguments: args, cwd = '', timeout = 10, noTruncate = false } = await ctx.readAsObject();
 			const { code, text } = await executeCommand(program, args, {
 				cwd: pathFilter(ctx, cwd),
+				noTruncate,
 				dir: '.',
 				timeout: timeout * 1000,
 				shell: false,
@@ -380,6 +419,91 @@ nlink: ${stats.nlink}`);
 				shell,
 			});
 			sendText(ctx.res, `Exit code ${code}\n${text}`);
+		});
+
+		// 后台进程管理：输出全部落盘为日志文件，LLM 可自行 read_file 查看
+		/** @type {Map<string, {child: import('node:child_process').ChildProcess, logFile: string, cwd: string, timer?: number}>} */
+		const bgProcesses = new Map();
+
+		/**
+		 * 启动后台程序（非阻塞），stdout/stderr → 日志文件
+		 * @returns {string} 纯文本：id 与日志路径，LLM 用 read_file 自行查看
+		 */
+		router.post('/run_bg', async (ctx) => {
+			const { program, arguments: args, cwd = '', timeout = -1 } = await ctx.readAsObject();
+			const safeCwd = pathFilter(ctx, cwd);
+
+			const id = Math.random().toString(36).slice(2, 10);
+			const logName = `bg-program-${id}.log`;
+			const logPath = path.join(safeCwd, logName);
+			const relLog = path.relative(ctx.sandboxRoot, logPath);
+
+			const logStream = createWriteStream(logPath, { flags: 'w' });
+
+			const child = spawn(program, args || [], {
+				cwd: safeCwd,
+				stdio: ['ignore', 'pipe', 'pipe'],
+				shell: false,
+			});
+
+			child.stdout.pipe(logStream);
+			child.stderr.pipe(logStream);
+
+			let timer = timeout > 0 && setTimeout(() => child.kill('SIGTERM'), timeout * 1000);
+
+			bgProcesses.set(id, { child, logFile: logPath, cwd: safeCwd, timer });
+			console.log("[后台进程] 已启动 "+id, program, args, cwd);
+
+			child.on('close', () => {
+				logStream.end();
+				clearTimeout(timer);
+				console.log("[后台进程] 已结束 "+id);
+			});
+			child.on('error', () => logStream.end());
+
+			sendText(ctx.res, JSON.stringify({
+				status: "Running in background",
+				programId: id,
+				logFile: relLog
+			}));
+		});
+
+		/**
+		 * 终止后台程序
+		 */
+		router.post('/stop_bg', async (ctx) => {
+			const { programId } = await ctx.readAsObject();
+			const info = bgProcesses.get(programId);
+
+			if (!info) {
+				return sendText(ctx.res, `invalid id: ${programId}`);
+			}
+
+			const { child, logFile, cwd, timer } = info;
+			const relLog = path.relative(ctx.sandboxRoot, logFile);
+
+			if (child.killed || child.exitCode !== null) {
+				bgProcesses.delete(programId);
+				return sendText(ctx.res, JSON.stringify({
+					status: "terminated earlier",
+					exitCode: child.exitCode,
+					logFile: relLog
+				}));
+			}
+
+			console.log("[后台进程] 中止 "+programId);
+			clearTimeout(timer);
+			child.kill('SIGTERM');
+
+			setTimeout(() => {
+				try { child.kill('SIGKILL'); } catch {}
+				bgProcesses.delete(programId);
+			}, 3000);
+
+			sendText(ctx.res, JSON.stringify({
+				status: "killed",
+				logFile: relLog
+			}));
 		});
 	}
 }

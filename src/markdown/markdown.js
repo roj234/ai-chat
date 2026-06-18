@@ -52,6 +52,7 @@ export const renderMarkdownToElement = (container, md, options = {}) => {
 	});
 	parser.write(md);
 	parser.end();
+	return container;
 };
 
 /**

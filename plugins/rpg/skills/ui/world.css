@@ -1,0 +1,138 @@
+
+/* ===== 世界观生成器样式 ===== */
+
+/* 整体容器 */
+.world-name {
+    font-size: 2.2em;
+    font-weight: bold;
+    text-align: center;
+    margin: 0.5em 0 1em;
+    color: #e2c87b;
+    text-shadow: 0 0 10px #aa8030;
+}
+
+/* 核心主题标签容器 */
+.world-themes {
+    margin: 1.5em 0;
+}
+
+.world-themes h3 {
+    font-size: 1.1em;
+    color: #ccc;
+    margin-bottom: 0.6em;
+}
+
+.theme-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5em;
+}
+
+.tag {
+    background: linear-gradient(135deg, #3a3a5c, #2a2a4a);
+    color: #d4af37;
+    padding: 0.3em 0.9em;
+    border-radius: 20px;
+    font-size: 0.85em;
+    border: 1px solid #6a6a9a;
+    animation: fadeIn 0.4s ease-out;
+}
+
+/* 通用区块 */
+section {
+    margin: 2em 0;
+    background: rgba(20, 20, 40, 0.6);
+    border-left: 3px solid #d4af37;
+    padding: 1.2em 1.5em;
+    border-radius: 0 8px 8px 0;
+    animation: fadeInSection 0.5s ease-out;
+}
+
+section h3 {
+    font-size: 1.3em;
+    color: #e2c87b;
+    margin: 0 0 0.8em;
+    border-bottom: 1px dashed #5a5a7a;
+    padding-bottom: 0.4em;
+}
+
+/* Markdown 流式文本 */
+.markdown-body {
+    line-height: 1.8;
+    color: #d0d0e0;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+    padding-left: 1.5em;
+}
+
+.markdown-body li {
+    margin: 0.3em 0;
+}
+
+/* 派系卡片 */
+.faction-card {
+    background: rgba(30, 30, 60, 0.8);
+    border: 1px solid #5a5a8a;
+    border-radius: 8px;
+    padding: 1em;
+    margin: 1em 0;
+    animation: fadeInCard 0.4s ease-out;
+}
+
+.faction-card h4 {
+    font-size: 1.1em;
+    color: #d4af37;
+    margin: 0 0 0.5em;
+}
+
+/* 属性表格 */
+.attribute-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1em 0;
+    color: #ddd;
+}
+
+.attribute-table th {
+    background: #2a2a4a;
+    color: #e2c87b;
+    padding: 0.6em 0.8em;
+    text-align: left;
+    border-bottom: 2px solid #d4af37;
+}
+
+.attribute-table td {
+    padding: 0.5em 0.8em;
+    border-bottom: 1px solid #3a3a5a;
+}
+
+.attribute-table tr {
+    animation: fadeInRow 0.3s ease-out;
+}
+
+.attribute-table tr:hover {
+    background: rgba(100, 100, 200, 0.15);
+}
+
+/* 动画关键帧 */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInSection {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes fadeInCard {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes fadeInRow {
+    from { opacity: 0; background: rgba(255,255,255,0.1); }
+    to { opacity: 1; background: transparent; }
+}

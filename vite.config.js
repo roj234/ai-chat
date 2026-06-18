@@ -80,9 +80,7 @@ const LOADING_TEMPLATE = `<div id="loading">
 //https://cn.vite.dev/
 export default defineConfig(async () => {
     const serverConfigInfo = await import("file://"+VITE_TRICK_CONFIG);
-
-    return {
-    define: {
+    const define = {
         APP_NAME: JSON.stringify(packageInfo.name),
         APP_VERSION: JSON.stringify(packageInfo.version),
         DB_SERVER: JSON.stringify(serverConfigInfo.SERVER_BASE_ADDR),
@@ -91,7 +89,10 @@ export default defineConfig(async () => {
         RESUME_TIMEOUT: JSON.stringify(serverConfigInfo.SSE_RESUME_TIMEOUT),
         IS_ANDROID_BUILD: JSON.stringify(false),
         BUILD_NUMBER: JSON.stringify(process.env.BUILD_NUMBER || "0"),
-    },
+    };
+
+    return {
+    define,
 
     plugins: [
         unconscious({
@@ -104,7 +105,7 @@ export default defineConfig(async () => {
                 /^btn-/,
                 'closed',
                 'lang',
-                'my/storyEngine'
+                'my/storyTurn'
             ]
         }),
         viteFontMinify(),
@@ -122,7 +123,21 @@ export default defineConfig(async () => {
                     `<script>console.log("构建时间: ${buildTime}")</script></head>`
                 );
             }
-        }
+        },
+        {
+            name: 'sw-helper',
+            configureServer(server) {
+                server.middlewares.use((req, res, next) => {
+                    const originalUrl = req.url;
+                    if (!originalUrl.endsWith("/sw.js")) return next();
+
+                    const code = fs.readFileSync("sw.js", "utf-8");
+                    res.writeHead(200, {"Content-Type": "text/javascript"});
+                    res.write(Object.entries(define).map(([k, v]) => `const ${k} = ${k === 'IS_ANDROID_BUILD' ? true : v};`).join('') + code);
+                    res.end();
+                });
+            }
+        },
         //viteSingleFile()
     ],
 
@@ -145,15 +160,16 @@ export default defineConfig(async () => {
         modulePreload: { polyfill: false },
         reportCompressedSize: !isGitHubActions,
         //sourcemap: true,
+        copyPublicDir: false,
 
         assetsInlineLimit: 512,
         rollupOptions: {
             input: {
                 main: 'index.html',
                 logViewer: 'log_viewer.html',
-                jsonEditor: 'json_editor.html',
+                jsonEditorPage: 'json_editor.html',
                 characterViewer: 'character_viewer.html',
-                docs: 'docs.html',
+                docViewer: 'docs.html',
                 markdownPreview: 'markdown.html',
                 sw: "sw.js",
             },

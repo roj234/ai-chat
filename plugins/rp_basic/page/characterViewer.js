@@ -2,7 +2,7 @@ import {$foreach, $state, $store, $watch, AS_IS, unconscious} from "unconscious"
 import {createMarkdownStream, renderMarkdownToElement} from "/src/markdown/markdown.js";
 import {callOnLoadHandler} from "/src/plugin.js";
 import {ZipWriter} from "unconscious/common/zip-io.js";
-import {openJsonEditor} from "/src/json_editor/editorProxy.js";
+import {openJsonEditor} from "/src/json_editor/jsonEditorProxy.js";
 import {highlightJsonLike} from "/src/markdown/highlight.js";
 import {streamFetch} from "/common/openai-api-utils.js";
 import {webviewDownloadFile} from "/vendor/jsBridge.js";

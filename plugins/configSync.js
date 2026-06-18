@@ -6,7 +6,7 @@ import {showToast} from "/src/components/Toast.js";
 
 const LOCAL_CONFIG = "theme uiAutoHideInput checkUpdate width sound expandThinkBlock expandToolCall backgroundFit db_server db_pat".split(" ");
 
-if (DB_MODE !== "local") {
+export const registerConfigSync = () => {
 	let {db_server, db_pat, _new: isNew} = config;
 
 	onLoad(() => {
@@ -41,5 +41,5 @@ if (DB_MODE !== "local") {
 				location.reload();
 			})
 		}, false);
-	})
+	});
 }

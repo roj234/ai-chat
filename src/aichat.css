@@ -19,7 +19,7 @@
     --focus: oklch(0.756 0.126 256.573);
     --error: oklch(0.592 0.202 21.239);
     --error-bg: oklch(0.592 0.202 21.239 / 0.15);
-    --ok: oklch(0.696 0.149 162.48);
+    --ok: #3fb950;
     --user: #2563eb;
     --assistant: oklch(0.545 0.022 80.03);
     --system: oklch(0.323 0.059 168.518);
@@ -111,7 +111,7 @@
         --focus: #60a5fa;
         --error: oklch(0.52 0.18 21);
         --error-bg: oklch(0.52 0.18 21 / 0.08);
-        --ok: oklch(0.5 0.13 160);
+        --ok: #16a34a;
         --user: #1d4ed8;
         --assistant: oklch(0.72 0.04 80);
         --system: oklch(0.45 0.06 168);
@@ -484,6 +484,18 @@ button[class^="ri-"] {
     display: flex;
     flex-direction: column;
 
+    & .drag {
+        position:absolute;
+        left:40%;
+        width:20%;
+        display: none;
+        pointer-events: none;
+    }
+
+    &.drag-over .drag {
+        display: block;
+    }
+
     /* 使用伪元素做背景 */
     .no-messages & {
         background: transparent;
@@ -528,7 +540,7 @@ button[class^="ri-"] {
 .spacer { flex: 1; }
 
 /* Badge & 通知 之后可能要删 */
-.badge {
+.badge_ {
     opacity: 0.7;
     pointer-events: none;
     font-size: 12px; color: var(--muted);
@@ -793,3 +805,14 @@ button[class^="ri-"] {
     }
 }
 
+@media print {
+    body {
+        background: none !important;
+    }
+    .sidebar, .composer, button, .stats {
+        display: none !important;
+    }
+    .sticky {
+        position: initial;
+    }
+}

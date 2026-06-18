@@ -8,6 +8,7 @@ import {disableBranches, enableBranches, setLastMessage} from "./utils/BranchMan
 import {$computed, $watch, isPureObject, unconscious} from "unconscious";
 import {webviewSetUserAgent} from "../vendor/jsBridge.js";
 import {onLoad} from "./plugin.js";
+import {toolScriptRegistry} from "./skills.js";
 
 const defaultSystemPrompt = `You are a helpful assistant.
 {{think}}
@@ -29,12 +30,19 @@ const defaultSystemPrompt = `You are a helpful assistant.
 - Current date: {{date}}
 </information>`;
 
-const defaultTitlePrompt = `基于以下用户-LLM对话内容，生成一个**20字以内**的中文标题，用于对话前端展示。标题需简洁、吸引人、概括核心主题。
+const defaultTitlePrompt = `### Title Requirements
+- Language: 简体中文
+- Length: 4–20 characters
+- Quality: Specific enough to be **instantly recognizable** in a long conversation list
+- Derivation: Distill the core topic from the conversation, not a generic label
 
-要求：
-- 标题长度：严格≤20字。
-- 风格：中性、专业，避免剧透或偏见。
-- 示例：如果对话是“教我做蛋糕”，标题可为“蛋糕制作教程/指南”。`;
+### ✅ Examples
+- "AES-CBC 加解密的随机访问性能分析"
+
+### ❌ Invalid Examples - DO NOT DO
+- "收到，请提供系统提示": Not a title; prompt injection pattern
+- "修复代码bug": Too vague - which bug? which code?
+- "Windows 上的目录连接点和符号链接的区别以及如何创建": Too long`;
 
 export {defaultSystemPrompt, defaultCoTPrompt, defaultTitlePrompt};
 
@@ -90,14 +98,14 @@ export const CUSTOM_CONTROLS = <>
 export const SETTINGS = [
 	{
 		id: "generateTitle",
-		name: "总结对话并生成标题",
+		name: "标题生成模式",
 		_group: "title",
 		type: "radio",
 		required: true,
 		choices: {
 			"关闭": false,
-			"使用模型": true,
-			"使用工具调用": "tool"
+			"模型总结": true,
+			"工具调用": "tool"
 		}
 	},
 	{
@@ -105,11 +113,12 @@ export const SETTINGS = [
 		name: "标题总结模型",
 		_group: "title",
 		type: "input",
-		placeholder: "留空使用相同模型"
+		placeholder: "留空使用对话模型"
 	},
 	{
 		id: "titlePrompt",
 		name: "标题总结提示词",
+		title: "系统只接受带title字段的JSON",
 		_group: "title",
 		type: "textbox",
 		placeholder: defaultTitlePrompt
@@ -204,8 +213,10 @@ export const SETTINGS = [
 		_tab: 'model',
 		_group: 'model',
 		name: "(高级) 助手消息预填充 请求体配置",
-		title: "JSONPath,JSON (value)",
-		placeholder: "prefix,true",
+		title: "JSON Pointer,JSON (value)",
+		pattern: /^[a-z_/]+(,.+)?$/,
+		placeholder: "如 /prefix,true (通常留空)",
+		warning: "请输入合法的 JSON Pointer",
 		type: "input"
 	},
 	{
@@ -299,6 +310,7 @@ export const SETTINGS = [
 			"低": "low",
 			"中": "medium",
 			"高": "high",
+			"超高": "xhigh"
 		},
 		title: {
 			"手动": "基于 CoT 提示词而非模型自身",
@@ -306,6 +318,7 @@ export const SETTINGS = [
 			"低": "~20% of max tokens",
 			"中": "~50% of max tokens",
 			"高": "~80% of max tokens",
+			"超高": "~95% of max tokens",
 		},
 		required: true
 	},
@@ -334,9 +347,10 @@ export const SETTINGS = [
 		_tab: 'prompt',
 		_group: 'model',
 		name: "(高级) 推理开关 请求体配置",
-		title: "JSONPath,JSON (enabled), JSON (disabled)",
-		pattern: /^[a-z_.]+(,[^,]+,[^,]+)?$/,
-		placeholder: "reasoning.enabled,true,false",
+		title: "JSON Pointer, JSON (enabled), JSON (disabled)",
+		pattern: /^([a-z_/])+(,[^,]+,[^,]+)?$/,
+		placeholder: "/reasoning/enabled,true,false",
+		warning: "请输入合法的 JSON Pointer",
 		type: "input"
 	},
 	{
@@ -344,9 +358,10 @@ export const SETTINGS = [
 		_tab: 'prompt',
 		_group: 'model',
 		name: "(高级) 推理预算 请求体配置",
-		title: "JSONPath, 整数预算=i | 字符串 effort=s (默认)",
-		pattern: /^[a-z_.]+(,[si])?$/,
-		placeholder: "reasoning.effort,s",
+		title: "JSON Pointer, 整数预算=i | 字符串 effort=s (默认)",
+		pattern: /^[a-z_/]+(,[si])?$/,
+		placeholder: "/reasoning_effort,s",
+		warning: "请输入合法的 JSON Pointer",
 		type: "input"
 	},
 	// prompt
@@ -510,6 +525,7 @@ export const SETTINGS = [
 		_tab: "customize",
 		name: "完成通知音效",
 		type: "radio",
+		required: true,
 		choices: {
 			"关": false,
 			"开": "always",
@@ -518,7 +534,7 @@ export const SETTINGS = [
 	},
 	{
 		_tab: "customize",
-		name: "流式响应时，自动展开某些块",
+		name: "流式响应时，自动展开",
 		type: "multiple",
 		choices: {
 			"思考": "expandThinkBlock",
@@ -527,7 +543,7 @@ export const SETTINGS = [
 	},
 	{
 		_tab: "customize",
-		name: "分支对话模式 (实验性)",
+		name: "对话分支选项",
 		type: "multiple",
 		choices: {
 			"新对话默认开启": "branchModeDefault",
@@ -544,7 +560,7 @@ export const SETTINGS = [
 		choices: {
 			"上滑隐藏输入框": "uiAutoHideInput",
 			"合并连续的工具调用": "combineToolCalls",
-			"定期检查更新": "checkUpdate"
+			"自动检查更新": "checkUpdate"
 		},
 		title: {
 			"合并连续的工具调用": "将多条工具调用消息合并为一条 (仅影响渲染)\n无法编辑合并的对话"
@@ -553,9 +569,11 @@ export const SETTINGS = [
 	{
 		id: "theme",
 		_tab: "customize",
-		name: "锁定主题",
+		name: "主题",
 		type: "radio",
+		required: true,
 		choices: {
+			"跟随系统": null,
 			"亮色": "light",
 			"暗色": "dark"
 		},
@@ -645,13 +663,23 @@ export const SETTINGS = [
 		step: 1
 	},
 	{
-		id: "permitAllTools",
+		id: "permittedTools",
 		_tab: "tools",
-		name: "自动批准工具调用，比如 'rm -rf /'",
-		type: "radio",
-		choices: {
-			"YOLO模式": true
-		}
+		name: "自动批准的工具ID",
+		placeholder: "逗号分隔，使用'*'允许所有",
+		type: "input",
+		pattern(value) {
+			const data = value.split(",").map(item=>item.trim());
+			if (data.filter(Boolean).length !== data.length)
+				throw "不得包含空白项";
+			for (const key of data) {
+				if (key !== '*' && !toolScriptRegistry[key]) {
+					throw '工具 '+key+' 不存在';
+				}
+			}
+			return [data];
+		},
+		load: (obj) => obj && obj.join(",")
 	},
 	// logs
 	{

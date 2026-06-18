@@ -98,17 +98,16 @@ declare namespace AiChat {
         reasoning: false | ReasoningEffort,
         CoTPrompt: string,
 
-        edit: boolean,
-
         reviewRequest: boolean,
         reviewMessage: boolean,
         logSSE: boolean,
         incognito: boolean,
 
-        generateTitle: boolean,
+        generateTitle: boolean | 'tool',
         titleModel: string,
+        titlePrompt: string,
 
-        permitAllTools: boolean,
+        permittedTools: string[],
         canPrefill: boolean,
         maxToolTurns: number
         sound: false | 'always' | 'background',
@@ -160,7 +159,9 @@ declare namespace AiChat {
 
     type ThinkPart = {
         type: "think";
-        think: Thinking;
+        think: Thinking & {
+            title?: string
+        };
     }
 
     type GalleryPart = {
@@ -227,6 +228,13 @@ declare namespace AiChat {
         reentrant?: FunctionToolReentrantMode;
 
         /**
+         * 生成工具调用标题
+         * @param request
+         * @param context
+         */
+        title?: (request: OpenAI.ToolCall, context?: ToolResponse & Payload) => string;
+
+        /**
          *
          * @param parameters schema中定义的参数
          * @param response 工具响应（任意对象），可以存入工具调用结果，以及renderer函数需要的数据
@@ -291,6 +299,15 @@ declare namespace AiChat {
         stream?: boolean,
         noImage?: boolean,
         trusted?: boolean
+    }
+
+    type FileSystemInstance = {
+        read_image({path: string}): Promise<Blob>,
+        mkdirs({path: string}): Promise<string>,
+        copy({src: string, dest: string, move: boolean}): Promise<string>,
+        stat({path: string}): Promise<string>,
+        delete({path: string}): Promise<string>,
+        list({path: string, glob: string}): Promise<string>,
     }
 
     namespace DnD {
@@ -446,9 +463,13 @@ declare namespace AiChat {
              * @param index 消息序号
              * @param isEditing 一个函数，判断给定的消息是否处于编辑状态
              * @param messages 消息数组
-             * @param isPostHook 后处理，chunks已经添加完成
+             * @param defaultRenderContent 默认 content 渲染函数
              */
-            getChunks?(message: Message, chunks: ResponseContentPart[], index: number, isEditing: function(Message): boolean, messages: Message[], isPostHook?: boolean): void | true;
+            renderContent?(
+                message: Message, chunks: ResponseContentPart[],
+                index: number, isEditing: (Message) => boolean, messages: Message[],
+                defaultRenderContent: ((message: Message, chunks: ResponseContentPart[], content?: string) => void)
+            ): void;
             // 返回 void 表示继续后面的处理，添加内部的keys，否则直接以这些keys结束
             keyFunc?(chunk: ResponseContentPart, keys: any[]): any[] | void;
         }

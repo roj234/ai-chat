@@ -9,6 +9,8 @@ export const applyMacro = (prompt, ctx = {}) => prompt.replaceAll(/\{\{(.+?)}}/g
 	return ctx[match] || text;
 });
 
+const IS_SYSTEM = debugSymbol("IS_SYSTEM");
+
 /**
  * 预设处理器
  * @param {AiChat.DnD.MyPrompt[]} prompts
@@ -23,7 +25,8 @@ export const applyPreset = ({prompts, regexps}, ctx, jsonMessages, prefill) => {
 	/** @type {OpenAI.Message[]} */
 	const messages = [{
 		role: "system",
-		content: ""
+		content: "",
+		[IS_SYSTEM]: true
 	}];
 	const variables = {};
 	let length = 0;
@@ -68,7 +71,8 @@ export const applyPreset = ({prompts, regexps}, ctx, jsonMessages, prefill) => {
 				if (ctx.dialogueExamples?.length)
 					messages.push({
 						role: "system",
-						content: "\n\n[Example Chat]\n\n"+ctx.dialogueExamples.join("\n\n[Example Chat]\n\n")
+						content: "\n\n[Example Chat]\n\n"+ctx.dialogueExamples.join("\n\n[Example Chat]\n\n"),
+						[IS_SYSTEM]: true
 					});
 				continue;
 			}
@@ -83,7 +87,8 @@ export const applyPreset = ({prompts, regexps}, ctx, jsonMessages, prefill) => {
 					if (currentMessage.role !== role)
 						messages.push(currentMessage = {
 							role,
-							content: cnt
+							content: cnt,
+							[IS_SYSTEM]: true
 						});
 					else {
 						currentMessage.content += "\n\n"+cnt;
@@ -137,7 +142,8 @@ export const applyPreset = ({prompts, regexps}, ctx, jsonMessages, prefill) => {
 			} else {
 				messages.push(currentMessage = {
 					role,
-					content
+					content,
+					[IS_SYSTEM]: true
 				});
 			}
 		}
@@ -173,6 +179,7 @@ export const applyPreset = ({prompts, regexps}, ctx, jsonMessages, prefill) => {
 	if (activeRegexps.length) {
 		for (let i = 0; i < messages.length; i++){
 			let message = messages[i];
+			if (!message[IS_SYSTEM])
 			message.content = regexpReplace(activeRegexps, messages.length - 1 - i, message.content);
 		}
 	}

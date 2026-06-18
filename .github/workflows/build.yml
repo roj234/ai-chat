@@ -13,6 +13,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 jobs:
   build:
@@ -49,7 +51,7 @@ jobs:
           sed -i \
             -e "s/{{VERSION_NAME}}/${VERSION_NAME}/g" \
             -e "s/{{VERSION}}/${VERSION}/g" \
-            android-config/config.json
+            misc/android-config/config.json
 
           echo "✅ 替换完成：VERSION=${VERSION}  VERSION_NAME=${VERSION_NAME}"
 
@@ -75,7 +77,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: android-config
-          path: packages/ai-chat/android-config/
+          path: packages/ai-chat/misc/android-config/
           if-no-files-found: error
 
       - name: Prepare Release Folder
@@ -83,11 +85,7 @@ jobs:
           cd packages/ai-chat
           mkdir ai-chat
           
-          cd dist
-          zip -r ../dist.zip . -x "server.js" -x "dist.brip"
-          cp dist.brip ../ai-chat/
-          cd ..
-          
+          cp dist/dist.brip ai-chat
           cp dist/server.js ai-chat
           cp backend/config.example.js ai-chat
           cp backend/package.json ai-chat
@@ -105,7 +103,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: dist
-          path: packages/ai-chat/dist.zip
+          path: packages/ai-chat/dist/dist.zip
 
   build-apk:
     needs: build
@@ -114,6 +112,34 @@ jobs:
       config_artifact: android-config
       assets_artifact: android-assets
     secrets: inherit
+
+  deploy:
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Download frontend package
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: .
+
+      - name: Unzip Release
+        run: |
+          mkdir dist
+          unzip -qq -o dist.zip -d dist -x "/INFO" || [[ $? -eq 1 ]]
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
 
   release:
     needs:

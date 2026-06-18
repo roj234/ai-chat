@@ -57,7 +57,6 @@ const schema = {
 ```javascript
 import {$update, unconscious} from "unconscious";
 import {messages} from "/src/states.js";
-import {schemaToPrompt} from "/common/schemaToTypeDef.js";
 import {jsonPrompt} from "/plugins/rpg/core.js";
 
 const ID = 'my/storyEngine';

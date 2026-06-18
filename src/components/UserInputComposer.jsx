@@ -86,36 +86,55 @@ export const createUserInputComposer = (scroller) => {
 					}} title={"返回底部"}/>
 		</div>
 		<div className="query">
-						<textarea placeholder="今天有什么能帮到你？" id="userInput" ref={userInput}
-								  onInput={() => {
-									  // Auto resize when typing
-									  userInput.style.height = '';
-									  userInput.style.height = (userInput.scrollHeight) + 'px';
-								  }}
-								  onKeyDown={(e) => {
-									  if (isMobile) return;
-									  if (e.key === 'Enter' && !e.shiftKey) {
-										  e.preventDefault();
-										  if (!unconscious(abortCompletion)) onSend();
-									  }
-								  }}
-						></textarea>
+			<h1 className={"drag"}>松开上传</h1>
+			<textarea placeholder="今天有什么能帮到你？" id="userInput" ref={userInput}
+					  onInput={() => {
+						  // Auto resize when typing
+						  userInput.style.height = '';
+						  userInput.style.height = (userInput.scrollHeight) + 'px';
+					  }}
+					  onKeyDown={(e) => {
+						  if (isMobile) return;
+						  if (e.key === 'Enter' && !e.shiftKey) {
+							  e.preventDefault();
+							  if (!unconscious(abortCompletion)) onSend();
+						  }
+					  }}
+			></textarea>
 			{createAttachmentGallery(attachments)}
 			<div className="controls">
 				<div className="controls hide-human">{CUSTOM_CONTROLS}</div>
 				<div className="spacer"></div>
 				{IS_ANDROID_BUILD && <button className="ri-camera-4-fill btn ghost" title="拍照上传"
-						 onClick={() => {
-							 webviewUploadImage().then(blob => {
-								 if (blob) blobToContentPart(blob, 0 === selectedConversation.id, attachments);
-							 })
-						 }}></button>}
+											 onClick={() => {
+												 webviewUploadImage().then(blob => {
+													 if (blob) blobToContentPart(blob, 0 === selectedConversation.id, attachments);
+												 })
+											 }}></button>}
 				<button className="ri-attachment-2 btn ghost" title="上传附件"
 						onClick={() => fileInput.click()}></button>
 				{sendButton}
 			</div>
 		</div>
 	</div>);
+
+	const dropZone = element.lastElementChild;
+	dropZone.addEventListener('dragenter', () => dropZone.classList.add('drag-over'));
+	dropZone.addEventListener('dragover', () => dropZone.classList.add('drag-over'));
+	dropZone.addEventListener('dragleave', (e) => {
+		if (e.target === dropZone) dropZone.classList.remove('drag-over');
+	});
+	dropZone.addEventListener('drop', (e) => {
+		e.preventDefault();
+		dropZone.classList.remove('drag-over');
+		const dt = e.dataTransfer;
+		if (dt?.files.length) {
+			const isFileTransferWindow = selectedConversation.id === 0;
+			for (const file of dt.files) {
+				blobToContentPart(file, isFileTransferWindow, attachments, true);
+			}
+		}
+	});
 
 	// 这可以用框架语法，但IDE很生气
 	bind(userInput, inputText);

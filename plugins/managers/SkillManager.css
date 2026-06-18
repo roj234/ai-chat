@@ -1,0 +1,14 @@
+
+/* 主容器 */
+.skill-manager {
+    & small {
+        font-size: 12px;
+        color: var(--text-lighter);
+    }
+
+    & .md {
+        font-size: 14px;
+        color: var(--text-lighter);
+        padding: 0 8px;
+    }
+}

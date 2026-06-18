@@ -90,14 +90,15 @@ const groupConversations = () => {
  *
  * @param {AiChat.Conversation} conv
  * @param {string} title
+ * @param {boolean=} skipSync
  */
-export const setConversationTitle = (conv, title) => {
+export const setConversationTitle = (conv, title, skipSync) => {
 	conv.title = title;
 	$update(updateConversationListUI);
 	if (unconscious(selectedConversation) === conv) {
 		$update(selectedConversation);
 	}
-	updateConversation(conv);
+	if (!skipSync) updateConversation(conv);
 };
 
 /**
@@ -132,9 +133,9 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 					SimpleModal({
 						type: "input",
 						title: "请输入新标题",
+						placeholder: "清除标题, 下次对话后重新生成",
 						value: conv.title,
 						onConfirm(val) {
-							if (!val) return false;
 							setConversationTitle(conv, val);
 						}
 					});

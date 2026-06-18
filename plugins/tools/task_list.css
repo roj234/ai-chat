@@ -1,0 +1,206 @@
+/* ═══════════════════════════════════════
+   TaskList — CSS Nesting
+   ═══════════════════════════════════════ */
+
+/* ── 变量层（不参与嵌套） ── */
+:root {
+    --tl-panel-bg:        #1c2128;
+    --tl-panel-border:    #373e47;
+    --tl-panel-radius:    10px;
+    --tl-panel-shadow:    0 4px 24px rgb(0 0 0 / .3);
+    --tl-panel-width:     320px;
+    --tl-panel-max-height:480px;
+
+    --tl-header-bg:       #252c34;
+    --tl-padding-x:       14px;
+    --tl-padding-y:       10px;
+
+    --tl-item-gap:        6px;
+    --tl-item-padding:    8px 12px;
+    --tl-item-hover:      rgb(255 255 255 / .04);
+
+    --tl-desc-size:       11px;
+    --tl-line-height:     1.4;
+
+    --tl-progress-h:      3px;
+    --tl-progress-bg:     #373e47;
+    --tl-progress-fill:   #58a6ff;
+}
+
+:root[data-theme="light"] {
+    --tl-panel-bg:        #fafbfc;
+    --tl-panel-border:    #d0d7de;
+    --tl-panel-shadow:    0 4px 24px rgb(0 0 0 / .08);
+    --tl-header-bg:       #f0f2f5;
+    --tl-item-hover:      rgb(0 0 0 / .04);
+    --tl-progress-bg:     #e5e7eb;
+    --tl-progress-fill:   #2563eb;
+}
+
+/* ═══════════════════════════════════════
+   .TaskListPanel
+   ═══════════════════════════════════════ */
+.TaskListPanel {
+    width: var(--tl-panel-width);
+    max-height: var(--tl-panel-max-height);
+    background: var(--tl-panel-bg);
+    border: 1px solid var(--tl-panel-border);
+    border-radius: var(--tl-panel-radius);
+    box-shadow: var(--tl-panel-shadow);
+    line-height: var(--tl-line-height);
+    font-size: 12px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: tl-fade-in .18s ease-out;
+
+    & .title { font-size: 13px; }
+
+    /* 折叠态 */
+    &.collapsed {
+        & .body,
+        & .footer { display: none; }
+
+        & .collapse { rotate: 90deg; }
+    }
+
+    /* ── header ── */
+    & .header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: var(--tl-padding-y) var(--tl-padding-x);
+        background: var(--tl-header-bg);
+        border-bottom: 1px solid var(--tl-panel-border);
+        user-select: none;
+    }
+
+    /* ── 进度条 ── */
+    & .progressBar {
+        flex: 1;
+        height: var(--tl-progress-h);
+        background: var(--tl-progress-bg);
+        border-radius: 99px;
+    }
+
+    & .progressFill {
+        height: 100%;
+        background: var(--tl-progress-fill);
+        border-radius: 99px;
+        transition: width .35s ease;
+    }
+
+    & .progressText {
+        color: var(--muted);
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    /* ── 折叠按钮 ── */
+    & .collapse {
+        width: 24px;
+        height: 24px;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--muted);
+        transition: background .12s, rotate .2s;
+
+        &:hover { background: var(--tl-item-hover); }
+    }
+
+    /* ── body 滚动区 ── */
+    & .body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 6px 8px;
+        display: flex;
+        flex-direction: column;
+        gap: var(--tl-item-gap);
+        scrollbar-width: thin;
+        scrollbar-color: var(--muted) transparent;
+    }
+
+    /* ── footer ── */
+    & .footer {
+        padding: 6px var(--tl-padding-x);
+        color: var(--muted);
+        border-top: 1px solid var(--tl-panel-border);
+        display: flex;
+        justify-content: space-between;
+    }
+}
+
+/* ═══════════════════════════════════════
+   .TaskItem
+   ═══════════════════════════════════════ */
+.TaskItem {
+    display: flex;
+    gap: 8px;
+    padding: var(--tl-item-padding);
+    transition: background .12s;
+    cursor: default;
+
+    &:hover { background: var(--tl-item-hover); }
+
+    /* ── 状态圆点 ── */
+    & .status {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-top: 4px;
+        transition: background .25s;
+        background: var(--muted);
+
+        &[data-status="in_progress"] {
+            background: var(--accent);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+            animation: tl-pulse 1.8s infinite;
+        }
+
+        &[data-status="completed"]   { background: var(--ok); }
+
+        &[data-status="cancelled"]      { background: var(--error); }
+    }
+
+    /* ── 文字区 ── */
+    & .content {
+        flex: 1;
+        min-width: 0;
+    }
+
+    & .desc {
+        font-size: var(--tl-desc-size);
+        color: var(--muted);
+        margin-top: 2px;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    /* ── completed 整行淡化 —— */
+    &[data-status="completed"] .title {
+        text-decoration: line-through;
+        color: var(--muted);
+    }
+
+    /* ── cancelled 行高亮 ── */
+    &[data-status="cancelled"] {
+        background: color-mix(in srgb, var(--error) 8%, transparent);
+    }
+}
+
+/* ═══════════════════════════════════════
+   Keyframes
+   ═══════════════════════════════════════ */
+@keyframes tl-fade-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes tl-pulse {
+    0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
+    50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 0%, transparent); }
+}

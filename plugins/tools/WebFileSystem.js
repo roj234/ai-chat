@@ -143,13 +143,13 @@ function segmentToRegex(segment) {
 
 // ────────────────────────────────── FileSystem Helpers ──────────────────────────────────
 
-const MKDIRS = { create: true };
+const CREATE = { create: true };
 
 /**
  * @param {string} path
  * @return {string[]}
  */
-function parsePath(path) {
+export function parsePath(path) {
 	return path.split('/').filter(s => s && s !== '.');
 }
 
@@ -182,7 +182,7 @@ async function resolveDirectory(rootHandle, dirPath) {
  *
  * @param {FileSystemDirectoryHandle} rootHandle
  * @returns {{
- * 		read_image({path: string}): Promise<Blob>,
+ * 		readImage({path: string}): Promise<Blob>,
  * 		mkdirs({path: string}): Promise<string>,
  * 		copy({src: string, dest: string, move?: boolean}): Promise<string>,
  * 		stat({path: string}): Promise<string>,
@@ -192,7 +192,7 @@ async function resolveDirectory(rootHandle, dirPath) {
  */
 export function createWebFileSystem(rootHandle) {
 	const api = {
-		async read_image({path}) {
+		async readImage({path}) {
 			const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
 			if (!['png', 'jpg', 'bmp', 'jpeg'].includes(ext))
 				throw new Error(`File extension "${ext}" is currently not allowed`);
@@ -207,13 +207,13 @@ export function createWebFileSystem(rootHandle) {
 		},
 
 		async mkdirs({path}) {
-			await resolveParent(rootHandle, path+'/_', MKDIRS);
+			await resolveParent(rootHandle, path+'/_', CREATE);
 			return 'done';
 		},
 
 		async copy({ src, dest, move }) {
 			const [ srcParent, srcName ] = await resolveParent(rootHandle, src);
-			const [ destParent, destName ] = await resolveParent(rootHandle, dest, MKDIRS);
+			const [ destParent, destName ] = await resolveParent(rootHandle, dest, CREATE);
 
 			let srcHandle;
 			try { srcHandle = await srcParent.getFileHandle(srcName); }
@@ -222,12 +222,12 @@ export function createWebFileSystem(rootHandle) {
 			async function copyEntry(handle, destDir, destName) {
 				if (handle.kind === 'file') {
 					const file = await handle.getFile();
-					const newHandle = await destDir.getFileHandle(destName, MKDIRS);
+					const newHandle = await destDir.getFileHandle(destName, CREATE);
 					const writable = await newHandle.createWritable();
 					await writable.write(file);
 					await writable.close();
 				} else {
-					const newDir = await destDir.getDirectoryHandle(destName, MKDIRS);
+					const newDir = await destDir.getDirectoryHandle(destName, CREATE);
 					const promises = [];
 					for await (const [childName, childHandle] of handle.entries()) {
 						promises.push(copyEntry(childHandle, newDir, childName));
@@ -256,7 +256,8 @@ export function createWebFileSystem(rootHandle) {
 			const [ parent, name ] = await resolveParent(rootHandle, path);
 
 			let handle;
-			try {
+			if (null == name) handle = parent;
+			else try {
 				handle = await parent.getFileHandle(name);
 			} catch {
 				try {
@@ -265,9 +266,9 @@ export function createWebFileSystem(rootHandle) {
 					throw new Error(`Path not found: ${path}`);
 				}
 			}
-			const isDir = handle.kind === 'directory';
-			const file = isDir ? null : await handle.getFile();
-			let str = `type: ${isDir ? 'dir' : 'file'}`;
+			const isFile = handle.kind === 'file';
+			const file = isFile ? await handle.getFile() : null;
+			let str = `type: ${isFile ? 'file' : 'dir'}`;
 			if (file) {
 				str += `
 size: ${file.size}
@@ -282,33 +283,69 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			return 'done';
 		},
 
+		/**
+		 * Append content to a file, optionally ensuring a newline precedes the content
+		 * if the existing file doesn't end with one.
+		 *
+		 * @param {FileSystemDirectoryHandle} rootHandle
+		 * @param {string} path
+		 * @param {string} content
+		 */
+		async append({path, content, newline = true}) {
+			const [parentHandle, name] = await resolveParent(rootHandle, path, CREATE);
+			const fileHandle = await parentHandle.getFileHandle(name, CREATE);
+
+			const file = await fileHandle.getFile();
+			const size = file.size;
+			let needNewline;
+
+			if (newline) {
+				// Check whether existing content ends with \n
+				if (size > 0) {
+					const offset = size - 1;
+					const lastByte = new Uint8Array((await file.slice(offset, offset + 1).arrayBuffer()))[0];
+					needNewline = lastByte !== 0x0a;
+				}
+			}
+
+			const writable = await fileHandle.createWritable({ keepExistingData: true });
+			await writable.seek(size);
+			await writable.write(needNewline ? '\n' + content : content);
+			await writable.close();
+			return "done";
+		},
+
 		/** List directory, optionally with a glob filter */
-		async list({path, glob: globStr}) {
-			const entries = globStr
+		async list({path, glob: globStr = '*', json = false}) {
+			const entries = globStr !== '*'
 				? await glob(globStr, path)
 				: (await resolveDirectory(rootHandle, path)).entries();
 
-			let text = '';
+			let prefix = '';
 			let items = 0;
-			const MAX_COUNT = 1000;
+
+			const MAX_COUNT = 500;
+			const result = [];
+
 			for await (const [name, handle, relDir] of entries) {
 				if (items >= MAX_COUNT) {
-					text += `[TRUNCATED: Only first ${MAX_COUNT} files shown, retry with glob?`;
+					prefix = `[TRUNCATED: Only first ${MAX_COUNT} files shown, use a more specific glob or path]\n`;
 					break;
 				}
 
 				const displayPath = relDir ? relDir + '/' + name : name;
-
-				if (handle.kind === 'directory') {
-					text += JSON.stringify(displayPath) + '\tdir\n';
-				} else {
+				if (handle.kind === 'file') {
 					const file = await handle.getFile();
-					text += JSON.stringify(displayPath) + '\tfile\t' + file.size + '\n';
+					result.push([displayPath, "file", file.size]);
+				} else {
+					result.push([displayPath, "dir"]);
 				}
+
 				items++;
 			}
-			const result = text.trim();
-			return result ? '"name"\ttype\tsize\n' + result : '[No files]';
+
+			if (json) return result;
+			return result.length ? prefix+result.map(item => item.join("\t")).join("\n") : "[No result]";
 		}
 	};
 
@@ -317,12 +354,13 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 	 * Yields { name, relDir, handle } where handle is the FileSystemHandle.
 	 */
 	async function glob(pattern, searchRoot) {
-		const handle = await resolveDirectory(rootHandle, searchRoot);
 		const segments = parsePath(pattern).map(segmentToRegex);
+		// 处理空pattern
+		if (!segments.length) return;
+
+		const handle = await resolveDirectory(rootHandle, searchRoot);
 
 		async function* walk(dirHandle, relDir, segIdx) {
-			if (segIdx >= segments.length) return;
-
 			const seg = segments[segIdx];
 			const nextIdx = segIdx + 1;
 			const isLast = nextIdx >= segments.length;
@@ -369,6 +407,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 	/** Resolve a File from a path relative to root handle */
 	async function resolveFile(path) {
 		const [parent, name] = await resolveParent(rootHandle, path);
+		if (!name) throw "Root is not file";
 		const fileHandle = await parent.getFileHandle(name);
 		return await fileHandle.getFile();
 	}
@@ -390,8 +429,8 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			 * @returns {Promise<void>}
 			 */
 			async write(path, data) {
-				const [ parent, name ] = await resolveParent(rootHandle, path, MKDIRS);
-				const fileHandle = await parent.getFileHandle(name, MKDIRS);
+				const [ parent, name ] = await resolveParent(rootHandle, path, CREATE);
+				const fileHandle = await parent.getFileHandle(name, CREATE);
 				const writable = await fileHandle.createWritable();
 				await writable.write(data);
 				await writable.close();

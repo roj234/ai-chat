@@ -1,6 +1,6 @@
 import {SETTINGS} from "/src/settings.js";
 import {duplicateConversation} from "/src/data-exchange.js";
-import {openJsonEditor} from "/src/json_editor/editorProxy.js";
+import {openJsonEditor} from "/src/json_editor/jsonEditorProxy.js";
 import {messages, selectedConversation} from "/src/states.js";
 import {$unwatch, $update, $watch, unconscious} from "unconscious";
 import {decodeObjects, serializeJSON} from "/src/utils/marshal.js";
@@ -13,10 +13,9 @@ import {BRANCH_MANAGER, enableBranches} from "../src/utils/BranchManager.js";
 SETTINGS.push({
 	type: "element",
 	_tab: "data",
-	name: "复制选中的对话",
-	title: "仅应用于测试",
+	name: "数据调试",
 	element: <div className={"choice-scroll"}>
-		<button className="btn ghost" onClick={duplicateConversation}>另存为</button>
+		<button className="btn ghost" onClick={duplicateConversation} disabled={() => !unconscious(selectedConversation)}>复制当前对话</button>
 		{IS_ANDROID_BUILD ? null : <button className="btn ghost" onClick={async () => {
 			let jsonText, update, onclose;
 			let updatePromise = () => {

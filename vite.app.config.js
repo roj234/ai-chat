@@ -94,7 +94,7 @@ export default defineConfig(async () => {
                 /^btn-/,
                 'closed',
                 'lang',
-                'my/storyEngine'
+                'my/storyTurn'
             ]
         }),
         viteFontMinify(),

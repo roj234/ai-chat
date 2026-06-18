@@ -83,10 +83,9 @@ export const PAT_VALID_AFTER = new Date("2026-01-01").getTime() / 1000;
 // ==========================================
 
 /**
- * 数据库安全开关
- * 警告：设为 true 将允许通过 API 执行 DROP TABLE 等危险操作
+ * 允许后端执行任意SQL (不是一般的危险, 除非你是作者, 否则别开)
  */
-export const ALLOW_DROP_DATABASE = false;
+export const ALLOW_SQL_EXECUTION = false;
 
 /**
  * 同时打开的SQLite数据库数量

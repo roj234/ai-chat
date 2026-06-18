@@ -1,0 +1,77 @@
+
+/**
+ *
+ * @type {AiChat.FunctionTool}
+ * @private
+ */
+export const RollDice = {
+	name: "RollDice",
+	description: "Produce random outcomes for probability-based events. Use only when an *actual random roll* is needed, not for deterministic math.",
+	parameters: {
+		type: "object",
+		properties: {
+			rolls: {
+				type: "array",
+				description: "一次掷骰",
+				minItems: 1,
+				maxItems: 9,
+				items: {
+					type: "object",
+					properties: {
+						count: {
+							type: "integer",
+							maximum: 100,
+							description: "骰子个数",
+						},
+						sides: {
+							type: "integer",
+							minimum: 2,
+							description: "骰子面数",
+						},
+						modifier: {
+							type: "integer",
+							description: "修正加值",
+							default: 0
+						},
+					},
+					required: ["count", "sides"]
+				}
+			}
+		},
+		required: ["rolls"]
+	},
+
+	script(parameters, response) {
+		const rolls = response.rolls = [];
+
+		return parameters.rolls.map(({count, sides, modifier = 0}) => {
+			if (count < 1 || count > 100 || sides <= 1) throw new Error("无效的输入");
+
+			let score = modifier;
+			const dices = [];
+			for (let i = 0; i < count; i++) {
+				const roll = Math.floor(Math.random() * sides) + 1;
+				score += roll;
+				dices.push(roll);
+			}
+
+			rolls.push({ exp: count+"d"+sides+(modifier>0?"+"+modifier:modifier||""), dices, score });
+			return score;
+		});
+	},
+	keyFunc(keys, {rolls}) {
+		keys.push(rolls);
+	},
+	renderer({rolls}) {
+		return <div className={"rp-dice"}>
+			{rolls.map(res => (
+				<div>
+					🎲{res.exp}
+					<span className="ellipsis">[{res.dices.join('+')}]</span>
+					<span style={{margin: "0 4px"}}>=</span>
+					<strong>{res.score}</strong>
+				</div>
+			))}
+		</div>;
+	}
+};

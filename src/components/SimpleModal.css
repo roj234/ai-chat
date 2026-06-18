@@ -25,7 +25,7 @@
     flex-direction: column;
 
     & >div {
-        padding: 12px 20px;
+        padding: 12px;
     }
     & .header {
         background-color: var(--panel);
@@ -49,7 +49,7 @@
             white-space: pre-wrap;
         }
 
-        & input, textarea {
+        & > input, & > textarea {
             margin-top: 8px;
             background-color: var(--bg);
         }

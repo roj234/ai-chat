@@ -67,25 +67,35 @@ export function createHashLine(fs) {
 		return lines;
 	};
 
-	const read = async ({ path: filePath, start, end, max_chars = 32768, format = 'raw' }, ctx) => {
-		const lines = await readLines(filePath, ctx);
-		const first = start != null ? start - 1 : 0;
-		const last  = end != null ? Math.min(end, lines.length) : lines.length;
-		if (first < 0) throw new Error('Start line must > 0');
-		if (first > lines.length) throw new Error("Start line > total lines ("+lines.length+"), no lines will be returned");
-		if (first > last) throw new Error('Resolved end line is before start line');
+	const read = async ({ path, offset, limit, maxChars = 50000, format = 'raw' }, ctx) => {
+		let needWarning;
 
-		let limit = max_chars;
+		const lines = await readLines(path, ctx);
+		const lineCount = lines.length;
+
+		let first = offset != null ? offset - 1 : 0;
+		if (first < 0) {
+			if (first === -1) throw new Error("Offset must be non-zero");
+			const pos = first + lineCount + 1;
+			if (pos >= 0) { first = pos; }
+			else { first = 0; needWarning = 'offset'; }
+		} else {
+			if (first >= lineCount) return ("[OFFSET_TOO_LARGE: Only "+lineCount+" lines]");
+		}
+
+		let last  = limit != null ? first + limit : lineCount;
+		if (last > lineCount) { last = lineCount; needWarning = 'limit'; }
+
 		let truncated = 0;
 		const respLines = [];
 
 		for (let i = first; i < last; i++) {
 			const line = lines[i];
-			if (limit < line.length) {
+			if (maxChars < line.length) {
 				truncated = `${last - i} lines before line#${i + 1} (length: ${line.length})`;
 				break;
 			}
-			limit -= line.length;
+			maxChars -= line.length;
 
 			let text;
 			switch (format) {
@@ -97,20 +107,21 @@ export function createHashLine(fs) {
 		}
 
 		let content = respLines.join('\n');
-		if (truncated) content += `\n[TRUNCATED: ${respLines.length} of ${last - first} lines shown]`;
+		if (truncated) content += `\n[TRUNCATED(maxChars): Only ${respLines.length} of ${last - first} (${lineCount} total) lines shown]`;
+		if (needWarning) content += `\n[OVERFLOW(${needWarning}): Only ${last - first} lines available in requested range]`;
 		return content;
 	};
 
-	const patch = async ({path: filePath, patches}, ctx) => {
-		const lines = await readLines(filePath, ctx);
+	const patch = async ({path, patches}, ctx) => {
+		const lines = await readLines(path, ctx);
 		const parsedPatches = [];
 
-		for (let { start_anchor, end_anchor, lines: patchLines, content } of patches) {
+		for (let { startAnchor, endAnchor, lines: patchLines, content } of patches) {
 			if (!patchLines) patchLines = content.split('\n');
 
-			let start = parseHash(start_anchor, lines), end   = parseHash(end_anchor, lines);
-			if (start < 0) throw (`Error locating anchor ${start_anchor}: The file may have changed significantly. Re-read to get fresh anchors.`);
-			if (end < 0)   throw (`Error locating anchor ${end_anchor}: The file may have changed significantly. Re-read to get fresh anchors.`);
+			let start = parseHash(startAnchor, lines), end   = parseHash(endAnchor, lines);
+			if (start < 0) throw (`Error locating anchor ${startAnchor}: The file may have changed significantly. Re-read to get fresh anchors.`);
+			if (end < 0)   throw (`Error locating anchor ${endAnchor}: The file may have changed significantly. Re-read to get fresh anchors.`);
 			if (start > end) throw ('Resolved end line is before start line: The file may have changed significantly. Re-read to get fresh anchors.');
 			end++;
 			parsedPatches.push({ start, end, patchLines });
@@ -154,18 +165,18 @@ export function createHashLine(fs) {
 
 		newLines.anchors = newAnchors;
 		newLines.mtime = Date.now();
-		cache.set(filePath, new WeakRef(newLines));
-		await fs.write(filePath, newLines.join('\n'), ctx);
+		cache.set(path, new WeakRef(newLines));
+		await fs.write(path, newLines.join('\n'), ctx);
 
 		return patchReport;
 	};
 
-	const replace = async ({ path, search, replace, all, start_line, end_line }, ctx) => {
+	const edit = async ({ path, search, replace, all, startLine, endLine }, ctx) => {
 		const lines = await readLines(path, ctx);
-		const actualStart = (start_line ?? 1) - 1;
-		const actualEnd = end_line ?? lines.length;
+		const actualStart = (startLine ?? 1) - 1;
+		const actualEnd = endLine ?? lines.length;
 		const slice = lines.slice(actualStart, actualEnd);
-		if (!slice.length) throw (`line slice [${start_line}, ${end_line}] is empty!`);
+		if (!slice.length) throw (`line slice [${startLine}, ${endLine}] is empty!`);
 		const content = slice.join("\n");
 
 		search = search.split("\n").map(item => item.trimEnd()).join("\n");
@@ -196,7 +207,7 @@ export function createHashLine(fs) {
 		return 'done';
 	};
 
-	const write = async ({ path, lines, content, return_anchors = false }, ctx) => {
+	const write = async ({ path, lines, content, returnAnchors = false }, ctx) => {
 		if (!lines) lines = content.split('\n');
 		const data = content || lines.join('\n');
 		await fs.write(path, data, ctx);
@@ -205,7 +216,7 @@ export function createHashLine(fs) {
 		lines.anchors = anchors;
 		cache.set(path, new WeakRef(lines));
 
-		if (return_anchors) {
+		if (returnAnchors) {
 			return (
 				HASHLINE_META_HEAD +
 				'Lines: ' + lines.length + '\n' +
@@ -218,5 +229,5 @@ export function createHashLine(fs) {
 
 	const del = filePath => cache.delete(filePath);
 
-	return { read, patch, replace, write, del };
+	return { read, patch, edit, write, del };
 }

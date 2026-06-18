@@ -1,6 +1,6 @@
 import {createJsonParser} from 'unconscious/common/Json.js';
 import {NestedMap} from 'unconscious/common/NestedMap.js';
-// TODO 内部API
+// TODO 移除对内部API的使用
 import {
 	$state,
 	$unwatch,
@@ -17,10 +17,31 @@ import {
 import {createStreamingMarkdownParser, registerCodeBlockRenderer} from "/src/markdown/markdown.js";
 import {EditableMessageRoles, MessageCopyHandler, MessageRoles} from "/src/states.js";
 import {JsonEditor} from "/src/components/JsonEditor.jsx";
-import {validateAndShowError} from "unconscious/common/json-schema-utils.js";
+import {schemaToTypeScriptDefinition, validateAndShowError} from "unconscious/common/json-schema-utils.js";
 
 const IS_FINISHED = debugSymbol('is_finished');
 const SYM = debugSymbol("REACTIVE_JSON");
+
+/**
+ * 将 JSON Schema 转换为类 TypeScript 接口的文本格式
+ * - 减少 tokens 并减少噪音让模型理解更清晰
+ * @param {OpenAI.ObjectSchema} schema
+ * @param {number} strict
+ * @returns {string}
+ */
+export function schemaToPrompt(schema, strict = 1) {
+	const tsDefinition = `\`\`\`typescript
+${schemaToTypeScriptDefinition(schema)}
+\`\`\``;
+
+	return (strict
+			? `### Response format
+Respond in valid JSON format strictly conforming to the following TypeScript interface:`
+			: `Output only a valid JSON object in code fence strictly matching this TypeScript interface. 
+Ensure all required fields are present, types are exact, and no extra fields are added. 
+No conversational text or markdown outside the JSON.`
+	) + "\n\n" + tsDefinition;
+}
 
 /**
  * 用来实现类似 { value && a } 但在 Unconscious 框架下不重新生成元素的效果
@@ -41,6 +62,51 @@ export function $once(proxy, element) {
 }
 
 /**
+ * 创建一个响应式的 Markdown 渲染器
+ * @param {HTMLElement} container - 承载渲染内容的 DOM 容器
+ * @param {import("unconscious").Reactive<string>} value - 响应式的字符串状态
+ * @returns {HTMLElement} 返回容器本身
+ */
+export function createReactiveMarkdown(container, value) {
+	let parser = createStreamingMarkdownParser(container);
+	let prevLen = 0;
+
+	if (isReactive(value)) {
+		$watchWithCleanup(value, () => {
+			const text = unconscious(value) || "";
+			parser.write(text.slice(prevLen));
+			if (value[IS_FINISHED]) parser.end();
+			prevLen = text.length;
+		});
+	} else {
+		parser.write(value);
+		parser.end();
+	}
+
+	return container;
+}
+
+MessageRoles["userPrompt"] = {
+	name: "CraftRPG提示块",
+	compose(message, output) {
+		output.push({
+			role: "user",
+			content: message.prompt
+		});
+	},
+	renderContent(message, chunks, index, isEditing, messages, defaultRenderContent) {
+		chunks.push({
+			type: "think",
+			think: {
+				title: "展开完整提示",
+				content: message.prompt
+			}
+		});
+		defaultRenderContent(message, chunks, message.content);
+	}
+}
+
+/**
  *
  * @param {string} id
  * @param {string} name
@@ -53,15 +119,8 @@ export function registerSchemaMessageRole(id, name, renderer, compose, schema) {
 	MessageRoles[id] = {
 		name,
 		compose,
-		getChunks(message, chunks, index, isEditing) {
-			const {think, content, reasoning_details} = message;
+		renderContent(message, chunks, index, isEditing) {
 			message[MessageCopyHandler] = () => JSON.stringify(message.content, null, 2);
-
-			if (think) {
-				const child = { type: "think", think };
-				if (reasoning_details) child.reasoning_details = reasoning_details;
-				chunks.push(child);
-			}
 
 			chunks.push({
 				type: "html",
@@ -90,7 +149,6 @@ export function registerSchemaMessageRole(id, name, renderer, compose, schema) {
 					}
 				}
 			});
-			chunks.push({ type: "usage" });
 		}
 	}
 
@@ -102,49 +160,22 @@ export function registerSchemaMessageRole(id, name, renderer, compose, schema) {
  * @param {string} name
  * @param {function(import("unconscious").Reactive<Object>): import("unconscious").Renderable} renderer
  */
-export function registerSchemaCodeBlockRenderer(name, renderer) {
+function registerSchemaCodeBlockRenderer(name, renderer) {
 	registerCodeBlockRenderer(name, (code, language, node, is_finished) => {
 		let rjson = node[SYM];
 		if (!rjson) {
 			node.previousElementSibling?.remove();
 			node[SYM] = rjson = createReactiveJSON();
 
-			const [val] = rjson;
-
-			const nodes = renderer(val);
+			const nodes = renderer(rjson[0]);
 			appendChildren(node, Array.isArray(nodes) ? nodes : [nodes]);
 		}
 
-		const [_, update] = rjson;
-		update(code, is_finished);
+		rjson[1](code, is_finished);
 	});
 
 }
 
-/**
- * 创建一个响应式的 Markdown 渲染器
- * @param {HTMLElement} container - 承载渲染内容的 DOM 容器
- * @param {import("unconscious").Reactive<string>} value - 响应式的字符串状态
- * @returns {HTMLElement} 返回容器本身
- */
-export function createReactiveMarkdown(container, value) {
-	let parser = createStreamingMarkdownParser(container);
-	let prevLen = 0;
-
-	if (isReactive(value)) {
-		$watchWithCleanup(value, () => {
-			const text = unconscious(value) || "";
-			parser.write(text.slice(prevLen));
-			if (value[IS_FINISHED]) parser.end();
-			prevLen = text.length;
-		});
-	} else {
-		parser.write(value);
-		parser.end();
-	}
-
-	return container;
-}
 
 /**
  * 创建一个用于流式 JSON 的响应式对象和更新函数
@@ -158,7 +189,7 @@ export function createReactiveMarkdown(container, value) {
  * $watch(() => data.user.name, (val) => console.log("Name updated:", val));
  * update('{"user": {"name": "Alice"', false);
  */
-export function createReactiveJSON() {
+function createReactiveJSON() {
 	/** @type {Map<(string|number)[], import("unconscious").Reactive<any>>} */
 	const registry = new NestedMap();
 	/**

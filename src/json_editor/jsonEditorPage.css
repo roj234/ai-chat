@@ -1,0 +1,106 @@
+/* 现代全局重置与色域定义 */
+:root {
+  --bg-panel: #11141a;
+  --bg-header: #151922;
+  --border-color: #242b37;
+
+  --color-primary: #3b82f6;
+  --error: #f43f5e;
+
+  --text: #f3f4f6;
+  --text-muted: #9ca3af;
+}
+
+/* 隐藏原生滚动条，使用极简滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary);
+}
+
+* {
+  margin: 0;
+}
+
+/* 顶层骨架 */
+#app {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-panel);
+  color: var(--text);
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+}
+
+.panel-header {
+  height: 48px;
+  background-color: var(--bg-header);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 16px;
+}
+
+.panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 编辑器容器适配 */
+.editor-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background-color: #0d0f14;
+}
+
+/* 覆盖底层 JsonEditor，使其具有全屏拉伸效果 */
+.CodeEditor {
+  height: 100% !important;
+  border: none !important;
+}
+
+.editor-error-footer {
+  height: 38px;
+  background-color: rgba(244, 63, 94, 0.1);
+  border-top: 1px solid var(--error);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 8px;
+  color: var(--error);
+  font-size: 12px;
+}
+
+.error-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 按钮规范 */
+
+.btn-icon {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+}
+
+.btn-icon:hover {
+  color: var(--text);
+}

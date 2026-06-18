@@ -1,8 +1,9 @@
-import {$computed, $foreach, $state, $store, ONCE_EVENT, unconscious} from "unconscious";
+import {$foreach, $state, $store, ONCE_EVENT} from "unconscious";
 import Chart from "/plugins/tools/chart.async.js";
 import {msgpack_schema, msgpack_schema_version} from "/common/MsgpackSchema.js";
 import {decodeMsg} from "unconscious/common/msgpack.js";
 import {PROTOCOL_VERSION} from "/backend/sync_const.js";
+import {formatDate} from "unconscious/common/Utils.js";
 
 // ============ STATE ============
 let allLogs = [];
@@ -13,9 +14,6 @@ let currentSort = { field: 'time', direction: 'desc' };
 let autoRefreshInterval = null;
 let tokenChartInstance = null;
 let costChartInstance = null;
-const selectedPresetRange_state = $state('7d');
-let customStart = null;
-let customEnd = null;
 
 // ============ DOM REFS ============
 /**
@@ -41,7 +39,7 @@ const formatNumber = n => {
 
 const formatCost = (c, currency) => {
 	if (c == null || isNaN(c)) return '—';
-	const sym = currency === 'CNY' ? '¥' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : '$';
+	const sym = currency === 'CNY' ? '¥' : '$';
 	if (c) {
 		if (Math.abs(c) < 0.001) return sym + c.toFixed(6);
 		if (Math.abs(c) < 0.01) return sym + c.toFixed(5);
@@ -57,28 +55,21 @@ const formatDuration = ms => {
 };
 
 const formatTime = ts => {
-	if (!ts) return '—';
 	const d = new Date(ts);
 	const now = new Date();
 	const isToday = d.toDateString() === now.toDateString();
-	const yyyy = d.getFullYear();
-	const mm = String(d.getMonth() + 1).padStart(2, '0');
-	const dd = String(d.getDate()).padStart(2, '0');
-	const hh = String(d.getHours()).padStart(2, '0');
-	const min = String(d.getMinutes()).padStart(2, '0');
-	const ss = String(d.getSeconds()).padStart(2, '0');
-	if (isToday) return `今天 ${hh}:${min}:${ss}`;
-	return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`;
+	if (isToday) return formatDate('今天 H:i:s', ts);
+	return formatDate('Y-m-d H:i:s', ts);
 };
 
 function getFinishBadge(reason) {
-	if (typeof reason !== "string") return <span class="badge badge-neutral">{reason}</span>;
+	if (typeof reason !== "string") return <span className="badge badge-neutral">{reason}</span>;
 	const r = reason.toLowerCase();
-	if (r === 'stop' || r === 'end_turn') return <span class="badge badge-success">stop</span>;
-	if (r === 'length' || r === 'max_tokens') return <span class="badge badge-warning">length</span>;
-	if (r.includes('tool')) return <span class="badge badge-info">{reason}</span>;
-	if (r === 'error' || r === 'content_filter') return <span class="badge badge-error">{reason}</span>;
-	return <span class="badge badge-neutral">{reason}</span>;
+	if (r === 'stop' || r === 'end_turn') return <span className="badge badge-success">stop</span>;
+	if (r === 'length' || r === 'max_tokens') return <span className="badge badge-warning">length</span>;
+	if (r.includes('tool')) return <span className="badge badge-info">{reason}</span>;
+	if (r === 'error' || r === 'content_filter') return <span className="badge badge-error">{reason}</span>;
+	return <span className="badge badge-neutral">{reason}</span>;
 }
 
 function escapeHtml(str) {
@@ -97,50 +88,40 @@ function showToast(msg, isError = false) {
 }
 
 // ============ TIME RANGE ============
-function getTimeRange() {
-	const now = Date.now();
-	let start, end;
-	const selectedPresetRange = unconscious(selectedPresetRange_state);
-	if (selectedPresetRange === 'custom' && customStart && customEnd) {
-		start = customStart;
-		end = customEnd;
-	} else {
-		switch (selectedPresetRange) {
-			case '1h':start = now - 3600 * 1000;break;
-			case '24h':start = now - 86400 * 1000;break;
-			case '7d':start = now - 7 * 86400 * 1000;break;
-			case '30d':start = now - 30 * 86400 * 1000;break;
-			default:start = now - 7 * 86400 * 1000;
-		}
-		end = now;
-	}
-	return [ start, end ];
-}
+const getTimeRange = () => [+new Date($startDate.value), +new Date($endDate.value)];
 
-function updateDateInputs() {
-	const [ start, end ] = getTimeRange();
-	$startDate.value = new Date(start).toISOString().slice(0, 16);
-	$endDate.value = new Date(end).toISOString().slice(0, 16);
-}
+const clearActivePresetBtn = () => {
+	document.querySelector('#presetBtns .btn-active')?.classList.remove('btn-active');
+};
 
-function setPresetRange(range) {
-	selectedPresetRange_state.value = range;
-	document.querySelectorAll('#presetBtns .btn-active').forEach(b => b.classList.remove('btn-active'));
-	const btn = document.querySelector(`#presetBtns [data-range="${range}"]`);
-	if (btn) btn.classList.add('btn-active');
-	if (range === 'custom') {
-		if (!customStart) {
-			const [ start, end ] = getTimeRange();
-			customStart = start;
-			customEnd = end;
-		}
-	} else {
-		customStart = null;
-		customEnd = null;
+const setPresetRange = range => {
+	clearActivePresetBtn();
+	document.querySelector(`#presetBtns [data-range="${range}"]`)?.classList.add('btn-active');
+
+	const end = new Date();
+	const start = new Date(end);
+	const type = range[range.length-1];
+	switch (type) {
+		case 'h':
+			start.setHours(start.getHours()-parseInt(range, 10));
+		break;
+		case 'd':
+			start.setHours(-parseInt(range, 10) * 24, 0);
+			end.setHours(23, 59);
+		break;
+		case 'm':
+			start.setMonth(end.getMonth(), 1);
+			start.setHours(0, 0);
+			end.setMonth(end.getMonth()+1, 0);
+			end.setHours(23, 59);
+		break;
 	}
-	updateDateInputs();
+
+	$startDate.value = formatDate("Y-m-dTH:i", start);
+	$endDate.value = formatDate("Y-m-dTH:i", end);
+
 	refreshData();
-}
+};
 
 const cfg = $store("config", undefined, {persist: true, deep: false});
 
@@ -326,16 +307,10 @@ function getBucketSize() {
 }
 
 function getBucketLabel(ts, bucketSize) {
+	if (bucketSize === 'minute') {return formatDate("H:i", parseInt(ts / (5 * 60 * 1000)) * (5 * 60 * 1000));}
+	if (bucketSize === 'hour') {return formatDate("m-d H:00", ts);}
+	if (bucketSize === 'day') {return formatDate("m-d", ts);}
 	const d = new Date(ts);
-	if (bucketSize === 'minute') {
-		return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-	}
-	if (bucketSize === 'hour') {
-		return `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:00`;
-	}
-	if (bucketSize === 'day') {
-		return `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-	}
 	// week
 	const startOfWeek = new Date(d);
 	startOfWeek.setDate(d.getDate() - d.getDay());
@@ -350,13 +325,12 @@ function aggregateLogs(logs) {
 	// Determine bucket duration in seconds
 	let bucketDur;
 	if (bucketSize === 'hour') bucketDur = 3600 * 1000;
-	else if (bucketSize === 'minute') bucketDur = 60 * 1000;
+	else if (bucketSize === 'minute') bucketDur = 5 * 60 * 1000;
 	else if (bucketSize === 'day') bucketDur = 86400 * 1000;
 	else bucketDur = 7 * 86400 * 1000;
 
 	// Create empty buckets
-	let bucketStart = start - (start % bucketDur);
-	for (let t = bucketStart; t <= end; t += bucketDur) {
+	for (let t = start; t <= end; t += bucketDur) {
 		const label = getBucketLabel(t, bucketSize);
 		buckets.set(label, {
 			label,
@@ -374,18 +348,15 @@ function aggregateLogs(logs) {
 	// Fill buckets
 	logs.forEach(log => {
 		const logTime = log.time || 0;
-		const bucketTs = logTime - (logTime % bucketDur);
-		const label = getBucketLabel(bucketTs, bucketSize);
-		const b = buckets.get(label);
-		if (b) {
-			b.input_tokens += (log.input_tokens || 0);
-			b.output_tokens += (log.output_tokens || 0);
-			b.reasoning_tokens += (log.reasoning_tokens || 0);
-			b.cached_tokens += (log.cached_tokens || 0);
-			b.cache_write_tokens += (log.cache_write_tokens || 0);
-			b.cost += (log.cost || 0);
-			b.requests += 1;
-		}
+		const label = getBucketLabel(logTime, bucketSize);
+		let b = buckets.get(label);
+		b.input_tokens += (log.input_tokens || 0);
+		b.output_tokens += (log.output_tokens || 0);
+		b.reasoning_tokens += (log.reasoning_tokens || 0);
+		b.cached_tokens += (log.cached_tokens || 0);
+		b.cache_write_tokens += (log.cache_write_tokens || 0);
+		b.cost += (log.cost || 0);
+		b.requests += 1;
 	});
 
 	const bucketArr = [...buckets.values()].sort((a, b) => a.timestamp - b.timestamp);
@@ -403,31 +374,30 @@ function updateCharts() {
 	const requestData = bucketArr.map(b => b.requests);
 
 	const bucketLabelZh = bucketSize === 'hour' ? '小时' : bucketSize === 'day' ? '天' : bucketSize === 'minute' ? '分钟' : '周';
-	chartTokenSubtitle.textContent = `按${bucketLabelZh}聚合`;
-	chartCostSubtitle.textContent = `按${bucketLabelZh}聚合`;
+	chartTokenSubtitle.textContent = chartCostSubtitle.textContent = `按${bucketLabelZh}聚合`;
 
 	// Token chart
 	if (tokenChartInstance) tokenChartInstance.destroy();
 	const tokenCtx = tokenChart.getContext('2d');
 	const datasets = [];
 	const colors = [
-		{ label: '输入 Tokens', color: '#4d94ff', data: inputData },
-		{ label: '输出 Tokens', color: '#3db87b', data: outputData },
-		{ label: '缓存 Tokens', color: '#3cc8c8', data: cachedData },
+		{ label: '输入', color: '#4d94ff', data: inputData },
+		{ label: '输出', color: '#3db87b', data: outputData },
+		{ label: '缓存', color: '#3cc8c8', data: cachedData },
 	];
 	if (reasoningData.some(v => v > 0)) {
-		colors.splice(2, 0, { label: '思考 Tokens', color: '#9b7ef0', data: reasoningData });
+		colors.splice(2, 0, { label: '思考', color: '#9b7ef0', data: reasoningData });
 	}
 	colors.forEach((c, i) => {
 		datasets.push({
 			label: c.label,
 			data: c.data,
 			borderColor: c.color,
-			backgroundColor: c.color + '20',
-			borderWidth: 2,
-			fill: i === 0,
-			tension: 0.35,
-			pointRadius: bucketArr.length <= 48 ? 3 : 1,
+			backgroundColor: i > 1 && c.color + (i === colors.length - 1 ? '40' : ''),
+			fill: i > 1,
+			borderWidth: i > 1 ? 0 : 2,
+			tension: 0.25,
+			pointRadius: i > 1 ? 0 : 3,
 			pointHoverRadius: 5,
 			pointBackgroundColor: c.color,
 		});
@@ -446,10 +416,7 @@ function updateCharts() {
 					labels: {
 						color: '#9ba3b5',
 						usePointStyle: true,
-						pointStyleWidth: 8,
-						padding: 20,
 						font: { size: 11 },
-						boxWidth: 8,
 					},
 				},
 				tooltip: {
@@ -471,17 +438,16 @@ function updateCharts() {
 						color: '#6b7385',
 						maxRotation: 45,
 						font: { size: 10 },
-						maxTicksLimit: 20,
 					},
-					grid: { color: '#2a304020', drawBorder: false },
+					grid: { color: '#2a304080', drawBorder: false },
 				},
 				y: {
 					ticks: {
 						color: '#6b7385',
 						font: { size: 10 },
-						callback: (v) => formatNumber(v),
+						callback: formatNumber,
 					},
-					grid: { color: '#2a304030', drawBorder: false },
+					grid: { color: '#2a304080', drawBorder: false },
 					beginAtZero: true,
 				},
 			},
@@ -491,7 +457,8 @@ function updateCharts() {
 	// Cost chart
 	if (costChartInstance) costChartInstance.destroy();
 	const costCtx = costChart.getContext('2d');
-	const currency = filteredLogs.length > 0 ? (filteredLogs[0].currency || 'USD') : 'USD';
+	const currency = 'CNY';
+	const max = Math.max(...costData);
 	costChartInstance = new Chart(costCtx, {
 		type: 'bar',
 		data: {
@@ -500,10 +467,7 @@ function updateCharts() {
 				{
 					label: '成本',
 					data: costData,
-					backgroundColor: costData.map((v, i) => {
-						const ratio = costData.length > 0 ? i / costData.length : 0;
-						return `rgba(240,160,80,${0.4 + ratio * 0.4})`;
-					}),
+					backgroundColor: costData.map(v => `rgba(240,160,80,${0.2 + 0.6 * (max ? v / max : 0)})`),
 					borderColor: '#f0a050',
 					borderWidth: 1,
 					borderRadius: 4,
@@ -511,14 +475,13 @@ function updateCharts() {
 					order: 2,
 				},
 				{
-					label: '请求数',
+					label: '请求',
 					data: requestData,
 					type: 'line',
 					borderColor: '#4d94ff',
-					backgroundColor: 'transparent',
 					borderWidth: 2,
 					tension: 0.35,
-					pointRadius: bucketArr.length <= 48 ? 3 : 1,
+					pointRadius: 3,
 					pointHoverRadius: 5,
 					pointBackgroundColor: '#4d94ff',
 					yAxisID: 'y1',
@@ -536,10 +499,7 @@ function updateCharts() {
 					labels: {
 						color: '#9ba3b5',
 						usePointStyle: true,
-						pointStyleWidth: 8,
-						padding: 20,
 						font: { size: 11 },
-						boxWidth: 8,
 					},
 				},
 				tooltip: {
@@ -560,9 +520,8 @@ function updateCharts() {
 			},
 			scales: {
 				x: {
-					ticks: { color: '#6b7385', maxRotation: 45, font: { size: 10 },
-						maxTicksLimit: 20 },
-					grid: { color: '#2a304020', drawBorder: false },
+					ticks: { color: '#6b7385', maxRotation: 45, font: { size: 10 }, },
+					grid: { color: '#2a304080', drawBorder: false },
 				},
 				y: {
 					type: 'linear',
@@ -572,7 +531,7 @@ function updateCharts() {
 						font: { size: 10 },
 						callback: (v) => formatCost(v, currency),
 					},
-					grid: { color: '#2a304030', drawBorder: false },
+					grid: { color: '#2a304080', drawBorder: false },
 					beginAtZero: true,
 				},
 				y1: {
@@ -581,7 +540,7 @@ function updateCharts() {
 					ticks: {
 						color: '#4d94ff',
 						font: { size: 10 },
-						callback: (v) => formatNumber(v),
+						callback: formatNumber,
 					},
 					grid: { drawOnChartArea: false, drawBorder: false },
 					beginAtZero: true,
@@ -755,8 +714,7 @@ const toggleAutoRefresh = () => {
 };
 
 const refreshData = async () => {
-	$refreshIndicator.innerHTML =
-		'<span style="display:inline-block;width:14px;height:14px;border:2px solid #6b7385;border-top-color:#4d94ff;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:4px;"></span> 加载中...';
+	$refreshIndicator.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #6b7385;border-top-color:#4d94ff;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:4px;"></span> 加载中...';
 	try {
 		const logs = await fetchLogs();
 		allLogs = processLogs(logs);
@@ -795,67 +753,48 @@ const refreshData = async () => {
 
 // ============ EVENT LISTENERS ============
 
-const navBar = () => {
-	return (
-		<nav className="nav">
-			<a href="#" className="nav-brand">
-				<div className="logo-icon">⚡</div>
-				AI Chat Logs
-			</a>
-			<div className="nav-actions">
-				<button className="btn btn-sm" onClick={() => {
-					fetchPrices();
-					refreshData();
-				}} title="刷新数据">
-					<span>🔄</span> 刷新
-				</button>
-				<button className="btn btn-sm btn-ghost" onClick={toggleAutoRefresh} ref={$autoRefreshBtn}
-						title="自动刷新">
-					<span>⏱️</span> 自动
-				</button>
-			</div>
-		</nav>
-	);
-}
 const topBar = () => {
-	const isDisabledNow = () => unconscious(selectedPresetRange_state) !== "custom";
-	const disabled = $computed(isDisabledNow);
-	const opacity = $computed(() => isDisabledNow() ? 0.6 : 1);
 	return (
 		<div className="top-bar">
 			<span className="top-bar-label">时间范围</span>
-			<div className="btn-group" id="presetBtns"  onClick.delegate{"button"}={({delegateTarget: btn}) => {
+			<div className="btn-group" id="presetBtns" onClick.delegate{"button"}={({delegateTarget: btn}) => {
 				const range = btn.dataset.range;
 				if (range) setPresetRange(range);
 			}
 			}>
-				<button className="btn btn-sm" data-range="1h">最近1小时</button>
+				<button className="btn btn-sm" data-range="1h">1小时</button>
 				<button className="btn btn-sm" data-range="24h">24小时</button>
-				<button className="btn btn-sm btn-active" data-range="7d">7天</button>
-				<button className="btn btn-sm" data-range="30d">30天</button>
-				<button className="btn btn-sm" data-range="custom">自定义</button>
+				<button className="btn btn-sm" data-range="1d">今天</button>
+				<button className="btn btn-sm" data-range="7d">7天</button>
+				<button className="btn btn-sm" data-range="1m">本月</button>
 			</div>
 			<input type="datetime-local" className="date-input" ref={$startDate} title="开始时间"
-				   disabled={disabled} style:opacity={opacity}
 				   onChange={() => {
-					   if ($startDate.value) {
-						   customStart = new Date($startDate.value).getTime();
-						   refreshData();
-					   }
+					   clearActivePresetBtn();
+					   refreshData();
 				   }}
 			/>
 			<span className="date-separator">—</span>
 			<input type="datetime-local" className="date-input" ref={$endDate} title="结束时间"
-				   disabled={disabled} style:opacity={opacity}
 				   onChange={() => {
-					   if ($endDate.value) {
-						   customEnd = new Date($endDate.value).getTime();
-						   refreshData();
-					   }
+					   clearActivePresetBtn();
+					   refreshData();
 				   }}
 			/>
 			<span className="top-bar-spacer"></span>
 			<span className="refresh-indicator" ref={$refreshIndicator}></span>
+			<button className="btn btn-sm btn-ghost" onClick={toggleAutoRefresh} ref={$autoRefreshBtn}
+					title="自动刷新">
+				<span>⏱️</span> 自动
+			</button>
+			<button className="btn btn-sm" onClick={({target}) => {
+				target.disabled = true;
+				fetchPrices().then(refreshData).finally(() => {
+					target.disabled = false;
+				})
+			}} title="刷新数据">
+				<span>🔄</span> 刷新
+			</button>
 		</div>
 	);
 }
@@ -998,7 +937,6 @@ const tableScroll = () => {
 // ============ INIT ============
 addEventListener("load", () => {
 	const app = <>
-		{navBar()}
 		<div className="main-container">
 			{topBar()}
 			{statsGrid()}
@@ -1010,7 +948,5 @@ addEventListener("load", () => {
 	</>;
 
 	document.body.replaceChildren(...app);
-
-	updateDateInputs();
-	refreshData();
+	setPresetRange('24h');
 }, ONCE_EVENT);

@@ -27,6 +27,7 @@ import {clearDirtyFlags, databaseError, listConversations} from "../database.js"
 import {patch} from "unconscious/common/deepEqual.js";
 import {decodeMsg} from "unconscious/common/msgpack.js";
 import {msgpack_schema} from "/common/MsgpackSchema.js";
+import {BRANCH_MANAGER} from "../utils/BranchManager.js";
 
 let body;
 
@@ -55,7 +56,7 @@ const on = async (type, data) => {
 };
 
 const setWritable = (id) => {
-	if (readonlyToast) readonlyToast();
+	readonlyToast?.();
 	readonlyToast = null;
 	body.remove("_readonly");
 	setCurrentLocked(0, id);
@@ -105,6 +106,7 @@ export function initSync(address, kvRef, kvCache) {
 			lastTimestamp = Math.max(lastTimestamp, conv.time);
 		}
 
+		for (let key of locks.keys()) on(SYNC_LOCKED, key);
 		closeToast = showToast(<>同步服务已断开 <button className={"btn primary"} onClick={({target}) => {
 			target.disabled = true;
 			target.textContent = '连接中';
@@ -175,20 +177,26 @@ export function initSync(address, kvRef, kvCache) {
 			case SYNC_MESSAGE:
 			case SYNC_MESSAGE_DEL: {
 				const conv = unconscious(selectedConversation);
-				const msg = unconscious(messages);
+				const bm = conv[BRANCH_MANAGER];
+				const msg = bm?.messages || unconscious(messages);
 
 				const {owner, ...message} = data;
 				const isUpdate = type === SYNC_MESSAGE;
+				let nextEnd;
 
 				const index = msg.findIndex(item => item.id === message.id);
 				if (index >= 0) {
 					if (isUpdate) patch(msg[index], message);
 					else msg.splice(index, 1);
 				} else if (isUpdate && conv.id === owner) {
-					msg.push(message);
+					msg.push(nextEnd = message);
 				}
 				clearDirtyFlags(conv, message.id, isUpdate && message);
-				$update(updateMessageUI);
+				if (bm) {
+					bm.setLeaf(nextEnd || msg[conv.bm_leaf] || msg.at(-1), true);
+					messages.value = bm.getMessages();
+				}
+				else $update(updateMessageUI);
 				break;
 			}
 			// 对话状态更新

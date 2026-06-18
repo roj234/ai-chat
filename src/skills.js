@@ -1,13 +1,13 @@
 import {config, messages, onConversationBeforeunload, onConversationLoaded, selectedConversation} from "./states.js";
-import {$state, $update, debugSymbol, unconscious} from "unconscious";
+import {$state, $update, $watch, debugSymbol, unconscious} from "unconscious";
 import {loadingBlock, prettyError} from "./utils/utils.js";
 
 import "./skills.css";
 import {updateMessageUI} from "./components/MessageList.jsx";
-import {compileSchema, jsonPathOp} from "unconscious/common/json-schema-utils.js";
-import {onLoad} from "./plugin.js";
-import {COMMAND_REGISTRY} from "./commands.js";
+import {compileSchema, jsonEval, validateAndShowError} from "unconscious/common/json-schema-utils.js";
 import {showToast} from "./components/Toast.js";
+import {MCPClient} from "/common/MCPClient.js";
+import {setConversationTitle} from "./components/ConversationList.jsx";
 
 export const TOOL_NAME = debugSymbol("TOOL_NAME");
 const TOOL_PARAM = debugSymbol("TOOL_PARAM");
@@ -17,45 +17,21 @@ const TOOL_PARAM = debugSymbol("TOOL_PARAM");
  */
 export const PLACEHOLDERS = {};
 
-onLoad(() => {
-	COMMAND_REGISTRY.tools = [
-		(args, params, element) => {
-			element.value = "/### 当前注册的工具\n"+(Object.entries(optionalTools).map(([k, v]) => "名称："+k+"\n描述："+v.description+"\n工具："+v.allowedTools+"\n隐藏："+v.hidden).join("\n\n"));
-			element.dispatchEvent(new InputEvent("input"));
-		},
-		"列出可用的工具"
-	];
-	COMMAND_REGISTRY.use_tools = [
-		async (args, params, element) => {
-			const conv = unconscious(selectedConversation);
-			if (!conv) throw "不在对话中";
-			await toolScriptRegistry.use.script({modules: args}, {[TOOL_NAME]:"use"}, conv);
-			conv.activatedModules.add("use");
-			showToast("已启用，注意这将禁用模型自行激活工具模块的能力");
-		},
-		"启用工具组"
-	];
-	COMMAND_REGISTRY.revoke_tools = [
-		async (args, params, element) => {
-			const conv = unconscious(selectedConversation);
-			if (!conv) throw "不在对话中";
-			await toolScriptRegistry.use.undo({newModules: args}, conv);
-			showToast("已禁用");
-		},
-		"禁用工具组"
-	];
-});
-
 /**
- * 常开工具
- * @type {OpenAI.Tool[]}
+ * 常开模块
+ * @type {Set<string>}
  */
-const defaultTools = [];
+export const defaultGroups = new Set(["Use", "Skill"]);
 /**
- * 工具/技能摘要，在调用后激活其它工具或返回技能内容
+ * 工具组摘要，在调用后激活工具
  * @type {Record<string, {description: string, allowedTools: string[], skill?: string, hidden: boolean | 'manual', systemPrompt: string}>}
  */
-const optionalTools = {};
+export const toolGroups = {};
+/**
+ * 技能摘要
+ * @type {Record<string, {description: string, content: string}>}
+ */
+const skills = {};
 /**
  * 根据工具摘要按需激活的工具元数据
  * @type {Record<string, OpenAI.Tool>}
@@ -72,8 +48,8 @@ export const toolScriptRegistry = {};
  * @type {OpenAI.ContentPart}
  */
 export class ContentPart {
-	constructor() {
-		this.content = [];
+	constructor(content = []) {
+		this.content = content;
 	}
 
 	text(text) {
@@ -86,14 +62,14 @@ export class ContentPart {
 	}
 }
 
-export {jsonPathOp} from "unconscious/common/json-schema-utils.js";
+export {jsonEval} from "unconscious/common/json-schema-utils.js";
 
 
-export const set_title_body = {
+export const SetTitle = {
 	type: "function",
 	function: {
-		name: "set_title",
-		description: "根据聊天内容设置对话标题，每当用户开始一个新话题时，请调用该工具为本次对话命名",
+		name: "SetTitle",
+		description: "设置对话标题",
 		parameters: {
 			type: "object",
 			properties: {
@@ -108,34 +84,40 @@ export const set_title_body = {
 	}
 };
 
-toolScriptRegistry["set_title"] = {
-	name: "set_title",
+toolScriptRegistry["SetTitle"] = {
 	default: true,
-	script({title}, response, globalStorage) {
-		globalStorage.title = title;
-
+	interactive: true,
+	script({title}, response, conv) {
 		const last = messages.at(-1);
 		if (!last.content) messages.pop();
 		else {
 			delete last.tool_calls;
 			delete last.tool_responses;
+			last.finish_reason = 'stop';
 		}
 
-		$update(selectedConversation);
+		setConversationTitle(conv, title, true);
+	},
+	title(tc, ctx = {}) {
+		return "设置标题 "+getToolParameters(ctx, tc).title;
 	}
 };
 
 const use_isRevoked = debugSymbol("use_isRevoked");
+const listUsableToolGroups = activatedModules => Object.keys(toolGroups).filter(name => !toolGroups[name].hidden && !activatedModules.has(name));
 
-toolScriptRegistry["use"] = {
-	name: "use",
+toolGroups["Use"] = {
+	description: "允许模型激活工具",
+	hidden: "manual"
+};
+toolScriptRegistry["Use"] = {
 	reentrant: true,
 	default: true,
 	async script({modules}, response, globalStorage) {
 		let {allowedTools, activatedModules} = globalStorage;
 		if (!allowedTools) {
 			allowedTools = new Set;
-			activatedModules = new Set;
+			activatedModules = new Set(defaultGroups);
 			globalStorage.allowedTools = allowedTools;
 			globalStorage.activatedModules = activatedModules;
 		}
@@ -144,11 +126,11 @@ toolScriptRegistry["use"] = {
 
 		const newToolNames = [];
 
-		response.newModules = modules;
-		response.newTools = newToolNames;
-
 		for (const moduleName of modules) {
-			let {allowedTools: allowedToolsArr, onActivated: dynamicCallback} = optionalTools[moduleName];
+			if (!toolGroups[moduleName] || activatedModules.has(moduleName))
+				throw "Tool schema validation error:\n$.modules: value("+JSON.stringify(moduleName)+") must in "+JSON.stringify(listUsableToolGroups(activatedModules));
+
+			let {allowedTools: allowedToolsArr, onActivated: dynamicCallback} = toolGroups[moduleName];
 
 			if (dynamicCallback) {
 				allowedToolsArr = await dynamicCallback(allowedToolsArr);
@@ -164,10 +146,9 @@ toolScriptRegistry["use"] = {
 			});
 		}
 
-		if (response[TOOL_NAME].startsWith("use:skill:")) {
-			response.isSkill = true;
-			return optionalTools[modules[0]].skill;
-		}
+		response.newModules = modules;
+		// UIOnly
+		response.newTools = newToolNames;
 
 		if (response[use_isRevoked]) response[use_isRevoked].value = false;
 		return "You can use these tools now: "+newToolNames.join(", ");
@@ -181,7 +162,7 @@ toolScriptRegistry["use"] = {
 		if (!context[use_isRevoked]) context[use_isRevoked] = $state(isRevoked);
 
 		return (
-			<div className={`skills`} class:revoked={() => context[use_isRevoked].value}>
+			<div className={`skills`} class:revoked={context[use_isRevoked]}>
 				<div className="tool-label-group">
 					<span>⚡ 获得新能力:</span>
 					{context.newTools.map(t => (
@@ -191,7 +172,7 @@ toolScriptRegistry["use"] = {
 
 				<span style={{flex: 1}}></span>
 
-				{() => context[use_isRevoked].value ? (
+				{() => unconscious(context[use_isRevoked]) ? (
 					<div className="revoked-status tool-label-group">
 						<svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
@@ -218,49 +199,53 @@ toolScriptRegistry["use"] = {
 		for (const moduleName of newModules) {
 			activatedModules.delete(moduleName);
 		}
-		activatedModules.forEach(name => optionalTools[name]?.allowedTools.forEach(name => allowedTools.add(name)));
+		activatedModules.forEach(name => toolGroups[name]?.allowedTools?.forEach(name => allowedTools.add(name)));
+	}
+};
+
+toolGroups["Skill"] = {
+	description: "允许模型激活技能",
+	hidden: "manual"
+};
+toolScriptRegistry["Skill"] = {
+	default: true,
+	script({skill}) {
+		return skills[skill].content;
+	},
+	title(req, ctx = {}) {
+		const skill = getToolParameters(ctx, req).skill;
+		return "激活技能 "+skill;
 	}
 };
 
 /**
  *
  * @param {{allowedTools: Set<string>, activatedModules: Set<string>}} conversation
- * @param {boolean} allowNewSkills
  * @return {Promise<[OpenAI.Tool[], string]>}
  */
-export const getTools = async (conversation, allowNewSkills) => {
-	const {allowedTools, activatedModules} = conversation;
+export const getAvailableTools = async (conversation) => {
+	let {allowedTools, activatedModules = defaultGroups} = conversation;
 
-	// 隐藏工具必须通过系统提示开启
-	let usableOptTools = Object.keys(optionalTools).filter(name => !optionalTools[name].hidden);
-	let usableDefTools = defaultTools;
+	const systemPrompt = [];
 
-	let systemPrompt = [];
-	if (activatedModules) {
-		const disableAll = activatedModules.has('*');
-		if (disableAll) {
-			usableOptTools = usableDefTools = [];
-		} else {
-			usableOptTools = usableOptTools.filter(name => !activatedModules.has(name));
-			usableDefTools = usableDefTools.filter(tool => !activatedModules.has(tool.function.name));
-		}
-		for (const name of activatedModules) {
-			let prompt = optionalTools[name]?.systemPrompt;
-			if (prompt) {
-				if (typeof prompt === "function") prompt = await prompt();
-				systemPrompt.push(prompt);
-			}
+	for (const name of activatedModules) {
+		let prompt = toolGroups[name]?.systemPrompt;
+		if (prompt) {
+			if (typeof prompt === "function") prompt = await prompt();
+			systemPrompt.push(prompt);
 		}
 	}
 
-	let tools_ = [];
-	if (usableOptTools.length && !activatedModules?.has("use") && allowNewSkills) {
-		tools_.push({
+	let result = [];
+
+	let tmpArr;
+	if (activatedModules.has("Use") && (tmpArr = listUsableToolGroups(activatedModules)).length) {
+		result.push({
 			type: "function",
 			function: {
-				name: "use",
-				description: "Activate one or more capability modules needed for the current task. Do not call this if request can be answered directly or just topic related to it.\n\n" + (
-					usableOptTools.map(name => name+": "+optionalTools[name].description).join("\n")
+				name: "Use",
+				description: "Activate capability modules (tools) needed in current session. Do not call this if request can be answered directly or just topic related to it.\n\n" + (
+					tmpArr.map(name => name+": "+toolGroups[name].description).join("\n")
 				),
 				parameters: {
 					type: "object",
@@ -268,7 +253,7 @@ export const getTools = async (conversation, allowNewSkills) => {
 						modules: {
 							type: "array",
 							minItems: 1,
-							items: { enum: usableOptTools },
+							items: { enum: tmpArr },
 						}
 					},
 					required: ["modules"]
@@ -277,16 +262,38 @@ export const getTools = async (conversation, allowNewSkills) => {
 		});
 	}
 
-	tools_.push(...usableDefTools);
+	if (activatedModules.has("Skill") && (tmpArr = Object.keys(skills)).length) {
+		result.push({
+			type: "function",
+			function: {
+				name: "Skill",
+				description: `Read one skill's content.
+When users ask you to perform tasks, check if any of the available skills match and invoke Skill tool.
+Skills provide specialized capabilities and domain knowledge.
+
+${tmpArr.map(name => name + ": " + skills[name].description).join("\n")}`,
+				parameters: {
+					type: "object",
+					properties: {
+						skill: {
+							type: "string",
+							enum: tmpArr,
+						}
+					},
+					required: ["skill"]
+				},
+			}
+		});
+	}
 
 	if (allowedTools) {
 		for (const name of allowedTools) {
-			const tool1 = tools[name];
-			if (!tool1) throw '工具 '+name+' 不存在';
-			tools_.push(tool1);
+			const tool = tools[name];
+			if (!tool) throw '工具 '+name+' 不存在';
+			result.push(tool);
 		}
 	}
-	return [tools_, systemPrompt.join("\n\n")];
+	return [result, systemPrompt.join("\n\n")];
 };
 
 const convertToCamelCase = str => str.replace(/-([a-z])/g, (match, letter) => letter.toUpperCase());
@@ -330,31 +337,16 @@ const NO_PARAMETERS = {
  * @param {string} text
  */
 export const registerSkill = text => {
-	const [skill, content] = parseSkillMetadata(text);
-	if (!skill) throw new Error("SKILL.md format error");
+	const [meta, content] = parseSkillMetadata(text);
+	if (!meta) throw new Error("SKILL.md format error");
 
-	skill.name = "skill:"+skill.name;
+	const name = meta.name;
+	if (name in skills) throw new Error("同名技能已存在？");
 
-	if (skill.name in toolScriptRegistry)
-		throw new Error("同名工具已存在？");
-
-	/*optionalTools[skill.name] = {
-		description: skill.description,
-		allowedTools: skill['allowed-tools'],
-		skill: content
-	};*/
-	defaultTools.push({
-		"type": "function",
-		"function": {
-			name: skill.name,
-			description: skill.description,
-			parameters: NO_PARAMETERS
-		}
-	});
-	toolScriptRegistry[skill.name] = {
-		script() {return content.trim();},
-		default: true,
-	};
+	skills[name] = {
+		description: meta.description,
+		content: content.trim(),
+	}
 };
 
 /**
@@ -365,10 +357,9 @@ const registerTool = tool => {
 	const {name, description, parameters = NO_PARAMETERS, ...rest} = tool;
 	if (!rest.script) throw new Error("Missing script for tool " + name);
 
-	if (name in toolScriptRegistry) {
-		if (toolScriptRegistry[name].script === rest.script) return;
-		throw new Error("同名工具已存在？");
-	}
+	const script = toolScriptRegistry[name]?.script;
+	if (script === rest.script) return;
+	if (script) throw new Error("同名工具已存在？");
 
 	parameters.additionalProperties = false;
 	compileSchema(parameters, true);
@@ -388,10 +379,11 @@ const registerTool = tool => {
  * @param {Partial<{
  *     onActivated: function(): AiChat.FunctionTool[],
  *     hidden: boolean | 'manual',
- *     systemPrompt: string
+ *     systemPrompt: string,
+ *     default?: boolean
  * }>} extra
  */
-export const registerTools = (name, description, toolDefs, {onActivated, hidden, systemPrompt} = {}) => {
+export const registerTools = (name, description, toolDefs, {onActivated, hidden, systemPrompt, default: defaultEnabled} = {}) => {
 	const toolNames = [];
 	for (const toolDef of toolDefs) {
 		const tool = registerTool(toolDef);
@@ -399,7 +391,9 @@ export const registerTools = (name, description, toolDefs, {onActivated, hidden,
 		toolNames.push(toolDef.name);
 	}
 
-	optionalTools[name] = {
+	if (defaultEnabled) defaultGroups.add(name);
+
+	toolGroups[name] = {
 		description,
 		allowedTools: toolNames,
 		onActivated,
@@ -409,13 +403,72 @@ export const registerTools = (name, description, toolDefs, {onActivated, hidden,
 };
 
 /**
- * 注册默认启用的工具
- * @param {AiChat.FunctionTool[]} tools
+ *
+ * @param {string} mcpBaseUrl
+ * @param {string} mcpName
+ * @param {string} mcpDescription
+ * @param {Object} options
  */
-export const registerDefaultTools = tools => {
-	for (const tool of tools) {
-		tool.default = true;
-		defaultTools.push(registerTool(tool));
+export const addMCPServer = (mcpBaseUrl, mcpName, mcpDescription = "External tools (MCP Server).", options) => {
+	const client = new MCPClient(mcpBaseUrl, options);
+	let toolArrayPromise;
+
+	const mcpToolGroup = /*"MCP_"+*/mcpName;
+	client.statusListener = (open) => {
+		if (!open) for (const key in tools) {
+			if (key.startsWith(mcpToolGroup)) {
+				delete tools[key];
+				delete toolScriptRegistry[key];
+			}
+		}
+		else {
+			toolArrayPromise = client.listTools().then(({tools}) => tools.map(({name, description, inputSchema}) => {
+				const displayName = mcpToolGroup+"_"+name;
+				tools[displayName] = {
+					type: "function", function: {
+						name: displayName, description,
+						parameters: inputSchema
+					}
+				};
+				toolScriptRegistry[displayName] = {
+					async script(parameters, response) {
+						const result = await client.callTool(name, parameters);
+						response.success = !result.isError;
+						response.content = result.content;
+					}
+				};
+				return displayName;
+			}));
+		}
+	};
+
+	const connectServer = async () => {
+		if (!client.isOpen) {
+			const closeToast = showToast("正在连接MCP服务器，请稍候", "ok", 0);
+			try {
+				await client.connect();
+			} catch (e) {
+				showToast("无法连接到MCP服务器\n"+prettyError(e), "error", 0);
+			} finally {
+				closeToast();
+			}
+		}
+		return toolArrayPromise;
+	}
+
+	registerTools(mcpToolGroup, mcpDescription, [], {
+		onActivated: connectServer
+	});
+
+	onConversationLoaded(() => {
+		if (selectedConversation.activatedModules?.has(mcpToolGroup)) {
+			if (client.readyState === EventSource.CLOSED) connectServer();
+		}
+	});
+
+	return () => {
+		client.disconnect("unregistered");
+		delete toolGroups[mcpToolGroup];
 	}
 };
 
@@ -456,9 +509,9 @@ export const runTools = async ({tool_calls, tool_responses}, globalStorage, forc
 			const {allowedTools} = globalStorage;
 			if (!(fn && (fn.default || allowedTools?.has(name)))) {
 				throw fn
-					? 'Call \'use\' to activate this tool.'
-					: optionalTools[name]
-						? 'This is a tool group, not real tool, call use(['+JSON.stringify(name)+']) to activate'
+					? 'Call \'Use\' to activate this tool.'
+					: toolGroups[name]
+						? 'This is a tool group, not real tool, call Use(['+JSON.stringify(name)+']) to activate'
 						: 'Tool not exist';
 			}
 
@@ -468,10 +521,11 @@ export const runTools = async ({tool_calls, tool_responses}, globalStorage, forc
 					interactive = interactive(parameters);
 				}*/
 				if (interactive === "secure") {
-					if (!config.permitAllTools && !selectedConversation.grantedTools?.has(name)) {
+					const strings = config.permittedTools;
+					if (!strings?.includes(name) && !selectedConversation.grantedTools?.has(name)) {
 						autoNext = false;
 						if (forceRerun === true || (forceRerun === i && !allowUnsafe)) {
-							throw "User doesn't permit this call";
+							throw "User doesn't permit this tool use. Nothing changed. STOP and wait for user.";
 						}
 
 						if (forceRerun !== i) {
@@ -482,6 +536,12 @@ export const runTools = async ({tool_calls, tool_responses}, globalStorage, forc
 				} else {
 					autoNext = false;
 				}
+			}
+
+			const schema = fn.parameters;
+			if (schema) {
+				const error = validateAndShowError(parameters, schema);
+				if (error) throw "Tool schema validation error:\n"+error;
 			}
 
 			let result = fn.script(parameters, msg, globalStorage);
@@ -500,6 +560,8 @@ export const runTools = async ({tool_calls, tool_responses}, globalStorage, forc
 			msg.content = prettyError(e);
 			autoNext = false;
 		}
+		if (forceRerun === true && null == msg.content)
+			throw 'some interactive tool need user input';
 		msg.time = Date.now();
 	};
 
@@ -514,15 +576,20 @@ export const runTools = async ({tool_calls, tool_responses}, globalStorage, forc
  * @param {AiChat.Conversation} global
  * @param {AiChat.AssistantMessage[]} messages
  * @param {number} first
+ * @param {boolean} reentrantOnly
  */
-export const undoToolCalls = (global, messages, first) => {
+export const undoToolCalls = (global, messages, first, reentrantOnly) => {
 	for (let i = messages.length - 1; i >= first; i--) {
 		const {tool_calls, tool_responses} = messages[i];
 		if (tool_responses) {
 			for (let j = tool_responses.length - 1; j >= 0; j--) {
 				let toolResponse = tool_responses[j];
 				try {
-					toolScriptRegistry[toolResponse[TOOL_NAME]].undo?.(toolResponse, global, tool_calls[j]);
+					const impl = toolScriptRegistry[toolResponse[TOOL_NAME]];
+					const reentrant = impl.reentrant;
+					if (reentrantOnly && !reentrant) continue;
+
+					impl.undo?.(toolResponse, global, tool_calls[j]);
 				} catch (e) {
 					console.error(e);
 				}
@@ -598,13 +665,37 @@ export const getToolParameters = (response, toolcall) => {
  * 在全局存储上挂载一个响应式对象
  * @param {AiChat.Conversation} conv
  * @param {string} name
- * @return {import("unconscious").Reactive<void>}
+ * @return {import("unconscious").Reactive<?>}
  */
-export const createStateListener = (conv, name) => {
+const createStateListener = (conv, name) => {
 	let map = conv[CONV_REACTIVE_MAP];
 	if (!map) map = conv[CONV_REACTIVE_MAP] = new Map;
 
 	let result = map.get(name);
 	if (!result) map.set(name, result = $state());
 	return result;
+}
+
+/**
+ * 监听对话上的响应式变量更新
+ * @param {AiChat.Conversation} conv
+ * @param {string} name
+ * @param {function(?): void} callback
+ * @param {boolean=true} triggerNow
+ */
+export const watchConversationState = (conv, name, callback, triggerNow) => {
+	const state = createStateListener(conv, name);
+	$watch(state, () => callback(unconscious(state)), triggerNow);
+}
+
+/**
+ * 触发对话上的响应式变量更新
+ * @param {AiChat.Conversation} conv
+ * @param {string} name
+ * @param {any=} value
+ */
+export const updateConversationState = (conv, name, value) => {
+	const state = createStateListener(conv, name);
+	state.value = value;
+	$update(state);
 }

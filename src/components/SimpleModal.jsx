@@ -22,7 +22,8 @@ const SimpleModal = ({
 		accent = 'primary',
 		confirmMessage = '确认',
 		onConfirm,
-		onCancel
+		onCancel,
+		after
 }) => {
 	let inputValue = '';
 	const ignoreCancel = onCancel === null;
@@ -68,6 +69,7 @@ const SimpleModal = ({
 						onFocus={onFocusBlur} onBlur={onFocusBlur}
 						placeholder={placeholder}
 					>{value}</textarea> : null}
+					{after}
 				</div>
 				<div className="footer">
 					<button className={"btn " + accent} onClick={handleConfirm}>{confirmMessage}</button>

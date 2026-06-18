@@ -38,6 +38,8 @@ q:before, q:after { content: none; }
     hyphens: auto;
     line-height: var(--md-line-height);
 
+    & rt { font-size: 66%; }
+
     & img { max-width: 100%; }
 
     & li::marker { color: var(--muted); }

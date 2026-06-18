@@ -9,9 +9,9 @@ function stopWorker() {
 
 const MAX_LOG_LENGTH = 5000;
 
-export const interpreter = {
-	name: "code_interpreter",
-	description: "Run sandboxed JavaScript in a WebWorker-like environment for exact calculation, data transformation, string processing, simulation, and quick algorithm validation. It cannot use import/require or access external systems.",
+export const CodeRunner = {
+	name: "CodeRunner",
+	description: "Run sandboxed JavaScript in a WebWorker-like environment for exact calculation, data transformation, string processing, and quick algorithm validation. It cannot use import/require or access external systems.",
 	parameters: {
 		type: "object",
 		properties: {
@@ -81,4 +81,4 @@ export const interpreter = {
 	}
 };
 
-registerTools("code_interpreter", "Run sandboxed JavaScript for calculation, parsing, transformation, simulation, and validation.", [interpreter]);
+registerTools("CodeRunner", "Run sandboxed JavaScript for calculation, such as string processing and algorithm validation.", [CodeRunner]);

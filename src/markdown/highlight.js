@@ -4,7 +4,7 @@ import './highlight-theme.css';
 
 import json from 'highlight.js/lib/languages/json';
 import {VirtualList} from "unconscious/common/VirtualList.js";
-import {$disposable} from "unconscious";
+import {$cleanup} from "unconscious";
 import {onLoad} from "../plugin.js";
 import {selectableVirtualListMixin} from "unconscious/common/selectableVirtualListMixin.js";
 import {VOID_TAGS} from "fastmd";
@@ -18,6 +18,36 @@ const light = (newCode, language) => hljs.highlight(newCode, {
 	language,
 	ignoreIllegals: true
 });
+
+/**
+ *
+ * @param {string} code
+ * @param {string} language
+ * @param onDone
+ * @param [shouldStop]
+ * @returns {(function(): void)|*}
+ */
+export const lightAsync = (code, language, onDone, shouldStop) => {
+	const gen = light(code, language);
+	let cancelled = false;
+	let result;
+
+	const step = () => {
+		if (cancelled || shouldStop?.()) return;
+		const start = performance.now();
+		// Monkey Patch: yield every 256 time regexp matches
+		while (!(result = gen.next()).done) {
+			if (performance.now() - start > 8) {
+				requestAnimationFrame(step);
+				return;
+			}
+		}
+		if (!cancelled) onDone(result.value.value);
+	};
+
+	requestAnimationFrame(step);
+	return () => { cancelled = true; };
+};
 
 export const lightSync = (newCode, language) => {
 	const gen = light(newCode, language);
@@ -74,7 +104,7 @@ const getOrCreateVL = node => {
 			keyFunc: (item) => item.text ?? item
 		});
 		vl._anchor = false;
-		$disposable(node, () => vl.destroy());
+		$cleanup(node, () => vl.destroy());
 	}
 	return vl;
 };
@@ -101,35 +131,26 @@ export const highlight = (code, language, node, is_finished) => {
 	const callback = (code) => {
 		if (is_finished) {
 			delete node._cache;
-			const generator = light(code, language);
 
 			const lines = code.split('\n');
 			const virtualList = getOrCreateVL(node);
 
-			const highlightReallyFast = () => {
+			lightAsync(code, language, (value) => {
 				if (!node.isConnected) return;
 
-				// Monkey Patch: yield every 256 time regexp matches
-				const result = generator.next();
+				node.style.height = node.offsetHeight + 'px';
+				node.replaceChildren(virtualList.dom);
+				virtualList.attach(node);
+				selectableVirtualListMixin(virtualList, (line) => lines[line]);
 
-				if (!result.done) {
-					requestAnimationFrame(highlightReallyFast);
-				} else {
-					node.style.height = node.offsetHeight + 'px';
-					node.replaceChildren(virtualList.dom);
-					virtualList.attach(node);
-					selectableVirtualListMixin(virtualList, (line) => lines[line]);
-
-					// noinspection JSPrimitiveTypeWrapperUsage
-					virtualList.items = processLines(result.value.value, []).map(s => new String(s));
-					virtualList.scrollToBottom();
-					virtualList.render();
-					node.style.height = '';
-					virtualList.render();
-					node._value = code;
-				}
-			};
-			setTimeout(highlightReallyFast);
+				// noinspection JSPrimitiveTypeWrapperUsage
+				virtualList.items = processLines(value, []).map(s => new String(s));
+				virtualList.scrollToBottom();
+				virtualList.render();
+				node.style.height = '';
+				virtualList.render();
+				node._value = code;
+			}, () => !node.isConnected);
 			return;
 		}
 

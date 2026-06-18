@@ -297,6 +297,7 @@ export function createSyncManager(wss) {
 					body.id = resp;
 				break;
 				case 'conversation/delete':
+					if (false === resp) return;
 					code = SYNC_CONVERSATION_DEL;
 					body = {id: body};
 				break;
@@ -306,9 +307,10 @@ export function createSyncManager(wss) {
 					shouldSend = (client) => client.id !== clientId && client.locked.has(body.owner);
 				break;
 				case 'message/delete':
+					if (false === resp) return;
 					code = SYNC_MESSAGE_DEL;
 					body = {id: body};
-					shouldSend = (client) => client.id !== clientId && client.locked.has(body.owner);
+					shouldSend = (client) => client.id !== clientId && client.locked.has(resp);
 				break;
 				case 'kv/set':
 					code = SYNC_KV;

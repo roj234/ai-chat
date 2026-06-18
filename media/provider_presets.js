@@ -6,5 +6,4 @@ export const provider_presets = {
 	"https://openrouter.ai/api/v1": {
 		provider: "OpenRouter",
 	},
-	// TODO 其他提供商
 }

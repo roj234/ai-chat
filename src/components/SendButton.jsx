@@ -46,7 +46,7 @@ export const createSendButton = (attachments, onSend) => {
 
 			if (state === 4) {
 				for (let response of last.tool_responses) {
-					if (null == response.content) return false;
+					if (!response.content) return false;
 				}
 			}
 

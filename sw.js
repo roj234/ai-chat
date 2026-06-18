@@ -3,7 +3,12 @@
  */
 
 const CACHE_NAME = 'blob-cache-v1';
+const CACHE_NAME_ASSETS = 'assets-cache-v1';
 const BLOB_URL_PATTERN = /\/api\/v2.*\/blob\/[a-zA-Z0-9\-_]+/;
+const ASSETS_URL_PATTERN = /\/assets\/[a-zA-Z0-9\-_\/]+\.(?:js|mjs|css|png|woff2)$/;
+
+// 每次构建更新，触发activate事件
+self[APP_VERSION+"/"+BUILD_NUMBER];
 
 // ===== 生命周期 =====
 self.addEventListener('install', (event) => {
@@ -11,17 +16,24 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-	event.waitUntil(self.clients.claim());
+	event.waitUntil(Promise.all([
+		self.clients.claim(),
+		// 更新版本时清除缓存
+		caches.delete(CACHE_NAME_ASSETS)
+	]));
 });
 
 // ===== 请求拦截 =====
 self.addEventListener('fetch', (event) => {
 	const request = event.request;
-	if (!BLOB_URL_PATTERN.test(request.url)) return;
-	if (request.method === 'GET') {
-		event.respondWith(handleGetBlobRequest(request, event));
-	} else if (request.method === 'POST') {
-		event.respondWith(handleSetBlobRequest(request, event));
+	if (!IS_ANDROID_BUILD && ASSETS_URL_PATTERN.test(request.url)) {
+		event.respondWith(handleAssetRequest(request, event));
+	} else if (BLOB_URL_PATTERN.test(request.url)) {
+		if (request.method === 'GET') {
+			event.respondWith(handleGetBlobRequest(request, event));
+		} else if (request.method === 'POST') {
+			event.respondWith(handleSetBlobRequest(request, event));
+		}
 	}
 });
 
@@ -45,6 +57,27 @@ const db = new Promise((resolve, reject) => {
 });
 
 // ===== 缓存核心逻辑 =====
+
+/**
+ * 处理匹配的 assets 请求（静态缓存）
+ * @param {Request} request
+ * @param {FetchEvent} event
+ * @returns {Promise<Response>}
+ */
+const handleAssetRequest = async (request, event) => {
+	const cache = await caches.open(CACHE_NAME_ASSETS);
+	const cachedResponse = await cache.match(request);
+	if (cachedResponse) return cachedResponse;
+
+	// 浏览器可能发起 opaque 请求，比如背景图
+	const networkResponse = await fetch(request.url, { mode: 'cors' });
+	if (networkResponse.ok) {
+		const clonedResponse = networkResponse.clone();
+		event.waitUntil(cache.put(request, clonedResponse));
+	}
+
+	return networkResponse;
+};
 
 /**
  * 处理 POST 请求，上传成功后预缓存
@@ -278,6 +311,7 @@ const trimCache = async (maxSize) => {
 // 自毁兼清理
 async function unregisterAndCleanup() {
 	await caches.delete(CACHE_NAME);
+	await caches.delete(CACHE_NAME_ASSETS);
 	(await db).close();
 	await new Promise((resolve, reject) => {
 		const req = indexedDB.deleteDatabase(APP_NAME+':sw');

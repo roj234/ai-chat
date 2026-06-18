@@ -16,21 +16,22 @@ import {SETTINGS} from "/src/settings.js";
 import {updateMessageUI} from "/src/components/MessageList.jsx";
 
 import {cloneNamed, downloadFile, getTextContent} from "/src/utils/utils.js";
-import {readPNG} from "/common/upng.js";
+import {readJPEG, readPNG} from "/common/upng.js";
 import {isIDB, kvListDel, kvListGet, kvListGetKeys, kvListSet} from "/src/database.js";
 import {registerTools} from "/src/skills.js";
 import {showToast} from "/src/components/Toast.js";
 import {Dropdown} from "/src/components/Dropdown.jsx";
 import {createTab} from "/src/components/SettingDialog.jsx";
 import SimpleModal from "/src/components/SimpleModal.jsx";
-import {_CharacterEditor, _LorebookEditor, _PresetEditor, createPanel, markDirty} from "./PresetPanel.jsx";
+import {_CharacterEditor, _LorebookEditor, _PresetEditor, markDirty} from "./PresetPanel.jsx";
+import {createPanel} from "./CreatePanel.jsx";
 import {convertSTCharacter, convertSTLorebook, convertSTPreset, normalizeCRLF} from "./convert.js";
 import {applyMacro, applyPreset, applyRenderReplace, createDefaultCtx, DEFAULT_USER_NAME, makeStory} from "./prompt.js";
 import {LorebookList, PresetList} from "./TagList.jsx";
 import schema from "./schema.json";
 import {compileSchema, validateAndShowError} from "unconscious/common/json-schema-utils.js";
 import {onLoad} from "/src/plugin.js";
-import {openJsonEditor} from "/src/json_editor/editorProxy.js";
+import {openJsonEditor} from "/src/json_editor/jsonEditorProxy.js";
 import {base64DecodeToString} from "unconscious/common/Base64.js";
 
 compileSchema(schema);
@@ -232,15 +233,14 @@ SETTINGS.push(
 	},
 	{
 		id: "st_useTools",
-		name: "世界书模式",
-		title: "基于工具调用的世界书和变量系统\n刷新对话生效",
+		name: "世界书实现",
 		type: "radio",
 		required: true,
 		_tab: "character",
 		choices: {
-			"正则匹配": false,
-			"工具调用(实验性)": true,
-			"1-Shot(笨模型)": "1-shot"
+			"正则": false,
+			"工具": true,
+			"工具+示例": "1-shot"
 		}
 	},
 	{
@@ -407,7 +407,7 @@ onConversationLoaded((conv, messages) => {
 		}
 		$update(updateMessageUI);
 		queueMicrotask(() => {
-			// 不再调用getChunks (当然虚拟列表不会让它真的只渲染一次的……)
+			// 不再调用renderContent (当然虚拟列表不会让它真的只渲染一次的……)
 			readyObj.stable = true;
 		});
 	})
@@ -461,11 +461,21 @@ const checkJSON = (json, batch, fileName, imageBlob) => {
 registerDataImportHandler("application/json", checkJSON);
 
 registerDataImportHandler("image/png", async (file, batch) => {
-	const ab = await file.arrayBuffer();
-	const {chara} = readPNG(ab);
+	const imageData = new Uint8Array(await file.arrayBuffer());
+	const {chara} = readPNG(imageData);
 	if (!chara) return;
 
 	const data = JSON.parse(base64DecodeToString(chara));
+	const result = checkJSON(data, batch, file.name, file);
+	if (result) return await result;
+});
+registerDataImportHandler("image/jpeg", async (file, batch) => {
+	const imageData = new Uint8Array(await file.arrayBuffer());
+	const comments = readJPEG(imageData).comments.join("");
+	if (!comments) return;
+
+	const data = JSON.parse(comments).chara;
+	if (!data) return;
 	const result = checkJSON(data, batch, file.name, file);
 	if (result) return await result;
 });
@@ -642,7 +652,7 @@ MessageRoles["st|char"] = {
 	 * @param chunks
 	 * @param index
 	 */
-	getChunks(self, chunks, index) {
+	renderContent(self, chunks, index) {
 		if (!self[_instances]) {
 			chunks.push({ type: "loading", text: "加载中" });
 			return;
@@ -798,7 +808,7 @@ MessageRoles["st|greeting"] = {
 	 * @param {AiChat.DnD.MyGreeting} self
 	 * @param chunks
 	 */
-	getChunks(self, chunks) {
+	renderContent(self, chunks) {
 		const card = self.content;
 		const char = card[_instances].character;
 		const greetings = char.greetings;
@@ -830,8 +840,8 @@ MessageRoles["st|greeting"] = {
 };
 
 MessageRoles["assistant"] = {
-	getChunks(message, chunks, index, isEditing, messages, isPostHook) {
-		if (!isPostHook) return true;
+	renderContent(message, chunks, index, isEditing, messages, defaultRenderContent) {
+		defaultRenderContent(message, chunks, message.content);
 
 		const isRP = messages[0]?.[_instances];
 		if (!isRP) return;

@@ -1,6 +1,6 @@
 
 // 几个落地小建议
-// 强制调用：在 API 端把 tool_choice 设为 {"type":"function","function":{"name":"suggest_followups"}}（或循环里检测到没调用就重发一次），比单纯靠提示词更可靠。
+// 强制调用：在 API 端把 tool_choice 设为 {"type":"function","function":{"name":"SuggestFollowups"}}（或循环里检测到没调用就重发一次），比单纯靠提示词更可靠。
 // 流式渲染：先把文本回复 stream 给前端，等 tool_call 到达再渲染建议气泡，体验更顺。
 // 去重：前端可对 prompt 做归一化（去标点+小写）防止模型给出语义重复项。
 // 可选字段 intent 用来做 UI 分组或图标，不需要可以删掉。
@@ -11,7 +11,7 @@ import {submitUserChatMessage} from "/src/api-request.js";
 
 const prompt2 = `<Follow-up-Suggestions>
 After **EVERY** reply — without exception — you MUST call the
-\`suggest_followups\` tool exactly once. The tool call comes AFTER your
+\`SuggestFollowups\` tool exactly once. The tool call comes AFTER your
 natural-language answer completed; never replace the answer with the tool call.
 
 Rules for generating suggestions:
@@ -32,11 +32,11 @@ Rules for generating suggestions:
    - Cover a MIX of intents — pick 3–4 from: drill_down, broaden, compare, next_step, clarify, example. Avoid duplicates that differ only in wording.
 
 4. ALWAYS CALL THE TOOL
-   - Even for short answers, errors, refusals, or clarification questions, you must still emit \`suggest_followups\`. There is NO scenario where skipping the call is correct.
+   - Even for short answers, errors, refusals, or clarification questions, you must still emit \`SuggestFollowups\`. There is NO scenario where skipping the call is correct.
 
 Example (user just asked about traveling to Kyoto in Chinese):
 
-suggest_followups({
+SuggestFollowups({
   "language": "zh-CN",
   "suggestions": [
     {"prompt": "推荐几个京都四月赏樱最值得去的景点", "intent": "drill_down"},
@@ -47,7 +47,7 @@ suggest_followups({
 })
 </Follow-up-Suggestions>`;
 const prompt = `<Follow-up-Generator>
-After current response, call \`suggest_followups\` to provide 3-4 next steps.
+After current response, call \`SuggestFollowups\` to provide 3-4 next steps.
 The tool call comes AFTER your natural-language answer completed; never replace the answer with the tool call.
 
 ## Constraints:
@@ -56,7 +56,7 @@ The tool call comes AFTER your natural-language answer completed; never replace 
 - **Quality**: Concrete (use nouns from context), varied (drill down/compare/next step), short (one sentence).
 
 ## Example (user just asked about traveling to Kyoto in Chinese):
-suggest_followups({
+SuggestFollowups({
   "language": "zh-CN",
   "suggestions": [
     {"prompt": "推荐几个京都四月赏樱最值得去的景点", "icon": "search"},
@@ -98,8 +98,8 @@ export const FOLLOWUP_ICON_MAP = {
  * @type {AiChat.FunctionTool<{options: string[]}>}
  * @private
  */
-const schema = {
-	name: "suggest_followups",
+const SuggestFollowups = {
+	name: "SuggestFollowups",
 	//description: "Provide 3-4 follow-up message suggestions that the user might want to send next, based on the conversation context. " +
 	//	"MUST be called once **AFTER** your natural-language answer completed. " +
 	//	"Suggestions should be written from the user's first-person perspective (as if the user is typing them), not the assistant's.",
@@ -188,8 +188,7 @@ const schema = {
 	}
 };
 
-registerTools("followup_suggestions", "让模型生成相关问题(追尾)", [schema], {
-// TODO 实现manual的可以在UI里手动激活，现在只能通过命令激活
+registerTools("SuggestFollowups", "让模型生成相关问题(追问)", [SuggestFollowups], {
 	hidden: 'manual',
 	systemPrompt: prompt
 })

@@ -25,8 +25,8 @@ function listImages() {
 	return images;
 }
 
-registerTools("zoom_in", "Zoom in on a specific region of an image to read small text or identify unclear details.", [{
-	name: 'zoom_in',
+registerTools("ZoomIn", "Zoom in on a specific region of an image to read small text or identify unclear details.", [{
+	name: 'ZoomIn',
 	description: 'Zoom in on a specific region of an image to read small text or identify unclear details by cropping it based on a bounding box',
 	parameters: {
 		type: 'object',

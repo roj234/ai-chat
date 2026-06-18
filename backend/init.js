@@ -14,12 +14,10 @@ import {registerSSEProxyRoutes} from "./routes/sse-proxy.js";
 import {
 	ALLOW_USER_NAMES,
 	INTERACTIVE_LOGIN,
-	RESPONSE_USE_MSGPACK_SCHEMA,
 	RESTRICT_USER_CREATION,
 	WEBSOCKET_SYNC_BASE,
 	WEBSOCKET_SYNC_ENABLE
 } from "./config.js";
-import {msgpack_schema_version} from "../common/MsgpackSchema.js";
 
 import {compressGeneric, decompressGeneric, deserializeRow} from "./utils/compression.js";
 import {loadUserData} from "./utils/UserManager.js";
@@ -138,7 +136,7 @@ export async function createRouter(dataPath, basePath = "api", workspacePath) {
 			if (INTERACTIVE_LOGIN) queries.push("t="+encodeURIComponent(ctx.req.headers.authorization.slice(7)));
 			return base+"?"+queries.join("&");
 		},
-		version: () => [PROTOCOL_VERSION, RESPONSE_USE_MSGPACK_SCHEMA && msgpack_schema_version]
+		version: () => [PROTOCOL_VERSION]
 	};
 
 	/**

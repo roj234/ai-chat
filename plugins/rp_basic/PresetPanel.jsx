@@ -81,13 +81,11 @@ function createList(dirtyHandle, config, onUpdate) {
 				<div className={"summary"}>
 					<span className="index">{index + 1}</span>
 					<span className="name" title={item.name}>{item.name}</span>
-					<label className="switch">
-						<input
-							type="checkbox"
-							checked={item.enabled}
-						/>
-						<span className="slider"></span>
-					</label>
+					<input
+						className="switch"
+						type="checkbox"
+						checked={item.enabled}
+					/>
 					<button
 						className="preset-panel__edit-btn"
 						onClick={() => {
@@ -96,7 +94,7 @@ function createList(dirtyHandle, config, onUpdate) {
 						}}
 						title="编辑/展开"
 					>
-						<i className={item[EXPANDED]?`ri-arrow-up-s-line`:`ri-arrow-down-s-line`}></i>
+						<i className={item[EXPANDED] ? `ri-arrow-up-s-line` : `ri-arrow-down-s-line`}></i>
 					</button>
 					<button
 						className="preset-panel__delete-btn"
@@ -363,29 +361,6 @@ function createTextList(handler, textFieldName) {
 	return [list, virtualList];
 }
 //endregion
-
-export function createPanel(constructor) {
-	const isOpen = $state(false);
-	let self;
-
-	const open = (preset) => {
-		if (!self) document.body.append(self = constructor(preset, isOpen, close));
-		requestAnimationFrame(() => {
-			isOpen.value = true;
-		});
-	};
-	const close = () => {
-		isOpen.value = false;
-		setTimeout(() => {
-			if (!isOpen.value) {
-				self?.remove();
-				self = null;
-			}
-		}, 300);
-	};
-
-	return {open, close};
-}
 
 /**
  * 预设编辑面板

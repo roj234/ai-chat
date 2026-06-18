@@ -1,0 +1,45 @@
+{
+  $schema: "http://json-schema.org/draft-07/schema#",
+  title: "剧情节点",
+
+  type: "object",
+  properties: {
+    name: {
+      type: "string",
+      description: "阶段名称，用于UI渲染"
+    },
+
+    // 第一个未激活的节点的除了 consequence 以外的字段都将作为提示喂给 LLM，LLM 可以主动在预期回合前激活（进入下一阶段）。
+    //
+    trigger: {
+      type: "string",
+      description: "触发此节点的预期条件或进度。例如：'主角第二次进入教堂'。"
+    },
+    seed: {
+      type: "string",
+      description: "隐秘的征兆（伏笔），微小但异样的细节，用于该节点未激活时的氛围渲染。例如：'领主征收的赋税越重，平民变异的概率越高'"
+    },
+    expected_turn: {
+      type: "integer",
+      description: "预期触发回合（整数）。代码在到达此回合时将本节点的后续内容注入系统提示词。0 为开局生效。"
+    },
+
+    hook: {
+      type: "string",
+      description: "危机与主角的牵绊。为何主角无法抽身？（例如：死者是主角之前的债主、正好克制主角的[弱点/执念]、或者主角身上的某件脏物引起了反派追踪）。"
+    },
+    consequence: {
+      type: "string",
+      description: "当此节点激活时发生的具体事件（冲突/灾难）。如：'国师在朝堂上显露妖族真身封锁皇城'、'血肉列车冲出轨道撞入下城区'。"
+    }
+  },
+  required: [
+    "name",
+    "trigger",
+    "seed",
+    "expected_turn",
+    "hook",
+    "consequence"
+  ],
+  additionalProperties: false
+}

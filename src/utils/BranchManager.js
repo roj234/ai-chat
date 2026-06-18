@@ -9,25 +9,7 @@ const INDEX = debugSymbol("INDEX");
 const CHILDREN = debugSymbol("CHILDREN");
 const NO_BRANCHES = [0, 1];
 
-/**
- * 创建分支管理器
- * @param {AiChat.Conversation} conv
- * @param {AiChat.Message[]} messages
- * @returns {AiChat.BranchManager}
- */
-function createBranchManager(conv, messages) {
-	// ---------- 构造阶段 ----------
-	messages.unshift({
-		id: -1 // 不保存到数据库
-	});
-
-	if (conv.bm_dummy) {
-		for (const id of conv.bm_dummy) {
-			messages.splice(id, 0, { id: -1, hidden: true });
-		}
-	}
-
-	const dynamic = [];
+const initBranchArray = (messages, dynamic) => {
 	messages.forEach((m, index) => {
 		m[INDEX] = index;
 
@@ -49,7 +31,28 @@ function createBranchManager(conv, messages) {
 			else children.push(m);
 		}
 	});
+};
 
+/**
+ * 创建分支管理器
+ * @param {AiChat.Conversation} conv
+ * @param {AiChat.Message[]} messages
+ * @returns {AiChat.BranchManager}
+ */
+function createBranchManager(conv, messages) {
+	// ---------- 构造阶段 ----------
+	messages.unshift({
+		id: -1 // 不保存到数据库
+	});
+
+	if (conv.bm_dummy) {
+		for (const id of conv.bm_dummy) {
+			messages.splice(id, 0, { id: -1, hidden: true });
+		}
+	}
+
+	const dynamic = [];
+	initBranchArray(messages, dynamic);
 	if (dynamic.length && !conv.bm_dummy) conv.bm_dummy = dynamic;
 
 	const findDefaultLeaf = () => messages.findLast(item => !(item[CHILDREN]?.length));
@@ -90,7 +93,7 @@ function createBranchManager(conv, messages) {
 			let {parent} = m;
 			// 正常情况下是不会出现的，但是如果有人动原始的消息数组
 			if (import.meta.env.DEV && parent === m[INDEX]) {
-				console.log("found circular reference", m);
+				console.trace("found circular reference", m);
 				path.length = 0;
 				Array.prototype.push.apply(path, messages.slice(1).reverse());
 				break;
@@ -159,7 +162,15 @@ function createBranchManager(conv, messages) {
 	return {
 		get messages() { return messages; },
 		set messages(m) { messages = m; },
-		setLeaf(v) { leaf = v; },
+		setLeaf(v, sync) {
+			leaf = v;
+			if (sync) {
+				for (let i = 0; i < messages.length; i++) {
+					delete messages[i][CHILDREN];
+				}
+				initBranchArray(messages, []);
+			}
+		},
 		getMessages() {
 			const path = getMessages();
 			Object.defineProperties(path, {
@@ -285,7 +296,7 @@ function setMessages(newMessages, global) {
 	for (; prefix < Math.min(oldMessages.length, newMessages.length); prefix++) {
 		if (oldMessages[prefix] !== newMessages[prefix]) break;
 	}
-	undoToolCalls(global, oldMessages, prefix);
+	undoToolCalls(global, oldMessages, prefix, true);
 	redoToolCalls(global, newMessages, prefix, true);
 }
 

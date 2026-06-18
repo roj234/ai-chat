@@ -32,7 +32,7 @@
     }
 }
 
-.filter { border-top: none; }
+.filter { border: none; }
 
 /* 箭头旋转动画 */
 .arrow-icon {

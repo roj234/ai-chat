@@ -1,0 +1,27 @@
+{
+  $schema: "http://json-schema.org/draft-07/schema#",
+  title: "剧情线",
+
+  type: "object",
+  properties: {
+    // CoT 推演
+    design: {
+      type: "string",
+      description: "【剧本推演】结合世界观和主角，构思一条贯穿始终的故事线（例如修仙界的灵气断绝阴谋、维多利亚时代的邪神苏醒、中世纪的瘟疫骑士降临）。解释这场危机/事件的起源以及它如何与主角产生关联，约150字。"
+    },
+    name: {
+      type: "string",
+      description: "剧情线名称。"
+    },
+    nodes: {
+      type: "array",
+      minItems: 3,
+      description: "剧本的关键节点，按时间/剧情发展顺序排列。从萌芽到最终爆发。",
+      "items": {
+        "$ref": "plot-node.schema.json5"
+      }
+    }
+  },
+  required: ["design", "name", "nodes"],
+  additionalProperties: false
+}

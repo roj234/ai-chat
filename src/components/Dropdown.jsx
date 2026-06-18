@@ -1,6 +1,6 @@
 import "./Dropdown.css";
 
-import {$disposable, $foreach} from "unconscious";
+import {$cleanup, $foreach} from "unconscious";
 import {indexInParent} from "../utils/utils.js";
 import {onLoad} from "../plugin.js";
 
@@ -24,7 +24,6 @@ export function Dropdown({items, selection, onChanged, dir = 'down'}) {
 		main.classList.remove("open");
 	};
 
-	console.log(items);
 	let options;
 	const main = <div className={"pretty-select "+dir}>
 		<div className="input" onClick.stop={() => main.classList.toggle("open")}>
@@ -67,7 +66,7 @@ export function Dropdown({items, selection, onChanged, dir = 'down'}) {
 	};
 
 	instances.add(main);
-	$disposable(main, () => instances.delete(main));
+	$cleanup(main, () => instances.delete(main));
 
 	return main;
 }

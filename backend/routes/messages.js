@@ -198,13 +198,13 @@ export function registerMessageRoutes(batcher) {
 		if (!Number.isFinite(id)) return { error: 'illegal id' };
 
 		const {db, vectorDB} = ctx;
-		const result = db.prepare('DELETE FROM messages WHERE id = ?').run(id);
-		if (!result.changes) return false;
+		const result = db.prepare('DELETE FROM messages WHERE id = ? RETURNING owner').get(id);
+		if (!result) return false;
 
 		if (vectorDB) {
 			vectorDB.delete('m#'+id.toString(36));
 			vectorDB.delete('M#'+id.toString(36));
 		}
-		return true;
+		return result.owner;
 	};
 }

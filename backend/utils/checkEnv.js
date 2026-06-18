@@ -53,7 +53,6 @@ async function detectEnv() {
 		kotlinResult,
 		tscResult,
 		dartResult,
-		ripgrepResult
 	] = await Promise.all([
 		'git --version',
 		'bash --help',
@@ -73,7 +72,6 @@ async function detectEnv() {
 		'kotlin -version',
 		'tsc --version',
 		'dart --version',
-		'rg --version',
 	].map(execCommand));
 
 	const env = {};
@@ -112,7 +110,6 @@ async function detectEnv() {
 	env.go = commonMatch(goResult);
 	env.rust = commonMatch(rustResult);
 	env.docker = commonMatch(dockerResult);
-	env.ripgrep = commonMatch(ripgrepResult);
 
 	return env;
 }
