@@ -11,7 +11,7 @@ import {
 } from "/src/database.js";
 import {config, conversations} from "/src/states.js";
 import {createHashLine} from "/common/hash-line.js";
-import {parsePath} from "./WebFileSystem.js";
+import {normalizePath} from "./WebFileSystem.js";
 import {unconscious} from "unconscious";
 
 const BLACKLIST_CHARS = new RegExp('[| &=?#{}<>:,]', 'g');
@@ -30,9 +30,9 @@ const fileEscape = (str) => str.replaceAll(BLACKLIST_CHARS, encodeURI);
  */
 export function createConfigFileSystem(base) {
 	const tmp = new Map;
-	const basePath = parsePath(base);
+	const basePath = normalizePath(base);
 	const myParse = (path) => {
-		const arr = parsePath(decodeURI(path));
+		const arr = normalizePath(decodeURI(path));
 		if (arr[0] === 'tmp') return arr;
 
 		if (arr.length < basePath.length) throw "Permission denied (path must start from: " + fileEscape(basePath.join('/')) + ")";
@@ -116,7 +116,7 @@ export function createConfigFileSystem(base) {
 			if (globStr) throw new Error("glob filter is not available in ConfigFileSystem");
 
 			let entries = null;
-			const arr = parsePath(decodeURI(path));
+			const arr = normalizePath(decodeURI(path));
 
 			switch (arr.length) {
 				case 0:

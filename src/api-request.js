@@ -21,6 +21,7 @@ import {
 	PLACEHOLDERS,
 	runTools,
 	SetTitle,
+	TOOL_NAME,
 	toolGroups,
 	toolScriptRegistry
 } from "./skills.js";
@@ -153,33 +154,75 @@ export async function submitUserChatMessage() {
 
 		if (!result) return result; // false
 
-		const promises = [];
-
 		let finishReason = result.finish_reason;
 
 		const assistantMessage = messages_.at(-1);
 
-		const resumeId = conversation_.resumeId;
-		if (finishReason !== 'error' || assistantMessage.error?.trim() !== "network error"/* fetch */) {
-			if (resumeId) {
-				try {
-					promises.push(jsonFetch(config.endpoint+"/abort/"+resumeId, {
-						key: config.accessToken,
-						method: 'POST'
-					}));
-				} catch (e) {
-					showToast("Abort接口调用失败\n"+e, 'error');
-				}
-				delete conversation_.resumeId;
-			}
-		} else {
-			if (resumeId) {
-				showToast("连接意外中止\n在"+(RESUME_TIMEOUT/60000)+"分钟内点击重试按钮可以无缝继续对话", 'error');
-			}
-		}
-
 		const tone = FINISH_REASON_TONE[finishReason];
 		const is_ok = tone != null;
+
+		const promises = [];
+		const commitMessage = async () => {
+			if (promises.length) return Promise.all(promises);
+
+			const resumeId = conversation_.resumeId;
+			if (finishReason !== 'error' || assistantMessage.error?.trim() !== "network error"/* fetch */) {
+				if (resumeId) {
+					try {
+						promises.push(jsonFetch(config.endpoint+"/abort/"+resumeId, {
+							key: config.accessToken,
+							method: 'POST'
+						}));
+					} catch (e) {
+						showToast("Abort接口调用失败\n"+e, 'error');
+					}
+					delete conversation_.resumeId;
+					// 如果这里删除了，之后可能会更新时间, 但是确实要删除这个并且调试一下重连失败的行为
+				}
+			} else {
+				if (resumeId) {
+					showToast("连接意外中止\n在"+(RESUME_TIMEOUT/60000)+"分钟内点击重试按钮可以无缝继续对话", 'error');
+				}
+			}
+
+			const has_resp = result.request_id && (finishReason !== 'error' || result.input_tokens);
+			if (has_resp || messageHasContent(assistantMessage)) {
+				promises.push(updateConversation(conversation_, unconscious(messages_)));
+
+				if (has_resp) {
+					isIDB && await promises.at(-1);
+					const id = assistantMessage.id;
+					if (id > 0) result.id = id;
+					promises.push(appendBillingLog(result));
+				}
+			}
+		};
+
+		if (is_ok && assistantMessage.tool_calls) {
+			const runToolsGuard = () => {
+				const timer = setTimeout(commitMessage, 2000);
+				addEventListener("beforeunload", commitMessage);
+				const promise = runTools(assistantMessage, conversation_);
+				promise.finally(() => {
+					removeEventListener("beforeunload", commitMessage);
+					clearTimeout(timer);
+				});
+				return promise;
+			};
+
+			const skipToolCalls = config.maxToolTurns && !(countAgenticTurns(messages_) % config.maxToolTurns);
+			if (skipToolCalls || !await runToolsGuard()) {
+				if (skipToolCalls) assistantMessage.tool_responses = assistantMessage.tool_calls.map(tc => ({[TOOL_NAME]: tc.function.name}));
+				// 如果存在可能需要批准的工具调用
+				finishReason = 'interrupt';
+			}
+
+			$update(updateMessageUI);
+		}
+
+		updateStatusText(FINISH_REASON_LABEL[finishReason], tone ?? 'error');
+
+		await commitMessage();
 
 		if ('interrupt' !== finishReason && 'loop' !== finishReason) {
 			if ('error' !== finishReason) {
@@ -194,32 +237,11 @@ export async function submitUserChatMessage() {
 			}
 		}
 
-		if (is_ok && assistantMessage.tool_calls) {
-			if ((config.maxToolTurns && !(countAgenticTurns(messages_) % config.maxToolTurns)) || !await runTools(assistantMessage, conversation_)) {
-				// 如果存在可能需要批准的工具调用
-				finishReason = 'interrupt';
-			}
-			$update(updateMessageUI);
-		}
-
-		updateStatusText(FINISH_REASON_LABEL[finishReason], tone ?? 'error');
-
-		const has_resp = result.request_id && (finishReason !== 'error' || result.input_tokens);
-		if (has_resp || messageHasContent(assistantMessage)) {
-			promises.push(updateConversation(conversation_, unconscious(messages_)));
-
-			if (has_resp) {
-				isIDB && await promises.at(-1).then(() => result.id = assistantMessage.id);
-				promises.push(appendBillingLog(result));
-			}
-		}
-
 		if (selectedConversation.id !== conversation_.id) {
 			finishReason = 'interrupt'; // 如果不在前台就不自动执行
 			showToast("对话 "+conversation_.title+"(#"+conversation_.id+") 已结束", tone ?? "error");
 		}
 
-		await Promise.all(promises);
 		return finishReason;
 	} finally {
 		runningConversations.delete(conversation_.id);
@@ -430,6 +452,7 @@ async function sendCompletionRequest(
 		assistantMessage.finish_reason = '';
 		onProgress?.();
 	} else {
+		if (initialAssistantMessage) messages.pop();
 		messages.push(assistantMessage = {
 			role: 'assistant',
 			content: '',
@@ -563,10 +586,8 @@ async function sendCompletionRequest(
 			let reasoning_format  = 'r';
 
 			if (config.mode === 'chat') {
-				const {
-					/** @type {Partial<OpenAI.AssistantMessage>} */
-					delta
-				} = chunk;
+				/** @type {Partial<OpenAI.AssistantMessage>} */
+				const delta = chunk.delta;
 				if (!delta) return;
 
 				if (delta.role) assistantMessage.role = delta.role;
@@ -583,7 +604,6 @@ async function sendCompletionRequest(
 					}
 					reasoning_format = 'rd';
 				} else if (delta.reasoning_content) {
-					// but I cant submit a PR
 					reasoning_text = delta.reasoning_content;
 					reasoning_format = 'rc';
 				}

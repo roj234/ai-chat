@@ -17,7 +17,7 @@ const webFileSystemInstances = new Map;
 SETTINGS.push({
 	id: "fs_server",
 	_tab: "tools",
-	name: "[fs] 文件访问服务",
+	name: "[Agent] v2.2\n\n文件访问后端服务器 (可选)",
 	title: "提供文件访问和命令执行功能",
 	type: "input",
 	pattern: /^(\/|https?:\/\/)/,
@@ -25,7 +25,6 @@ SETTINGS.push({
 	placeholder: "http://localhost:1/api/"
 }, {
 	_tab: "tools",
-	name: "[fs] 工具配置",
 	type: "multiple",
 	choices: {
 		"使用 HashLine 编辑文件": "fs_hashline"
@@ -541,12 +540,12 @@ const MAX_LINE_LENGTH = 180;
 /** @type {AiChat.FunctionTool} */
 const Grep = {
 	name: "Grep",
-	description: `Search for a regex pattern across files in a directory.`,
+	description: `Search for a regex pattern across files.`,
 	parameters: {
 		type: "object",
 		properties: {
 			pattern: { type: "string", description: "Regular expression pattern" },
-			path: { type: "string", default: "." },
+			path: { type: "string", default: ".", description: "Directory or file" },
 			glob: { type: "string", default: "**" },
 			maxResults: { type: "integer", default: 50, minimum: 1, maximum: 500 },
 		},
@@ -558,7 +557,7 @@ const Grep = {
 		const p = pattern.length > 30 ? pattern.slice(0, 30) + "…" : pattern;
 		return "搜索 " + (glob !== "**" ? path + "/" + glob : path) + " 中的 " + p;
 	},
-	script: async ({ pattern, path = ".", glob = "**", maxResults = 50 }, response, conv) => {
+	async script({ pattern, path = ".", glob = "**", maxResults = 50 }, response, conv) {
 		if (conv.fs_type === "api") {
 			try {
 				const spawn = fileAccess("spawn");
@@ -572,7 +571,9 @@ const Grep = {
 						"--max-columns", MAX_LINE_LENGTH,
 						"--color", "never",
 						"--max-count", maxResults,
-						"--glob", glob,
+						"--type-add",
+						"foo:"+glob,
+						"-tfoo",
 						"--path-separator", "/",
 						"--",
 						pattern,
@@ -585,14 +586,14 @@ const Grep = {
 
 				if (!result.startsWith("Exit code -1")) {
 					result = result.slice(result.indexOf('\n')+1);
-					return result.split("\n\n").map(item => item.slice(path.length+1)).slice(0, maxResults).join("\n\n") || '[No match]';
+					const arr = result.replaceAll("\t", "  ").split("\n\n");
+					return (arr.length === 1 ? arr[0] : arr.map(item => item.slice(path.length+1)).slice(0, maxResults).join("\n\n")) || '[No match]';
 				}
 			} catch (e) {
 				showToast("未找到后端的rg/ripgrep工具，可能影响性能\n"+e, 'error');
 			}
 		}
 
-		const list = fileAccess("list");
 		const read = fileAccess("read");
 
 		let flag = '';
@@ -618,7 +619,19 @@ const Grep = {
 			taskQueue.add(self);
 		};
 
-		for (const [relPath, type] of (await list({ path, glob, json: true }, response, conv))) {
+		let listError;
+		let files;
+		try {
+			const list = fileAccess("list");
+			files = await list({path, glob, json: true}, response, conv);
+			path += '/';
+		} catch (e) {
+			if (glob !== '**') throw e;
+			listError = e;
+			files = [["", 'file']];
+		}
+
+		for (const [relPath, type] of files) {
 			if (type !== 'file') continue;
 			if (matches >= maxResults) break;
 
@@ -627,14 +640,15 @@ const Grep = {
 
 				let content;
 				try {
-					content = await read({ path: path + "/" + relPath, format: "raw", maxChars: 65536 }, response, conv);
+					content = await read({ path: path + relPath, format: "raw", maxChars: 65536 }, response, conv);
 				} catch {
+					if (listError) throw listError;
 					return;
 				}
 
 				if (matches >= maxResults) return;
 
-				const lines = content.split("\n");
+				const lines = content.split("\n").map(item => item.trimEnd().replaceAll("\t", "  "));
 				let match;
 				for (let i = 0; i < lines.length; i++) {
 					if (regExp.test(lines[i])) {
@@ -659,12 +673,17 @@ const Grep = {
 	},
 };
 
+const programTitle = (req, ctx = {}) => {
+	return req.function.name+": " + getToolParameters(ctx, req).explanation;
+};
+
 /** @type {AiChat.FunctionTool} */
 const RunBackgroundProgram = {
 	name: "RunBackgroundProgram",
 	description: "Execute a program in background.",
 	interactive: "secure",
 	script: fileAccess("run_bg"),
+	title: programTitle,
 
 	parameters: {
 		type: "object",
@@ -710,6 +729,7 @@ const RunProgram = {
 	description: "Execute a program with an array of arguments.",
 	interactive: "secure",
 	script: fileAccess("spawn"),
+	title: programTitle,
 
 	parameters: {
 		type: "object",
@@ -742,6 +762,7 @@ const Shell = {
 	description: "Run a command string through a shell.",
 	interactive: "secure",
 	script: fileAccess("shell"),
+	title: programTitle,
 
 	parameters: {
 		type: "object",
@@ -765,7 +786,8 @@ const Shell = {
 
 let fsPrompt = `<file-editing>
 - Root path is '.', **always** use relative path.
-- All writing tools like Append and Write, will automatically create intermediate directories.
+- All writing tools like Append and Write, will automatically create parent directories.
+- Do NOT read a file to verity your edits, tool will error if change failed.
 - Grep result is \`ripgrep --heading\` format:
 \`\`\`
 a.txt

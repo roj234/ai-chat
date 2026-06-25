@@ -1,5 +1,7 @@
 import {readAsString} from "/common/chardet.js";
 import {createHashLine} from "/common/hash-line.js";
+import {IgnoreMatcher} from "/common/ignore.js";
+import {config} from "../../src/states.js";
 
 // ────────────────────────────────── Glob‑to‑Regex (ported from Globs.java) ──────────────────────────
 
@@ -149,34 +151,42 @@ const CREATE = { create: true };
  * @param {string} path
  * @return {string[]}
  */
-export function parsePath(path) {
-	return path.split('/').filter(s => s && s !== '.');
+export const normalizePath = path => {
+	const arr = path.split('/').filter(s => s && s !== '.');
+	for (let i = 0; i < arr.length;) {
+		if (arr[i] === '..') {
+			arr.splice(--i, 2);
+		} else {
+			i++;
+		}
+	}
+	return arr;
 }
 
 /**
  * Resolve parent directory handle and entry name from a full path (relative to root).
  */
-async function resolveParent(rootHandle, filePath, options) {
-	const parts = parsePath(filePath);
+const resolveParent = async (rootHandle, filePath, options) => {
+	const parts = normalizePath(filePath);
 	const name = parts.pop();
 	let parent = rootHandle;
 	for (const part of parts) {
 		parent = await parent.getDirectoryHandle(part, options);
 	}
 	return [ parent, name ];
-}
+};
 
 /**
  * Resolve a directory handle from a path.
  */
-async function resolveDirectory(rootHandle, dirPath) {
-	const parts = parsePath(dirPath);
+const resolveDirectory = async (rootHandle, dirPath) => {
+	const parts = normalizePath(dirPath);
 	let handle = rootHandle;
 	for (const part of parts) {
 		handle = await handle.getDirectoryHandle(part);
 	}
 	return handle;
-}
+};
 
 /**
  *
@@ -190,28 +200,40 @@ async function resolveDirectory(rootHandle, dirPath) {
  * 		list({path: string, glob?: string}): Promise<string>,
  * }}
  */
-export function createWebFileSystem(rootHandle) {
+export const createWebFileSystem = rootHandle => {
+	/** @type {IgnoreMatcher} */
+	let ignored;
+	const loadIgnore = async () => {
+		let text = '';
+
+		for (const name of ['.ignore', '.gitignore']) {
+			try {
+				const fileHandle = await rootHandle.getFileHandle(name);
+				const file = await fileHandle.getFile();
+				text = await file.text();
+				break;
+			} catch {}
+		}
+		ignored = new IgnoreMatcher();
+		ignored.parse(text);
+		ignored.compile();
+	};
+	const checkPath = async (path, isDir) => {
+		if (!ignored) await loadIgnore();
+		const parsedPath = normalizePath(path);
+		if (ignored.test(parsedPath.join('/'), isDir)) throw ('Forbidden: operate ignored path');
+	};
+
 	const api = {
-		async readImage({path}) {
-			const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
-			if (!['png', 'jpg', 'bmp', 'jpeg'].includes(ext))
-				throw new Error(`File extension "${ext}" is currently not allowed`);
-
-			const [ parent, name ] = await resolveParent(rootHandle, path);
-			const fileHandle = await parent.getFileHandle(name);
-
-			const file = await fileHandle.getFile();
-			if (file.size > 10485760) throw new Error(`File too big (${file.size} bytes)`);
-
-			return file;
-		},
-
 		async mkdirs({path}) {
+			await checkPath(path, true);
 			await resolveParent(rootHandle, path+'/_', CREATE);
-			return 'done';
+			return 'success';
 		},
 
 		async copy({ src, dest, move }) {
+			if (move) await checkPath(src, true);
+			await checkPath(dest, true);
 			const [ srcParent, srcName ] = await resolveParent(rootHandle, src);
 			const [ destParent, destName ] = await resolveParent(rootHandle, dest, CREATE);
 
@@ -249,7 +271,7 @@ export function createWebFileSystem(rootHandle) {
 				await copyEntry(srcHandle, destParent, destName);
 			}
 
-			return 'done';
+			return 'success';
 		},
 
 		async stat({path}) {
@@ -278,9 +300,10 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 		},
 
 		async delete({path}) {
+			await checkPath(path, true);
 			const [ parent, name ] = await resolveParent(rootHandle, path);
 			await parent.removeEntry(name, { recursive: true });
-			return 'done';
+			return 'success';
 		},
 
 		/**
@@ -292,6 +315,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 		 * @param {string} content
 		 */
 		async append({path, content, newline = true}) {
+			await checkPath(path);
 			const [parentHandle, name] = await resolveParent(rootHandle, path, CREATE);
 			const fileHandle = await parentHandle.getFileHandle(name, CREATE);
 
@@ -312,11 +336,15 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			await writable.seek(size);
 			await writable.write(needNewline ? '\n' + content : content);
 			await writable.close();
-			return "done";
+
+			if (/\.(gitignore|ignore)$/.test(path)) await loadIgnore();
+			return "success";
 		},
 
 		/** List directory, optionally with a glob filter */
 		async list({path, glob: globStr = '*', json = false}) {
+			if (!ignored) await loadIgnore();
+
 			const entries = globStr !== '*'
 				? await glob(globStr, path)
 				: (await resolveDirectory(rootHandle, path)).entries();
@@ -328,12 +356,16 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			const result = [];
 
 			for await (const [name, handle, relDir] of entries) {
+				const displayPath = relDir ? relDir + '/' + name : name;
+				const isDir = handle.kind === 'directory';
+
+				if (ignored.test(displayPath, isDir)) continue;
+
 				if (items >= MAX_COUNT) {
 					prefix = `[TRUNCATED: Only first ${MAX_COUNT} files shown, use a more specific glob or path]\n`;
 					break;
 				}
 
-				const displayPath = relDir ? relDir + '/' + name : name;
 				if (handle.kind === 'file') {
 					const file = await handle.getFile();
 					result.push([displayPath, "file", file.size]);
@@ -353,8 +385,8 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 	 * Walk the filesystem matching a glob pattern.
 	 * Yields { name, relDir, handle } where handle is the FileSystemHandle.
 	 */
-	async function glob(pattern, searchRoot) {
-		const segments = parsePath(pattern).map(segmentToRegex);
+	const glob = async (pattern, searchRoot) => {
+		const segments = normalizePath(pattern).map(segmentToRegex);
 		// 处理空pattern
 		if (!segments.length) return;
 
@@ -373,8 +405,9 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 					yield* walk(dirHandle, relDir, nextIdx);
 					// ** matches one-or-more directories
 					for await (const [name, entryHandle] of dirHandle.entries()) {
-						if (entryHandle.kind === 'directory') {
-							yield* walk(entryHandle, relDir ? relDir + '/' + name : name, segIdx);
+						const childPath = relDir ? relDir + '/' + name : name;
+						if (entryHandle.kind === 'directory' && !ignored.test(childPath, true)) {
+							yield* walk(entryHandle, childPath, segIdx);
 						}
 					}
 				}
@@ -384,65 +417,90 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			for await (const [name, handle] of dirHandle.entries()) {
 				if (!seg.test(name)) continue;
 
+				const entryPath = relDir ? relDir + '/' + name : name;
+				const isDir = handle.kind === 'directory';
+
 				if (isLast) {
-					yield [name, handle, relDir];
-				} else if (handle.kind === 'directory') {
-					yield* walk(handle, relDir ? relDir + '/' + name : name, nextIdx);
+					if (!ignored.test(entryPath, isDir)) {
+						yield [name, handle, relDir];
+					}
+				} else if (isDir && !ignored.test(entryPath, true)) {
+					yield* walk(handle, entryPath, nextIdx);
 				}
 			}
 		}
 
 		async function* yieldChildren(dirHandle, relDir) {
 			for await (const [name, handle] of dirHandle.entries()) {
+				const entryPath = relDir ? relDir + '/' + name : name;
+				const isDir = handle.kind === 'directory';
+
+				if (ignored.test(entryPath, isDir)) continue;
+
 				yield [name, handle, relDir];
-				if (handle.kind === 'directory') {
-					yield* yieldChildren(handle, relDir ? relDir + '/' + name : name);
+				if (isDir) {
+					yield* yieldChildren(handle, entryPath);
 				}
 			}
 		}
 
 		return walk(handle, '', 0);
-	}
+	};
 
 	/** Resolve a File from a path relative to root handle */
-	async function resolveFile(path) {
+	const resolveFile = async path => {
 		const [parent, name] = await resolveParent(rootHandle, path);
 		if (!name) throw "Root is not file";
 		const fileHandle = await parent.getFileHandle(name);
 		return await fileHandle.getFile();
-	}
+	};
 
+	const hashLine = createHashLine({
+		/**
+		 * @param {string} path
+		 * @returns {Promise<string>}
+		 */
+		async read(path) {
+			const file = await resolveFile(path);
+			return readAsString(file);
+		},
+		/**
+		 * @param {string} path
+		 * @param {string} data
+		 * @returns {Promise<void>}
+		 */
+		async write(path, data) {
+			await checkPath(path);
+			const [ parent, name ] = await resolveParent(rootHandle, path, CREATE);
+			const fileHandle = await parent.getFileHandle(name, CREATE);
+			const writable = await fileHandle.createWritable();
+			await writable.write(data);
+			await writable.close();
+
+			if (/\.(gitignore|ignore)$/.test(path)) await loadIgnore();
+		},
+		/**
+		 * @param {string} path
+		 * @returns {Promise<number>}
+		 */
+		async mtime(path) {
+			const file = await resolveFile(path);
+			return file.lastModified;
+		}
+	});
 	return {
 		...api,
-		...createHashLine({
-			/**
-			 * @param {string} path
-			 * @returns {Promise<string>}
-			 */
-			async read(path) {
+		...hashLine,
+		async read(args) {
+			const path = args.path;
+			const isImage = path.match(/\.(png|jpg|jpeg|bmp|webp)$/i);
+			if (isImage && config.modalities.includes("image")) {
 				const file = await resolveFile(path);
-				return readAsString(file);
-			},
-			/**
-			 * @param {string} path
-			 * @param {string} data
-			 * @returns {Promise<void>}
-			 */
-			async write(path, data) {
-				const [ parent, name ] = await resolveParent(rootHandle, path, CREATE);
-				const fileHandle = await parent.getFileHandle(name, CREATE);
-				const writable = await fileHandle.createWritable();
-				await writable.write(data);
-				await writable.close();
-			},
-			/**
-			 * @param {string} path
-			 * @returns {Promise<number>}
-			 */
-			async mtime(path) {
-				const file = await resolveFile(path);
-				return file.lastModified;
+				if (file.size > 10485760) throw new Error(`File too large (${file.size} bytes)`);
+				return file;
 			}
-		})
+
+			return hashLine.read(args);
+		}
 	};
-}
+};

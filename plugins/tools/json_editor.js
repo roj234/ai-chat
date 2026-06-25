@@ -84,7 +84,7 @@ const EditJson = {
 			content: JSON.stringify(obj, null, 2)
 		}, response, global);
 
-		return "done. undoHandle="+JSON.stringify(undo);
+		return "success. undoHandle="+JSON.stringify(undo);
 	},
 	title: prefixTitle("编辑JSON")
 };

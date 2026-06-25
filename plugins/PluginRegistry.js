@@ -57,6 +57,7 @@ import {registerCodeBlockRenderer, renderMarkdownToElement} from "/src/markdown/
 import {createDragSort} from "/common/DragSort.js";
 import {registerSchemaMessageRole} from "/common/ReactiveJSON.js";
 import {COMMAND_REGISTRY} from "../src/commands.js";
+import {registerHumanAsTool} from "./tools/human_as_tool.js";
 
 /**
  * @type {Array<{
@@ -131,6 +132,11 @@ const pluginDefinitions = [
 				}
 			}], {default: true});
 		}
+	},
+	{
+		name: "人在回路",
+		description: "没想到我居然是LSP！",
+		load: registerHumanAsTool
 	},
 	{
 		name: "外部插件API",

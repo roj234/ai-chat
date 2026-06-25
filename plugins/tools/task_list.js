@@ -108,8 +108,8 @@ export const registerTaskList = () => {
 			tasks_r = $state();
 
 		watchConversationState(conv, "TaskList:tasks", () => {
-			const tasks = conv.tasks?.length;
-			if (!tasks) {
+			const tasks = conv.tasks;
+			if (!tasks?.length) {
 				if (taskDiv) {
 					taskDiv.remove();
 					taskDiv = null;

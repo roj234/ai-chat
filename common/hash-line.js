@@ -171,19 +171,21 @@ export function createHashLine(fs) {
 		return patchReport;
 	};
 
-	const edit = async ({ path, search, replace, all, startLine, endLine }, ctx) => {
+	const edit = async ({ path, search, replace, replaceAll, startLine, endLine }, ctx) => {
+		if (search === replace) throw ('"search" cannot equals to "replace"');
+
 		const lines = await readLines(path, ctx);
 		const actualStart = (startLine ?? 1) - 1;
 		const actualEnd = endLine ?? lines.length;
 		const slice = lines.slice(actualStart, actualEnd);
-		if (!slice.length) throw (`line slice [${startLine}, ${endLine}] is empty!`);
+		if (!slice.length) throw (`file slice [${startLine}, ${endLine}] is empty!`);
 		const content = slice.join("\n");
 
 		search = search.split("\n").map(item => item.trimEnd()).join("\n");
 		replace = replace.split("\n").map(item => item.trimEnd()).join("\n");
 
 		let newContent;
-		if (all) {
+		if (replaceAll) {
 			newContent = content.replaceAll(search, replace);
 		} else {
 			let count = 0, lastIdx = -1, idx = -1;
@@ -191,7 +193,7 @@ export function createHashLine(fs) {
 				count++;
 				lastIdx = idx;
 			}
-			if (count === 0) throw (`'search' was not found in the file.`);
+			if (count === 0) throw (`"search" was not found in the file.`);
 			if (count > 1) throw (`Found ${count} occurrences of the search string — the search must uniquely identify a single location. Please expand the 'search' to include more surrounding context.`);
 			newContent = content.slice(0, lastIdx) + replace + content.slice(lastIdx + search.length);
 		}
@@ -204,7 +206,7 @@ export function createHashLine(fs) {
 
 		await fs.write(path, newContent, ctx);
 		cache.delete(path);
-		return 'done';
+		return 'success';
 	};
 
 	const write = async ({ path, lines, content, returnAnchors = false }, ctx) => {
@@ -224,7 +226,7 @@ export function createHashLine(fs) {
 				lines.map((line, i) => anchors[i] + HASHLINE_CONTENT_SEP + line).join('\n')
 			);
 		}
-		return 'done';
+		return 'success';
 	};
 
 	const del = filePath => cache.delete(filePath);

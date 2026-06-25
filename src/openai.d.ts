@@ -118,11 +118,11 @@ declare namespace OpenAI {
     }
 
     // 消息对象
-    type Message = {
+    type BaseMessage = {
         role: Role;
         content: string | ContentPart[];
     }
-    type AssistantMessage = Message & {
+    type AssistantMessage = BaseMessage & {
         role: 'assistant';
         reasoning?: string; // OpenAI
         reasoning_content?: string; // Llama.cpp
@@ -131,6 +131,7 @@ declare namespace OpenAI {
         images?: ImagePart[]; // OpenRouter
         audio?: AudioData[];
     }
+    type Message = BaseMessage | ToolCallMessage | AssistantMessage;
 
     type AudioData = {
         data: string; // Base64
@@ -139,7 +140,7 @@ declare namespace OpenAI {
         transcript: string;
     }
 
-    type ToolCallMessage = Message & {
+    type ToolCallMessage = BaseMessage & {
         role: 'tool';
         tool_call_id: string;
     }

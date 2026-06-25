@@ -1,4 +1,4 @@
-import {ALLOW_SQL_EXECUTION, LOG_HOOK} from "../config.js";
+import {LOG_HOOK} from "../config.js";
 import {
 	compressConversation,
 	compressLog,
@@ -16,22 +16,16 @@ import path from "node:path";
  * @param {string} rootPath
  */
 export function registerDatabaseRoutes(router, rootPath) {
-	router.post('/database', async (ctx) => {
-		if (!ALLOW_SQL_EXECUTION) {
-			ctx.send(403, { error: "功能未开启" });
-			return;
-		}
-
-		ctx.db.exec(await ctx.readAsObject(8192).sql);
-
-		ctx.send(200, { success: true });
-	});
 	router.delete('/database', async (ctx) => {
 		const logs = ctx.db.prepare(`SELECT id, data FROM "logs"`).all();
 		const updateLog = ctx.db.prepare(`UPDATE "logs" SET data = ? WHERE id = ?`);
 		for (const row of logs) {
 			const data = decompressLog(row.data);
-			LOG_HOOK(data);
+			const result = await LOG_HOOK(data);
+			if (result === 'SKIP') {
+				ctx.db.prepare(`DELETE FROM "logs" WHERE id = ?`).run(row.id);
+				continue;
+			}
 			updateLog.run(await compressLog(data), row.id);
 		}
 

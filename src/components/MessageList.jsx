@@ -157,7 +157,7 @@ const chunkRenderer = m => {
 							totalCost,
 							log.currency,
 							avgTps / logs.length,
-							logs.at(-1).finish_reason
+							logs.findLast(Boolean)?.finish_reason
 						];
 					});
 				}} style={"--height:"+(30 + (m.end_index-m.index)*64)+"px"}>
@@ -287,18 +287,17 @@ const chunkGather = (message, chunks, index, messages) => {
 				message,
 				idx: j
 			});
-			const response = message.tool_responses?.[j];
 			const name = tool.function.name;
-			if (response) {
-				if (toolScriptRegistry[name]?.renderer && response.time) {
-					chunks.push({
-						type: "tool",
-						tool_name: name,
-						idx: index,
-						response,
-						tool
-					});
-				}
+			const fn = toolScriptRegistry[name];
+			const response = message.tool_responses?.[j];
+			if (fn?.renderer && response && (fn.interactive || response.time)) {
+				chunks.push({
+					type: "tool",
+					tool_name: name,
+					idx: index,
+					response,
+					tool
+				});
 			}
 		}
 	}

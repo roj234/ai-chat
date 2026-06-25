@@ -23,10 +23,11 @@ onLoad((app) => {
 /**
  *
  * @param {Record<string, any>} body
- * @param flag
+ * @param {number=} flag
+ * @param {RegExp=} err1
  * @return {Promise<*>}
  */
-const check = (body, flag) => {
+const check = (body, flag, err1) => {
 	body.model = config.model;
 
 	if (flag !== 2) {
@@ -43,7 +44,9 @@ const check = (body, flag) => {
 		return flag === 3 ? msg.content : flag === 2 ? msg : msg.tool_calls || msg.content || msg.reasoning || msg.reasoning_content;
 	});
 
-	if (!flag) p = p.catch(() => {});
+	if (!flag) p = p.catch((err) => {
+		if (err1 && String(err).match(err1)) return true;
+	});
 
 	return p;
 }
@@ -51,7 +54,7 @@ const check = (body, flag) => {
 const reason_switch_keys = [
 	[
 		{ chat_template_kwargs: { enable_thinking: false },},
-		"chat_template_kwargs.enable_thinking"
+		"/chat_template_kwargs/enable_thinking"
 	],
 	[
 		{ reasoning: { enabled: false },},
@@ -59,7 +62,7 @@ const reason_switch_keys = [
 	],
 	[
 		{ thinking: { type: "disabled" },},
-		"thinking.type,\"enabled\",\"disabled\""
+		"/thinking/type,\"enabled\",\"disabled\""
 	],
 ];
 const reason_budget_keys = [
@@ -137,7 +140,7 @@ async function checkModelCapability() {
 				],
 			}],
 			tools: [get_time_tool],
-			tool_choice: get_time_tool,
+			//tool_choice: get_time_tool,
 			max_tokens: 50,
 		}),
 		// audio
@@ -150,7 +153,7 @@ async function checkModelCapability() {
 				],
 			}],
 			max_tokens: 1,
-		}),
+		}, 0, /size|duration|time/i),
 		// image
 		check({
 			messages: [{
@@ -161,7 +164,7 @@ async function checkModelCapability() {
 				],
 			}],
 			max_tokens: 1,
-		}),
+		}, 0, /size|1x1|width/i),
 		// video
 		check({
 			model: config.model,
@@ -173,7 +176,7 @@ async function checkModelCapability() {
 				],
 			}],
 			max_tokens: 1,
-		}),
+		}, 0, /size|1x1|duration|time|width/i),
 		// prefill
 		check({
 			messages: [
@@ -189,7 +192,7 @@ async function checkModelCapability() {
 			],
 			logprobs: true,
 			max_tokens: 1,
-			top_logprobs: 5
+			top_logprobs: 2
 		}),
 		// json object
 		check({

@@ -336,20 +336,20 @@ export const registerMultimediaGeneration = () => {
 	SETTINGS.push({
 		id: "mg_img_api",
 		_tab: "tools",
-		name: "[t2a] 图像生成API (SD/Comfy)",
+		name: "[MultimediaGeneration] v1.1\n\n图像生成API (SD/Comfy)",
 		type: "input",
 		pattern: /^https?:\/\/.+(?:\/sdapi\/v1|\/prompt)$/,
 		placeholder: "http://localhost:1/sdapi/v1"
 	},{
 		id: "mg_img_comfy_workflow",
 		_tab: "tools",
-		name: "[t2a] ComfyUI工作流",
+		name: "ComfyUI工作流模板",
 		type: "textbox",
 		placeholder: comfyui_template
 	},{
 		id: "mg_tts_api",
 		_tab: "tools",
-		name: <>[t2a] 语音生成API<span className={"spacer"} /><a href={"https://github.com/roj234/qwen3-audio.cpp"}>服务端</a></>,
+		name: <>语音生成API<span className={"spacer"} /><a href={"https://github.com/roj234/qwen3-audio.cpp"}>服务端</a></>,
 		type: "input",
 		pattern: /^https?:\/\/.+(\/v1)$/,
 		placeholder: "http://localhost:1/v1"

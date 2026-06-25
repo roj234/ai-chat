@@ -110,7 +110,7 @@ MessageRoles["userPrompt"] = {
  *
  * @param {string} id
  * @param {string} name
- * @param renderer
+ * @param {(data: import("unconscious").Reactive<Object>) => import("unconscious").Renderable} renderer
  * @param compose
  * @param {OpenAI.Schema | function(AiChat.AssistantMessage): OpenAI.Schema} schema
  */

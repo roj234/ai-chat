@@ -7,6 +7,7 @@ import FontFilter from "unconscious/postcss/font-filter.js";
 import OklchToRgb from "unconscious/postcss/oklch-to-rgb.js";
 import InlineVars from "unconscious/postcss/inline-vars.js";
 import {viteFontMinify} from 'unconscious/vite/font-minify.js';
+import {minifyJsString} from 'unconscious/vite/minJs.js';
 
 import packageInfo from "./package.json";
 
@@ -98,6 +99,7 @@ export default defineConfig(async () => {
             ]
         }),
         viteFontMinify(),
+        minifyJsString(),
         {
             name: 'inject-build-time',
             transformIndexHtml(html) {

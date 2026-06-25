@@ -83,11 +83,6 @@ export const PAT_VALID_AFTER = new Date("2026-01-01").getTime() / 1000;
 // ==========================================
 
 /**
- * 允许后端执行任意SQL (不是一般的危险, 除非你是作者, 否则别开)
- */
-export const ALLOW_SQL_EXECUTION = false;
-
-/**
  * 同时打开的SQLite数据库数量
  */
 export const MAX_OPEN_DATABASES = 10;
@@ -189,26 +184,35 @@ export const SSE_RESUME_TIMEOUT = 1000 * 60 * 15;
  * 日志钩子，可以在这里做一些计费和别名相关的操作，这个函数只影响日志记录
  * - 入库时调用，改变代码不影响过去的数据
  * - 但你依然需要保证幂等性，因为有重建（压缩）数据库接口，会对每一条历史消息调用这个函数
+ * - 返回 SKIP 不记录这条日志
  * @param {AiChat.BillingLog} log
- * @return {string}
+ * @return {"SKIP"|void}
  */
 export const LOG_HOOK = (log) => {
-	// 去除 OpenRouter 的模型名称前缀（当然也可以反过来加上，这只是 replace 的两个参数）
-	log.model = log.model.replace(/^(anthropic|google|openrouter|openai|deepseek)\//, "");
+	if (log.finish_reason === 'interrupt' && null == log.output_tokens) return 'SKIP';
 
-	if (log.cost == null && log.model === "deepseek-v4-pro") {
+	// 去除 OpenRouter 的模型名称前缀（当然也可以反过来加上，这只是 replace 的两个参数）
+	log.model = log.model.replaceAll(/^(anthropic|google|openrouter|openai|deepseek)\/|[-:]free$/g, "");
+
+	if (log.cost == null) {
 		const { input_tokens = 0, cached_tokens = 0, cache_write_tokens = 0, output_tokens = 0, provider } = log;
 
-		const CACHE_READ_PRICE = 0.025; // 每百万 Token 价格
-		const INPUT_PRICE      = 3;
-		const OUTPUT_PRICE     = 6;
+		// 每百万 Token 价格
+		if (log.model === "deepseek-v4-pro") {
+			const CACHE_READ_PRICE = 0.025, INPUT_PRICE = 3, OUTPUT_PRICE = 6;
 
-		log.currency = "CNY";
-		log.cost = (INPUT_PRICE * input_tokens + CACHE_READ_PRICE * cached_tokens + OUTPUT_PRICE * output_tokens) / 1000000;
-		// 覆盖前端显示的渠道名称
-		// log.provider = "DeepSeek";
+			log.currency = "CNY";
+			log.cost = (INPUT_PRICE * input_tokens + CACHE_READ_PRICE * cached_tokens + OUTPUT_PRICE * output_tokens) / 1000000;
+		}
+
+		if (log.model === "gpt-5.5") {
+			const CACHE_READ_PRICE = 0.5, INPUT_PRICE = 5, OUTPUT_PRICE = 30;
+
+			log.currency = "USD";
+			log.cost = (INPUT_PRICE * input_tokens + CACHE_READ_PRICE * cached_tokens + OUTPUT_PRICE * output_tokens) / 1000000;
+		}
 	}
-}
+};
 
 // ==========================================
 // 6. 数据压缩与序列化 (Optimization)
