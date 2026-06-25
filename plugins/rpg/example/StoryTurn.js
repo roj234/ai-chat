@@ -269,7 +269,7 @@ registerSchemaMessageRole(ID, 'CraftRPG回合参考实现', renderer, composer, 
 });
 
 // 注册命令
-COMMAND_REGISTRY["say"] = [
+COMMAND_REGISTRY["turn"] = [
 	(args) => {
 		sendAction(messages, args[0].trim());
 	},

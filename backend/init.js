@@ -157,11 +157,11 @@ export async function createRouter(dataPath, basePath = "api", workspacePath) {
 				result = { error: "unknown function "+func };
 			} else {
 				try {
-					const resp = handler(value, ctx);
-					let toReject = [...rejectors];
+					const resp = await handler(value, ctx);
+					//let toReject = [...rejectors];
 					rejectors.length = 0;
 
-					if (resp instanceof Promise) {
+					/*if (resp instanceof Promise) {
 						const size = out.length;
 						promises.push(resp.catch(e => {
 							toReject.forEach(reject => reject(e));
@@ -172,7 +172,7 @@ export async function createRouter(dataPath, basePath = "api", workspacePath) {
 							out[size] = result;
 							sync?.onBatch(ctx, func, value, result);
 						}));
-					} else {
+					} else */{
 						result = resp;
 						sync?.onBatch(ctx, func, value, result);
 					}

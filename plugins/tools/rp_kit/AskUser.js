@@ -1,4 +1,4 @@
-import {$state, $update, $watch} from "unconscious";
+import {$state, $update, $watch, unconscious} from "unconscious";
 import {inputText} from "/src/states.js";
 import {getToolParameters} from "/src/skills.js";
 
@@ -41,7 +41,9 @@ export const AskUser = {
 	renderer(response, frozen, tc) {
 		let content = $state(response.content);
 		$watch(content, () => {
-			response.content = content.value;
+			const value = unconscious(content);
+			response.success = !!value;
+			response.content = value;
 			$update(inputText);
 		}, false);
 		let ta;

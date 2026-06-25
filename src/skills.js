@@ -515,14 +515,14 @@ export const runTools = async ({tool_calls, tool_responses}, globalStorage, forc
 						: 'Tool not exist';
 			}
 
-			let interactive = fn.interactive;
+			const strings = config.permittedTools;
+			let interactive = strings.includes("!"+name) ? 'secure' : fn.interactive;
 			if (interactive) {
 				/*if (typeof interactive === "function") {
 					interactive = interactive(parameters);
 				}*/
 				if (interactive === "secure") {
-					const strings = config.permittedTools;
-					if (!strings?.includes(name) && !selectedConversation.grantedTools?.has(name)) {
+					if (!strings?.includes(name) && !strings?.includes('*') && !selectedConversation.grantedTools?.has(name)) {
 						autoNext = false;
 						if (forceRerun === true || (forceRerun === i && !allowUnsafe)) {
 							throw "User doesn't permit this tool use. Nothing changed. STOP and wait for user.";
@@ -558,7 +558,8 @@ export const runTools = async ({tool_calls, tool_responses}, globalStorage, forc
 			console.error(e);
 			msg.success = false;
 			msg.content = prettyError(e);
-			autoNext = false;
+			if (!config.ignoreToolError)
+				autoNext = false;
 		}
 		if (forceRerun === true && null == msg.content)
 			throw 'some interactive tool need user input';
@@ -583,13 +584,13 @@ export const undoToolCalls = (global, messages, first, reentrantOnly) => {
 		const {tool_calls, tool_responses} = messages[i];
 		if (tool_responses) {
 			for (let j = tool_responses.length - 1; j >= 0; j--) {
-				let toolResponse = tool_responses[j];
+				const tc = tool_calls[j], tr = tool_responses[j];
 				try {
-					const impl = toolScriptRegistry[toolResponse[TOOL_NAME]];
+					const impl = toolScriptRegistry[tc.function.name];
 					const reentrant = impl.reentrant;
 					if (reentrantOnly && !reentrant) continue;
 
-					impl.undo?.(toolResponse, global, tool_calls[j]);
+					impl.undo?.(tr, global, tc);
 				} catch (e) {
 					console.error(e);
 				}

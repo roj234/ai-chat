@@ -7,17 +7,16 @@ import {showToast} from "/src/components/Toast.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {createWebFileSystem} from "./WebFileSystem.js";
 import "./agent.css";
-import {createConfigFileSystem} from "./ConfigFileSystem.js";
+import {createVirtualFileSystem} from "./VirtualFileSystem.js";
 import {AskUser} from "./rp_kit/AskUser.js";
 
-let opfsInstance;
 /** @type {Map<string, AiChat.FileSystemInstance>} */
 const webFileSystemInstances = new Map;
 
 SETTINGS.push({
 	id: "fs_server",
 	_tab: "tools",
-	name: "[fs] 文件访问服务",
+	name: "[Agent] v2.2\n\n文件访问后端服务器 (可选)",
 	title: "提供文件访问和命令执行功能",
 	type: "input",
 	pattern: /^(\/|https?:\/\/)/,
@@ -25,13 +24,10 @@ SETTINGS.push({
 	placeholder: "http://localhost:1/api/"
 }, {
 	_tab: "tools",
-	name: "[fs] 工具配置",
+	name: "实验性选项 (刷新页面生效)",
 	type: "multiple",
 	choices: {
-		"使用 HashLine 编辑文件": "fs_hashline"
-	},
-	title: {
-		"使用 HashLine 编辑文件": "HashLine让模型使用稳定的锚点进行文件编辑\n然而因为模型并未在这种格式的数据上训练，它可能只是跑分好看\n刷新页面生效"
+		"暂无": "fs_"
 	}
 });
 
@@ -59,6 +55,34 @@ const FS_INSTANCE = debugSymbol("FS_INSTANCE");
  */
 async function callFBI(globalStorage) {
 	let {fs_type, fs_base} = globalStorage;
+
+	const getFSBase = (showShellWarning) => new Promise(resolve => {
+		SimpleModal({
+			type: "input",
+			title: "🐳 缚印·定域",
+			message: (
+				<div className={"md"}>
+					<p>既择“缚印”之道，须划定
+						<ruby>疆界
+							<rt>工作目录</rt>
+						</ruby>
+						。容器之根为 <kbd>/</kbd>，然天道不可直取，当择一<span className="highlight"><ruby>子域<rt>子目录</rt></ruby></span>以安天下。
+					</p>
+					<p>例：<kbd>/my-project-1</kbd>，勿授全根，慎之。</p>
+					<p>此域日后仍可易之，入命<kbd>/basepath &lt;path&gt;</kbd> 即可<ruby>改弦更张<rt>更改路径</rt></ruby>。</p>
+					{showShellWarning && <q>⚠️ <ruby>令咒<rt>命令</rt></ruby>可越藩篱，若于异容器中运行服务，则无此隐忧</q>}
+				</div>
+			),
+			value: "/",
+			confirmMessage: "定此域",
+			accent: "primary",
+			onConfirm(value) {
+				resolve(value === '/' ? '' : value);
+			},
+			onCancel: null
+		});
+	});
+
 	if (!fs_type) {
 		fs_type = await new Promise((resolve, reject) => {
 			const el = SimpleModal({
@@ -87,7 +111,7 @@ async function callFBI(globalStorage) {
 						</div>
 						<div>
 							<button className={"opfs"} title={"实验性"}>🌀 藏渊</button>
-							<span>藏于虚空，浏览器私库（OPFS），<br/>数据栖于斯，暂未可导出。</span>
+							<span>藏于虚空，浏览器私库（OPFS），<br/>数据栖于斯，亦可导出。</span>
 						</div>
 					</div>
 				),
@@ -101,27 +125,10 @@ async function callFBI(globalStorage) {
 		});
 
 		if (fs_type === "api") {
-			fs_base = await new Promise(resolve => {
-				SimpleModal({
-					type: "input",
-					title: "🐳 缚印·定域",
-					message: (
-						<div className={"md"}>
-							<p>既择“缚印”之道，须划定<ruby>疆界<rt>工作目录</rt></ruby>。容器之根为 <kbd>/</kbd>，然天道不可直取，当择一<span className="highlight"><ruby>子域<rt>子目录</rt></ruby></span>以安天下。</p>
-							<p>例：<kbd>/my-project-1</kbd>，勿授全根，慎之。</p>
-							<p>此域日后仍可易之，入命<kbd>/basepath &lt;path&gt;</kbd> 即可<ruby>改弦更张<rt>更改路径</rt></ruby>。</p>
-							<q>⚠️ <ruby>令咒<rt>命令</rt></ruby>可越藩篱，若于异容器中运行服务，则无此隐忧</q>
-						</div>
-					),
-					value: "/",
-					confirmMessage: "定此域",
-					accent: "primary",
-					onConfirm(value) {
-						resolve(value === '/' ? '' : value);
-					},
-					onCancel: null
-				});
-			});
+			fs_base = await getFSBase(1);
+		}
+		if (fs_type === "opfs") {
+			fs_base = await getFSBase(0);
 		}
 		if (fs_type === 'config') {
 			fs_base = await new Promise((resolve, reject) => {
@@ -257,8 +264,13 @@ async function callFBI(globalStorage) {
 
 			return fs;
 		}
-		case "opfs": return opfsInstance || (opfsInstance = createWebFileSystem(await navigator.storage.getDirectory()));
-		case "config": return createConfigFileSystem(fs_base);
+		case "opfs": {
+			let baseDir = await navigator.storage.getDirectory();
+			const baseDirStr = fs_base;
+			if (baseDirStr) baseDir = baseDir.getDirectoryHandle(baseDirStr, {create:true});
+			return createWebFileSystem(baseDir);
+		}
+		case "config": return createVirtualFileSystem(fs_base);
 	}
 }
 
@@ -333,7 +345,7 @@ const Glob = {
 /** @type {AiChat.FunctionTool} */
 const Read = {
 	name: "Read",
-	description: "Read text file by 1-based line `offset`." +
+	description: "Read a file by 1-based line `offset`." +
 		" Negative `offset` count from the end." +
 		" Return at most `limit` lines." +
 		" Read(offset=-5) for a 10-line file return line 6-10" +
@@ -347,8 +359,7 @@ const Read = {
 			path: { type: "string", },
 			format: {
 				type: "string",
-				enum: ["raw", "lineNumber"],
-				description: "`lineNumber` will prefixed result with `line + \\t + content`"
+				enum: ["raw", "lineNumber"]
 			},
 			offset: { type: "integer" },
 			limit: { type: "integer" },
@@ -359,21 +370,6 @@ const Read = {
 			}
 		},
 		required: ["path", "format"]
-	}
-};
-/** @type {AiChat.FunctionTool} */
-const ReadImage = {
-	name: "ReadImage",
-	description: "Load an image file to visually inspect it",
-	script: fileAccess("readImage"),
-	title: prefixTitle("查看图片"),
-
-	parameters: {
-		type: "object",
-		properties: {
-			path: { type: "string", },
-		},
-		required: ["path"]
 	}
 };
 /** @type {AiChat.FunctionTool} */
@@ -399,7 +395,7 @@ const Write = {
 /** @type {AiChat.FunctionTool} */
 const Append = {
 	name: "Append",
-	description: "Append to the end of a file. Non exist file will be created.",
+	description: "Append to the end of a file. New file will be created.",
 	script: fileAccess("append"),
 	title: prefixTitle("追加"),
 	parameters: {
@@ -418,42 +414,45 @@ const Append = {
 	}
 };
 /** @type {AiChat.FunctionTool} */
-const Patch = {
-	name: "Patch",
-	description: "Patch one to multiple ranges in a file using anchors. " +
-		"Each patch modifies the interval [startAnchor, endAnchor]. " +
-		"Anchor format is \"line#hash\"",
+const LineEdit = {
+	name: "LineEdit",
+	description:
+		"Replace line ranges in a file. " +
+		"Each edit replaces lines [startLine, endLine] (1‑based, inclusive) with `content`. " +
+		"Edits are applied in parallel, so you can provide all start/end lines " +
+		"based on the file state you just read — no offset calculation needed.",
 	script: fileAccess("patch"),
-	title: prefixTitle("修改"),
-
+	title: prefixTitle("编辑(高级)"),
 	parameters: {
 		type: "object",
 		properties: {
 			path: { type: "string" },
-			patches: {
+			edits: {
 				type: "array",
 				items: {
 					type: "object",
 					properties: {
-						startAnchor: { type: "string" },
-						endAnchor: { type: "string" },
+						startContent: { type: "string", description: "EXACT single-line content of the file at startLine" },
+						startLine: { type: "integer" },
+						endContent: { type: "string", description: "EXACT single-line content of the file at endLine" },
+						endLine: { type: "integer" },
 						content: { type: "string" },
 					},
-
-					required: ["startAnchor", "endAnchor", "content"]
+					required: ["startContent", "startLine", "endContent", "endLine", "content"]
 				}
 			}
 		},
-		required: ["path", "patches"]
+		required: ["path", "edits"]
 	}
 };
 /** @type {AiChat.FunctionTool} */
 const Edit = {
 	name: "Edit",
 	description:
-		"Find and replace text within a file in an optional 1-based line range." +
+		"Find and replace text within a file." +
 		" When `replaceAll` is true, replaces all occurrences in that range." +
-		" when `replaceAll` is false, it must occur exactly once in that range.",
+		" when `replaceAll` is false, it must occur exactly once in that range." +
+		" Use optional 1-based inclusive `startLine` and `endLine` to disambiguate when the search string appears multiple times.",
 	script: fileAccess("edit"),
 	title: prefixTitle("修改"),
 
@@ -541,12 +540,12 @@ const MAX_LINE_LENGTH = 180;
 /** @type {AiChat.FunctionTool} */
 const Grep = {
 	name: "Grep",
-	description: `Search for a regex pattern across files in a directory.`,
+	description: `Search for a regex pattern across files.`,
 	parameters: {
 		type: "object",
 		properties: {
 			pattern: { type: "string", description: "Regular expression pattern" },
-			path: { type: "string", default: "." },
+			path: { type: "string", default: ".", description: "Directory or file" },
 			glob: { type: "string", default: "**" },
 			maxResults: { type: "integer", default: 50, minimum: 1, maximum: 500 },
 		},
@@ -558,7 +557,7 @@ const Grep = {
 		const p = pattern.length > 30 ? pattern.slice(0, 30) + "…" : pattern;
 		return "搜索 " + (glob !== "**" ? path + "/" + glob : path) + " 中的 " + p;
 	},
-	script: async ({ pattern, path = ".", glob = "**", maxResults = 50 }, response, conv) => {
+	async script({ pattern, path = ".", glob = "**", maxResults = 50 }, response, conv) {
 		if (conv.fs_type === "api") {
 			try {
 				const spawn = fileAccess("spawn");
@@ -572,7 +571,9 @@ const Grep = {
 						"--max-columns", MAX_LINE_LENGTH,
 						"--color", "never",
 						"--max-count", maxResults,
-						"--glob", glob,
+						"--type-add",
+						"foo:"+glob,
+						"-tfoo",
 						"--path-separator", "/",
 						"--",
 						pattern,
@@ -585,14 +586,14 @@ const Grep = {
 
 				if (!result.startsWith("Exit code -1")) {
 					result = result.slice(result.indexOf('\n')+1);
-					return result.split("\n\n").map(item => item.slice(path.length+1)).slice(0, maxResults).join("\n\n") || '[No match]';
+					const arr = result.replaceAll(/^(\d+):/gm, "$1\x1F").split("\n\n");
+					return (arr.length === 1 ? arr[0] : arr.map(item => item.slice(path.length+1)).slice(0, maxResults).join("\n\n")) || '[No match]';
 				}
 			} catch (e) {
 				showToast("未找到后端的rg/ripgrep工具，可能影响性能\n"+e, 'error');
 			}
 		}
 
-		const list = fileAccess("list");
 		const read = fileAccess("read");
 
 		let flag = '';
@@ -618,7 +619,19 @@ const Grep = {
 			taskQueue.add(self);
 		};
 
-		for (const [relPath, type] of (await list({ path, glob, json: true }, response, conv))) {
+		let listError;
+		let files;
+		try {
+			const list = fileAccess("list");
+			files = await list({path, glob, json: true}, response, conv);
+			path += '/';
+		} catch (e) {
+			if (glob !== '**') throw e;
+			listError = e;
+			files = [["", 'file']];
+		}
+
+		for (const [relPath, type] of files) {
 			if (type !== 'file') continue;
 			if (matches >= maxResults) break;
 
@@ -627,26 +640,27 @@ const Grep = {
 
 				let content;
 				try {
-					content = await read({ path: path + "/" + relPath, format: "raw", maxChars: 65536 }, response, conv);
+					content = await read({ path: path + relPath, format: "raw", maxChars: 65536 }, response, conv);
 				} catch {
+					if (listError) throw listError;
 					return;
 				}
 
 				if (matches >= maxResults) return;
 
-				const lines = content.split("\n");
+				const lines = content.split("\n").map(item => item.trimEnd().replaceAll("\t", "  "));
 				let match;
 				for (let i = 0; i < lines.length; i++) {
 					if (regExp.test(lines[i])) {
 						if (!match) {
 							if (results) results += '\n';
-							results += relPath+'\n';
+							if (relPath) results += relPath+'\n';
 							match = true;
 						}
 
 						let line = lines[i];
 						if (line.length > MAX_LINE_LENGTH) line = "[Omitted long matching line]"; // 行为统一
-						results += (i+1)+":"+line+'\n';
+						results += (i+1)+"\x1F"+line+'\n';
 						if (++matches >= maxResults) return;
 					}
 				}
@@ -659,12 +673,17 @@ const Grep = {
 	},
 };
 
+const programTitle = (req, ctx = {}) => {
+	return req.function.name+": " + getToolParameters(ctx, req).explanation;
+};
+
 /** @type {AiChat.FunctionTool} */
 const RunBackgroundProgram = {
 	name: "RunBackgroundProgram",
 	description: "Execute a program in background.",
 	interactive: "secure",
 	script: fileAccess("run_bg"),
+	title: programTitle,
 
 	parameters: {
 		type: "object",
@@ -710,6 +729,7 @@ const RunProgram = {
 	description: "Execute a program with an array of arguments.",
 	interactive: "secure",
 	script: fileAccess("spawn"),
+	title: programTitle,
 
 	parameters: {
 		type: "object",
@@ -742,6 +762,7 @@ const Shell = {
 	description: "Run a command string through a shell.",
 	interactive: "secure",
 	script: fileAccess("shell"),
+	title: programTitle,
 
 	parameters: {
 		type: "object",
@@ -763,88 +784,31 @@ const Shell = {
 	}
 };
 
-let fsPrompt = `<file-editing>
+const fsTools = [Glob, Read, Grep, Stat, AskUser, Edit, Write, Append, Delete, Mkdirs, CopyMove];
+let fsPrompt = () => {
+	let prompt = `<file-editing>
 - Root path is '.', **always** use relative path.
-- All writing tools like Append and Write, will automatically create intermediate directories.
-- Grep result is \`ripgrep --heading\` format:
+- All writing tools like Append and Write, will automatically create parent directories.
+- DO NOT read file to verify edits, tool will not return "success' if edit failed.
+- Reading errors are separated from file content by a '\x03' delimiter; everything after this character is error info, not file content.
+- Line-numbered output from any tool follows the format \`lineNumber\x1Fcontent\`
+`;
+
+	if (config.modalities.includes('image')) {
+		prompt += `- Read tool can read images to visually inspect them.\n`;
+	}
+
+	prompt += `- Grep result example:
 \`\`\`
 a.txt
-5:content
+5\x1Fcontent
 
 b.txt
-2:content
+2\x1Fcontent
 \`\`\`
 </file-editing>`;
-const fsTools = [Glob, Read, ReadImage, Grep, Stat, AskUser, Edit, Write, Append, Delete, Mkdirs, CopyMove];
-if (config.fs_hashline) {
-	Read.parameters.properties.format = {
-		type: "string",
-		enum: ["raw", "lineNumber", "anchors"]
-	}
-	Edit.description +=
-		" Use this for simple, one-shot substitutions." +
-		" For multi‑edit, insertions, deletions, or when you can't guarantee a unique match, use `patch` with anchors instead.";
 
-	fsTools.push(Patch);
-	fsPrompt += `<file-edit-guide>
-For all file editing, use Read + Patch (anchor‑based) or Edit (string‑based).
-
-### Reading files
-
-Call \`Read\` with one of three formats:
-
-- **\`raw\`** — plain text, no metadata. Use for quick inspection when you don't need line‑level precision.
-- **\`lineNumber\`** — content prefixed with \`N\\t\`. Lightweight: use to scan structure, locate edits, or pair with \`replace\`'s \`start_line\`/\`end_line\`. Cheaper than \`anchors\` (no hash overhead).
-- **\`anchors\`** — content prefixed with \`N#hash\\t\`. Required before \`patch\`. Hash anchors let \`patch\` survive line‑number shifts from earlier edits.
-
-**Strategy**: explore with \`lineNumber\` first (lower token cost). Switch to \`anchors\` only when you're ready to call \`patch\`.
-
-### Anchor‑based editing (preferred for multi‑edit, insertions, or large files)
-
-1. **Read with anchors**: Use \`Read(format='anchors')\`. The response looks like:
-
-\`\`\`
-1#fdb1	content
-...
-1234#e7b7	test
-[TRUNCATED: 1234 of 5678 lines shown]
-\`\`\`
-
-The anchor is \`1#fdb1\` and \`1234#e7b7\`.
-
-Without \`anchors\` format, you cannot use \`patch\`.
-
-2. **Patch**: Use \`Patch\` with arrays of:
-   - \`startAnchor\`: first line to replace (inclusive).
-   - \`endAnchor\`: last line to replace (inclusive).
-   - \`content\`: replacement lines.
-
-Response example:
-
-\`\`\`
-[Patch 1]
-8#90b8	倒数第二行
-[Patch 2]
-9#1fa9	最后一行
-\`\`\`
-
-- Return new anchors for changed lines. Untouched lines keep their original anchors; their line numbers shift by the cumulative diff.
-- You MUST chain multiple patches in one patch call to avoid mangle anchors.
-
-### String‑based editing
-
-Use \`Edit\` when you have an exact string to swap once.
-
-To disambiguate when the search string appears multiple times, narrow the scope with:
-- \`startLine\` / \`endLine\` (inclusive) — restrict the search to that line range.
-
-Typical workflow: \`Read(format: "lineNumber")\` → spot the line number → \`Edit(search=..., replace=..., startLine=42, endLine=43)\`.
-
-### Guidelines
-- Use \`Read(format: "lineNumber")\` for exploration — cheaper than \`anchors\`.
-- Use \`Patch\` for structural changes, multi‑line edits, insertions, or deletions.
-- Use \`Edit\` only for single, unambiguous find‑and‑replace.
-</file-edit-guide>`;
+	return prompt;
 }
 
 registerTools(
@@ -853,11 +817,25 @@ registerTools(
 	fsTools,
 	{ systemPrompt: fsPrompt }
 );
+registerTools(
+	"LineEdit",
+	"Another edit tool trying to use lesser tokens.",
+	[LineEdit],
+	{
+		systemPrompt: `<line-edit>
+### \`LineEdit\` guide
+
+This tool replaces a contiguous range of lines \`[startLine .. endLine]\` (1‑based, inclusive) with new content. 
+Only use this when you **already have a recent, verified file snapshot** from a \`Read\`/\`Grep\` call.
+</line-edit>`,
+		hidden: "manual"
+	}
+);
 
 registerTools(
 	"FilesReadonly",
 	"只读文件访问.",
-	[Glob, Read, ReadImage, Grep, Stat, AskUser],
+	[Glob, Read, Grep, Stat, AskUser],
 	{ systemPrompt: fsPrompt, hidden: "manual" }
 );
 

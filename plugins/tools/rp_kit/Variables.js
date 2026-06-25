@@ -30,6 +30,7 @@ Return value: the new value at the pointer after the operation completes.`
 	parameters: {
 		type: "object",
 		properties: {
+			// maybe a MOVE(from, to)
 			operation: { enum: ["set", "plus", "delete"], },
 			pointer: {pattern: "^/[a-zA-Z0-9/]+-?$", description: `JSON Pointer like "/player/hp" or "/inventory/items/0"; `},
 			explanation: {

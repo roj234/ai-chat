@@ -228,7 +228,7 @@ SETTINGS.push(
 		id: "st_userdesc",
 		name: "自我介绍",
 		type: "textbox",
-		placeholder: "{{user}}是一个35岁的男性提夫林程序员，正在担心被深水城的雾雨魔法店裁员（我在写什么？）",
+		placeholder: "[user]\n{{user}}是一个35岁的男性提夫林程序员，正在担心被深水城的雾雨魔法店裁员\n\nOutput in 简体中文 regardless of prompt language.\n\n[char]",
 		_tab: "character"
 	},
 	{

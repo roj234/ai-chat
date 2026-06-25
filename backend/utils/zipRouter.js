@@ -1,7 +1,8 @@
 import {ZipReader} from "unconscious/common/zip-io.js";
 import {MIME_TYPES} from "./mime.js";
 import {pipeline} from 'node:stream/promises';
-import {Readable} from 'node:stream'
+import {Readable} from 'node:stream';
+import {createBrotliDecompress, createInflateRaw} from "node:zlib";
 
 
 function getContentType(filename) {
@@ -53,13 +54,12 @@ export function createZipRouter(zip) {
 			return true;
 		}
 
-		const method = entry.method === 8 ? 'deflate' : entry.method === 92 ? 'br' : '';
+		const compression = entry.method === 8 ? 'deflate' : entry.method === 92 ? 'br' : '';
 
 		// 决定是否直接发送 ZIP 中的原始 deflate 数据
-		const acceptEncoding = (req.headers['accept-encoding'] || '').toLowerCase();
-		const acceptsDeflate = acceptEncoding.includes(method);  // 即使是 'deflate, gzip' 也会匹配
+		const encodings = (req.headers['accept-encoding'] || '').toLowerCase();
+		const accept = 0 && encodings.includes(compression);
 
-		let body;
 		let headers = {
 			'Content-Type': getContentType(path),
 			'Last-Modified': lastModified,
@@ -67,27 +67,26 @@ export function createZipRouter(zip) {
 			'Cache-Control': 'public',
 		};
 
-		body = await zip.getRaw(entry);
-
+		/** @type {Blob} */
+		let body = await zip.getRaw(entry);
 		let needDecompress;
 
-		if (method && acceptsDeflate) {
+		if (compression && accept) {
 			// ZIP 中是 deflate 压缩，且客户端接受 deflate → 直接发送原始压缩块
-			headers['Content-Encoding'] = method;
+			headers['Content-Encoding'] = compression;
 			headers['Content-Length'] = entry.compressedSize;
 		} else {
 			headers['Content-Length'] = entry.uncompressedSize;
-			if (method) needDecompress = true;
+			if (compression) needDecompress = true;
 		}
 
-		const buffer = Buffer.from(body);
 		res.writeHead(200, headers);
 
+		let readable = Readable.from(body);
 		if (needDecompress) {
-			await pipeline(Readable.from(buffer), new DecompressionStream(method === 'deflate' ? 'deflate-raw' : 'br'), res);
-		} else {
-			await pipeline(Readable.from(buffer), res);
+			readable = readable.pipe(compression === 'deflate' ? createInflateRaw() : createBrotliDecompress());
 		}
+		await pipeline(readable, res);
 		return true;
 	};
 }

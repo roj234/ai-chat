@@ -110,7 +110,7 @@ MessageRoles["userPrompt"] = {
  *
  * @param {string} id
  * @param {string} name
- * @param renderer
+ * @param {(data: import("unconscious").Reactive<Object>) => import("unconscious").Renderable} renderer
  * @param compose
  * @param {OpenAI.Schema | function(AiChat.AssistantMessage): OpenAI.Schema} schema
  */
@@ -145,7 +145,7 @@ export function registerSchemaMessageRole(id, name, renderer, compose, schema) {
 							{() => state.error && <pre className={"error"} >{state.error}</pre> }
 						</div>);
 					} else {
-						return (<pre className={"code-block"}><code lang={id}>{renderer(message.content)}</code></pre>);
+						return (<pre className={"code-block"} lang={id}><code lang={id}>{renderer(message.content)}</code></pre>);
 					}
 				}
 			});

@@ -1,5 +1,6 @@
 import {abortCompletion, inputText, messages, selectedConversation} from "../states.js";
 import {$watch, unconscious} from "unconscious";
+import {TOOL_NAME, toolScriptRegistry} from "../skills.js";
 
 const x = ["发送", "中止", "继续", "重试", "执行工具"];
 const y = ["ri-send-plane-fill", "ri-square-fill", "ri-play-large-fill", "ri-loop-right-line", "ri-function-ai-line"/* ri-check-double-line */];
@@ -46,7 +47,7 @@ export const createSendButton = (attachments, onSend) => {
 
 			if (state === 4) {
 				for (let response of last.tool_responses) {
-					if (!response.content) return false;
+					if (!response || (!response.content && toolScriptRegistry[response[TOOL_NAME]]?.interactive)) return false;
 				}
 			}
 

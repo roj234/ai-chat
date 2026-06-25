@@ -15,5 +15,10 @@ if not exist config.js (
   cls
 )
 
+chcp 65001
+set PYTHONENCODING=utf-8
+set LC_ALL=zh_CN.UTF-8
+set LANG=zh_CN.UTF-8
+bash -c "printf \"Emojis (UTF-8 Check):\\n\\xF0\\x9F\\x98\\x80\\n\\xF0\\x9F\\x94\\xA5\\n\""
 node server.js --static dist.brip
 pause

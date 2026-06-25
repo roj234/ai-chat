@@ -26,7 +26,7 @@
     }
 
     & pre::-webkit-scrollbar {
-        display: none;
+        visibility: hidden;
     }
 
     & textarea {

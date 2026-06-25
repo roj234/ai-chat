@@ -10,9 +10,10 @@ import {
 	updateConversation
 } from "/src/database.js";
 import {config, conversations} from "/src/states.js";
-import {createHashLine} from "/common/hash-line.js";
-import {parsePath} from "./WebFileSystem.js";
+import {createHashLine} from "/common/fs-common.js";
+import {normalizePath} from "./WebFileSystem.js";
 import {unconscious} from "unconscious";
+import {NestedMap} from "unconscious/common/NestedMap.js";
 
 const BLACKLIST_CHARS = new RegExp('[| &=?#{}<>:,]', 'g');
 
@@ -28,11 +29,11 @@ const fileEscape = (str) => str.replaceAll(BLACKLIST_CHARS, encodeURI);
  * 基于应用配置数据库的虚拟文件系统
  * @returns {AiChat.FileSystemInstance}
  */
-export function createConfigFileSystem(base) {
+export function createVirtualFileSystem(base) {
 	const tmp = new Map;
-	const basePath = parsePath(base);
+	const basePath = normalizePath(base);
 	const myParse = (path) => {
-		const arr = parsePath(decodeURI(path));
+		const arr = normalizePath(decodeURI(path));
 		if (arr[0] === 'tmp') return arr;
 
 		if (arr.length < basePath.length) throw "Permission denied (path must start from: " + fileEscape(basePath.join('/')) + ")";
@@ -64,9 +65,6 @@ export function createConfigFileSystem(base) {
 	};
 
 	const api = {
-		async read_image({ path }) {
-			return "read_image() is not available in ConfigFileSystem";
-		},
 		async mkdirs({ path }) {
 			return "mkdirs() is not available in ConfigFileSystem (you may only use existing directories)";
 		},
@@ -116,7 +114,7 @@ export function createConfigFileSystem(base) {
 			if (globStr) throw new Error("glob filter is not available in ConfigFileSystem");
 
 			let entries = null;
-			const arr = parsePath(decodeURI(path));
+			const arr = normalizePath(decodeURI(path));
 
 			switch (arr.length) {
 				case 0:

@@ -61,49 +61,59 @@ import {jsonPrompt} from "/plugins/rpg/core.js";
 
 const ID = 'my/storyEngine';
 
-async function sendAction(messages, userInput) {
+async function sendAction(messages, prompt) {
 	// 你可以根据用户消息修改schema，如果需要
 	const schema_ = structuredClone(schema);
 
 	// 构造用户提示
 	const time = Date.now();
-	messages.push({
-		id: -1, // 不存入数据库
+	const input_messages = [{
 		role: "user",
 		time,
-		content: schemaToPrompt(schema, config.jsonSupport) + "提示词，当然，你也可以不用schemaToPrompt函数，手动向AI描述schema\n" + userInput
+		content: prompt
+	}];
+
+	// 使用 id -1 让这条消息不保存（因为是临时的）
+    // 使用 userPrompt 角色让消息渲染 content，但实际提交给AI的内容为 prompt
+	messages_.push({
+		id: -1,
+		role: "userPrompt",
+		time,
+		content: prompt,
+		prompt: `
+【做一些事】，格式如下（当然你也可以不用这个工具函数而是自行构造提示词）
+JSON Schema 只是提供了一层额外的约束
+
+${schemaToPrompt(schema_, config.jsonSupport)}
+
+## 用户输入
+
+${prompt}`
 	});
 
-	const originalPrompt = {
-		role: "user",
-		time,
-		content: userInput
-	};
-
-	let assistantResponse;
 	try {
-		// 调用模型
-		assistantResponse = await jsonPrompt(schema_, messages, {
-			// 自定义请求体
-			reasoning: {enabled: enableThink},
-			max_tokens: 8000,
+		const assistantResponse = await jsonPrompt(schema_, messages_, {
+			// 在这里可以自行修改请求体
+			reasoning: {enabled: false},
+			max_tokens: Math.max(8192, prompt.length),
 		}, ID);
-	} catch (e) {
-		console.error(e);
-		// 出错了，恢复原始数据
-		messages[messages.length - 2] = originalPrompt;
-		return;
-	}
 
-	// 将 AI 回复替换消息数组，使用splice是为了兼容对话分支
-	messages.splice(messages.length - 2, 2,
-		originalPrompt,
-		{
+		const jsonData = JSON.parse(assistantResponse.content);
+		// 你可以在这里对消息进行处理
+
+		input_messages.push({
 			...assistantResponse,
 			role: ID,
-			content: JSON.parse(assistantResponse.content)
-		}
-	);
+			content: jsonData
+		});
+	} catch (e) {
+		// 错误处理，jsonPrompt 不会因为网络故障抛出异常
+        // 但出现推理问题时 assistantResponse 的 finish_reason 为 error 且 content 可能不是合法的 JSON 所以还是会走到这里
+		console.error(e);
+	}
+
+	// 将 AI 回复替换消息数组，必须使用 splice 函数，因为对话分支管理器 hook 了它
+	messages_.splice(messages_.length - 2, 2, ...input_messages);
 }
 ```
 
@@ -174,15 +184,15 @@ registerSchemaMessageRole(
     '故事渲染器',   // 显示名称
     renderStory,   // 渲染函数 (val) => JSX.Element[]
     composer,      // 消息组合函数，用于决定哪些数据要发回LLM
-    schema         // 可选的 schema （可以和AI生成的不同，例如少些 required，或包含复杂的 allOf ），用于编辑时的校验
+    schema         // 可选的 schema （可以和AI生成的不同），它用于用户手动编辑时的校验
 );
 
-// 注册命令
+// 注册命令 (可选)
 COMMAND_REGISTRY["say"] = [
 	(args) => {
 		sendAction(messages, args[0].trim());
 	},
-	"开启或继续一段富文本故事"
+	"命令描述"
 ];
 ```
 

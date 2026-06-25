@@ -23,7 +23,7 @@ import {
 	SYNC_UNLOCKED
 } from "/backend/sync_const.js";
 import {updateMessageUI} from "../components/MessageList.jsx";
-import {clearDirtyFlags, databaseError, listConversations} from "../database.js";
+import {clearDirtyFlags, databaseError, DB_MESSAGES_DIFF, listConversations} from "../database.js";
 import {patch} from "unconscious/common/deepEqual.js";
 import {decodeMsg} from "unconscious/common/msgpack.js";
 import {msgpack_schema} from "/common/MsgpackSchema.js";
@@ -204,7 +204,11 @@ export function initSync(address, kvRef, kvCache) {
 			case SYNC_CONVERSATION_DEL: {
 				const index = conversations.findIndex(item => item.id === data.id);
 				if (index >= 0) data = patch(conversations.splice(index, 1)[0], data);
-				if (type === SYNC_CONVERSATION) conversations.unshift(data);
+				if (type === SYNC_CONVERSATION) {
+					// 作废消息缓存
+					delete data[DB_MESSAGES_DIFF];
+					conversations.unshift(data);
+				}
 				else if (data.id === selectedConversation.id) {
 					showToast("当前对话已被其它客户端删除", 'error', 0);
 					beginConversation();

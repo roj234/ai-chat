@@ -93,7 +93,7 @@ function renderWorld(val) {
 						<td>{attr.description}</td>
 						<td>{attr.rank_rule}</td>
 						<td>{attr.type}</td>
-						<td style={() => `color:#${unconscious(attr).color}`}>
+						<td style={() => `color:#${unconscious(attr.color)}`}>
 							{attr.color}
 						</td>
 					</tr>

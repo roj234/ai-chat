@@ -32,7 +32,8 @@ export function registerLogRoutes(router, batcher) {
 		id = id ?? await ctx.getVariable("messageId");
 		if (id == null || time == null) return { error: 'id required' };
 
-		LOG_HOOK(body);
+		const result = await LOG_HOOK(body);
+		if (result === 'SKIP') return false;
 
 		if (id === -1) id = null;
 		ctx.db.prepare('INSERT INTO logs (id, time, data) VALUES (?, ?, ?) ON CONFLICT DO NOTHING').run(id, time, await compressLog(body));

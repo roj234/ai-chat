@@ -225,6 +225,7 @@ export function createMarkdownRenderer(root, options = {}) {
 				if (filename) span.dataset.name = filename;
 				span.innerText = filename || language;
 				value = language;
+				owner.setAttribute(name, value);
 			}
 
 			if (!options.trusted) {

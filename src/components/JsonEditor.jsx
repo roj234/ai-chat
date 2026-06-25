@@ -33,7 +33,7 @@ const findPosition = (root, targetOffset) => {
 
 export const JsonEditor = ({value = "", state}) => {
 	const currentText = preserveState($state(value));
-	let pre, code;
+	let pre;
 	/** @type {HTMLTextAreaElement} */
 	let textarea;
 
@@ -59,12 +59,12 @@ export const JsonEditor = ({value = "", state}) => {
 			cancelHighlight = lightAsync(codeStr, "json", (html) => {
 				cancelHighlight = null;
 				lastText = codeStr;
-				morphdom(code, "<code>"+html+"</code>");
+				morphdom(pre, "<pre>"+html+"</pre>");
 				if (errorPos != null) {
 					const cursor = <span className='cursor'></span>;
 
 					const range = document.createRange();
-					const pos = findPosition(code, errorPos);
+					const pos = findPosition(pre, errorPos);
 					range.setStart(...pos);
 					if (errorPos >= codeStr.length)
 						range.insertNode(new Text("\n"));
@@ -85,8 +85,8 @@ export const JsonEditor = ({value = "", state}) => {
 		const suffix = commonSuffix(oldText, newText, prefix);
 
 		const range = document.createRange();
-		range.setStart(...findPosition(code, prefix));
-		range.setEnd(...findPosition(code, oldText.length - suffix));
+		range.setStart(...findPosition(pre, prefix));
+		range.setEnd(...findPosition(pre, oldText.length - suffix));
 		range.deleteContents();
 
 		const insertedText = newText.slice(prefix, newText.length - suffix);
@@ -101,7 +101,7 @@ export const JsonEditor = ({value = "", state}) => {
 	}
 
 	const el = <div className="args CodeEditor">
-		<pre ref={pre}><code ref={code}></code></pre>
+		<pre ref={pre}></pre>
 		<textarea ref={textarea} spellCheck={false} value={currentText} onInput={update} onKeyDown={event => {
 			if (event.key === "Tab") {
 				event.preventDefault();

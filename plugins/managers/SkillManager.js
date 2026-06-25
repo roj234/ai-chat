@@ -6,6 +6,7 @@ import {addMCPServer, defaultGroups, toolGroups, toolScriptRegistry} from "/src/
 import {renderMarkdownToElement} from "/src/markdown/markdown.js";
 
 import "./SkillManager.css";
+import "../rp_basic/PresetPanel.css";
 import {config, selectedConversation} from "/src/states.js";
 import {CUSTOM_CONTROLS, SETTINGS} from "/src/settings.js";
 import {Filter} from "unconscious/common/components/Filter.jsx";
@@ -121,7 +122,7 @@ function openSkillManager(preset, isOpen, close) {
 						const filter = <Filter config={[
 							{
 								type: "input",
-								name: "名称",
+								name: "名称 (namespace prefix)",
 								placeholder: "建议使用 PascalCase",
 								id: "name",
 								pattern: /^[a-zA-Z0-9_-]+$/,
@@ -130,7 +131,7 @@ function openSkillManager(preset, isOpen, close) {
 							{
 								type: "input",
 								name: "服务器地址",
-								placeholder: "仅支持SSE协议",
+								placeholder: "仅支持SSE协议 请勿以 /sse 结尾",
 								id: "url",
 								pattern: /.+/,
 								required: true

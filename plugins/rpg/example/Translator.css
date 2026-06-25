@@ -1,0 +1,170 @@
+
+pre[lang="aichat/translator"] {
+    margin: 0;
+    background: transparent;
+
+    & > code {
+        font-family: 'Segoe UI', "Microsoft YaHei", "PingFang SC", sans-serif;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        color: var(--text-lighter);
+    }
+
+    & p { margin: 0; }
+
+    /* ===== 消息级折叠块 ===== */
+    & details {
+        border: 1px solid var(--border);
+        letter-spacing: 0.3px;
+
+        & > * { padding: 6px 12px; }
+
+        & > summary {
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            background: var(--secondary-bg);
+            user-select: none;
+
+            &:hover {
+                color: var(--text);
+                background: var(--secondary-hover);
+            }
+        }
+
+        & > *:not(summary) {
+            font-size: 0.88em;
+            line-height: var(--md-line-height);
+        }
+    }
+
+    /* ===== 翻译卡片 ===== */
+    .trans-card {
+        border: 1px solid var(--border);
+    }
+
+    /* ---- 卡片首行：原文 + 译文并肩 ---- */
+    .trans-card .card-main {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+
+        @media (max-width: 640px) {
+            grid-template-columns: 1fr;
+        }
+
+        & > ::before {
+            display: block;
+            font-weight: 600;
+            color: var(--accent);
+            font-size: 12px;
+            letter-spacing: 0.6px;
+            margin-bottom: 4px;
+        }
+    }
+
+    .trans-card .original {
+        padding: 14px 16px;
+        font-size: 0.95em;
+        line-height: var(--md-line-height);
+        background: var(--chip-bg);
+        border-right: 1px solid var(--bg);
+
+        &::before {
+            content: "原文";
+        }
+    }
+
+    .trans-card .translated {
+        padding: 14px 16px;
+        font-size: 0.95em;
+        line-height: 1.7;
+        color: var(--text);
+        background: var(--chip-hover);
+
+        &::before {
+            content: "译文";
+        }
+    }
+
+    /* ---- 卡片折叠区：CoT 过程 ---- */
+    .trans-card .cot-details {
+        border: none;
+    }
+
+    .cot-body {
+        color: var(--muted);
+
+        & > * + * {
+            margin-top: 10px;
+        }
+
+        & > ::before {
+            display: block;
+            width: 100%;
+            font-weight: 600;
+            color: #8e9cb2;
+            font-size: 12px;
+            margin-bottom: 2px;
+        }
+    }
+
+    /* 专业词汇标签 */
+    .cot-body .term-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+
+        &::before { content: "专业词汇"; }
+
+        & .tag {
+            background: var(--chip-bg);
+            padding: 1px 10px;
+            border-radius: 10px;
+        }
+    }
+
+    .cot-body .intent {
+        &::before { content: "意图理解"; }
+    }
+
+    .cot-body .strategy {
+        &::before { content: "翻译策略"; }
+
+        & ol {
+            margin: 0;
+            padding-left: 1.3em;
+
+            & li + li { margin-top: 2px; }
+        }
+    }
+
+    .cot-body .drafts {
+        &::before { content: "草稿与润色"; }
+
+        & .draft-item {
+            padding: 3px 10px;
+            background: var(--chip-bg);
+            border-radius: 4px;
+            color: #94a3b8;
+
+            & + .draft-item { margin-top: 4px; }
+
+            &:last-child {
+                background: var(--chip-hover);
+                color: var(--text);
+            }
+        }
+    }
+
+    /* ===== 渐入动画 ===== */
+    .trans-card {
+        animation: translatorFadeIn 0.3s ease-out;
+    }
+
+    @keyframes translatorFadeIn {
+        from { opacity: 0; transform: translateY(4px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+}

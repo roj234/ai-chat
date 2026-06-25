@@ -3,7 +3,7 @@
  * @param {Blob} blob
  * @return {Promise<[string, number]>}
  */
-export async function readBOM(blob) {
+export const readBOM = async blob => {
 	const stream = blob.stream();
 	const reader = stream.getReader();
 	try {
@@ -57,7 +57,7 @@ export async function readBOM(blob) {
 	} finally {
 		reader.releaseLock(); // 释放锁，其他读取器可复用
 	}
-}
+};
 
 /**
  *
@@ -65,7 +65,7 @@ export async function readBOM(blob) {
  * @param {string} charset
  * @return {Promise<string>}
  */
-async function tryDecode(blob, charset) {
+const tryDecode = async (blob, charset) => {
 	const stream = blob.stream().pipeThrough(new TextDecoderStream(charset, { fatal: true, ignoreBOM: true }));
 	const reader = stream.getReader();
 
@@ -77,19 +77,24 @@ async function tryDecode(blob, charset) {
 	}
 
 	return result;
-}
+};
 /**
  *
  * @param {Blob} blob
  * @return {Promise<string>}
  */
-export async function readAsString(blob) {
+export const readAsString = async blob => {
 	const [charset, skip] = await readBOM(blob);
 
-	if (charset) return await tryDecode(blob, charset);
+	if (charset) {
+		try {
+			return await tryDecode(blob.slice(skip), charset);
+		} catch {}
+	}
 
-	const utfVal = await tryDecode(blob, 'UTF-8').catch(_ => null);
-	const gbkVal = await tryDecode(blob, 'GB18030').catch(_ => null);
-
-	return utfVal || gbkVal;
-}
+	try {
+		return await Promise.any([tryDecode(blob, 'UTF-8'), tryDecode(blob, 'GB18030')]);
+	} catch {
+		throw ('[Failed to decode binary file]');
+	}
+};

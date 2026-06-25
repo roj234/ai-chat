@@ -141,7 +141,7 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 		for (let i = 0; i < messages.length; i++) {
 			const message = messages[i];
 			const id = message.id;
-			if (id === -1) continue;
+			if (id < 0) continue;
 
 			let diff;
 			if (id) {
@@ -155,7 +155,7 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 				}
 			} else {
 				// 新消息防止重复入库
-				message.id = -1;
+				message.id = -2;
 			}
 
 			if (!keepTime) conversation.time = Date.now();
@@ -186,7 +186,7 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 			}
 			promises.push(save().finally(() => {
 				// 如果新消息保存失败，不要阻止后续保存
-				if (message.id === -1) delete message.id;
+				if (message.id === -2) delete message.id;
 			}));
 		}
 

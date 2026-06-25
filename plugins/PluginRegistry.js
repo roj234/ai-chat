@@ -39,6 +39,9 @@ import "./tools/zoom_in.js";
 // 注意目前只能用JS，如果想用Python可以看看Pyoxide
 import "./tools/interpreter.js";
 
+// 预装管线（？）
+import "./rpg/example/Translator.js";
+
 // 内联代码的可选插件
 import {registerTaskList} from "./tools/task_list.js";
 import {registerFileTransfer} from "./tools/file_transfer.js";
@@ -57,6 +60,7 @@ import {registerCodeBlockRenderer, renderMarkdownToElement} from "/src/markdown/
 import {createDragSort} from "/common/DragSort.js";
 import {registerSchemaMessageRole} from "/common/ReactiveJSON.js";
 import {COMMAND_REGISTRY} from "../src/commands.js";
+import {registerHumanAsTool} from "./tools/human_as_tool.js";
 
 /**
  * @type {Array<{
@@ -131,6 +135,11 @@ const pluginDefinitions = [
 				}
 			}], {default: true});
 		}
+	},
+	{
+		name: "人在回路",
+		description: "没想到我居然是LSP！",
+		load: registerHumanAsTool
 	},
 	{
 		name: "外部插件API",

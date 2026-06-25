@@ -663,17 +663,29 @@ export const SETTINGS = [
 		step: 1
 	},
 	{
+		id: "ignoreToolError",
+		_tab: "tools",
+		name: "AFK / 让模型自己修调用",
+		type: "radio",
+		choices: {
+			"工具调用失败不打断自动提交": true
+		}
+	},
+	{
 		id: "permittedTools",
 		_tab: "tools",
-		name: "自动批准的工具ID",
-		placeholder: "逗号分隔，使用'*'允许所有",
+		name: "全局工具审批配置",
+		placeholder: "逗号分隔自动执行的工具名称，使用感叹号前缀来手动执行，使用星号允许全部",
 		type: "input",
 		pattern(value) {
 			const data = value.split(",").map(item=>item.trim());
 			if (data.filter(Boolean).length !== data.length)
 				throw "不得包含空白项";
-			for (const key of data) {
-				if (key !== '*' && !toolScriptRegistry[key]) {
+			for (let key of data) {
+				const ch = key[0];
+				if (ch === '*') continue;
+				if (ch === '!') key = key.slice(1);
+				if (!toolScriptRegistry[key]) {
 					throw '工具 '+key+' 不存在';
 				}
 			}

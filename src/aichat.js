@@ -5,6 +5,7 @@ import {ConversationList, LOCKED, updateConversationListUI} from "./components/C
 import {SETTINGS} from "./settings.js";
 import {databaseError, getMessages, isIDB, listConversations, updateConversation} from "./database.js";
 import {
+	abortCompletion,
 	beginConversation,
 	config,
 	conversations,
@@ -290,6 +291,8 @@ const createApp = () => {
 				if (selectedConversation.ready) {
 					const conv = unconscious(selectedConversation);
 					if (conv === skip) return;
+
+					if (unconscious(abortCompletion)) return;
 
 					const promise = updateConversation(conv, unconscious(messages));
 					if (conv.id == null) {

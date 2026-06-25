@@ -83,49 +83,85 @@ declare namespace AiChat {
 
     type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
-    type Preset = {
+    type ModelConfig = {
+        provider: string
+
+        endpoint: string
+        accessToken: string
+        model: string
+        mode: 'chat' | 'completions'
+        max_tokens: number
+
+        template: string
+
+        canPrefill: boolean
+        prefillPath: string
+
+        forceThink: boolean | null
+        reasoningPath: string
+        reasoningEffortPath: string
+
+        modalities: ('image' | 'audio' | 'tool')[]
+        additionalBody: Record<string, any>
+        streamDuplex: boolean
+
+        jsonSupport: 0 | 1 | 2 | 3
+    }
+
+    type SamplingConfig = {
+        temperature: number
+        top_p: number
+        top_k: number
+        min_p: number
+        frequency_penalty: number
+        presence_penalty: number
+        stop: string[]
+        antiSlop: Record<string, number>
+        logit_bias: Record<string, number>
+    }
+
+    type PromptConfig = {
+        systemPrompt: string
+        reasoning: false | ReasoningEffort
+        CoTPrompt: string
+        stripCoT: boolean | 'm'
+    }
+
+    type TitleModelConfig = {
+        generateTitle: boolean | 'tool'
+        titleModel: string
+        titlePrompt: string
+    }
+
+    type Preset = ModelConfig & SamplingConfig & PromptConfig & TitleModelConfig & {
         name: string,
 
+        db_server: string,
+        db_pat: string,
+
         theme?: 'light' | 'dark';
+        sound: false | 'always' | 'background',
+        allowHTMLTags: ('basic' | 'style' | 'script')[]
 
-        endpoint: string,
-        accessToken: string,
-        model: string,
-        mode: 'chat' | 'completions',
-
-        max_tokens: number,
-        systemPrompt: string,
-        reasoning: false | ReasoningEffort,
-        CoTPrompt: string,
+        blobCacheCapacity: number
 
         reviewRequest: boolean,
         reviewMessage: boolean,
         logSSE: boolean,
         incognito: boolean,
 
-        generateTitle: boolean | 'tool',
-        titleModel: string,
-        titlePrompt: string,
-
         permittedTools: string[],
-        canPrefill: boolean,
         maxToolTurns: number
-        sound: false | 'always' | 'background',
-
-        stripCoT: boolean | 'm',
-        forceThink: boolean | null,
-        modalities: ('image' | 'audio' | 'tool')[]
-
-        additionalBody: Record<string, any>,
-        stop: string[],
-        antiSlop: Record<string, number>
 
         nickname: string;
 
-        jsonSupport: 0 | 1 | 2 | 3,
-
         // UI
+        combineToolCalls: 0 | 1,
+        uiAutoHideInput: 0 | 1,
+        expandThinkBlock: 0 | 1,
+        expandToolCall: 0 | 1,
         think: 0 | 1,
+        checkUpdate: 0 | 1,
         tools: 0 | 1,
     }
 

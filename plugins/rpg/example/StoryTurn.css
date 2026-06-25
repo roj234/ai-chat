@@ -1,17 +1,15 @@
-.msg.my\/storyTurn {
-    & pre {
-        margin: 0;
-    }
-}
+pre[lang="my/storyTurn"] {
+    margin: 0;
 
-code[lang="my/storyTurn"] {
-    font-family: 'Segoe UI', "Microsoft YaHei", sans-serif;
-    background: #fdf6e3;
-    border: 2px solid #e2d7ba;
-    color: #444;
-    padding: 1em;
-    /*display: flex;
-    flex-direction: column;*/
+    & > code {
+        font-family: 'Segoe UI', "Microsoft YaHei", sans-serif;
+        background: #fdf6e3;
+        border: 2px solid #e2d7ba;
+        color: #444;
+        padding: 1em;
+        /*display: flex;
+        flex-direction: column;*/
+    }
 
     & p {
         margin: 0;

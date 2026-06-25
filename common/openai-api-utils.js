@@ -102,7 +102,7 @@ export const streamFetch = (url, {key = "", ...data} = {}, onToken) => fetch(url
 });
 
 
-const deltaBlacklist = new Set(["role", "model"]);
+const deltaBlacklist = new Set(["role", "model", "type"]);
 /**
  *
  * @param {Object} chunk

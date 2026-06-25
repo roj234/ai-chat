@@ -31,7 +31,7 @@ export async function checkUpdate(force) {
 	const canCheck = time > (updateInfo.retryAfter || 0) && time - lastCheckTime > 4000000;
 
 	let info = updateInfo.info;
-	if (!canCheck && info) return info;
+	if (!canCheck) return info;
 
 	const url = `https://api.github.com/repos/roj234/ai-chat/releases/latest`;
 	const response = await fetch(url, { headers: {
@@ -49,7 +49,10 @@ export async function checkUpdate(force) {
 		}
 	}
 
-	if (!response.ok) throw new Error(`请求失败: ${response.status} ${response.statusText}`);
+	if (!response.ok) {
+		updateInfo.value = {time: Date.now()};
+		throw new Error(`请求失败: ${response.status} ${response.statusText}`);
+	}
 
 	const release = await response.json();
 

@@ -1,4 +1,4 @@
-import {$state, $store, AS_IS} from 'unconscious';
+import {$state, $store, appendChildren, AS_IS} from 'unconscious';
 import './jsonEditorPage.css';
 import {JsonEditor} from '/src/components/JsonEditor.jsx';
 
@@ -78,4 +78,6 @@ const App = () => {
 	);
 };
 
-document.body.replaceChildren(...App());
+const body = document.body;
+body.replaceChildren();
+appendChildren(body, App());
