@@ -65,7 +65,7 @@ export const CUSTOM_CONTROLS = <>
 			onClick={() => {
 				config.tools ^= true;
 			}}>
-		<div className="tooltip">工具调用：使用工具绘制图表、进行计算</div>
+		<div className="tooltip">智能体：让AI使用工具<br/><small>{isMobile?"长按":"右键"}打开配置菜单</small></div>
 	</button>
 	<button className="ri-git-fork-line chip"
 			style:display={() => selectedConversation.ready ? "" : "none"}

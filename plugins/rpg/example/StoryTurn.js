@@ -2,7 +2,7 @@ import {jsonPrompt} from "../core.js";
 import "./StoryTurn.css";
 import {$once, createReactiveMarkdown, registerSchemaMessageRole, schemaToPrompt} from "/common/ReactiveJSON.js";
 import {$foreach, $update, unconscious} from "unconscious";
-import {abortCompletion, config, messages, selectedConversation} from "/src/states.js";
+import {abortCompletion, config, ensureActiveConversation, messages, selectedConversation} from "/src/states.js";
 import {updateMessageUI} from "/src/components/MessageList.jsx";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 
@@ -103,6 +103,7 @@ Operation semantics:
  * @param {string} prompt
  */
 const sendAction = async (messages_, prompt) => {
+	await ensureActiveConversation();
 	if (unconscious(abortCompletion)) return;
 
 	let schemaToLLM = schema;

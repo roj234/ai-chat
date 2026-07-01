@@ -23,10 +23,10 @@ export const PLACEHOLDERS = {};
  */
 export const defaultGroups = new Set(["Use", "Skill"]);
 /**
- * 工具组摘要，在调用后激活工具
+ * 工具集摘要，在调用后激活工具
  * @type {Record<string, {description: string, allowedTools: string[], skill?: string, hidden: boolean | 'manual', systemPrompt: string}>}
  */
-export const toolGroups = {};
+export const toolset = {};
 /**
  * 技能摘要
  * @type {Record<string, {description: string, content: string}>}
@@ -104,9 +104,9 @@ toolScriptRegistry["SetTitle"] = {
 };
 
 const use_isRevoked = debugSymbol("use_isRevoked");
-const listUsableToolGroups = activatedModules => Object.keys(toolGroups).filter(name => !toolGroups[name].hidden && !activatedModules.has(name));
+const listUsableToolset = activatedModules => Object.keys(toolset).filter(name => !toolset[name].hidden && !activatedModules.has(name));
 
-toolGroups["Use"] = {
+toolset["Use"] = {
 	description: "允许模型激活工具",
 	hidden: "manual"
 };
@@ -127,10 +127,10 @@ toolScriptRegistry["Use"] = {
 		const newToolNames = [];
 
 		for (const moduleName of modules) {
-			if (!toolGroups[moduleName] || activatedModules.has(moduleName))
-				throw "Tool schema validation error:\n$.modules: value("+JSON.stringify(moduleName)+") must in "+JSON.stringify(listUsableToolGroups(activatedModules));
+			if (!toolset[moduleName] || activatedModules.has(moduleName))
+				throw "Tool schema validation error:\n$.modules: value("+JSON.stringify(moduleName)+") must in "+JSON.stringify(listUsableToolset(activatedModules));
 
-			let {allowedTools: allowedToolsArr, onActivated: dynamicCallback} = toolGroups[moduleName];
+			let {allowedTools: allowedToolsArr, onActivated: dynamicCallback} = toolset[moduleName];
 
 			if (dynamicCallback) {
 				allowedToolsArr = await dynamicCallback(allowedToolsArr);
@@ -199,11 +199,11 @@ toolScriptRegistry["Use"] = {
 		for (const moduleName of newModules) {
 			activatedModules.delete(moduleName);
 		}
-		activatedModules.forEach(name => toolGroups[name]?.allowedTools?.forEach(name => allowedTools.add(name)));
+		activatedModules.forEach(name => toolset[name]?.allowedTools?.forEach(name => allowedTools.add(name)));
 	}
 };
 
-toolGroups["Skill"] = {
+toolset["Skill"] = {
 	description: "允许模型激活技能",
 	hidden: "manual"
 };
@@ -226,26 +226,26 @@ toolScriptRegistry["Skill"] = {
 export const getAvailableTools = async (conversation) => {
 	let {allowedTools, activatedModules = defaultGroups} = conversation;
 
-	const systemPrompt = [];
-
+	let systemPrompt = [];
 	for (const name of activatedModules) {
-		let prompt = toolGroups[name]?.systemPrompt;
+		let prompt = toolset[name]?.systemPrompt;
 		if (prompt) {
-			if (typeof prompt === "function") prompt = await prompt();
+			if (typeof prompt === "function") prompt = prompt();
 			systemPrompt.push(prompt);
 		}
 	}
+	systemPrompt = await Promise.all(systemPrompt);
 
 	let result = [];
 
 	let tmpArr;
-	if (activatedModules.has("Use") && (tmpArr = listUsableToolGroups(activatedModules)).length) {
+	if (activatedModules.has("Use") && (tmpArr = listUsableToolset(activatedModules)).length) {
 		result.push({
 			type: "function",
 			function: {
 				name: "Use",
 				description: "Activate capability modules (tools) needed in current session. Do not call this if request can be answered directly or just topic related to it.\n\n" + (
-					tmpArr.map(name => name+": "+toolGroups[name].description).join("\n")
+					tmpArr.map(name => name+": "+toolset[name].description).join("\n")
 				),
 				parameters: {
 					type: "object",
@@ -380,10 +380,11 @@ const registerTool = tool => {
  *     onActivated: function(): AiChat.FunctionTool[],
  *     hidden: boolean | 'manual',
  *     systemPrompt: string,
- *     default?: boolean
+ *     default?: boolean,
+ *     data: any
  * }>} extra
  */
-export const registerTools = (name, description, toolDefs, {onActivated, hidden, systemPrompt, default: defaultEnabled} = {}) => {
+export const registerTools = (name, description, toolDefs, {onActivated, hidden, systemPrompt, default: defaultEnabled, data} = {}) => {
 	const toolNames = [];
 	for (const toolDef of toolDefs) {
 		const tool = registerTool(toolDef);
@@ -393,12 +394,13 @@ export const registerTools = (name, description, toolDefs, {onActivated, hidden,
 
 	if (defaultEnabled) defaultGroups.add(name);
 
-	toolGroups[name] = {
+	toolset[name] = {
 		description,
 		allowedTools: toolNames,
 		onActivated,
 		hidden,
-		systemPrompt
+		systemPrompt,
+		data
 	};
 };
 
@@ -415,15 +417,23 @@ export const addMCPServer = (mcpBaseUrl, mcpName, mcpDescription = "External too
 
 	const mcpToolGroup = /*"MCP_"+*/mcpName;
 	client.statusListener = (open) => {
-		if (!open) for (const key in tools) {
-			if (key.startsWith(mcpToolGroup)) {
-				delete tools[key];
-				delete toolScriptRegistry[key];
-			}
-		}
-		else {
-			toolArrayPromise = client.listTools().then(({tools}) => tools.map(({name, description, inputSchema}) => {
-				const displayName = mcpToolGroup+"_"+name;
+		if (!open) {
+			if (toolArrayPromise) toolArrayPromise.then(toolNames => {
+				for (const name in toolNames) {
+					delete tools[name];
+					delete toolScriptRegistry[name];
+				}
+			});
+		} else {
+			toolArrayPromise = client.listTools().then(({tools: toolArray}) => toolArray.map(({
+									name, description, inputSchema,
+									title, annotations, execution
+			}) => {
+				// title: string
+				// annotations: {readOnlyHint: boolean, destructiveHint: boolean, openWorldHint: boolean, idempotentHint: boolean}
+				// execution: {taskSupport: 'forbidden'}
+
+				const displayName = (options.prefix?mcpToolGroup+"_":"")+name;
 				tools[displayName] = {
 					type: "function", function: {
 						name: displayName, description,
@@ -431,6 +441,7 @@ export const addMCPServer = (mcpBaseUrl, mcpName, mcpDescription = "External too
 					}
 				};
 				toolScriptRegistry[displayName] = {
+					interactive: annotations?.destructiveHint && 'secure',
 					async script(parameters, response) {
 						const result = await client.callTool(name, parameters);
 						response.success = !result.isError;
@@ -457,18 +468,18 @@ export const addMCPServer = (mcpBaseUrl, mcpName, mcpDescription = "External too
 	}
 
 	registerTools(mcpToolGroup, mcpDescription, [], {
-		onActivated: connectServer
-	});
-
-	onConversationLoaded(() => {
-		if (selectedConversation.activatedModules?.has(mcpToolGroup)) {
-			if (client.readyState === EventSource.CLOSED) connectServer();
-		}
+		async systemPrompt() {
+			if (!client.isOpen) await connectServer();
+			return ''
+		},
+		onActivated: connectServer,
+		data: "MCP",
+		hidden: options.hidden
 	});
 
 	return () => {
 		client.disconnect("unregistered");
-		delete toolGroups[mcpToolGroup];
+		delete toolset[mcpToolGroup];
 	}
 };
 
@@ -510,7 +521,7 @@ export const runTools = async ({tool_calls, tool_responses}, globalStorage, forc
 			if (!(fn && (fn.default || allowedTools?.has(name)))) {
 				throw fn
 					? 'Call \'Use\' to activate this tool.'
-					: toolGroups[name]
+					: toolset[name]
 						? 'This is a tool group, not real tool, call Use(['+JSON.stringify(name)+']) to activate'
 						: 'Tool not exist';
 			}

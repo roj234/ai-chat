@@ -92,8 +92,8 @@ $watch(isLLaMACppRouter, () => {
 	}
 })
 
-const updateModelInfo = new IntersectionObserver(([entry]) => {
-	if (isLlamaCppBackend && entry.isIntersecting) updateModels(true);
+const updateModelInfo = new IntersectionObserver((entries) => {
+	if (isLlamaCppBackend && entries.at(-1).isIntersecting) updateModels(true);
 });
 
 const BUTTON_STYLES = {

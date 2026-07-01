@@ -2,16 +2,17 @@ import SimpleModal from "/src/components/SimpleModal.jsx";
 import {highlightJsonLike} from "/src/markdown/highlight.js";
 import {$computed, $state, $update, $watch, $watchWithCleanup, unconscious} from "unconscious";
 import {VirtualList} from "unconscious/common/VirtualList.js";
-import {addMCPServer, defaultGroups, toolGroups, toolScriptRegistry} from "/src/skills.js";
+import {addMCPServer, defaultGroups, toolScriptRegistry, toolset} from "/src/skills.js";
 import {renderMarkdownToElement} from "/src/markdown/markdown.js";
 
 import "./SkillManager.css";
 import "../rp_basic/PresetPanel.css";
-import {config, selectedConversation} from "/src/states.js";
+import {config, ensureActiveConversation, selectedConversation} from "/src/states.js";
 import {CUSTOM_CONTROLS, SETTINGS} from "/src/settings.js";
 import {Filter} from "unconscious/common/components/Filter.jsx";
 
 import {createPanel} from "../rp_basic/CreatePanel.jsx";
+import {onLoad} from "../../src/plugin.js";
 
 SETTINGS.push({
 	id: "mcps",
@@ -24,20 +25,36 @@ SETTINGS.push({
 
 let mcpServers = [];
 
-$watch($computed(() => config.mcps), () => {
-	const mcps = config.mcps;
-	mcpServers && mcpServers.forEach(close => close());
-	mcpServers = mcps && mcps.map(item => addMCPServer(item.url, item.name, item.desc, {headers:item.headers}));
-})
+const refreshTools = $computed(() => !!selectedConversation.ready);
+const currentTools = $computed(() => {
+	return Object.entries(toolset).filter(([k, v]) => v.hidden !== true).map(([k, v]) => ({
+		name: k,
+		...v
+	}));
+}, [refreshTools]);
+
+onLoad(() => {
+	$watch($computed(() => config.mcps), () => {
+		const mcps = config.mcps;
+		mcpServers && mcpServers.forEach(close => close());
+		mcpServers = mcps && mcps.map(({url, name, desc, ...rest}) => addMCPServer(url, name, desc, rest));
+		$update(refreshTools);
+	});
+
+	addEventListener("beforeunload", () => {
+		mcpServers && mcpServers.forEach(close => close());
+	});
+});
 
 /**
  *
  * @return {[import("unconscious").Renderable, VirtualList]}
  */
 function createList() {
-	const list = <ul onClick.delegate{"input[type=checkbox]"}={({delegateTarget}) => {
+	const list = <ul onClick.delegate{"input[type=checkbox]"}={async ({delegateTarget}) => {
 		const key = delegateTarget.closest("li").dataset.name;
 
+		await ensureActiveConversation();
 		const conv = unconscious(selectedConversation);
 		const Use = toolScriptRegistry['Use'];
 		if (delegateTarget.checked) {
@@ -58,10 +75,10 @@ function createList() {
 					<span className="name">{mod.name}</span>
 					{mod.hidden && <small title={"需要人工操作"}>手动</small>}
 					{mod.allowedTools?.length && <small title={mod.allowedTools.join("\n")}>{mod.allowedTools.length} 个工具</small>}
-					{mod.name.startsWith("MCP_") && <button
+					{mod.data === "MCP" && <button
 						className="preset-panel__delete-btn"
 						onClick={() => {
-							const idx = config.mcps.findIndex(mcp => mcp.name === mod.name.slice(4));
+							const idx = config.mcps.findIndex(mcp => mcp.name === mod.name);
 
 							SimpleModal({
 								title: "确认删除",
@@ -98,18 +115,13 @@ function createList() {
 	return [list, virtualList];
 }
 
-const refreshTools = $computed(() => {
-	return Object.entries(toolGroups).filter(([k, v]) => v.hidden !== true).map(([k, v]) => ({
-		name: k,
-		...v
-	}));
-}, [$computed(() => !!selectedConversation.ready)]);
 
 function openSkillManager(preset, isOpen, close) {
 	const [el, vl] = createList();
 
-	$watchWithCleanup(refreshTools, () => {
-		vl.setItems(unconscious(refreshTools));
+	$watchWithCleanup(currentTools, () => {
+		console.log("updated");
+		vl.setItems(unconscious(currentTools));
 	});
 
 	return (
@@ -122,48 +134,69 @@ function openSkillManager(preset, isOpen, close) {
 						const filter = <Filter config={[
 							{
 								type: "input",
-								name: "名称 (namespace prefix)",
-								placeholder: "建议使用 PascalCase",
+								name: "名称",
+								placeholder: "建议 PascalCase",
 								id: "name",
-								pattern: /^[a-zA-Z0-9_-]+$/,
+								pattern(name) {
+									if (!/^[a-zA-Z0-9_-]+$/.test(name)) return "名称只能包含大小写字母数字斜杠下划线";
+									if (config.mcps.find(mcp => mcp.name === name)) return "名称与现有MCP/工具集重复";
+									return [name];
+								},
 								required: true
+							},
+							{
+								type: "radio",
+								id: "prefix",
+								required: true,
+								name: "命名空间",
+								choices: {
+									"无": null,
+									"前缀": true
+								},
+								title: {
+									"前缀": "在MCP工具名称前添加MCP服务器名称"
+								}
 							},
 							{
 								type: "input",
 								name: "服务器地址",
-								placeholder: "仅支持SSE协议 请勿以 /sse 结尾",
+								placeholder: "支持 SSE 和 Streamable HTTP 传输协议",
 								id: "url",
 								pattern: /.+/,
 								required: true
 							},
 							{
-								type: "textbox",
-								name: "请求头",
-								placeholder: "Authorization: Bearer xxx\n - 目前版本不支持，仅预留",
-								id: "headers",
-								pattern(value) {
-									return [value.split("\n").map(item => item.split(": "))];
-								},
+								type: "input",
+								name: "API密钥",
+								placeholder: "sk-xxxxxx",
+								id: "key",
 							},
 							{
 								type: "input",
-								name: "简介(给模型看)",
-								placeholder: "Another MCP Server",
+								name: "简介",
+								placeholder: "Online search",
 								id: "desc"
+							},
+							{
+								type: "radio",
+								id: "hidden",
+								required: true,
+								name: "模型自主激活 (请填写简介)",
+								choices: {
+									"拒绝": 'manual',
+									"允许": null
+								},
 							}
 						]} choices={state}/>;
 						const modal = SimpleModal({
 							title: "添加MCP服务器",
 							message: filter,
 							onConfirm() {
-								const mcps = config.mcps;
-								if (!mcps) config.mcps = [unconscious(state)];
-								else {
-									mcps.push(unconscious(state));
-									$update(config);
+								const obj = unconscious(state);
+								for (const key in obj) {
+									if (!obj[key]) delete obj[key];
 								}
-
-								queueMicrotask(refreshTools);
+								config.mcps = [ ...(config.mcps || []), obj];
 							}
 						});
 

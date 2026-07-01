@@ -9,299 +9,331 @@ import {
 	setKV,
 	updateConversation
 } from "/src/database.js";
-import {config, conversations} from "/src/states.js";
-import {createHashLine} from "/common/fs-common.js";
-import {normalizePath} from "./WebFileSystem.js";
-import {unconscious} from "unconscious";
-import {NestedMap} from "unconscious/common/NestedMap.js";
+import {config, conversations, selectedConversation, Shared} from "/src/states.js";
+import {createWebFileSystem, resolveDirectory} from "./WebFileSystem.js";
+import {$update, unconscious} from "unconscious";
+import {NestedMap, NODE_VALUE} from "unconscious/common/NestedMap.js";
+import {serializeJSON} from "../../src/utils/marshal.js";
+
+/**
+ * 角色名：
+ * 种族：
+ * 年龄：
+ * 性别：
+ * 身份/表现/成就：
+ * 性格：
+ * 外貌/外观：
+ * 人物关系：
+ * 背景：
+ * 其他(如能力等，没有可不填)
+ */
+// TODO server 重建数据库也重建一下id
 
 const BLACKLIST_CHARS = new RegExp('[| &=?#{}<>:,]', 'g');
+const SOME = {};
+
+class FakeFile {
+	kind = "file";
+	text;
+	constructor(fs, path) {
+		this.fs = fs;
+		this.path = path;
+	}
+
+	async _text() {
+		let text = this.text;
+		if (text == null) {
+			text = this.text = await this.fs.read(this.path);
+		}
+		return text;
+	}
+
+	async createWritable({ keepExistingData } = SOME) {
+		let text = keepExistingData ? await this._text() : '';
+		return {
+			write(data) {text += data;},
+			close: async () => {
+				await this.fs.write(this.path, text);
+				this.text = text;
+			}
+		}
+	}
+	async getFile() {
+		const text = await this._text()
+		const time = Date.now();
+		return new File([text], "unknown");
+	}
+}
+
+class FakeDirectory {
+	kind = "directory";
+	/**
+	 *
+	 * @param {NestedMap<string, Function>} fs
+	 * @param {string[]} path
+	 * @param children=
+	 */
+	constructor(fs, path, children) {
+		this.fs = fs;
+		this.path = path;
+		this.children = children || fs.getChildren(path);
+	}
+
+	async *entries() {
+		const children = this.children;
+		const hook = children.get(NODE_VALUE);
+		if (hook) {
+			yield * (await (await (hook.handle || hook)).entries(this));
+			return;
+		}
+
+		for (let [name, val] of children) {
+			const joinedKey = [...this.path, name];
+			const hook = val.get(NODE_VALUE);
+
+			yield [name, hook?.read ? new FakeFile(hook, joinedKey) : new FakeDirectory(this.fs, joinedKey, val)];
+		}
+	}
+
+	getDirectoryHandle(name, { create } = SOME) {
+		const children = this.children;
+		const entries = children.get(name);
+		let hook;
+		if (entries?.size && !(hook = entries.get(NODE_VALUE))?.read) {
+			return hook?.handle || new FakeDirectory(this.fs, [...this.path, name], entries);
+		}
+
+		hook = children.get(NODE_VALUE)?.dir(name, create, this);
+		if (hook) return hook;
+
+		if (create) throw "Creating directory is not supported on current parent";
+		throw 'Not exist or not directory';
+	}
+
+	getFileHandle(name, { create } = SOME) {
+		const children = this.children;
+		const handle = children.get(name)?.get(NODE_VALUE);
+		if (handle?.read) {
+			return new FakeFile(handle, [...this.path, name]);
+		}
+
+		const hook = children.get(NODE_VALUE)?.file(name, create, this);
+		if (hook) return hook;
+
+		if (create) throw "Creating file is not supported on current parent";
+		throw 'Not exist or not file';
+	}
+
+	removeEntry(name, options, { recursive } = SOME) {
+		const hook = this.children.get(NODE_VALUE)?.del;
+		if (hook) return hook(name, recursive, this);
+		throw "Not supported";
+	}
+}
+
+const FAKE_DIR_CONSTANT = { type: "directory" };
+const FAKE_FILE_CONSTANT = {
+	kind: "file",
+	getFile() {
+		return {
+			size: "unknown",
+			lastModified: 0
+		}
+	}
+};
+
 
 /**
  * 对路径字符串中的「非法字符」进行 URI 转义
- *
  * @param {string} str - 原始路径字符串
  * @returns {string} 转义后的路径字符串（仅黑名单字符被编码）
  */
 const fileEscape = (str) => str.replaceAll(BLACKLIST_CHARS, encodeURI);
 
+/** 校验并剥离 .json 后缀 */
+const checkJson = (name) => {
+	if (!name.endsWith(".json")) throw (`Invalid file name: ${name}`);
+	return name.slice(0, -5);
+};
+
+const registry = new NestedMap();
+
+const kvTypes = ["memories"];
+const kvsTypes = ["st|char", "st|preset", "st|lorebook"];
+
+const kvHandler = {
+	read: async (type) => serializeJSON(await getKV(type), 2),
+	write: (type, value) => setKV(type, JSON.parse(value))
+};
+
+registry.set([".", "kv"], {
+	file(name, create) {
+		const path = checkJson(name);
+		if (kvTypes.includes(path))
+			return new FakeFile(kvHandler, decodeURI(path));
+	},
+	*entries() {
+		for (const type of kvTypes) {
+			yield [type+".json", FAKE_FILE_CONSTANT];
+		}
+	}
+});
+
+const kvsHandler = {
+	read: async ([type, name]) => serializeJSON(await kvListGet(type, name), 2),
+	write: ([type, name], value) => kvListSet(JSON.parse(value), type, name)
+};
+for (const type of kvsTypes) {
+	const handler = {
+		file(name, create) {
+			return new FakeFile(kvsHandler, [type, checkJson(name)]);
+		},
+		/**
+		 *
+		 * @param {string[]} path
+		 * @param {NestedMap<string, Function>} fs
+		 * @returns {Generator<[string, FakeDirectory | FakeFile], void, *>}
+		 */
+		async *entries(path, fs) {
+			const keys = await kvListGetKeys(type);
+			for (const {name} of keys) {
+				yield [name+".json", FAKE_FILE_CONSTANT];
+			}
+		},
+		del(name) {
+			return kvListDel(type, name);
+		}
+	};
+
+	//registry.set([".", "kvs", type], handler);
+	registry.set([".", "kvs", fileEscape(type)], handler);
+}
+
+
+
+const convHandler = {
+	async read(convObj) {
+		await getMessages(convObj);
+		return serializeJSON(convObj, 2);
+	},
+	async write(convObj, data) {
+		const meta = JSON.parse(data);
+		Object.assign(convObj, meta);
+		await updateConversation(convObj);
+		$update(conversations);
+	},
+};
+
+/** 为指定对话 id 创建 messages 处理器 */
+const convMessageHandler = {
+	async read([conv, id]) {
+		const msgs = await getMessages(conv);
+		const msg = msgs.find(m => m.id === id);
+		if (!msg) throw (`Message ${id} not found`);
+		return serializeJSON(msg, 2);
+	},
+	async write([conv, id], data) {
+		const msgs = await getMessages(conv);
+		const index = msgs.findIndex(m => m.id === id);
+		if (index < 0) throw (`Message ${id} not found`);
+		msgs[index] = JSON.parse(data);
+		await updateConversation(conv, msgs);
+	},
+}
+
+
+registry.set([".", "conversations", 0, "messages"], {
+	file(name, create, self) {
+		const conv = self.path.at(-2);
+		return new FakeFile(convMessageHandler, [conv, parseInt(checkJson(name), 10)]);
+	},
+	async *entries(self) {
+		const conv = self.path.at(-2);
+		for (const message of await getMessages(conv)) {
+			yield [message.id+".json", FAKE_FILE_CONSTANT];
+		}
+	},
+	async del(name, recursive, self) {
+		const conv = self.path.at(-2);
+		const id = parseInt(checkJson(name), 10);
+
+		const msgs = await getMessages(conv);
+		const index = msgs.findIndex(m => m.id === id);
+		if (index < 0) throw (`Message ${id} not found`);
+		msgs.splice(index, 1);
+		await updateConversation(conv, msgs, 1);
+	}
+});
+registry.set([".", "conversations", 0], {
+	async file(name, create, self) {
+		if (name === "conversation.json") {
+			const conv = self.path.at(-1);
+			return new FakeFile(convHandler, conv);
+		}
+	},
+	dir(name, create, self) {
+		if (name === "messages") {
+			const conv = self.path.at(-1);
+			return new FakeDirectory(registry, [".", "conversations", conv, name], registry.getChildren([".", "conversations", 0, name]));
+		}
+	},
+	*entries(self) {
+		yield ["conversation.json", FAKE_FILE_CONSTANT];
+		yield ["messages", this.dir("messages", false, self)];
+	}
+});
+
+registry.set([".", "conversations"], {
+	dir(name, create) {
+		const id = parseInt(name, 10);
+		if (id === selectedConversation.id) throw "Not allowed: modifying ACTIVE conversation will cause data loss";
+
+		const conv = unconscious(conversations).find(c => c.id === id);
+		if (conv) return new FakeDirectory(registry, [".", "conversations", conv], registry.getChildren([".", "conversations", 0]));
+	},
+	*entries() {
+		for (const {id} of unconscious(conversations)) {
+			yield [String(id), FAKE_DIR_CONSTANT];
+		}
+	},
+	async del(name) {
+		const id = parseInt(name, 10);
+		const idx = unconscious(conversations).findIndex(c => c.id === id);
+		if (idx < 0) throw 'Not exist';
+		const conv = conversations.splice(idx, 1)[0];
+		return deleteConversation(conv);
+	}
+});
+
+const tempHandle = {};
+Object.defineProperty(tempHandle, "handle", {
+	get: async () => (await resolveDirectory(await navigator.storage.getDirectory(), "tmp/c"+selectedConversation.id, { create: true }))
+});
+registry.set([".", "tmp"], tempHandle);
+
+registry.set([".", "config.json"], {
+	read(name) {
+		const {endpoint, accessToken, db_server, db_pat, ...val} = unconscious(config);
+		return JSON.stringify(val, null, 2);
+	},
+	write(name, data) {
+		const {endpoint, model, accessToken, db_server, db_pat} = unconscious(config);
+		config.value = JSON.parse(data);
+		config.endpoint = endpoint;
+		config.accessToken = accessToken;
+		config.db_server = db_server;
+		config.db_pat = db_pat;
+		Shared.SettingUI.sync();
+	},
+});
+
+const root = new FakeDirectory(registry, ["."]);
+
 /**
  * 基于应用配置数据库的虚拟文件系统
+ * @param {string} base - 根路径约束（如 "conversations"）
  * @returns {AiChat.FileSystemInstance}
  */
-export function createVirtualFileSystem(base) {
-	const tmp = new Map;
-	const basePath = normalizePath(base);
-	const myParse = (path) => {
-		const arr = normalizePath(decodeURI(path));
-		if (arr[0] === 'tmp') return arr;
-
-		if (arr.length < basePath.length) throw "Permission denied (path must start from: " + fileEscape(basePath.join('/')) + ")";
-		for (let i = 0; i < basePath.length; i++) {
-			if (arr[i] !== basePath[i]) throw "Permission denied (path must start from: " + fileEscape(basePath.join('/')) + ")";
-		}
-		return arr;
-	}
-	const kv = ["memories"].map(fileEscape);
-	const kvs = ["st|char", "st|preset", "st|lorebook"].map(fileEscape);
-
-	/** 校验并剥离 .json 后缀 */
-	const checkJson = (name) => {
-		if (!name.endsWith(".json")) throw new Error(`Invalid file name: ${name}`);
-		return name.slice(0, -5);
-	};
-
-	/** 安全解析 JSON 字符串 */
-	const parseJson = (data, path) => {
-		try { return JSON.parse(data); }
-		catch (e) { throw new Error(`Invalid JSON at ${path}: ${e.message}`); }
-	};
-
-	/** 查找对话，不存在则抛错 */
-	const findConv = (id) => {
-		const conv = (conversations || []).find(c => c.id === id);
-		if (!conv) throw new Error(`Conversation ${id} not found`);
-		return conv;
-	};
-
-	const api = {
-		async mkdirs({ path }) {
-			return "mkdirs() is not available in ConfigFileSystem (you may only use existing directories)";
-		},
-		async copy({ src, dest, move }) {
-			return "copy() is not available in ConfigFileSystem";
-		},
-		async stat({ path }) {
-			return "stat() is not available in ConfigFileSystem";
-		},
-
-		/** 删除文件 / 对话 */
-		async delete({ path }) {
-			const arr = myParse(path);
-			switch (arr[0]) {
-				case "tmp":
-					if (arr.length === 2) {
-						return tmp.delete(arr[1]);
-					}
-				break;
-				case "kv":
-					if (arr.length === 2) {
-						await setKV(checkJson(arr[1]), undefined);
-						return;
-					}
-				break;
-				case "kvs":
-					if (arr.length === 3) {
-						await kvListDel(arr[1], checkJson(arr[2]));
-						return;
-					}
-				break;
-				case "conversations":
-					if (arr.length === 2) {
-						// conversations/{id} — 直接删对话，id 不加 .json 后缀
-						await deleteConversation({ id: parseInt(arr[1], 10) });
-						return;
-					} else if (arr.length === 4 && arr[2] === "messages") {
-						throw new Error(`deleteMessage(${checkJson(arr[3])}) is not implemented`);
-					}
-				break;
-			}
-			throw new Error(`Cannot delete '${path}'`);
-		},
-
-		/** 列出目录内容（TSV 格式） */
-		async list({ path, glob: globStr }) {
-			if (globStr) throw new Error("glob filter is not available in ConfigFileSystem");
-
-			let entries = null;
-			const arr = normalizePath(decodeURI(path));
-
-			switch (arr.length) {
-				case 0:
-					// 虚拟根目录
-					entries = [
-						'tmp\tdir',
-						'kv\tdir',
-						'kvs\tdir',
-						'conversations\tdir',
-						'config.json\tfile'
-					];
-					break;
-				case 1:
-					switch (arr[0]) {
-						case "tmp":
-							entries = [...tmp.keys()].map(item => item+"\tfile");
-						break;
-						case "kv":
-							entries = kv.map(item => item + ".json\tfile");
-							break;
-						case "kvs":
-							entries = kvs.map(item => item + "\tdir");
-							break;
-						case "conversations":
-							entries = (conversations || []).map(c => `${c.id}\tdir`);
-							break;
-					}
-					break;
-				case 2:
-					switch (arr[0]) {
-						case "kvs":
-							entries = (await kvListGetKeys(arr[1]))
-								.map(item => item.name + ".json\tfile");
-							break;
-						case "conversations":
-							entries = ['meta.json\tfile', 'messages\tdir'];
-							break;
-					}
-					break;
-				case 3:
-					if (arr[0] === "conversations" && arr[2] === "messages") {
-						const msgs = await getMessages({ id: parseInt(arr[1]) });
-						entries = msgs.map(m => m.id + ".json\tfile");
-					}
-					break;
-			}
-
-			return entries?.length ? entries.map(fileEscape).join("\n") : "[No result]";
-		}
-	};
-
-	return {
-		...api,
-		...createHashLine({
-			/**
-			 * 读取文件内容（JSON 字符串）
-			 * @param {string} path
-			 * @returns {Promise<string>}
-			 */
-			async read(path) {
-				const arr = myParse(path);
-
-				switch (arr[0]) {
-					case "tmp":
-						if (arr.length === 1) {
-							const str = tmp.get(arr[1]);
-							if (str != null) return str;
-						}
-					break;
-
-					// ——— kv/{name}.json ———
-					case "kv":
-						if (arr.length === 2) {
-							const val = await getKV(checkJson(arr[1]));
-							return JSON.stringify(val, null, 2);
-						}
-						break;
-
-					// ——— kvs/{type}/{name}.json ———
-					case "kvs":
-						if (arr.length === 3) {
-							const val = await kvListGet(arr[1], checkJson(arr[2]));
-							return JSON.stringify(val, null, 2);
-						}
-						break;
-
-					// ——— conversations/{id}/meta.json | conversations/{id}/messages/{msgId}.json ———
-					case "conversations":
-						if (arr.length === 3 && arr[2] === "meta.json") {
-							const conv = findConv(parseInt(arr[1]));
-							return JSON.stringify(conv, null, 2);
-						}
-						if (arr.length === 4 && arr[2] === "messages") {
-							const msgs = await getMessages({ id: parseInt(arr[1]) });
-							const msg = msgs.find(m => String(m.id) === checkJson(arr[3]));
-							if (!msg) throw new Error(`Message ${arr[3]} not found`);
-							return JSON.stringify(msg, null, 2);
-						}
-						break;
-
-					// ——— 根目录 config.json ———
-					case "config.json":
-						if (arr.length === 1) {
-							const {endpoint, /*model, */accessToken, db_server, db_pat, ...val} = unconscious(config);
-							return JSON.stringify(val, null, 2);
-						}
-						break;
-				}
-
-				throw new Error(`File not exist: '${path}'`);
-			},
-
-			/**
-			 * 写入 JSON 数据到文件
-			 * @param {string} path
-			 * @param {string} data - JSON 字符串
-			 * @returns {Promise<void>}
-			 */
-			async write(path, data) {
-				const arr = myParse(path);
-				if (arr[0] !== 'tmp' && config.incognito) throw "Readonly filesystem";
-
-				switch (arr[0]) {
-					case "tmp":
-						if (arr.length === 2) {
-							tmp.set(arr[1], data);
-							return;
-						}
-						break;
-					case "kv":
-						if (arr.length === 2) {
-							await setKV(checkJson(arr[1]), parseJson(data, path));
-							return;
-						}
-						break;
-
-					case "kvs":
-						if (arr.length === 3) {
-							await kvListSet(parseJson(data, path), arr[1], checkJson(arr[2]));
-							return;
-						}
-						break;
-
-					case "conversations":
-						if (arr.length === 3 && arr[2] === "meta.json") {
-							const meta = parseJson(data, path);
-							const conv = findConv(parseInt(arr[1]));
-							await updateConversation({ ...conv, ...meta });
-							return;
-						}
-						if (arr.length === 4 && arr[2] === "messages") {
-							const patch = parseJson(data, path);
-							const conv = findConv(parseInt(arr[1]));
-							const msgs = await getMessages({ id: conv.id });
-							const idx = msgs.findIndex(m => String(m.id) === checkJson(arr[3]));
-							if (idx === -1) throw new Error(`Message ${arr[3]} not found`);
-							msgs[idx] = { ...msgs[idx], ...patch };
-							await updateConversation(conv, msgs);
-							return;
-						}
-						break;
-
-					case "config.json":
-						if (arr.length === 1) {
-							const {endpoint, model, accessToken, db_server, db_pat} = unconscious(config);
-							config.value = parseJson(data, path);
-							config.endpoint = endpoint;
-							//config.model = model;
-							config.accessToken = accessToken;
-							config.db_server = db_server;
-							config.db_pat = db_pat;
-							//await setKV("config", parseJson(data, path));
-							return;
-						}
-						break;
-				}
-
-				throw new Error(`Cannot write to '${path}'`);
-			},
-
-			/**
-			 * 文件修改时间（虚拟 FS 无真实 mtime，返回当前时间）
-			 * @returns {Promise<number>}
-			 */
-			async mtime(path) {
-				return Date.now();
-			}
-		})
-	};
+export async function createVirtualFileSystem(base) {
+	return createWebFileSystem(await resolveDirectory(root, base || ""));
 }

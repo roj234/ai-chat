@@ -439,25 +439,6 @@ button[class^="ri-"] {
     font-family: 'PingFang SC', 'Microsoft YaHei', '楷体', serif;
 }
 
-/* 工具调用按钮 */
-.chip {
-    position: relative;
-    & .tooltip { display: none; }
-}
-.chip:hover .tooltip {
-    display: block;
-    position: absolute;
-    top: -100%;
-    font-size: smaller;
-    transform: translateX(-50%);
-    width: max-content;
-    padding: var(--spacing-xs) var(--spacing-md);
-    background: rgba(0,0,0,0.8);
-    color: #E6EAF3;
-    border-radius: var(--border-radius-sm);
-    text-align: center;
-}
-
 /* 输入框 */
 .composer {
     position: sticky;
@@ -535,6 +516,11 @@ button[class^="ri-"] {
         padding: var(--spacing-md);
         font-size: 14px;
     }
+}
+
+/* 工具调用按钮 */
+.controls .tooltip {
+    font-size: smaller;
 }
 
 .spacer { flex: 1; }
@@ -802,6 +788,10 @@ button[class^="ri-"] {
 
     .filter-label:not(.tooltip) {
         color: var(--text);
+    }
+
+    .toasts {
+        bottom: 64px;
     }
 }
 

@@ -12,27 +12,28 @@ export const RollDice = {
 		properties: {
 			rolls: {
 				type: "array",
-				description: "一次掷骰",
 				minItems: 1,
-				maxItems: 9,
 				items: {
 					type: "object",
 					properties: {
 						count: {
 							type: "integer",
+							minimum: 1,
 							maximum: 100,
-							description: "骰子个数",
 						},
 						sides: {
 							type: "integer",
 							minimum: 2,
-							description: "骰子面数",
 						},
 						modifier: {
 							type: "integer",
-							description: "修正加值",
 							default: 0
 						},
+						label: {
+							type: "string",
+							//description: "Don't place expression (2d6) here",
+							//example: "理智检定"
+						}
 					},
 					required: ["count", "sides"]
 				}
@@ -44,9 +45,7 @@ export const RollDice = {
 	script(parameters, response) {
 		const rolls = response.rolls = [];
 
-		return parameters.rolls.map(({count, sides, modifier = 0}) => {
-			if (count < 1 || count > 100 || sides <= 1) throw new Error("无效的输入");
-
+		return parameters.rolls.map(({count, sides, modifier = 0, label = ""}) => {
 			let score = modifier;
 			const dices = [];
 			for (let i = 0; i < count; i++) {
@@ -56,8 +55,8 @@ export const RollDice = {
 			}
 
 			rolls.push({ exp: count+"d"+sides+(modifier>0?"+"+modifier:modifier||""), dices, score });
-			return score;
-		});
+			return [score+" = "+dices.join("+")+(label&&" ("+label+")")];
+		}).join("\n");
 	},
 	keyFunc(keys, {rolls}) {
 		keys.push(rolls);

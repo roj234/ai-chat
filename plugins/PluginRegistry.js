@@ -27,11 +27,11 @@ import "./customBackground.js";
 import "./tools/memories.js";
 // 对话建议工具
 import "./tools/followupSuggestions.js";
-// 文件系统和Agent工具组 (use:workspace_files / run_process)
+// 文件系统和Agent工具集 (use:workspace_files / run_process)
 import "./tools/agent.js";
 // 图表工具 (use:chart)
 import "./tools/chart.js";
-// 角色扮演工具组 (use:interactive_simulation)
+// 角色扮演工具集 (use:interactive_simulation)
 import "./tools/rp_kit/interactive_simulation.js";
 // 图片缩放工具 (use:zoom_in)
 import "./tools/zoom_in.js";
@@ -45,6 +45,7 @@ import "./rpg/example/Translator.js";
 // 内联代码的可选插件
 import {registerTaskList} from "./tools/task_list.js";
 import {registerFileTransfer} from "./tools/file_transfer.js";
+import {registerSubagent} from "./tools/subagent.js";
 import {registerJsonEditor} from "./tools/json_editor.js";
 import {registerConfigSync} from "./configSync.js";
 import {registerModelFastSwitch} from "./ModelFastSwitch.js";
@@ -140,6 +141,11 @@ const pluginDefinitions = [
 		name: "人在回路",
 		description: "没想到我居然是LSP！",
 		load: registerHumanAsTool
+	},
+	{
+		name: "子代理(WIP)",
+		description: "能跑，但可能有breaking change或数据丢失",
+		load: registerSubagent
 	},
 	{
 		name: "外部插件API",

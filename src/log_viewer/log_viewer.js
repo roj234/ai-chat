@@ -563,7 +563,7 @@ let foreachTable = $foreach(renderLogs, (log, i) => {
 				<div className="detail-grid">
 					<div className="detail-item">
 						<span className="detail-label">ID</span>
-						<span className="detail-value">{log.request_id} (#{log.id})</span>
+						<span className="detail-value">{log.request_id} (#{log.id||log.usage})</span>
 					</div>
 					<div className="detail-item">
 						<span className="detail-label">Tokens</span>
@@ -606,7 +606,7 @@ let foreachTable = $foreach(renderLogs, (log, i) => {
 		<td className="mono" style="text-align:right;font-size:12px">{cachedInfo}</td>
 		<td className="mono"
 			style="text-align:right;font-weight:600;color:#f0c060">{formatCost(log.cost, currency)}</td>
-		<td className="mono" style="text-align:right;color:#e0a870">{formatDuration(log.duration)}</td>
+		<td className="mono" style="text-align:right;color:#e0a870">{log.duration == null ? "非流" : formatDuration(log.duration)}</td>
 		<td className="mono" style="text-align:right;color:#e890b0">{formatDuration(log.latency)}</td>
 		<td>{getFinishBadge(log.finish_reason)}</td>
 	</tr>;

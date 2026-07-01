@@ -14,6 +14,17 @@
         gap: 8px;
         color: var(--muted);
         font-size: smaller;
+        position: relative;
+    }
+    .progress {
+        position: absolute;
+        left: 0;
+        top: 0;
+        height: 100%;
+        width: 0;
+        border-radius: var(--border-radius-md);
+        box-shadow: 0 0 12px var(--accent);
+        transition: width 0.3s ease;
     }
 }
 

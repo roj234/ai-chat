@@ -13,6 +13,7 @@ export function registerLogRoutes(router, batcher) {
 		ctx.send(200, rows.map(row => {
 			const data = deserializeRow(row, decompressLog);
 			delete data.request_id;
+			delete data.usage;
 			return data;
 		}));
 	});
@@ -29,14 +30,14 @@ export function registerLogRoutes(router, batcher) {
 	};
 
 	batcher['log/insert'] = async ({id, time = Date.now(), ...body}, ctx) => {
+		if (id < 0) id = null;
 		id = id ?? await ctx.getVariable("messageId");
-		if (id == null || time == null) return { error: 'id required' };
+		if (time == null) return { error: 'id required' };
 
 		const result = await LOG_HOOK(body);
 		if (result === 'SKIP') return false;
 
-		if (id === -1) id = null;
-		ctx.db.prepare('INSERT INTO logs (id, time, data) VALUES (?, ?, ?) ON CONFLICT DO NOTHING').run(id, time, await compressLog(body));
+		ctx.db.prepare('INSERT INTO logs (id, time, data) VALUES (?, ?, ?)').run(id, time, await compressLog(body));
 		return true;
 	};
 }

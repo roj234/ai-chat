@@ -1,6 +1,6 @@
 import {bakeSchema} from "unconscious/common/msgpack.js";
 
-export const msgpack_schema_version = "9";
+export const msgpack_schema_version = "10";
 export const msgpack_schema = [];
 msgpack_schema.push(
 	// generic
@@ -9,6 +9,7 @@ msgpack_schema.push(
 	["$", msgpack_schema, ["BlobH", "Map", "Set", "SET", "ARR", "DEL", "STR"]],
 	"hash", "size", "lastModified",
 	"error",
+	"status",
 
 	// conversation
 	"activatedModules", "allowedTools", "grantedTools",
@@ -58,7 +59,7 @@ msgpack_schema.push(
 	"input_tokens", "output_tokens", "reasoning_tokens", "cached_tokens", "cache_write_tokens",
 	"duration", "latency", "cost",
 	["currency", null, ["USD", "CNY"]],
-	"rowid",
+	"rowid", "usage",
 );
 
 bakeSchema(msgpack_schema);

@@ -6,6 +6,7 @@ import {abortCompletion, config} from "/src/states.js";
 import {bundleModule, createModule} from "unconscious/common/safe-worker/safe-worker.js";
 import {ZipReader} from "unconscious/common/zip-io.js";
 import {schemaToTypeScriptDefinition} from "unconscious/common/json-schema-utils.js";
+import {appendBillingLog} from "../../src/database.js";
 
 export const jsonPrompt = async (schema, messages, body, custom_renderer_id = 'json') => {
 	const supportLevel = config.jsonSupport;
@@ -50,10 +51,8 @@ export const jsonPrompt = async (schema, messages, body, custom_renderer_id = 'j
 
 		message.content = removeCodeFence(message.content);
 
-		/*log.id = -1;
-		log._type = "jsonApi/"+custom_renderer_id;
-		await appendBillingLog(log);*/
-
+		log.usage = "cr:"+custom_renderer_id;
+		await appendBillingLog(log);
 		return message;
 	} finally {
 		abortCompletion.value = null;

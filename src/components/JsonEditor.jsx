@@ -2,7 +2,6 @@ import "./JsonEditor.css";
 import {$cleanup, $state, $watchWithCleanup, AS_IS, preserveState} from "unconscious";
 import {createJsonParser} from "unconscious/common/Json.js";
 import {lightAsync} from "../markdown/highlight.js";
-import morphdom from "morphdom";
 
 const commonPrefix = (a, b) => {
 	const n = Math.min(a.length, b.length);
@@ -42,24 +41,24 @@ export const JsonEditor = ({value = "", state}) => {
 
 	const scheduleHighlight = () => {
 		cancelHighlight?.();
-		let errorPos;
-
 		let codeStr = currentText.value = textarea.value;
-		const parser = createJsonParser(AS_IS, {json5: true});
-		try {
-			parser.write(codeStr);
-			const obj = parser.end();
-			if (state) state.value = { obj };
-		} catch (e) {
-			if (state) state.value = { error: e + " near index " + parser.pos() };
-			errorPos = parser.pos();
-		}
-
 		let timer = setTimeout(() => {
+			let errorPos;
+			const parser = createJsonParser(AS_IS, {json5: true});
+			try {
+				parser.write(codeStr);
+				const obj = parser.end();
+				if (state) state.value = { obj };
+			} catch (e) {
+				if (state) state.value = { error: e + " near index " + parser.pos() };
+				errorPos = parser.pos();
+			}
+
 			cancelHighlight = lightAsync(codeStr, "json", (html) => {
 				cancelHighlight = null;
 				lastText = codeStr;
-				morphdom(pre, "<pre>"+html+"</pre>");
+				pre.innerHTML = html;
+				//morphdom(pre, "<pre>"+html+"</pre>");
 				if (errorPos != null) {
 					const cursor = <span className='cursor'></span>;
 

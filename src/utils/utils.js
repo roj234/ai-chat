@@ -22,9 +22,10 @@ export const cloneNamed = (obj, names) => {
 
 export const IN_EDIT_MODE = debugSymbol("EDIT");
 
-export const loadingBlock = message => <div className={"my-box loading"}>
+export const loadingBlock = (message, progress) => <div className={"my-box loading"}>
 	<div className="spinner"></div>
 	<span>{message}</span>
+	{progress && <div className={"progress"} style:width={() => unconscious(progress)*100+"%"}></div> }
 </div>;
 
 export const errorBlock = (error, title) => {
@@ -284,3 +285,16 @@ export const downloadFile = (blob, ext) => {
 		URL.revokeObjectURL(url);
 	}
 };
+
+/**
+ *
+ * @param {HTMLElement} element
+ * @param {Function} callback
+ */
+export const updateOnIntersected = (element, callback) => {
+	const man = new IntersectionObserver((entries) => {
+		if (!entries.at(-1).isIntersecting) return;
+		callback();
+	});
+	man.observe(element);
+}

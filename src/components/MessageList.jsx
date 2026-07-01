@@ -11,6 +11,7 @@ import {
 	MessageCopyHandler,
 	MessageRoles,
 	messages,
+	PROGRESS,
 	selectedConversation
 } from "../states.js";
 import {submitUserChatMessage} from "../api-request.js";
@@ -62,7 +63,7 @@ const chunkRenderer = m => {
 				if (typeof element === "function") element = element();
 				return typeof element === "string" ? <div dangerouslySetInnerHTML={item.html} /> : element;
 			case "loading":
-				return loadingBlock(<my-loading text={item.text} />);
+				return loadingBlock(<my-loading text={item.text} />, item.progress);
 			case "input_audio": {
 				return <AudioPlayer src={item.input_audio.data} />
 			}
@@ -78,10 +79,11 @@ const chunkRenderer = m => {
 				}
 				if (isEditing(m.key)) {
 					return <EditWidget value={text} onChange={value => {
-						item.text = value;
 						const message = m.key;
 						if (!Array.isArray(message.content)) {
 							message.content = value;
+						} else {
+							message.content[item.key].text = value;
 						}
 					}} />;
 				} else {
@@ -117,14 +119,13 @@ const chunkRenderer = m => {
 						let totalCacheWrite = 0;
 						let totalCost = 0;
 						let totalTime = 0;
-						let avgTps = 0;
 
 						logs.forEach(item => {
 							if (!item) return;
 
 							let {
 								input_tokens = 0, cached_tokens = 0, output_tokens = 0, reasoning_tokens = 0, cache_write_tokens = 0,
-								cost = 0, duration = 0, tps
+								cost = 0, duration = 0
 							} = item;
 
 							duration /= 1000;
@@ -136,8 +137,6 @@ const chunkRenderer = m => {
 							totalCacheWrite += cache_write_tokens;
 							totalCost += cost;
 							totalTime += duration;
-
-							avgTps += tps ?? output_tokens / duration;
 						});
 
 						const log = logs[0];
@@ -156,7 +155,7 @@ const chunkRenderer = m => {
 							totalTime,
 							totalCost,
 							log.currency,
-							avgTps / logs.length,
+							totalOutput / totalTime,
 							logs.findLast(Boolean)?.finish_reason
 						];
 					});
@@ -337,6 +336,7 @@ function chunkKeyFunc(message, chunk) {
 
 	switch (type) {
 		default: keys.push(type); break;
+		case "loading": keys.push(chunk.progress); break;
 		case "error": keys.push("error", chunk.error); break;
 		case "text": {
 			keys.push(chunk.text);
@@ -422,7 +422,7 @@ function updateButtons(m, container) {
 	const notGenerating = !unconscious(abortCompletion);
 	const isEditing_ = isEditing(key);
 	const isLast = (end_index ? end_index === messages.length : index === messages.length-1);
-	const mayChange = (!isLast || notGenerating) && EditableMessageRoles.has(role) && !key.isOther;
+	const mayChange = (!isLast || notGenerating) && EditableMessageRoles.has(role);
 	const isComposite = end_index > index + 1;
 	// 不支持编辑组合消息（工具调用）
 	if (notGenerating && mayChange && !isComposite) buttons.push(isEditing_ ? saveBtn : editBtn);
@@ -742,7 +742,7 @@ const combinedMessages = $computed((oldMessages) => {
 			generationEnded = message.finish_reason !== '';
 			ref[PINNED] = !generationEnded || isEditing(message);
 			if (!generationEnded) {
-				if (!message.time || (!message.content && !message.think)) chunks.push({ type: "loading" });
+				if (!message.time || (!message.content && !message.think)) chunks.push({ type: "loading", progress: message[PROGRESS] });
 			}
 			// show token usage & billing
 			else {

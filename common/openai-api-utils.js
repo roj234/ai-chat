@@ -17,13 +17,13 @@ const networkErrorHandler = err => {
  */
 export const jsonFetch = (url, {key = "", ...data} = {}) => fetch(url, {
 	method: data.body ? "POST" : "GET",
+	referrerPolicy: 'no-referrer',
+	...data,
 	headers: {
 		'Accept': 'application/json',
-		'Content-Type': "application/json",
-		'Authorization': key ? "Bearer " + key : undefined
+		...makeHeaders(data, key),
+		...data.headers
 	},
-	referrerPolicy: 'no-referrer',
-	...data
 })
 .catch(networkErrorHandler)
 .then(res => {
@@ -36,22 +36,30 @@ export const jsonFetch = (url, {key = "", ...data} = {}) => fetch(url, {
 	return res.json();
 });
 
+const makeHeaders = (data, key) => {
+	const headers = {};
+	if (key) headers['Authorization'] = "Bearer "+key;
+	if (data.body) headers['Content-Type'] = 'application/json';
+	return headers;
+}
+
 /**
  * 发起流式请求
  * @param {string} url
  * @param {string=} key
  * @param {RequestInit} data
- * @param {function(OpenAI.Response): void} onToken
- * @return {Promise<void>}
+ * @param {function(OpenAI.Response, string): void} onChunk
+ * @return {Promise<Response>}
  */
-export const streamFetch = (url, {key = "", ...data} = {}, onToken) => fetch(url, {
+export const sseFetch = (url, {key = "", ...data} = {}, onChunk) => fetch(url, {
 	method: "POST",
-	headers: {
-		'Content-Type': "application/json",
-		'Authorization': "Bearer "+(key||'')
-	},
 	referrerPolicy: 'no-referrer',
-	...data
+	...data,
+	headers: {
+		'Accept': 'application/json,text/event-stream',
+		...makeHeaders(data, key),
+		...data.headers
+	},
 })
 .catch(networkErrorHandler)
 .then(async res => {
@@ -62,43 +70,54 @@ export const streamFetch = (url, {key = "", ...data} = {}, onToken) => fetch(url
 		};
 	}
 	const contentType = res.headers.get('content-type');
-	if (contentType === 'application/json') return onToken(await res.json(), true);
+	if (contentType === 'application/json') return onChunk(await res.json(), '\0');
 
 	const reader = res.body.getReader();
 
 	const decoder = new TextDecoder();
+	const STREAM = {stream: true};
 	let buf = '';
 
 	try {
+		let event;
 		while (true) {
 			const {done, value} = await reader.read();
 			if (done) break;
 
-			buf += decoder.decode(value, {stream: true});
+			buf += decoder.decode(value, STREAM);
 
 			const lines = buf.split("\n");
 			buf = lines.pop() || '';
+
 			for (const line of lines) {
-				if (line.startsWith('data: ')) {
+				if (line.startsWith('event: ')) event = line.slice(7);
+				else if (line.startsWith('data: ')) {
 					const data = line.slice(6);
 					if (data === '[DONE]') return;
 
 					const json = JSON.parse(data);
 					let error = json.error;
 					try {
-						onToken(json);
+						onChunk(json, event);
 					} catch (e) {
 						if (!error)
 							error = e;
 					}
 
 					if (error) throw error;
-				}
+					event = undefined;
+				}/* else {
+					if (line && !'event: '.startsWith(line) && !'data: '.startsWith(line)) {
+						throw new Error("Illegal SSE response");
+					}
+				}*/
 			}
 		}
 	} finally {
 		await reader.cancel();
 	}
+
+	return res;
 });
 
 

@@ -1,13 +1,12 @@
+import {sseFetch} from "./openai-api-utils.js";
 
 export class MCPClient {
 	statusListener;
+	options;
 
 	/** @type {string} */
 	#baseUrl;
-	#options;
-	/** @type {EventSource} */
-	#sse;
-	/** @type {string} 消息端点 URL */
+	/** @type {string|null} 消息端点 URL */
 	#messageUrl;
 	/** @type {Error} */
 	#error;
@@ -19,8 +18,17 @@ export class MCPClient {
 
 	/** @type {number} JSON-RPC 请求 ID 自增 */
 	#reqId = 0;
-	/** @type {Map<number, {resolve,reject,timer}>} */
+	/** @type {Map<number, {resolve,reject}>} */
 	#pending = new Map();
+
+	/** @type {'sse'|'http'|null} 当前传输模式 */
+	#transportMode = null;
+
+	/** @type {Record<string, string>|null} Streamable HTTP 的 session ID */
+	#headers = null;
+
+	/** @type {AbortController|null} SSE 流的 closer */
+	#closer = null;
 
 	/**
 	 * @param {string} baseUrl
@@ -28,50 +36,61 @@ export class MCPClient {
 	 */
 	constructor(baseUrl, options = {}) {
 		this.#baseUrl = baseUrl.replace(/\/$/, '');
-		this.#options = options;
+		this.options = options;
 	}
 
-	get isOpen() { return this.#sse?.readyState === EventSource.OPEN; }
-	get readyState() { return this.#sse?.readyState ?? EventSource.CLOSED; }
+	get isOpen() { return this.#connectPromise; }
 	get serverInfo() { return this.#serverInfo; }
 	get lastError() { return this.#error; }
 
 	/**
+	 * 连接服务器。先尝试 SSE (GET)，失败则 fallback 到 Streamable HTTP (POST)
 	 * @returns {Promise<object>}
 	 */
 	async connect() {
-		if (this.isOpen) throw new Error("已连接");
-
-		let doConnect = this.#connectPromise;
-		if (doConnect) return doConnect.then(() => this.#serverInfo);
+		let connectPromise = this.#connectPromise;
+		if (connectPromise) return connectPromise;
 
 		let _resolve, _reject;
-		doConnect = new Promise((resolve, reject) => {
+
+		connectPromise = this.#connectPromise = new Promise((resolve, reject) => {
 			_resolve = resolve;
 			_reject = reject;
+		}).then(() => this.jsonRPC('initialize', {
+			protocolVersion: '2024-11-05',
+			capabilities:    {},
+			clientInfo:      {
+				name:    APP_NAME,
+				version: APP_VERSION,
+			},
+		}));
+		connectPromise.then((handshake) => {
+			this.#serverInfo = handshake;
+			this.statusListener?.(true);
+			return this.jsonRPC("notifications/initialized", undefined, true);
 		});
-		this.#connectPromise = doConnect;
 
-		let timeout = setTimeout(() => {
-			_reject(new Error('SSE 连接超时'));
-			sse.close();
+		const closer = this.#closer = new AbortController;
+
+		const timeout = setTimeout(() => {
+			this.#error = new Error('连接超时');
+			closer.abort();
 		}, 10000);
 
-		const sse = new EventSource(`${this.#baseUrl}/sse`);
-		sse.addEventListener("close", () => {
-			const reason = this.#error || new Error('SSE 流断开');
-			_reject(reason);
+		sseFetch(this.#baseUrl, {
+			method: 'GET',
+			key: this.options.key,
+			signal: closer.signal
+		}, (msg, event) => {
+			if (event === 'endpoint') {
+				clearTimeout(timeout);
+				this.#messageUrl = new URL(msg, this.#baseUrl).href;
+				this.#transportMode = 'sse';
+				_resolve();
+				return;
+			}
 
-			for (const [ , reject ] of this.#pending.values()) reject(reason);
-			this.#pending.clear();
-
-			this.disconnect();
-
-			this.statusListener?.(this.isOpen);
-		});
-		sse.addEventListener("message", (e) => {
 			try {
-				const msg = JSON.parse(e.data);
 				// 通知，先忽略吧
 				if (null == msg.id) return;
 				const [ resolve, reject ] = this.#pending.get(msg.id);
@@ -86,44 +105,50 @@ export class MCPClient {
 			} catch (e) {
 				this.disconnect(e);
 			}
+		}).catch(err => {
+			if (err.status === 405 && !this.#messageUrl) {
+				clearTimeout(timeout);
+
+				// try streamable HTTP
+				this.#transportMode = 'http';
+				this.#messageUrl = this.#baseUrl;
+				_resolve();
+			}
+		}).finally(() => {
+			if (this.#transportMode === 'http') return;
+
+			const reason = this.#error || new Error('SSE 流断开');
+			_reject(reason);
+
+			for (const [ , reject ] of this.#pending.values()) reject(reason);
+			this.#pending.clear();
+			this.disconnect(reason);
 		});
-		sse.addEventListener("endpoint", ({data}) => {
-			clearTimeout(timeout);
-			this.#messageUrl = new URL(data, this.#baseUrl).href;
-			_resolve();
-		});
 
-		try {
-			this.#sse = sse;
-			await doConnect;
-
-			// 握手
-			const handshake = await this.jsonRPC('initialize', {
-				protocolVersion: '2024-11-05',
-				capabilities:    {},
-				clientInfo:      {
-					name:    APP_NAME,
-					version: APP_VERSION,
-				},
-			});
-			this.#serverInfo = handshake;
-			this.statusListener?.(this.isOpen);
-
-			await this.sendNotification("notifications/initialized");
-			return handshake;
-		} catch (err) {
-			this.#connectPromise = null;
-			this.disconnect(err);
-			throw err;
-		}
+		return connectPromise;
 	}
 
-	disconnect(reason) {
+	async disconnect(reason) {
+		if (this.#headers) {
+			await fetch(this.#messageUrl, {
+				method: "DELETE",
+				headers: {
+					...this.#headers,
+					'Authorization': `Bearer ${this.options.key}`
+				},
+			});
+		}
+
 		this.#error = reason;
-		this.#sse?.close();
-		this.#sse = null;
 		this.#messageUrl = null;
 		this.#serverInfo = null;
+		this.#transportMode = null;
+		this.#headers = null;
+		this.#connectPromise = null;
+		this.#closer?.abort(reason);
+		this.#closer = null;
+		this.#reqId = 0;
+		this.statusListener?.(false);
 	}
 
 	/**
@@ -178,41 +203,49 @@ export class MCPClient {
 	/**
 	 * @param {string} method
 	 * @param {object=} params
-	 */
-	async sendNotification(method, params) {
-		if (!this.#messageUrl) await this.connect();
-		const body = JSON.stringify({ jsonrpc: '2.0', method, params });
-		await fetch(this.#messageUrl, {
-			method:  'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body,
-		});
-	}
-
-	/**
-	 * @param {string} method
-	 * @param {object=} params
+	 * @param {boolean=false} isNotification
 	 * @returns {Promise<any>}
 	 */
-	async jsonRPC(method, params) {
+	async jsonRPC(method, params, isNotification) {
 		if (!this.#messageUrl) await this.connect();
 
-		const id = ++this.#reqId;
-		const body = JSON.stringify({ jsonrpc: '2.0', id, method, params });
+		let id;
+		const body = { jsonrpc: '2.0', method, params };
+		if (!isNotification) id = body.id = ++this.#reqId;
 
 		return new Promise((resolve, reject) => {
-			this.#pending.set(id, [ resolve, reject ]);
-
-			fetch(this.#messageUrl, {
-				method:  'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body,
-			}).then(resp => {
-				if (!resp.ok) throw "HTTP "+resp.status;
-			}).catch(err => {
-				this.#pending.delete(id);
-				reject(err);
+			let result;
+			const reqPromise = sseFetch(this.#messageUrl, {
+				headers: this.#headers,
+				body:    JSON.stringify(body),
+				key:     this.options.key,
+				signal:  this.#closer.signal
+			}, (chunk, event) => {
+				if (chunk.id === id) {
+					if (chunk.error) {
+						throw new Error(`JSON-RPC ${chunk.error.code}: ${chunk.error.message}`);
+					}
+					result = chunk.result;
+				}
 			});
+
+			if (isNotification) return resolve();
+
+			if (this.#transportMode === 'sse') {
+				this.#pending.set(id, [ resolve, reject ]);
+
+				reqPromise.catch(err => {
+					this.#pending.delete(id);
+					reject(err);
+				});
+			} else {
+				reqPromise.then((resp) => {
+					const sessionId = resp.headers.get('Mcp-Session-Id');
+					if (sessionId) this.#headers = {'Mcp-Session-Id': sessionId};
+
+					resolve(result);
+				}, reject);
+			}
 		});
 	}
 }

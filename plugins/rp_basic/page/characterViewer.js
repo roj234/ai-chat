@@ -4,7 +4,7 @@ import {callOnLoadHandler} from "/src/plugin.js";
 import {ZipWriter} from "unconscious/common/zip-io.js";
 import {openJsonEditor} from "/src/json_editor/jsonEditorProxy.js";
 import {highlightJsonLike} from "/src/markdown/highlight.js";
-import {streamFetch} from "/common/openai-api-utils.js";
+import {sseFetch} from "/common/openai-api-utils.js";
 import {webviewDownloadFile} from "/vendor/jsBridge.js";
 import {PROTOCOL_VERSION} from "/backend/sync_const.js";
 
@@ -74,7 +74,7 @@ Only output the translation result, no explanations, no additional text.`,
 	const parser = createMarkdownStream();
 
 	try {
-		await streamFetch(url, {
+		await sseFetch(url, {
 			key: apiKey,
 			body,
 			signal: signal.signal,

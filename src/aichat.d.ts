@@ -152,6 +152,7 @@ declare namespace AiChat {
 
         permittedTools: string[],
         maxToolTurns: number
+        ignoreToolError: 0 | 1,
 
         nickname: string;
 

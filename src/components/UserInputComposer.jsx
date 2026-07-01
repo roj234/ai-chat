@@ -1,7 +1,7 @@
 import {
 	abortCompletion,
 	config,
-	conversations,
+	ensureActiveConversation,
 	inputText,
 	isMobile,
 	lastScrollDirection,
@@ -16,7 +16,7 @@ import {bind} from "../utils/utils.js";
 import {$computed, $state, $watch, unconscious} from "unconscious";
 import {handleCommand} from "../commands.js";
 import SimpleModal from "./SimpleModal.jsx";
-import {getBlob, updateConversation} from "../database.js";
+import {getBlob} from "../database.js";
 import {webviewUploadImage} from "/vendor/jsBridge.js";
 
 
@@ -251,21 +251,7 @@ export const createUserInputComposer = (scroller) => {
 
 		if (noAI) return;
 
-		if (null == selectedConversation.id) {
-			// 创建新对话
-			const conv = {
-				title: "",
-				time: Date.now(),
-				ready: true
-			};
-			if (config.branchModeDefault) conv.bm_leaf = 1;
-			if (config.incognito) conv.id = -1;
-
-			await updateConversation(conv, unconscious(messages), true);
-
-			conversations.unshift(conv);
-			selectedConversation.value = conv;
-		}
+		await ensureActiveConversation();
 
 		if (config.reviewMessage && input) return;
 

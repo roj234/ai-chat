@@ -1,6 +1,7 @@
 import {$asyncState, $computed, $state, $store, $watch, debugSymbol, unconscious} from 'unconscious';
 import {jsonFetch} from "./utils/utils.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
+import {updateConversation} from "./database.js";
 
 /**
  * @type {boolean}
@@ -94,9 +95,27 @@ $watch(selectedConversation, () => {
  */
 export const conversations = $state([]);
 
-export const beginConversation = () => {
+export const resetConversation = () => {
 	selectedConversation.value = null;
 	messages.value = [];
+};
+
+export const ensureActiveConversation = async () => {
+	if (null == selectedConversation.id) {
+		// 创建新对话
+		const conv = {
+			title: "",
+			time: Date.now(),
+			ready: true
+		};
+		if (config.branchModeDefault) conv.bm_leaf = 1;
+
+		if (config.incognito) conv.id = -1;
+		else await updateConversation(conv, unconscious(messages), true);
+
+		conversations.unshift(conv);
+		selectedConversation.value = conv;
+	}
 };
 
 /**
@@ -187,3 +206,5 @@ let nativeTheme;
  * @return {'light' | 'dark'}
  */
 export const getCurrentTheme = () => config.theme || nativeTheme;
+
+export const PROGRESS = debugSymbol("PrefillProgress");

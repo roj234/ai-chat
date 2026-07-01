@@ -5,17 +5,11 @@ import {config} from "../../src/states.js";
 
 // ────────────────────────────────── Glob‑to‑Regex (ported from Globs.java) ──────────────────────────
 
-const REGEX_META_CHARS = '.^$+{[]|()';
-const GLOB_META_CHARS = '\\*?[{';
-
-function isRegexMeta(c) { return REGEX_META_CHARS.indexOf(c) !== -1; }
-function isGlobMeta(c)  { return GLOB_META_CHARS.indexOf(c)  !== -1; }
+const REGEX_META_CHARS = new Set('.^$+{[]|()');
+const GLOB_META_CHARS = new Set('\\*?[{');
 
 const EOL = undefined;
-
-function next(glob, i) {
-	return i < glob.length ? glob.charAt(i) : EOL;
-}
+const next = (glob, i) => i < glob.length ? glob[i] : EOL;
 
 /**
  * Converts a glob pattern (Unix style) to a RegExp pattern string.
@@ -27,13 +21,13 @@ function globToRegexPattern(globPattern) {
 
 	let i = 0;
 	while (i < globPattern.length) {
-		let c = globPattern.charAt(i++);
+		let c = globPattern[i++];
 		switch (c) {
 			case '\\': {
 				if (i === globPattern.length)
 					throw new Error(`No character to escape at position ${i - 1}`);
-				const nextChar = globPattern.charAt(i++);
-				if (isGlobMeta(nextChar) || isRegexMeta(nextChar)) regex.push('\\');
+				const nextChar = globPattern[i++];
+				if (GLOB_META_CHARS.has(nextChar) || REGEX_META_CHARS.has(nextChar)) regex.push('\\');
 				regex.push(nextChar);
 				break;
 			}
@@ -59,7 +53,7 @@ function globToRegexPattern(globPattern) {
 				let hasRangeStart = false;
 				let last = 0;
 				while (i < globPattern.length) {
-					c = globPattern.charAt(i++);
+					c = globPattern[i++];
 					if (c === ']') break;
 					if (c === '/') throw new Error(`Explicit 'name separator' in class at ${i - 1}`);
 					if (c === '\\' || c === '[' || (c === '&' && next(globPattern, i) === '&')) {
@@ -120,7 +114,7 @@ function globToRegexPattern(globPattern) {
 				break;
 			}
 			default: {
-				if (isRegexMeta(c)) regex.push('\\');
+				if (REGEX_META_CHARS.has(c)) regex.push('\\');
 				regex.push(c);
 				break;
 			}
@@ -179,11 +173,11 @@ const resolveParent = async (rootHandle, filePath, options) => {
 /**
  * Resolve a directory handle from a path.
  */
-const resolveDirectory = async (rootHandle, dirPath) => {
+export const resolveDirectory = async (rootHandle, dirPath, options) => {
 	const parts = normalizePath(dirPath);
 	let handle = rootHandle;
 	for (const part of parts) {
-		handle = await handle.getDirectoryHandle(part);
+		handle = await handle.getDirectoryHandle(part, options);
 	}
 	return handle;
 };
@@ -227,7 +221,7 @@ export const createWebFileSystem = rootHandle => {
 	const api = {
 		async mkdirs({path}) {
 			await checkPath(path, true);
-			await resolveParent(rootHandle, path+'/_', CREATE);
+			await resolveDirectory(rootHandle, path, CREATE);
 			return 'success';
 		},
 

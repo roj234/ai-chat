@@ -54,29 +54,29 @@
 | `/new` | 创建新对话 |
 | `/title <文本>` | 重命名当前对话 |
 | `/preset <名称>` | 加载预设配置 |
-| `/tools` | 列出可用工具 |
-| `/use_tools <工具名>` | 启用指定工具 |
-| `/revoke_tools <工具名>` | 禁用指定工具 |
+| `/continue` | 继续上一条助手消息 |
+| `/setprompt` | 将预设的系统提示词固化到当前对话 |
+| `/basepath` | 设置文件访问服务的根目录 |
 
 ## 界面功能
 
 
 ### 系统提示词
-我们提供一种元数据语法以控制模型使用的工具
+我们提供一种元数据语法
 ```
 ---
-disabled-tools: *
 allowed-tools: tool_name
 ---
 ```
-如果通过元数据强制指定工具，那么【工具调用】按钮将不会生效  
-系统提示词的文本可以随时修改，但元数据只会在创建新对话时更新（未来会修）
+通过元数据指定工具，工具只会在创建新对话时设置  
+后续也可以通过工具配置菜单编辑  
+系统提示词的文本可以随时修改
 
 ### 【工具调用】按钮
 启用系统内置或插件提供的工具  
 一旦模型调用过工具，后续不建议禁止工具调用，否则可能出现意料之外的结果  
-（这是因为目前控制的不是工具的存在与否，而是 tool_choice 的值）  
-对于大部分国产开源模型，这么做都有极大可能导致模型以文本形式生成工具调用标签
+（控制的不是工具的存在，而是 tool_choice 的值）  
+对于大部分国产开源模型，这么做可能导致模型以文本形式生成工具标签
 
 ### "继续消息" / Prefill / 回复预填充 (Assistant Message Prefill)
 
@@ -100,7 +100,7 @@ assistant: , how are you today.
 
 ### 思考预算
 
-默认的思考预算格式是OpenAI规范 (需要我的分支让 llama.cpp 支持它)  
+默认的思考预算格式是OpenAI规范，支持自动检测  
 亦可自定义格式
 
 按钮解释：
@@ -110,8 +110,7 @@ assistant: , how are you today.
 - 低：low / 20% 的 max_tokens
 - 中：medium / 50% 的 max_tokens
 - 高：high / 80% 的 max_tokens
-
-暂时没有 xhigh
+- 高：xhigh / 95% 的 max_tokens
 
 ### 底部输入框工具栏，从左到右
 
@@ -198,3 +197,28 @@ AiChat 使用自研的流式 Markdown 解析器，支持：
 - **Mermaid 图表**：流程图、时序图等
 - **代码高亮**：基于 highlight.js 的语法高亮
 - 大部分标准 Markdown 语法
+
+### MCP 服务器
+
+右键 Agent 按钮（机器人图标）打开工具设置面板  
+在该面板中可以控制当前对话能使用的工具  
+右上角的加号可以添加MCP服务器  
+MCP会话会在第一次使用时创建，页面关闭时销毁  
+如果MCP服务器的工具有变动，你需要手动在工具设置面板中禁用再启用它  
+否则删除的工具会报错找不到，新增的工具不会被模型看到
+
+顺便推荐几个免费MCP服务器
+
+联网搜索：
+```
+name: Exa
+description: Online search
+url: https://mcp.exa.ai/mcp
+```
+
+API文档：
+```
+name: Context7
+description: Online API document for well-known projects
+url: https://mcp.context7.com/mcp
+```

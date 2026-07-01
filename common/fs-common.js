@@ -21,10 +21,12 @@ export function createHashLine(fs) {
 		return lines;
 	};
 
-	const read = async ({ path, offset, limit, maxChars = 50000, format = 'raw' }, ctx) => {
+	const read = async ({ path, offset, limit, maxChars = 50000, format = 'raw', noTruncate }, ctx) => {
 		let needWarning;
 
 		const lines = await readLines(path, ctx);
+		if (noTruncate) return lines.join('\n');
+
 		const lineCount = lines.length;
 
 		let first = offset != null ? offset - 1 : 0;
@@ -63,24 +65,24 @@ export function createHashLine(fs) {
 		if (truncated || needWarning) {
 			if (truncated) content += `\nTRUNCATED(maxChars): Only ${respLines.length} of ${last - first} (${lineCount} total) lines shown`;
 			if (needWarning) content += `\nOVERFLOW(${needWarning}): Only ${last - first} lines available in requested range`;
-		} else {
+		} else if (last === lineCount) {
 			content += 'EOF';
 		}
 		return content;
 	};
 
-	const patch = async ({path, edits}, ctx) => {
+	const patch = async ({path, changes}, ctx) => {
 		const lines = await readLines(path, ctx);
 		const patches = [];
 
-		for (let { startLine, startContent, endLine, endContent, content } of edits) {
+		for (let { startLine, startContent, endLine, endContent, content } of changes) {
 			const patchLines = content.split('\n');
 
 			if (startLine > endLine) throw ('end before start.');
 			if (lines[startLine-1] !== startContent) throw (`lines[startLine] !== startContent`);
 			if (lines[endLine-1] !== endContent) throw (`lines[endLine] !== endContent`);
 
-			patches.push([ startLine, endLine + 1, patchLines ]);
+			patches.push([ startLine, endLine, patchLines ]);
 		}
 
 		patches.sort(([astart], [bstart]) => astart - bstart);

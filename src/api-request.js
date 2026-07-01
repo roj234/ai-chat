@@ -9,6 +9,7 @@ import {
 	lastScrollDirection,
 	MessageRoles,
 	messages,
+	PROGRESS,
 	runningConversations,
 	selectedConversation,
 	Shared,
@@ -22,7 +23,6 @@ import {
 	runTools,
 	SetTitle,
 	TOOL_NAME,
-	toolGroups,
 	toolScriptRegistry
 } from "./skills.js";
 import {$stampLock, $state, $update, $watch, isReactive, unconscious} from "unconscious";
@@ -39,7 +39,7 @@ import SimpleModal from "./components/SimpleModal.jsx";
 import {highlightJsonLike} from "./markdown/highlight.js";
 import {setConversationTitle, updateConversationListUI} from "./components/ConversationList.jsx";
 import {deepEntries} from "unconscious/common/json-schema-utils.js";
-import {applyDelta, streamFetch} from "/common/openai-api-utils.js";
+import {applyDelta, sseFetch} from "/common/openai-api-utils.js";
 import {base64DecodeToUint8Array} from "unconscious/common/Base64.js";
 
 export const statusBadge = <span />;
@@ -49,12 +49,23 @@ export const updateStatusText = (text, tone = '') => {
 };
 
 /**
- *
  * @return {Promise<string>}
  */
-export async function submitUserChatMessage() {
-	if (unconscious(abortCompletion)) return "error";
-	abortCompletion.value = new AbortController();
+export const submitUserChatMessage = () => agentLoop(unconscious(selectedConversation), messages, config);
+
+/**
+ *
+ * @param {AiChat.Conversation} conversation
+ * @param {import("unconscious").Reactive<AiChat.Message[]>} messages
+ * @param {import("unconscious").Reactive<AiChat.Preset>} config
+ * @param {boolean} backgroundTask
+ * @returns {Promise<false|string>}
+ */
+export async function agentLoop(conversation, messages, config, backgroundTask) {
+	if (runningConversations.has(conversation.id)) return "error";
+
+	const overrides = conversation.overrides;
+	if (overrides) config = { ...config, ...overrides };
 
 	let markdownRenderer = createMarkdownStream();
 	const {scroller} = Shared;
@@ -101,7 +112,7 @@ export async function submitUserChatMessage() {
 		if (atBottom < 100 && !lastScrollDirection.value) scroller.vl.scrollTo(scroller.scrollHeight);
 	}
 	function callback(type, content) {
-		if (selectedConversation.id !== conversation_.id) return;
+		if (selectedConversation.id !== conversation.id) return;
 
 		switch (type) {
 			case MARKDOWN_APPEND:
@@ -122,23 +133,21 @@ export async function submitUserChatMessage() {
 	}
 
 	const messages_ = $stampLock(messages);
-	const conversation_ = unconscious(selectedConversation);
-	const abort_ = $state(unconscious(abortCompletion));
+	const abort_ = $state(new AbortController());
 	/** @type {AiChat.LLMRequestContext} */
 	const context = {};
 
-	// _ApiRequest 会更新 abortCompletion
-	// TODO 让 stampLock 支持这个
-	let oldValue;
+	let oldValue = selectedConversation.id !== conversation.id || null;
 	$watch(abort_, () => {
 		const newValue = unconscious(abort_);
-		if (unconscious(abortCompletion) === oldValue) {
+		// noinspection EqualityComparisonWithCoercionJS
+		if (unconscious(abortCompletion) == oldValue) {
 			abortCompletion.value = newValue;
 		}
 		oldValue = newValue;
 	});
 
-	runningConversations.set(conversation_.id, {
+	runningConversations.set(conversation.id, {
 		abort: abort_,
 		messages: messages_
 	});
@@ -146,7 +155,7 @@ export async function submitUserChatMessage() {
 
 	try {
 		const result = await executeCompletionRequest(
-			conversation_, messages_,
+			conversation, messages_,
 			config.tools, config.additionalBody,
 			abort_, callback,
 			context, config
@@ -165,7 +174,7 @@ export async function submitUserChatMessage() {
 		const commitMessage = async () => {
 			if (promises.length) return Promise.all(promises);
 
-			const resumeId = conversation_.resumeId;
+			const resumeId = conversation.resumeId;
 			if (finishReason !== 'error' || assistantMessage.error?.trim() !== "network error"/* fetch */) {
 				if (resumeId) {
 					try {
@@ -176,7 +185,7 @@ export async function submitUserChatMessage() {
 					} catch (e) {
 						showToast("Abort接口调用失败\n"+e, 'error');
 					}
-					delete conversation_.resumeId;
+					delete conversation.resumeId;
 					// 如果这里删除了，之后可能会更新时间, 但是确实要删除这个并且调试一下重连失败的行为
 				}
 			} else {
@@ -187,12 +196,11 @@ export async function submitUserChatMessage() {
 
 			const has_resp = result.request_id && (finishReason !== 'error' || result.input_tokens);
 			if (has_resp || messageHasContent(assistantMessage)) {
-				promises.push(updateConversation(conversation_, unconscious(messages_)));
+				promises.push(updateConversation(conversation, unconscious(messages_)));
 
 				if (has_resp) {
 					isIDB && await promises.at(-1);
-					const id = assistantMessage.id;
-					if (id > 0) result.id = id;
+					if (assistantMessage.id >= 0) result.id = assistantMessage.id;
 					promises.push(appendBillingLog(result));
 				}
 			}
@@ -202,7 +210,7 @@ export async function submitUserChatMessage() {
 			const runToolsGuard = () => {
 				const timer = setTimeout(commitMessage, 2000);
 				addEventListener("beforeunload", commitMessage);
-				const promise = runTools(assistantMessage, conversation_);
+				const promise = runTools(assistantMessage, conversation);
 				promise.finally(() => {
 					removeEventListener("beforeunload", commitMessage);
 					clearTimeout(timer);
@@ -220,14 +228,14 @@ export async function submitUserChatMessage() {
 			$update(updateMessageUI);
 		}
 
-		updateStatusText(FINISH_REASON_LABEL[finishReason], tone ?? 'error');
+		updateStatusText("");
 
 		await commitMessage();
 
 		if ('interrupt' !== finishReason && 'loop' !== finishReason) {
 			if ('error' !== finishReason) {
-				if (!conversation_.title) {
-					generateChatTitle(conversation_, messages_);
+				if (!conversation.title) {
+					generateChatTitle(conversation, messages_, config);
 				}
 			}
 
@@ -237,25 +245,19 @@ export async function submitUserChatMessage() {
 			}
 		}
 
-		if (selectedConversation.id !== conversation_.id) {
+		if (selectedConversation.id !== conversation.id && !backgroundTask) {
 			finishReason = 'interrupt'; // 如果不在前台就不自动执行
-			showToast("对话 "+conversation_.title+"(#"+conversation_.id+") 已结束", tone ?? "error");
+			showToast("对话 "+conversation.title+"(#"+conversation.id+") 已结束", tone ?? "error");
 		}
 
 		return finishReason;
 	} finally {
-		runningConversations.delete(conversation_.id);
+		runningConversations.delete(conversation.id);
 		$update(updateConversationListUI);
 		abort_.value = null;
 	}
 }
 
-const FINISH_REASON_LABEL = {
-	'tool_calls': '批准工具调用',
-	'length': '长度限制',
-	'stop': '完成',
-	'error': '错误',
-};
 const FINISH_REASON_TONE = {
 	'tool_calls': '',
 	'stop': 'ok',
@@ -280,20 +282,20 @@ const countAgenticTurns = messages => {
  *
  * @param {AiChat.Conversation} conversation
  * @param {AiChat.Message[]} messages
+ * @param {Partial<AiChat.TitleModelConfig & AiChat.ModelConfig>} config
  */
-const generateChatTitle = (conversation, messages) => {
+const generateChatTitle = (conversation, messages, config) => {
 	let s1 = getTextContent(messages[0]).slice(0, 512);
 
 	const i = s1.indexOf("\n");
 	conversation.title = i >= 0 && i < 30 ? s1.slice(0, i) : s1.slice(0, Math.min(s1.length, 30));
 
-	let s2 = getTextContent(messages[1]).slice(0, 512);
+	let m = messages.find((item, i) => i&&item.content);
+	let s2 = m&&getTextContent(m).slice(0, 512);
 	if (config.generateTitle !== true) {
 		setConversationTitle(conversation, conversation.title, true);
 		return;
 	}
-
-	updateStatusText('生成标题');
 
 	const body = {
 		model: config.titleModel || config.model,
@@ -315,16 +317,33 @@ Directly output title in JSON \` { "title": <conversation title> } \`, no explai
 	const [reasoningPath, reasoningEnabledValue, reasoningDisabledValue = 'false'] = (config.reasoningPath||"reasoning/enabled").split(",");
 	if (config.forceThink !== 0) jsonEval(body, reasoningPath, "set", JSON.parse(reasoningDisabledValue));
 
+	updateStatusText('生成标题');
+
+	const start = Date.now();
 	jsonFetch(config.endpoint+'/chat/completions', {
 		key: config.accessToken,
 		body: JSON.stringify(body)
 	}).then(json => {
+		const now = Date.now();
+		const log = {
+			usage: "tl:"+conversation.id,
+			provider: (config.provider || config.name || config.endpoint),
+			request_id: json.id,
+			model: json.model,
+			latency: now - start,
+			finish_reason: json.choices?.[0].finish_reason || 'error'
+		};
+		extractUsageMetrics(json, log);
+		appendBillingLog(log);
+
 		let content = json.choices?.[0].message?.content;
 		if (!content) throw json;
 		setConversationTitle(conversation, JSON.parse(content).title);
 	}).catch(err => {
 		console.error(err);
 		showToast("标题生成失败\n"+prettyError(err), 'error');
+	}).finally(() => {
+		updateStatusText("");
 	});
 };
 
@@ -480,8 +499,6 @@ async function sendCompletionRequest(
 
 	if (error) {
 		if (config.sound) failure();
-		updateStatusText('错误', 'error');
-
 		assistantMessage.error = error;
 		assistantMessage.finish_reason = 'error';
 		return false;
@@ -495,8 +512,10 @@ async function sendCompletionRequest(
 	let genImages = [];
 
 	let manualCoTCloseTag;
+	let thinkingPrefill;
 	let thinkState;
 	if ((thinkState = assistantMessage.think) && !assistantMessage.content) {
+		thinkingPrefill = true;
 		thinkState.start = startTime;
 		const format = thinkState.format;
 		manualCoTCloseTag = format.startsWith("m") && "</"+format.slice(1)+">\n";
@@ -519,7 +538,7 @@ async function sendCompletionRequest(
 	// Request
 	try {
 		let resumeObj;
-		await streamFetch(url, {
+		await sseFetch(url, {
 			...data,
 			key: config.accessToken,
 			signal: abortCompletion.signal
@@ -532,9 +551,14 @@ async function sendCompletionRequest(
 				if (json.prompt_progress) {
 					const {processed, total} = json.prompt_progress;
 
-					updateStatusText("预填充: "+(processed / total * 100).toFixed(2)+"%");
-					//assistantMessage[PROMPT_PROGRESS] = processed / total;
-					//onProgress?.();
+					const newValue = processed / total;
+					updateStatusText("预填充: "+(newValue * 100).toFixed(2)+"%");
+					if (!assistantMessage[PROGRESS]) {
+						assistantMessage[PROGRESS] = $state(newValue);
+						onProgress?.();
+					} else {
+						assistantMessage[PROGRESS].value = newValue;
+					}
 					return;
 				}
 				updateStatusText("生成中, "+predicted_n+" Tokens, "+predicted_per_second.toFixed(2)+"TPS");
@@ -669,10 +693,18 @@ async function sendCompletionRequest(
 						format: reasoning_format
 					});
 					if (assistantMessage.content || assistantMessage.tool_calls) endThinking();
-				} else if (isReactive(thinkState)) {
-					thinkState.content += reasoning_text;
-				} else if (thinkState.content.trimEnd() !== reasoning_text.trimEnd()) {
-					console.warn("未预料的思考块", thinkState);
+				} else {
+					if (thinkingPrefill) {
+						const isPrefillResponse = reasoning_text.startsWith(thinkState.content);
+						if (isPrefillResponse) reasoning_text = reasoning_text.slice(thinkState.content.length);
+						thinkingPrefill = false;
+					}
+
+					if (isReactive(thinkState)) {
+						thinkState.content += reasoning_text;
+					} else {
+						console.warn("未预料的思考块", thinkState);
+					}
 				}
 			} else if (isReactive(thinkState)) {
 				if (manualCoTCloseTag) {
@@ -716,7 +748,6 @@ async function sendCompletionRequest(
 		}
 	} catch (err) {
 		if (err.name === 'AbortError') {
-			updateStatusText('已取消');
 			finishReason = "interrupt";
 		} else {
 			abortCompletion.abort();
@@ -729,7 +760,6 @@ async function sendCompletionRequest(
 				}
 
 				if (config.sound) failure();
-				updateStatusText('错误', 'error');
 				console.error(err);
 				if (err.status) err = `API错误 ${err.status}\n${err.message}`;
 				assistantMessage.error = prettyError(err);
@@ -774,11 +804,6 @@ async function buildCompletionPayload(
 	context, config
 ) {
 	/**
-	 * @type {OpenAI.Message[]}
-	 */
-	const json_messages = [];
-
-	/**
 	 * @type {AiChat.AssistantMessage}
 	 */
 	let initialAssistantMessage= messages.at(-1);
@@ -799,10 +824,36 @@ async function buildCompletionPayload(
 		}
 	}
 
+	// Prepare request body
+	const headers = {
+		//'HTTP-Referer': 'https://github.com/roj234/ai-chat',
+		//'X-Title': 'AiChat',
+	};
+	let path = '/chat/completions';
+
+	const resumeId = conversation.resumeId;
+	if (resumeId != null) {
+		if (Date.now() - conversation.time < RESUME_TIMEOUT) {
+			return {
+				url: config.endpoint+'/resume/'+resumeId,
+				data: {headers},
+				assistantMessage,
+				initialAssistantMessage
+			};
+		}
+	}
+
+	/**
+	 * @type {OpenAI.Message[]}
+	 */
+	const json_messages = [];
+
 	let toolsUsed = conversation.activatedModules?.size > 0;
 	let callbacks = [];
 	for (let j = 0; j < messages.length; j++){
 		const m = messages[j];
+		// 为 dynamic context pruning 预留接口
+		if (m.skip) continue;
 
 		const compose = MessageRoles[m.role]?.compose;
 		if (compose) {
@@ -819,6 +870,7 @@ async function buildCompletionPayload(
 
 			updateStatusText("正在执行工具");
 			await runTools(m, conversation, true);
+			updateStatusText("");
 
 			for (let i = 0; i < tool_calls.length; i++) {
 				json_messages.push({
@@ -834,7 +886,6 @@ async function buildCompletionPayload(
 		if (isPrefill && prefillPath) {
 			const [path, value = "true"] = prefillPath.split(",");
 			jsonEval(json_msg, path, "set", JSON.parse(value));
-			// json_msg.prefix = true;
 		}
 		const format = think?.format;
 		if (format && (config.stripCoT !== true || isPrefill)) {
@@ -847,27 +898,6 @@ async function buildCompletionPayload(
 			}
 		} else {
 			delete json_msg.reasoning_details;
-		}
-	}
-
-	// Prepare request body
-	const headers = {
-		//'HTTP-Referer': location.origin,
-		//'X-Title': 'AIChat',
-		'Content-Type': 'application/json',
-		'Authorization': `Bearer ${config.accessToken}`
-	};
-	let path = '/chat/completions';
-
-	const resumeId = conversation.resumeId;
-	if (resumeId != null) {
-		if (Date.now() - conversation.time < RESUME_TIMEOUT) {
-			return {
-				url: config.endpoint+'/resume/'+resumeId,
-				data: {headers},
-				assistantMessage,
-				initialAssistantMessage
-			};
 		}
 	}
 
@@ -901,7 +931,10 @@ async function buildCompletionPayload(
 				// is this default=true for llama.cpp ?
 				body.parallel_tool_calls = true;
 				if (!allowTools) body.tool_choice = "none";
-				else if (typeof allowTools === "object") body.tool_choice = allowTools;
+				else if (typeof allowTools === "object") {
+					if (Array.isArray(allowTools)) body.tools.push(...allowTools);
+					else body.tool_choice = allowTools;
+				}
 			}
 
 			if (config.generateTitle === "tool" && !selectedConversation.title) {
@@ -1044,16 +1077,11 @@ export const buildSystemPrompt = async (conversation, prompt, toolPrompt) => {
 	if (prompt.startsWith("---\n")) {
 		const [meta, content] = parseSkillMetadata(prompt);
 
-		let activatedModules = conversation.activatedModules;
-		// only process at initial
-		if (!activatedModules) {
+		// 初始化时处理
+		if (!conversation.activatedModules) {
 			const allowedTools = meta.allowedTools;
-			conversation.activatedModules = new Set(allowedTools.filter(name => toolGroups[name]));
-			conversation.allowedTools = new Set(allowedTools.filter(name => toolScriptRegistry[name]));
-		}
-
-		for (const key of ["tool_choice", "reasoning"]) {
-			if (key in meta) body[key] = meta[key];
+			const Use = toolScriptRegistry['Use'];
+			Use.script({modules: allowedTools}, {}, conversation);
 		}
 
 		prompt = content;

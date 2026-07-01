@@ -1,4 +1,52 @@
-2.22.4
+2.23.0
+
+休息几天，再修修bug可以开始做3.0和RPG管线了。（FINALLY！）
+
+### 前端
+
+重构了虚拟文件系统的实现，现在可以更方便的挂载节点了，同时持久化了临时文件系统到OPFS
+加了/continue指令强行继续消息，部分解决了语义问题
+- 重新生成按钮：总是重新生成
+- /continue：总是继续生成
+- 发送按钮：继续生成如果：主动点击停止 && 设置支持继续生成
+
+加入子代理支持，AI可以生成子代理执行任务并获取响应
+- 基础功能正常，但对话数据可能出错
+- 未来可能breaking change
+
+MCP服务器支持自定义请求头以及StreamableHTTP传输协议
+- 修复无法添加MCP服务器的bug
+- 优化MCP服务器连接时机
+- 优化MCP格式和使用体验（breaking，你需要删除并重新添加之前的MCP服务器）
+
+加入清空OPFS选项
+toolGroup改名toolset
+修改LineEdit工具名称
+优化RollDice和CodeRunner工具
+优化开启新对话函数的语义
+为预填充状态（仅llama.cpp）加入进度指示器
+优化标题生成，在工具调用链结束之后生成
+优化提示词override默认工具调用配置。删掉tool_choice注入支持
+优化tooltip
+
+fix json editor(toolset) / schema
+fix cmd parse
+fix JsonEditor(component) 不用morphdom了有换行的边缘问题
+修复无法编辑图像消息中的文本的问题
+修复平均TPS计算公式的错误
+修复导出对话右键菜单无效的问题
+
+删掉一些updateStatusText的调用
+修复（？）EditLines的问题
+修复了思考预填充的bug
+
+### 后端
+
+所有LLM调用都支持日志记录了
+预置字典版本升级到10
+优化SSE Resume流程
+
+2.22.4 (7/3)
 
 ### 前端
 
@@ -97,7 +145,7 @@ JSON路径由 dot path 改为 JSON Pointer (RFC 6901) + append extension
 - 管理模型在当前对话中能“激活”和“使用”的工具
 - 你可以添加任意MCP服务器，每个服务器将注册为模块，你可以让模型自行激活或在UI中手动管理
 - 设置【新对话的默认值】需要通过系统提示的高级语法（在文档中）
-- 加入只读文件访问工具组（手动开启）
+- 加入只读文件访问工具集（手动开启）
 - 删除了 use_tool, revoke_tool, list_tools 命令
 - 记忆和追问工具不再需要靠命令激活
 - 删除了 registerDefaultTool API，注册工具现在必须通过 registerTools 函数

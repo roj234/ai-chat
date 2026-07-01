@@ -2,16 +2,41 @@ import {ContentPart, getToolParameters, registerTools} from "/src/skills.js";
 import {config, selectedConversation} from "/src/states.js";
 import {SETTINGS} from "/src/settings.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
-import {debugSymbol, unconscious} from "unconscious";
+import {$state, debugSymbol, unconscious} from "unconscious";
 import {showToast} from "/src/components/Toast.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {createWebFileSystem} from "./WebFileSystem.js";
 import "./agent.css";
 import {createVirtualFileSystem} from "./VirtualFileSystem.js";
 import {AskUser} from "./rp_kit/AskUser.js";
+import {updateOnIntersected} from "../../src/utils/utils.js";
+import {formatSize} from "unconscious/common/Utils.js";
 
 /** @type {Map<string, AiChat.FileSystemInstance>} */
 const webFileSystemInstances = new Map;
+
+
+const state = $state();
+const updateEstimate = () => navigator.storage.estimate().then(t => state.value = formatSize(t.usage) + "/" + formatSize(t.quota));
+const opfsDialog = <div className={"choice-scroll"}>
+	<button className={"btn danger"} onClick={() => {
+		SimpleModal({
+			title: "清空私库（OPFS）？",
+			message: "这包括:\n配置文件系统（化卷）中的临时数据\n源私有文件系统（藏渊）中的所有数据\n申请了存储权限的插件数据\n\n重要数据请通过交互式下载（FileTransfer）工具打包导出",
+			async onConfirm() {
+				const dir = await navigator.storage.getDirectory();
+				for await (const [name] of dir.entries()) {
+					await dir.removeEntry(name, {recursive: true});
+				}
+				updateEstimate();
+			}
+		})
+	}}>清空私库
+	</button>
+	<small>已用：{state}</small>
+</div>;
+
+updateOnIntersected(opfsDialog, updateEstimate);
 
 SETTINGS.push({
 	id: "fs_server",
@@ -24,11 +49,8 @@ SETTINGS.push({
 	placeholder: "http://localhost:1/api/"
 }, {
 	_tab: "tools",
-	name: "实验性选项 (刷新页面生效)",
-	type: "multiple",
-	choices: {
-		"暂无": "fs_"
-	}
+	type: "element",
+	element: opfsDialog
 });
 
 COMMAND_REGISTRY["basepath"] = [
@@ -414,20 +436,19 @@ const Append = {
 	}
 };
 /** @type {AiChat.FunctionTool} */
-const LineEdit = {
-	name: "LineEdit",
+const EditLines = {
+	name: "EditLines",
 	description:
-		"Replace line ranges in a file. " +
-		"Each edit replaces lines [startLine, endLine] (1‑based, inclusive) with `content`. " +
-		"Edits are applied in parallel, so you can provide all start/end lines " +
-		"based on the file state you just read — no offset calculation needed.",
+		"Edit a file by applying a list of line-based changes. " +
+		"Each change replaces a 1-based inclusive line range with content. " +
+		"Changes must not overlap. They are applied in reverse line order automatically.",
 	script: fileAccess("patch"),
-	title: prefixTitle("编辑(高级)"),
+	title: prefixTitle("按行编辑"),
 	parameters: {
 		type: "object",
 		properties: {
 			path: { type: "string" },
-			edits: {
+			changes: {
 				type: "array",
 				items: {
 					type: "object",
@@ -442,7 +463,7 @@ const LineEdit = {
 				}
 			}
 		},
-		required: ["path", "edits"]
+		required: ["path", "changes"]
 	}
 };
 /** @type {AiChat.FunctionTool} */
@@ -790,6 +811,7 @@ let fsPrompt = () => {
 - Root path is '.', **always** use relative path.
 - All writing tools like Append and Write, will automatically create parent directories.
 - DO NOT read file to verify edits, tool will not return "success' if edit failed.
+- If a path is URI encoded, keep it as-is, don't decode.
 - Reading errors are separated from file content by a '\x03' delimiter; everything after this character is error info, not file content.
 - Line-numbered output from any tool follows the format \`lineNumber\x1Fcontent\`
 `;
@@ -818,16 +840,13 @@ registerTools(
 	{ systemPrompt: fsPrompt }
 );
 registerTools(
-	"LineEdit",
+	"EditLines",
 	"Another edit tool trying to use lesser tokens.",
-	[LineEdit],
+	[EditLines],
 	{
-		systemPrompt: `<line-edit>
-### \`LineEdit\` guide
-
-This tool replaces a contiguous range of lines \`[startLine .. endLine]\` (1‑based, inclusive) with new content. 
-Only use this when you **already have a recent, verified file snapshot** from a \`Read\`/\`Grep\` call.
-</line-edit>`,
+		systemPrompt: `<edit-lines>
+Only use \`EditLines\` when you **already \`Read\`/\`Grep\`-ed** a file and knowing line numbers.
+</edit-lines>`,
 		hidden: "manual"
 	}
 );

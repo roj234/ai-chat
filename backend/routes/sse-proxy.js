@@ -1,6 +1,6 @@
 import {SSE_PROXY_BACKEND, SSE_PROXY_MODERATION, SSE_PROXY_TRACE, SSE_RESUME_TIMEOUT} from "../config.js";
 import {EventEmitter} from "node:events";
-import {applyDelta, streamFetch} from "../../common/openai-api-utils.js";
+import {applyDelta, sseFetch} from "../../common/openai-api-utils.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {Transform} from 'node:stream';
@@ -145,7 +145,7 @@ async function SSEHandler(logPath, apiPath, ctx) {
 		const optionalParams = baseUrl+apiPath;
 		if (SSE_PROXY_TRACE) log('请求发送', optionalParams);
 
-		await streamFetch(optionalParams, {
+		await sseFetch(optionalParams, {
 			body,
 			duplex,
 			signal: abort.signal,

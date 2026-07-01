@@ -1,4 +1,4 @@
-import {beginConversation, conversations, messages, runningConversations, selectedConversation} from "../states.js";
+import {conversations, messages, resetConversation, runningConversations, selectedConversation} from "../states.js";
 import {decodeObjects, serializeJSON} from "../utils/marshal.js";
 import {showToast} from "../components/Toast.js";
 import {$computed, $update, unconscious} from "unconscious";
@@ -211,7 +211,7 @@ export function initSync(address, kvRef, kvCache) {
 				}
 				else if (data.id === selectedConversation.id) {
 					showToast("当前对话已被其它客户端删除", 'error', 0);
-					beginConversation();
+					resetConversation();
 				}
 			}
 			break;

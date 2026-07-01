@@ -1,9 +1,10 @@
 import {showToast} from "./components/Toast.js";
-import {beginConversation, selectedConversation} from "./states.js";
+import {config, messages, resetConversation, selectedConversation} from "./states.js";
 import {updateConversation} from "./database.js";
 import {loadPreset} from "./components/PresetDropdown.jsx";
 import {unconscious} from "unconscious";
 import {tokenize} from "unconscious/common/StringTokenizer.js";
+import {submitUserChatMessage} from "./api-request.js";
 
 /**
  * 指令处理器定义
@@ -22,7 +23,7 @@ export const COMMAND_REGISTRY = {
 		"加载预设: /preset <name>...",
 	],
 	new: [
-		() => beginConversation(),
+		() => resetConversation(),
 		"开启新对话",
 	],
 	title: [
@@ -50,7 +51,23 @@ export const COMMAND_REGISTRY = {
 			element.dispatchEvent(new InputEvent("input"));
 		},
 		"显示帮助"
-	]
+	],
+	"continue": [
+		() => {
+			const msg = unconscious(messages).at(-1);
+			if (msg?.role !== 'assistant') {
+				showToast("最后一条消息角色不是助手", "error");
+				return;
+			}
+			if (!config.canPrefill) {
+				showToast("未在设置中启用Prefill", "error");
+				return;
+			}
+			msg.finish_reason = 'interrupt';
+			submitUserChatMessage();
+		},
+		"继续上一条助手消息"
+	],
 };
 
 /**
@@ -64,15 +81,14 @@ const parseCommand = text => {
 	const args = [];
 	const params = {};
 
-	// 简单的正则处理：支持 key:value 或直接的参数
-	parts.forEach(part => {
-		if (part.includes(':')) {
-			const [k, v] = part.split(':');
-			params[k] = v;
+	for (let i = 0; i < parts.length; i++) {
+		const str = parts[i];
+		if (str.startsWith("--") && str.indexOf(' ') < 0) {
+			params[str.substring(2)] = parts[++i];
 		} else {
-			args.push(part.replace(/^"|"$/g, '')); // 去掉引号
+			args.push(str);
 		}
-	});
+	}
 
 	return { command, args, params };
 };

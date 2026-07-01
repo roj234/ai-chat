@@ -1,10 +1,11 @@
-const SW_URL = './sw.js';
-
+import {updateOnIntersected} from "../src/utils/utils.js";
 import {SETTINGS} from "/src/settings.js";
 import {onLoad} from "/src/plugin.js";
 import {$computed, $state, $watch, unconscious} from "unconscious";
 import {formatSize} from "unconscious/common/Utils.js";
 import {config} from "/src/states.js";
+
+const SW_URL = './sw.js';
 
 let element;
 
@@ -31,11 +32,7 @@ if (DB_MODE !== 'local') {
 			element.replaceChildren(<button className={"btn primary"} onClick={() => enableBlobCache().then(cb)}>启用</button>);
 		} else {
 			const size = $state(0);
-			const im = new IntersectionObserver((entries) => {
-				if (!entries.at(-1).isIntersecting) return;
-				getCacheSize().then(size1 => size.value = size1);
-			});
-			im.observe(element);
+			updateOnIntersected(element, () => getCacheSize().then(size1 => size.value = size1));
 			$watch($computed(() => config.blobCacheCapacity), () => {
 				const cap = config.blobCacheCapacity;
 				if (cap) setMaxCacheSize(cap << 20).then(([before, after]) => {

@@ -11,11 +11,15 @@ const MAX_LOG_LENGTH = 5000;
 
 export const CodeRunner = {
 	name: "CodeRunner",
-	description: "Run sandboxed JavaScript in a WebWorker-like environment for exact calculation, data transformation, string processing, and quick algorithm validation. It cannot use import/require or access external systems.",
+	description: "Run sandboxed JavaScript in a Worker for exact calculation, data transformation, string processing, and quick algorithm validation.",
 	parameters: {
 		type: "object",
 		properties: {
-			code: { type: "string", description: "A self-invoking expression or use `return`. Output is captured from the final return value or `console.log`" }
+			code: { type: "string", description: "Body of an async function" +
+					"\n- Supports await" +
+					"\n- Use return or console.log to output." +
+					"\n- Output must be structuredClone-able" +
+					"\n- Network/file/import APIs are not available.", }
 		},
 		required: ["code"]
 	},
@@ -31,16 +35,11 @@ export const CodeRunner = {
 		return new Promise((resolve, reject) => {
 			let log = '';
 			let trimmedChars = 0;
-			function getLog() {
-				return trimmedChars ? "Trimmed "+trimmedChars+" characters.\n\n"+log : log;
-			}
+			const getLog = () => log && ("\nLog:\n"+(trimmedChars ? "Trimmed " + trimmedChars + " characters.\n\n" + log : log));
 
 			const timer = setTimeout(() => {
 				stopWorker();
-				reject({
-					error: "TimeoutError ("+timeout+"s)",
-					log: getLog()
-				});
+				reject("Error: Timeout"+getLog());
 			}, timeout * 1000);
 
 			if (!worker) worker = new MyWorker();
@@ -62,18 +61,10 @@ export const CodeRunner = {
 
 				clearTimeout(timer);
 
-				const base = log ? { log: getLog() } : {};
-
 				if ("result" in data) {
-					resolve({
-						result: data.result,
-						...base
-					});
+					resolve("Result:\n"+JSON.stringify(data.result)+getLog());
 				} else {
-					reject({
-						...data,
-						...base
-					});
+					reject(data.error+getLog());
 				}
 			};
 			worker.postMessage(code);

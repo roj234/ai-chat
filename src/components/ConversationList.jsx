@@ -141,7 +141,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 					});
 				return;
 				case "export":
-					exportConversation(false, conv);
+					exportConversation(1, conv);
 				return;
 				case "delete":
 					SimpleModal({
@@ -221,7 +221,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 			return <div
 				_conv={conv}
 				className={`chat-item${unconscious(selectedConversation) === conv ? ' active' : ''}`}
-				title={formatDate("Y-m-d H:i:s", conv.time)}
+				title={conv.title+"\n"+formatDate("Y-m-d H:i:s", conv.time)}
 			>
 				{runningConversations.has(conv.id) && <span className={"spinner"} />}
 				{conv[LOCKED] && <span className="ri-lock-line" title={"其它端正在编辑"} />}

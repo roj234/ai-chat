@@ -6,12 +6,12 @@ import {SETTINGS} from "./settings.js";
 import {databaseError, getMessages, isIDB, listConversations, updateConversation} from "./database.js";
 import {
 	abortCompletion,
-	beginConversation,
 	config,
 	conversations,
 	isMobile,
 	lastScrollDirection,
 	messages,
+	resetConversation,
 	selectedConversation,
 	Shared,
 	state
@@ -28,7 +28,7 @@ import {callOnLoadHandler} from "./plugin.js";
 import {enableBranches} from "./utils/BranchManager.js";
 import {checkUpdate} from "../common/updater.js";
 import {setAllowHTMLTags} from "./markdown/markdown.js";
-import {streamFetch} from "../common/openai-api-utils.js";
+import {sseFetch} from "../common/openai-api-utils.js";
 
 const $ = sel => document.getElementById(sel);
 
@@ -83,13 +83,13 @@ const createApp = () => {
 			<div className="bar">
 				<button className="ri-menu-line btn ghost" title="展开侧边栏" onClick={toggleSidebar}></button>
 				<TitleEditor/>
-				<button className="ri-add-line btn ghost" title="开启新对话" onClick={beginConversation}></button>
+				<button className="ri-add-line btn ghost" title="开启新对话" onClick={resetConversation}></button>
 			</div>
 		</header>
 		{newSettingUI}
 		<aside ref={sidebar} className="sidebar hide" style={isMobile ? "display:none;left:-100%":undefined}>
 			<div className="sidebar-header">
-				<button className="btn secondary" style="flex: 1" onClick={beginConversation}><i
+				<button className="btn secondary" style="flex: 1" onClick={resetConversation}><i
 					className="ri-add-line"></i>开启新对话
 				</button>
 				<button className="ri-arrow-left-s-line btn ghost" title="收起侧边栏" onClick={toggleSidebar}></button>
@@ -317,7 +317,7 @@ const createApp = () => {
 export const executeLogin = () => new Promise((resolve, reject) => {
 	const abort = new AbortController;
 	let modal;
-	streamFetch(config.db_server+"login", { signal: abort.signal }, ({code, token}) => {
+	sseFetch(config.db_server+"login", { signal: abort.signal }, ({code, token}) => {
 		if (code) {
 			modal = SimpleModal({
 				title: "交互式登录",

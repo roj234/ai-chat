@@ -1,4 +1,4 @@
-import {applyDelta, streamFetch} from "../../common/openai-api-utils.js";
+import {applyDelta, sseFetch} from "../../common/openai-api-utils.js";
 
 /**
  * @param {number} concurrency
@@ -42,7 +42,7 @@ export const ParallelInference = function (concurrency = 100) {
 	this.invokeAPI = async (baseUrl, body, key) => {
 		const completion = {};
 		try {
-			await streamFetch(baseUrl+"chat/completions", {
+			await sseFetch(baseUrl+"chat/completions", {
 				body: JSON.stringify(body),
 				signal: AbortSignal.timeout(3000000),
 				authorization: "Bearer "+key

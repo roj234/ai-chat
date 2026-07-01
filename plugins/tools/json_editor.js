@@ -59,14 +59,14 @@ const EditJson = {
 	async script({path, pointer, value}, response, global) {
 		const text = await readFile({
 			path,
-			format: "raw"
+			noTruncate: true
 		}, response, global);
 
 		let obj;
 		try {
 			obj = parseJsonLenient(text);
-		} catch {
-			throw "Not a valid JSON file";
+		} catch (e) {
+			throw "file cannot be parsed:\n"+e;
 		}
 
 		const jsonPointer = parseJsonPointer(pointer);
@@ -101,7 +101,7 @@ const WriteJson = {
 			path: { type: "string" },
 			content: { description: "Complete JSON object or array. Replaces all existing content.", type: ["object", "array"], },
 		},
-		required: ["path", "value"]
+		required: ["path", "content"]
 	},
 
 	script({path, content}, response, global) {
@@ -129,16 +129,22 @@ const ValidateJson = {
 		let schema, data;
 
 		try {
-			data = parseJsonLenient(await readFile({path: dataPath}, response, global));
+			data = parseJsonLenient(await readFile({
+				path: dataPath,
+				noTruncate: true
+			}, response, global));
 		} catch (e) {
-			return "json file cannot be parsed\n"+(e.message||e);
+			return "data cannot be parsed:\n"+(e.message||e);
 		}
 
 		try {
-			schema = parseJsonLenient(await readFile({path: schemaPath}, response, global));
+			schema = parseJsonLenient(await readFile({
+				path: schemaPath,
+				noTruncate: true
+			}, response, global));
 			compileSchema(schema);
 		} catch (e) {
-			return "schema file cannot be parsed\n"+(e.message||e);
+			return "schema cannot be parsed:\n"+(e.message||e);
 		}
 
 		const issues = {};
