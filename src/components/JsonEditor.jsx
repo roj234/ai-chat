@@ -57,7 +57,7 @@ export const JsonEditor = ({value = "", state}) => {
 			cancelHighlight = lightAsync(codeStr, "json", (html) => {
 				cancelHighlight = null;
 				lastText = codeStr;
-				pre.innerHTML = html;
+				pre.innerHTML = html+"&nbsp;";
 				//morphdom(pre, "<pre>"+html+"</pre>");
 				if (errorPos != null) {
 					const cursor = <span className='cursor'></span>;

@@ -12,14 +12,16 @@
  * @property {Function} getToken
  * @property {Function} uploadImage
  * @property {Function} setUserAgent
+ * @property {Function} hasAudioPermission
+ * @property {Function} requestAudioPermission
  */
 
-const imageUploadPromises = new Map;
+const rpc = new Map;
 
 window.__imageUploaded = (id, url) => {
-	const resolve = imageUploadPromises.get(id);
+	const resolve = rpc.get(id);
 	if (!resolve) return;
-	imageUploadPromises.delete(id);
+	rpc.delete(id);
 
 	if (!url) {
 		resolve(null);
@@ -33,6 +35,25 @@ window.__imageUploaded = (id, url) => {
 			.catch(() => resolve(null));
 	}
 };
+
+window.__audioPermissionResult = (id, granted) => {
+	const resolve = rpc.get(id);
+	if (!resolve) return;
+	rpc.delete(id);
+	resolve(granted);
+};
+
+/**
+ * @returns {Promise<boolean>}
+ */
+export const webviewRequestAudio = () => {
+	if (WebViewApi.hasAudioPermission()) return Promise.resolve(true);
+	return new Promise((resolve) => {
+		const id = Date.now() + '_' + Math.random().toString(36).slice(2);
+		rpc.set(id, resolve);
+		WebViewApi.requestAudioPermission(id);
+	});
+}
 
 const saveBlobByLocalHttp = (blob, filename) => {
 	const port = WebViewApi.serverPort();
@@ -66,7 +87,7 @@ export const webviewDownloadFile = (file, filename) => {
  */
 export const webviewUploadImage = () => new Promise((resolve) => {
 	const id = Date.now() + '_' + Math.random().toString(36).slice(2);
-	imageUploadPromises.set(id, resolve);
+	rpc.set(id, resolve);
 	WebViewApi.uploadImage(id);
 });
 

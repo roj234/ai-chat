@@ -111,6 +111,7 @@
 
 /* SetTimeout */
 .rp-timer {
+    width: 100%;
     & .progress {
         width: 100%;
         height: 12px;
@@ -145,10 +146,16 @@
                     transparent
             );
             background-size: 20px 20px;
-            animation: progress-move 2s linear infinite;
         }
     }
 }
+
+@media (prefers-reduced-motion: no-preference) {
+    .rp-timer .bar:not(.ended)::after {
+        animation: progress-move 2s linear infinite;
+    }
+}
+
 
 @keyframes progress-move {
     from { background-position: 0 0; }

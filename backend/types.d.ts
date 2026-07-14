@@ -38,12 +38,12 @@ namespace AiChatBackend {
         readonly size: number;
 
         set(id: string, text: string): Promise<void>;
-        query(text: string, topK: number, threshold: number): Promise<string[]>;
+        query(text: string, topK: number, threshold: number): Promise<{id: string, score: number}[]>;
 
-        close(): void;
+        close(): Promise<void>;
 
-        search(query: Float32Array, topK = 5, threshold = 0.3): string[];
-        upsert(id: string, vector: Float32Array): void;
+        search(query: Float32Array, topK?: number, threshold?: number): Promise<{id: string, score: number}[]>;
+        upsert(id: string, vector: Float32Array): Promise<void>;
         delete(id: string): Promise<void>;
     }
 

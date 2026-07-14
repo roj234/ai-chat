@@ -1,6 +1,6 @@
 import {chapterData} from "./documents.js";
 import {renderMarkdownToElement} from "../markdown/markdown.js";
-import {callOnLoadHandler} from "../plugin.js";
+import {callOnLoadHandler} from "../hooks.js";
 
 let hamburgerBtn, mainWrapper, markdownContent, navList, navNoResults, overlay, searchClear, searchInput, sidebar, sidebarNav, tocBadge, tocFab, tocList, tocMobileClose, tocMobileNav, tocMobilePanel, tocNav, tocSidebar;
 
@@ -564,7 +564,16 @@ const loadMarkdown = async (url) => {
 
 	markdownContent.replaceChildren();
 	renderMarkdownToElement(markdownContent, md.replaceAll('\r', ''), {
-		trusted: true
+		trusted: true,
+		attrFilter(node, name, value) {
+			if (name === 'href') {
+				if (value.startsWith('./')) {
+					node.target = "_self";
+					return "#documents"+value.slice(1).replace("#", ":");
+				}
+			}
+			return value;
+		}
 	});
 	tocItems = initTOC();
 }

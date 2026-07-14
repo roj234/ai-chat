@@ -33,6 +33,10 @@ export const RollDice = {
 							type: "string",
 							//description: "Don't place expression (2d6) here",
 							//example: "理智检定"
+						},
+						hidden: {
+							type: "boolean",
+							default: false
 						}
 					},
 					required: ["count", "sides"]
@@ -45,7 +49,7 @@ export const RollDice = {
 	script(parameters, response) {
 		const rolls = response.rolls = [];
 
-		return parameters.rolls.map(({count, sides, modifier = 0, label = ""}) => {
+		return parameters.rolls.map(({count, sides, modifier = 0, label = "", hidden}) => {
 			let score = modifier;
 			const dices = [];
 			for (let i = 0; i < count; i++) {
@@ -54,7 +58,7 @@ export const RollDice = {
 				dices.push(roll);
 			}
 
-			rolls.push({ exp: count+"d"+sides+(modifier>0?"+"+modifier:modifier||""), dices, score });
+			if (!hidden) rolls.push({ exp: count+"d"+sides+(modifier>0?"+"+modifier:modifier||""), dices, score });
 			return [score+" = "+dices.join("+")+(label&&" ("+label+")")];
 		}).join("\n");
 	},

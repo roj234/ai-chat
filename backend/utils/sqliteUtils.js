@@ -9,7 +9,7 @@ export const cachePreparedSql = (db) => {
 		value: (sql) => {
 			let statement = sqlCache.get(sql);
 			if (!statement) {
-				if (sqlCache.size > 500) sqlCache.clear();
+				if (sqlCache.size > 500) sqlCache.delete(sqlCache.keys().next().value);
 
 				statement = originalPrepare.call(db, sql);
 				sqlCache.set(sql, statement);

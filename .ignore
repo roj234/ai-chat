@@ -1,0 +1,7 @@
+dist
+dist-app
+data
+node_modules
+public/assets
+misc
+vendor

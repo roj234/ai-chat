@@ -1,10 +1,11 @@
 import {SETTINGS} from "/src/settings.js";
 import {jsonFetch, prettyError} from "/src/utils/utils.js";
-import {config, Shared} from "/src/states.js";
+import {config} from "/src/states.js";
 import {provider_presets} from "/media/provider_presets.js";
-import {onLoad} from "/src/plugin.js";
-import SimpleModal from "../src/components/SimpleModal.jsx";
+import {onLoad} from "/src/hooks.js";
+import SimpleModal from "/src/components/SimpleModal.jsx";
 import {jsonEval} from "unconscious/common/json-schema-utils.js";
+import {DI_settings} from "/src/hooks.js";
 
 const EMPTY_WAV = `UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=`;
 const EMPTY_BMP = `Qk06AAAAAAAAADYAAAAoAAAAAQAAAAEAAAABABgAAAAAAAQAAAATCwAAEwsAAAAAAAAAAAAA/wAAAA==`;
@@ -12,12 +13,14 @@ const EMPTY_BMP = `Qk06AAAAAAAAADYAAAAoAAAAAQAAAAEAAAABABgAAAAAAAQAAAATCwAAEwsAA
 const EMPTY_MP4 = `AAAAHGZ0eXBpc29tAAACAGlzb21pc28ybXA0MQAAAB9tZGF03ABMYXZjNjEuMy4xMDAAAjBADgEYIAcAAAEybW9vdgAAASp0cmFrAAABIm1kaWEAAAAgbWRoZAAAAAAAAAAAAAAAAAAAH0AAAAQIVcQAAAAAAPptaW5mAAAA8nN0YmwAAAB+c3RzZAAAAAAAAAABAAAAbm1wNGEAAAAAAAAAAQAAAAAAAAAAAAEAEAAAAAAfQAAAAAAANmVzZHMAAAAAA4CAgCUAAQAEgICAF0AVAAAAAAAfQAAABZIFgICABRWIVuUABoCAgAECAAAAFGJ0cnQAAAAAAAAfQAAABZIAAAAgc3R0cwAAAAAAAAACAAAAAQAABAAAAAABAAAACAAAABxzdHNjAAAAAAAAAAEAAAABAAAAAgAAAAEAAAAcc3RzegAAAAAAAAAAAAAAAgAAABMAAAAEAAAAFHN0Y28AAAAAAAAAAQAAACQ=`;
 
 onLoad((app) => {
-	app.append(<datalist id="ac-providers">{Object.entries(provider_presets).map(([k, v]) =>
-		<option value={k} label={v.provider}/>
-	)}</datalist>);
-
-	const providerInput = Shared.SettingUI.querySelector('[data-id="endpoint"] input');
-	providerInput.setAttribute("list", "ac-providers");
+	const DATALIST_ID = 'DL-providers';
+	const owner = DI_settings.byId('endpoint');
+	owner.append(<datalist id={DATALIST_ID}>
+		{Object.entries(provider_presets).map(([k, v]) =>
+			<option value={k} label={v}/>
+		)}
+	</datalist>);
+	owner.children[0].setAttribute("list", DATALIST_ID);
 });
 
 /**
@@ -64,11 +67,19 @@ const reason_switch_keys = [
 		{ thinking: { type: "disabled" },},
 		"/thinking/type,\"enabled\",\"disabled\""
 	],
+	[
+		{ enable_thinking: false,},
+		"/enable_thinking"
+	],
 ];
 const reason_budget_keys = [
 	[
 		{ thinking_budget_tokens: 1,},
 		"thinking_budget_tokens,i"
+	],
+	[
+		{ thinking_budget: 1,},
+		"thinking_budget,i"
 	],
 	[
 		{ reasoning: { max_tokens: 1 },},
@@ -79,7 +90,7 @@ const reason_budget_keys = [
 async function checkModelCapability() {
 	const hello = () => {return{
 		messages: [{role: "user", content: "Hi"}],
-		max_tokens: 1
+		max_completion_tokens: 1
 	}};
 	const isThinking = (json) => Object.keys(json).toString().includes("reason");
 
@@ -113,7 +124,7 @@ async function checkModelCapability() {
 		for (const [v, k] of reason_budget_keys) {
 			const body = {
 				messages: [{role: "user", content: "Compute 375*293"}],
-				max_tokens: 50
+				max_completion_tokens: 50
 			}
 			Object.assign(body, v);
 			json = await check(body, 3);
@@ -141,7 +152,7 @@ async function checkModelCapability() {
 			}],
 			tools: [get_time_tool],
 			//tool_choice: get_time_tool,
-			max_tokens: 50,
+			max_completion_tokens: 50,
 		}),
 		// audio
 		check({
@@ -152,7 +163,7 @@ async function checkModelCapability() {
 					{ type: 'input_audio', input_audio: { data: EMPTY_WAV, format: 'wav' } },
 				],
 			}],
-			max_tokens: 1,
+			max_completion_tokens: 1,
 		}, 0, /size|duration|time/i),
 		// image
 		check({
@@ -163,7 +174,7 @@ async function checkModelCapability() {
 					{ type: 'image_url', image_url: { url: "data:image/bmp;base64,"+EMPTY_BMP } },
 				],
 			}],
-			max_tokens: 1,
+			max_completion_tokens: 1,
 		}, 0, /size|1x1|width/i),
 		// video
 		check({
@@ -175,7 +186,7 @@ async function checkModelCapability() {
 					{ type: 'input_video', input_video: { data: EMPTY_MP4, format: 'mp4' } },
 				],
 			}],
-			max_tokens: 1,
+			max_completion_tokens: 1,
 		}, 0, /size|1x1|duration|time|width/i),
 		// prefill
 		check({
@@ -183,7 +194,7 @@ async function checkModelCapability() {
 				{ role: 'user', content: 'Hi' },
 				{ role: 'assistant', content: 'My name is not ' },
 			],
-			max_tokens: 20,
+			max_completion_tokens: 20,
 		}),
 		// logprobs
 		check({
@@ -191,7 +202,7 @@ async function checkModelCapability() {
 				{ role: 'user', content: 'Hi' },
 			],
 			logprobs: true,
-			max_tokens: 1,
+			max_completion_tokens: 1,
 			top_logprobs: 2
 		}),
 		// json object
@@ -199,7 +210,7 @@ async function checkModelCapability() {
 			model: config.model,
 			messages: [{ role: 'user', content: 'What is your name? Use ```json\nresponse```.' }],
 			response_format: { type: 'json_object', },
-			max_tokens: 50,
+			max_completion_tokens: 50,
 		}),
 		// json schema
 		check({
@@ -218,7 +229,7 @@ async function checkModelCapability() {
 					},
 				},
 			},
-			max_tokens: 50,
+			max_completion_tokens: 50,
 		}),
 		check({
 			model: config.model,
@@ -245,7 +256,7 @@ async function checkModelCapability() {
 					},
 				},
 			},
-			max_tokens: 50,
+			max_completion_tokens: 50,
 		}),
 	]);
 
@@ -272,7 +283,7 @@ async function checkModelCapability() {
 	else if (isJson(results[6])) config.jsonSupport = 1;
 	else config.jsonSupport = 0;
 
-	Shared.SettingUI.sync();
+	DI_settings.sync();
 
 	results.push(reasoning);
 	results.push(reasoningBudget);
@@ -290,11 +301,11 @@ SETTINGS.push({
 
 			const mode = config.mode !== "chat";
 			check(mode ? {
-				prompt: "Hi ",
-				max_tokens: 1,
+				prompt: "Hi",
+				max_completion_tokens: 1,
 			} : {
 				messages: [{role: "user", content: "Hi"}],
-				max_tokens: 1,
+				max_completion_tokens: 1,
 			}, 1).then(() => {
 				target.textContent = "成功";
 				SimpleModal({

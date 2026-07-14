@@ -1,5 +1,5 @@
 import './ToolCallCard.css';
-import {runTools, TOOL_NAME, toolScriptRegistry} from "../skills.js";
+import {runTools, TOOL_NAME, toolScriptRegistry} from "../toolset.js";
 import {config, messages, selectedConversation} from "../states.js";
 import {$state, $update, $watch, appendChildren, isReactive, unconscious} from "unconscious";
 import {MORPH_CHILD_FUNCTION} from "../utils/utils.js";
@@ -43,8 +43,10 @@ export function ToolCallCard(props) {
                             }).finally(() => {
                                 target.disabled = false;
                             });
-                        }} title={"确保知道自己在做什么！\n点击：撤销然后重做\n警告：错误使用可能导致状态不一致甚至数据丢失"}>
-                        重新执行</button>}
+                        }}>
+                        重新执行<span className={"tooltip"}>{`撤销工具调用并重新执行。
+某些工具不支持撤销，此时会重复执行，
+可能导致状态不一致或数据丢失。`}</span></button>}
                     </div>
                     <pre ref={output} className="args" dangerouslySetInnerHTML={highlightJsonLike(response_content.value ?? "/* 尚未运行 */")}></pre>
                     {() => Array.isArray(response_content.value) ? <div className="gallery">{response_content.value.map(part => {
@@ -72,7 +74,7 @@ export function ToolCallCard(props) {
 
     let title;
     try {
-        title = !isReactive(tool) && toolScriptRegistry[name]?.title?.(tool, message.tool_responses[idx]);
+        title = !isReactive(tool) && toolScriptRegistry[name]?.title?.(tool, message.tool_responses[idx] || {});
     } catch (e) {
         console.error("工具标题生成异常", e);
     }
@@ -126,7 +128,7 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
                 <button className={"btn warning"} onClick={({target}) => {
                     setAuditState(target, true);
                 }}>
-                    允许一次
+                    允许
                 </button>
                 <button className={"btn primary"} onClick={({target}) => {
                     target.previousElementSibling.click();
@@ -134,8 +136,8 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
                     const grantedTools = selectedConversation.grantedTools;
                     if (!grantedTools) selectedConversation.grantedTools = new Set([tool_name]);
                     else grantedTools.add(tool_name);
-                }} title={"在该对话中一直允许"}>
-                    一直允许
+                }} title={"总是允许(仅当前对话)"}>
+                    总是允许
                 </button>
                 <button className={"btn danger"} onClick={({target}) => {
                     setAuditState(target, false);

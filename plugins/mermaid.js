@@ -1,5 +1,12 @@
 import {registerCodeBlockRenderer} from "/src/markdown/markdown.js";
 import {getCurrentTheme} from "/src/states.js";
+import {PLACEHOLDERS} from "../src/toolset.js";
+
+PLACEHOLDERS['mdfmt'] += `
+- Render mermaid:
+   \`\`\`mermaid
+   [content]
+   \`\`\``;
 
 export const registerMermaidRenderer = () => {
 	let mermaid;
@@ -7,7 +14,7 @@ export const registerMermaidRenderer = () => {
 
 	registerCodeBlockRenderer("mermaid", (code, language, node, is_finished) => {
 		if (!renderQueue) {
-			const moduleUrl = import.meta.env.DEV ? new URL('/assets/mermaid.esm.min.js', import.meta.url).href : './mermaid.esm.min.js';
+			const moduleUrl = import.meta.env.DEV ? new URL('/assets/mermaid.min.mjs', import.meta.url).href : './mermaid.min.mjs';
 			renderQueue = import(/* @vite-ignore */moduleUrl).then(module => {
 				mermaid = module.default;
 				mermaid.initialize({

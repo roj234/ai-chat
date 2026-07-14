@@ -1,0 +1,51 @@
+
+
+.subagent-card {
+    display: flex;
+    font-size: 13px;
+    background: var(--chip-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--border-radius-md);
+    gap: 8px;
+    padding: 8px 12px;
+    align-items: center;
+
+    & .sa-btn {
+        padding: 6px 14px;
+        border: none;
+        font-size: 12px;
+        font-weight: 600;
+        transition: background .15s, box-shadow .15s, opacity .15s;
+        align-items: center;
+        gap: 4px;
+
+        --color-pct: 18%;
+
+        &.running {
+            background: color-mix(in srgb, var(--accent) var(--color-pct), transparent);
+            color: var(--accent);
+        }
+        &.done {
+            background: color-mix(in srgb, var(--ok) var(--color-pct), transparent);
+            color: var(--ok);
+        }
+        &.error {
+            background: color-mix(in srgb, var(--error) var(--color-pct), transparent);
+            color: var(--error);
+        }
+        &.paused {
+            background: color-mix(in srgb, var(--warning-accent) var(--color-pct), transparent);
+            color: var(--warning-accent);
+        }
+
+        &:disabled {
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+
+        &:not(:disabled):hover {
+            --color-pct: 100%;
+            color: var(--text);
+        }
+    }
+}

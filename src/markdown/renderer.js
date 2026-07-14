@@ -247,6 +247,9 @@ export function createMarkdownRenderer(root, options = {}) {
 				if (!allowedAttributes.has(name)) return;
 			}
 
+			const filter = options.attrFilter;
+			if (filter && null == (value = filter(node, name, value))) return;
+
 			const attr = node.attributes[name];
 			if (!attr) {
 				node.setAttribute(name, value);

@@ -190,7 +190,7 @@ export function readJPEG(data, returnStripped) {
 }
 
 /**
- * 向 JPEG 文件写入注释（覆盖或追加）
+ * 向 JPEG 文件写入注释
  * @param {Uint8Array} data - 原始 JPEG 字节
  * @param {string} comment - 要写入的注释内容
  * @returns {Uint8Array} 包含新注释的 JPEG 字节

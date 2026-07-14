@@ -8,6 +8,9 @@ import {createHashLine} from "../../common/fs-common.js";
 import {IgnoreMatcher} from "../../common/ignore.js";
 import {createReadStream, createWriteStream} from 'node:fs';
 import {pipeline} from "node:stream/promises";
+import {createHash} from 'node:crypto';
+import {normalizePath} from 'unconscious/common/path-utils.js';
+import {formatSize} from "unconscious/common/Utils.js";
 
 /**
  * 路径校验
@@ -15,8 +18,8 @@ import {pipeline} from "node:stream/promises";
  * @param {string} relPath
  * @return {string}
  */
-function pathFilter(ctx, relPath) {
-	const root = ctx.sandboxRoot;
+export const pathFilter = (ctx, relPath) => {
+	const root = ctx.fsRoot;
 	const targetPath = path.resolve(root, relPath.replace(/^\/+/, ''));
 	if (!targetPath.startsWith(root)) {
 		const err = new Error('Forbidden: Path Traversal');
@@ -24,11 +27,12 @@ function pathFilter(ctx, relPath) {
 		throw err;
 	}
 	return targetPath;
-}
+};
+
 async function pathFilterWithIgnore(ctx, relPath, isDir) {
 	const targetPath = pathFilter(ctx, relPath);
 
-	const root = ctx.sandboxRoot;
+	const root = ctx.fsRoot;
 	const processedRelPath = targetPath.slice(root.length+1).replaceAll(path.sep, '/');
 	const ignore = await getIgnoreMatcher(root, targetPath);
 	if (ignore.test(processedRelPath, isDir)) {
@@ -154,10 +158,16 @@ function modeToString(mode) {
 function killProcess(child) {
 	child.kill('SIGTERM');
 	setTimeout(() => {
-		try {
-			child.kill('SIGKILL');
-		} catch {
+		if (process.platform === 'win32') {
+			try {
+				spawn('taskkill', ['/T', '/PID', child.pid, '/F'], { stdio: 'ignore' });
+			} catch {}
+		} else {
+			try {
+				process.kill(-child.pid, 'SIGKILL');
+			} catch {}
 		}
+		try { child.kill('SIGKILL'); } catch {}
 	}, 3000);
 }
 
@@ -172,7 +182,7 @@ const getIgnoreMatcher = async (root, targetDir) => {
 	let matcher = matcherCache.get(root);
 	if (!matcher) {
 		if (matcherCache.size > 1000)
-			matcherCache.clear();
+			matcherCache.delete(matcherCache.keys().next().value);
 
 		matcher = new IgnoreMatcher();
 
@@ -219,7 +229,7 @@ export async function registerFsRoutes(router, allowExec) {
 			const safePath = await pathFilterWithIgnore(ctx, path1);
 			await fs.mkdir(path.dirname(safePath), { recursive: true });
 			await fs.writeFile(safePath, data, 'utf-8');
-			if (/\.(gitignore|ignore)$/.test(path)) matcherCache.delete(ctx.sandboxRoot);
+			if (/\.(gitignore|ignore)$/.test(path)) matcherCache.delete(ctx.fsRoot);
 		},
 		async mtime(path, ctx) {
 			const safePath = pathFilter(ctx, path);
@@ -228,29 +238,15 @@ export async function registerFsRoutes(router, allowExec) {
 		}
 	});
 
-	router.post('/root', (ctx) => {
-		sendText(ctx.res, ctx.sandboxRoot);
+	router.post('/ping', async (ctx) => {
+		const args = await ctx.readAsObject(1024);
+		const hash = createHash("sha256");
+		hash.update(args.nonce + 'AiChat');
+		ctx.send(200, { pong: hash.digest('hex') });
 	});
+
 	router.post('/read', async (ctx) => {
-		const args = await ctx.readAsObject();
-		const path = args.path;
-		const isImage = path.match(/\.(png|jpg|jpeg|bmp|webp)$/i);
-		if (isImage) {
-			const safePath = pathFilter(ctx, path);
-			const stats = await fs.stat(safePath);
-			if (stats.size > 10485760) {
-				return ctx.send(400, { error: `File too large (${stats.size} bytes)` });
-			}
-
-			ctx.res.writeHead(200, {
-				'Content-Type': `image/${isImage[1]}`,
-				'Content-Length': stats.size,
-			});
-
-			return pipeline(createReadStream(safePath), ctx.res);
-		}
-
-		sendText(ctx.res, await hashLine.read(args, ctx));
+		sendText(ctx.res, await hashLine.read(await ctx.readAsObject(), ctx));
 	});
 	router.post('/patch', async (ctx) => {
 		sendText(ctx.res, await hashLine.patch(await ctx.readAsObject(), ctx));
@@ -280,16 +276,51 @@ export async function registerFsRoutes(router, allowExec) {
 		}
 
 		await fs.appendFile(safePath, needNewline ? '\n'+content : content, 'utf8');
-		if (/\.(gitignore|ignore)$/.test(path)) matcherCache.delete(ctx.sandboxRoot);
+		if (/\.(gitignore|ignore)$/.test(path)) matcherCache.delete(ctx.fsRoot);
 		sendText(ctx.res, "success");
 	});
+
+	// ── Binary read/write/append (bypass text line cache) ──
+
+	router.post('/readRaw', async (ctx) => {
+		const { path: filePath } = await ctx.readAsObject();
+		const safePath = pathFilter(ctx, filePath);
+		const stats = await fs.stat(safePath);
+		if (stats.size > 10485760) {
+			return ctx.send(400, { error: `File too large (${stats.size} bytes)` });
+		}
+
+		ctx.res.writeHead(200, {
+			'Content-Type': 'application/octet-stream',
+			'Content-Length': stats.size,
+		});
+		return pipeline(createReadStream(safePath), ctx.res);
+	});
+
+	/**
+	 * @param {AiChatBackend.RouteContext} ctx
+	 */
+	const handler = async (ctx) => {
+		const filePath = ctx.searchParams.get('path');
+		if (!filePath) return ctx.send(400, { error: 'missing path' });
+		const safePath = await pathFilterWithIgnore(ctx, filePath);
+		await fs.mkdir(path.dirname(safePath), { recursive: true });
+
+		const buffer = await ctx.readAsBuffer();
+		await fs[ctx.url.pathname.endsWith("/appendRaw") ? 'appendFile' : 'writeFile'](safePath, buffer);
+		if (/\.(gitignore|ignore)$/.test(filePath)) matcherCache.delete(ctx.fsRoot);
+		hashLine.del(filePath);        // invalidate text line cache
+		sendText(ctx.res, "success");
+	};
+
+	router.post('/writeRaw', handler);
+	router.post('/appendRaw', handler);
 
 	// 文件/目录信息
 	router.post('/stat', async (ctx) => {
 		const { path: filePath } = await ctx.readAsObject();
 		const stats = await fs.stat(pathFilter(ctx, filePath));
-		ctx.send(200, `
-type: ${stats.isDirectory() ? "dir" : "file"}
+		ctx.send(200, `type: ${stats.isDirectory() ? "dir" : "file"}
 mode: ${modeToString(stats.mode)}
 size: ${stats.size}
 atime: ${new Date(stats.atimeMs).toISOString()}
@@ -298,29 +329,38 @@ ctime: ${new Date(stats.ctimeMs).toISOString()}
 nlink: ${stats.nlink}`);
 	});
 	router.post('/list', async (ctx) => {
-		const { path: filePath, glob = '*', json = false } = await ctx.readAsObject();
+		const {
+			path: filePath = '.',
+			pattern = '*',
+			json = false,
+			limit = 500,
+			modifiedSince = 0,
+			showDir = null,
+			showModified = false
+		} = await ctx.readAsObject();
 		const safePath = await pathFilterWithIgnore(ctx, filePath, true);
-		const ignore = await getIgnoreMatcher(ctx.sandboxRoot, safePath);
-		const entries = glob !== '*'
-			? await fs.glob(glob, { cwd: safePath, withFileTypes: true })
+		const ignore = await getIgnoreMatcher(ctx.fsRoot, safePath);
+		const entries = pattern !== '*'
+			? await fs.glob(pattern, { cwd: safePath, withFileTypes: true })
 			: await fs.readdir(safePath, { withFileTypes: true });
 
 		let prefix = '';
 		let items = 0;
 		let dirPrefix = new Set;
+		let modSince = modifiedSince ? +new Date(modifiedSince) : 0;
+		if (!isFinite(modSince)) throw 'Invalid date';
 
-		const MAX_COUNT = 500;
 		const result = [];
 		for await (const entry of entries) {
-			const entryName = glob !== '*' ? path.join(entry.parentPath, entry.name).slice(safePath.length+1).replaceAll(path.sep, '/') : entry.name;
+			const entryName = pattern !== '*' ? path.join(entry.parentPath, entry.name).slice(safePath.length+1).replaceAll(path.sep, '/') : entry.name;
 			const isDir = entry.isDirectory();
 			if (ignore.test(entryName, isDir) || dirPrefix.has(entry.parentPath.slice(safePath.length+1))) {
 				if (isDir) dirPrefix.add(entryName);
 				continue;
 			}
 
-			if (items >= MAX_COUNT) {
-				prefix = `[TRUNCATED: Only first ${MAX_COUNT} files shown, use a more specific glob or path]\n`;
+			if (items >= limit) {
+				prefix = `[TRUNCATED to ${limit} entries, use a more specific path or pattern]\n`;
 				break;
 			}
 			if (!json) items++;
@@ -329,12 +369,18 @@ nlink: ${stats.nlink}`);
 				const fullPath = path.join(entry.parentPath, entry.name);
 				const stats = await fs.stat(fullPath);
 
-				result.push([entryName, "file", stats.size]);
-			} else if (entryName) {
+				if (stats.mtimeMs > modSince) {
+					const item = [entryName, "file", formatSize(stats.size)];
+					if (showModified || modSince) item.push(stats.mtime.toISOString().slice(0, -5));
+					result.push(item);
+				}
+			} else if (entryName && (showDir != null ? showDir : !modSince)) {
 				// 跳过 '.' 当前目录
 				result.push([entryName, "dir"]);
 			}
 		}
+
+		if (modSince) result.sort((a, b) => b[3].localeCompare(a[3]));
 
 		if (json) {
 			ctx.send(200, result);
@@ -345,10 +391,10 @@ nlink: ${stats.nlink}`);
 	});
 
 	// 基础操作
-	router.post('/mkdirs', async (ctx) => {
+	router.post('/mkdir', async (ctx) => {
 		const { path: filePath } = await ctx.readAsObject();
 		await fs.mkdir(await pathFilterWithIgnore(ctx, filePath, true), { recursive: true });
-		ctx.send(200, 'success');
+		ctx.send(200, 'Success');
 	});
 	router.post('/copy', async (ctx) => {
 		const { src, dest, move } = await ctx.readAsObject();
@@ -360,16 +406,209 @@ nlink: ${stats.nlink}`);
 		} else {
 			await fs.cp(safeSrc, safeDest, { recursive: true });
 		}
-		ctx.send(200, 'success');
+		ctx.send(200, 'Success');
 	});
 	router.post('/delete', async (ctx) => {
 		const { path: filePath } = await ctx.readAsObject();
 		const safePath = await pathFilterWithIgnore(ctx, filePath, true);
-		if (safePath === ctx.sandboxRoot) return ctx.send(403, { error: 'Cannot delete root' });
+		if (safePath === ctx.fsRoot) return ctx.send(403, { error: 'Cannot delete root' });
 
 		await fs.rm(safePath, { recursive: true, force: true });
 		hashLine.del(filePath);
-		ctx.send(200, 'success');
+		ctx.send(200, 'Success');
+	});
+
+	const OUTPUT_LIMIT = 20000;
+	const HALF = Math.floor(OUTPUT_LIMIT / 2);
+
+	// Valid string terminator sequences are BEL, ESC\, and 0x9c
+	const ST = "(?:\\u0007|\\u001B\\u005C|\\u009C)";
+	// OSC sequences only: ESC ] ... ST (non-greedy until the first ST)
+	const osc = "(?:\\u001B\\][\\s\\S]*?"+ST+")";
+	// CSI and related: ESC/C1, optional intermediates, optional params (supports ; and :) then final byte
+	const csi = "[\\u001B\\u009B][\\[\\]()#;?]*(?:\\d{1,4}(?:[;:]\\d{0,4})*)?[\\dA-PR-TZcf-nq-uy=><~]";
+
+	const ANSI_SEQ = new RegExp(osc+"|"+csi, 'g');
+
+	// 后台进程管理：输出全部落盘为日志文件，LLM 可自行 read_file 查看
+	/** @type {Map<string, {child: import('node:child_process').ChildProcess, logFile: string, cwd: string, timer?: number}>} */
+	const processes = new Map();
+
+	/**
+	 * 统一执行命令并限制输出大小，按到达顺序交错拼接 stdout/stderr
+	 * @param {string} command     - 要执行的程序或 shell 命令
+	 * @param {string[]} args      - 程序参数（shell 模式时传空数组）
+	 * @param {object}   options   - { cwd, timeout(ms), shell(boolean|string), safeCwd(用于落盘) }
+	 * @returns {Promise<{code: number, text: string}>}
+	 */
+	async function executeCommand(command, args, { cwd, timeout, shell = false, dir, noTruncate, async: _async }) {
+		const child = spawn(command, args, {
+			cwd,
+			stdio: ['ignore', 'pipe', 'pipe'],
+			shell,
+			//detached: detach,
+		});
+
+		let head = Buffer.alloc(0), tail = Buffer.alloc(0);
+		let totalBytes = 0;
+
+		let filename = `/command-log-${Date.now()}-${child.pid}.log`;
+		let file = null;
+
+		/** @param {Buffer} chunk */
+		const onData = (chunk) => {
+			totalBytes += chunk.length;
+
+			if (file) {
+				file.write(chunk);
+				tail = Buffer.concat([tail, chunk]).subarray(-HALF);
+			} else {
+				tail = Buffer.concat([tail, chunk]);
+				if (!noTruncate && tail.length > OUTPUT_LIMIT) {
+					file = createWriteStream(path.join(cwd, filename), { flags: 'w' });
+					file.write(tail);
+
+					head = tail.subarray(0, HALF);
+					tail = tail.subarray(-HALF);
+				}
+			}
+		};
+
+		child.stdout.on('data', onData);
+		child.stderr.on('data', onData);
+
+		const decode = (buf) => {
+			try {
+				return guessCharset(buf);
+			} catch {
+				return buf.toString();
+			}
+		};
+		const getLog = () => {
+			if (!file) return decode(tail);
+
+			return `[WARNING: Large output omitted (${formatSize(totalBytes)}), log saved to: ${JSON.stringify(dir + filename)}]\n`
+				+ decode(head)
+				+ `\n[WARNING: Omitted ${totalBytes - OUTPUT_LIMIT} bytes]\n`
+				+ decode(tail);
+		};
+
+		const result = await new Promise((resolve) => {
+			let timer = setTimeout(() => {
+				child.stdout.removeAllListeners('data');
+				child.stderr.removeAllListeners('data');
+
+				resolve({
+					code: (_async?'':'TIMEOUT, ')+'Running in background (pid='+child.pid+', logPath='+JSON.stringify(dir + filename)+')',
+					text: getLog(),
+				});
+
+				// Ensure log file exists for remaining output
+				if (!file) {
+					file = createWriteStream(path.join(cwd, filename), { flags: 'w' });
+					file.write(tail);
+					head = tail = null;
+				} else {
+					file.write(tail);
+					head = tail = null;
+				}
+
+				child.stdout.pipe(file, { end: false });
+				child.stderr.pipe(file, { end: false });
+			}, Math.min(_async ? 100 : timeout, 275000));
+
+			processes.set(child.pid, { child, logFile: dir+filename, cwd, timer });
+
+			console.log("[进程] 已启动", cwd, command, args);
+
+			child.on('error', (err) => {
+				clearTimeout(timer);
+				resolve({ code: -1, text: err.message });
+			});
+
+			child.on('exit', (code, signal) => {
+				if (file) file.end();
+				if (head == null) return;
+
+				clearTimeout(timer);
+				resolve({
+					code: signal ? "KILLED" : code,
+					text: getLog()
+				});
+			});
+		});
+
+		return { code: result.code ?? 0, text: result.text.replaceAll(ANSI_SEQ, "") };
+	}
+
+	/**
+	 * 终止后台程序
+	 */
+	router.post('/kill', async (ctx) => {
+		const { pid } = await ctx.readAsObject();
+		const info = processes.get(pid);
+
+		if (!info) return sendText(ctx.res, `Error: process died or not started by agent.`);
+
+		const { child, logFile, timer } = info;
+
+		if (child.killed || child.exitCode !== null) {
+			processes.delete(pid);
+			return sendText(ctx.res,
+				`status: exited earlier
+exitCode: ${child.exitCode}
+logPath: ${logFile}`
+			);
+		}
+
+		console.log("[进程] 中止 "+pid);
+		clearTimeout(timer);
+		processes.delete(pid);
+		killProcess(child);
+
+		sendText(ctx.res,
+			`status: killed
+logPath: ${logFile}`
+		);
+	});
+
+	let bashPath = 'bash';
+	let rgPath = path.join(import.meta.dirname, 'bin', 'rg.exe');
+	try {
+		await fs.access(rgPath);
+	} catch {
+		rgPath = 'rg';
+	}
+
+	router.post('/grep', async (ctx) => {
+		const { maxCount, glob, pattern, path, maxColumns } = await ctx.readAsObject();
+		const { code, text } = await executeCommand(rgPath, [
+			"--line-number",
+			"--no-messages",
+			"--heading",
+			"--max-columns", maxColumns,
+			"--color", "never",
+			"--max-count", maxCount,
+			"--type-add",
+			"foo:"+glob,
+			"-tfoo",
+			"--path-separator", "/",
+			"--",
+			pattern,
+			normalizePath(path).join('/') || '.',
+		], {
+			cwd: ctx.fsRoot,
+			noTruncate: true,
+			dir: '.',
+			timeout: 60000,
+			charset: 'utf8'
+		});
+
+		if (code === -1 && text.includes("ENOENT")) {
+			// TODO backend grep
+		}
+
+		sendText(ctx.res, `${typeof code === 'number'?'Exit code '+code:code}\n${text}`);
 	});
 
 	if (allowExec) {
@@ -388,201 +627,46 @@ nlink: ${stats.nlink}`);
 			return ctx.send(200, { prompt: envPrompt })
 		});
 
-		const OUTPUT_LIMIT = 20000;
-		const HALF = Math.floor(OUTPUT_LIMIT / 2);
-
-		/**
-		 * 统一执行命令并限制输出大小，按到达顺序交错拼接 stdout/stderr
-		 * @param {string} command     - 要执行的程序或 shell 命令
-		 * @param {string[]} args      - 程序参数（shell 模式时传空数组）
-		 * @param {object}   options   - { cwd, timeout(ms), shell(boolean|string), safeCwd(用于落盘) }
-		 * @returns {Promise<{code: number, text: string}>}
-		 */
-		async function executeCommand(command, args, { cwd, timeout, shell, dir, noTruncate }) {
-			const child = spawn(command, args, {
-				cwd,
-				stdio: ['ignore', 'pipe', 'pipe'],
-				shell: shell || false,
-			});
-
-			let head = Buffer.alloc(0), tail = Buffer.alloc(0);
-			let totalBytes = 0;
-
-			let filename = '';
-			let file = null;
-
-			/** @param {Buffer} chunk */
-			const onData = (chunk) => {
-				totalBytes += chunk.length;
-
-				if (file) {
-					file.write(chunk);
-					tail = Buffer.concat([tail, chunk]).subarray(-HALF);
-				} else {
-					tail = Buffer.concat([tail, chunk]);
-					if (!noTruncate && tail.length > OUTPUT_LIMIT) {
-						filename = `/command-log-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.log`;
-
-						file = createWriteStream(path.join(cwd, filename), { flags: 'w' });
-						file.write(tail);
-
-						head = tail.subarray(0, HALF);
-						tail = tail.subarray(-HALF);
-					}
-				}
-			};
-
-			child.stdout.on('data', onData);
-			child.stderr.on('data', onData);
-
-			// ---- 进程结束 ----
-			const result = await new Promise((resolve) => {
-				let timer = setTimeout(() => killProcess(child), Math.min(timeout, 275000));
-				console.log("[进程] 已启动 "+command, args, cwd);
-
-				child.on('error', (err) => {
-					clearTimeout(timer);
-					resolve({ code: -1, text: err.message });
-				});
-
-				child.on('exit', (code, signal) => {
-					clearTimeout(timer);
-
-					const decode = (buf) => {
-						try {
-							return guessCharset(buf);
-						} catch {
-							return buf.toString();
-						}
-					};
-
-					let text;
-					if (!file) {
-						text = decode(tail);
-					} else {
-						if (file) file.end();
-						text = decode(head)
-							+ `\n<Output too large (${totalBytes} bytes). Full output saved to: ${JSON.stringify(dir+filename)}>\n`
-							+ decode(tail);
-					}
-					resolve({ code: signal ? "TIMEOUT" : code, text });
-				});
-			});
-
-			return { code: result.code ?? 0, text: result.text };
-		}
-
 		router.post('/spawn', async (ctx) => {
-			const { program, arguments: args, cwd = '', timeout = 10, noTruncate = false, charset = 'utf8' } = await ctx.readAsObject();
+			const {
+				program, arguments: args, cwd = '',
+				timeout = 10, async = false,
+				noTruncate = false, charset = 'utf8'
+			} = await ctx.readAsObject();
 			const { code, text } = await executeCommand(program, args, {
 				cwd: await pathFilterWithIgnore(ctx, cwd, true),
 				noTruncate,
 				dir: '.',
 				timeout: timeout * 1000,
+				async,
 				charset
 			});
-			sendText(ctx.res, `Exit code ${code}\n${text}`);
+			sendText(ctx.res, `${typeof code === 'number'?'Exit code '+code:code}\n${text}`);
 		});
 
 		router.post('/shell', async (ctx) => {
-			let { command, cwd = '', timeout = 10, shell = defaultShell, charset = 'utf8' } = await ctx.readAsObject();
+			let {
+				command, cwd = '', shell = defaultShell,
+				timeout = 10, async = false,
+				charset = 'utf8',
+			} = await ctx.readAsObject();
 			let args = [];
 
 			if (shell === 'bashemu') {
 				shell = false;
 				args = ['-c', command];
-				command = 'bash';
+				command = bashPath;
 			}
 
 			const { code, text } = await executeCommand(command, args, {
 				cwd: await pathFilterWithIgnore(ctx, cwd, true),
 				dir: '.',
 				timeout: timeout * 1000,
+				async,
 				shell,
 				charset
 			});
-			sendText(ctx.res, `Exit code ${code}\n${text}`);
-		});
-
-		// 后台进程管理：输出全部落盘为日志文件，LLM 可自行 read_file 查看
-		/** @type {Map<string, {child: import('node:child_process').ChildProcess, logFile: string, cwd: string, timer?: number}>} */
-		const bgProcesses = new Map();
-
-		/**
-		 * 启动后台程序（非阻塞），stdout/stderr → 日志文件
-		 * @returns {string} 纯文本：id 与日志路径，LLM 用 read_file 自行查看
-		 */
-		router.post('/run_bg', async (ctx) => {
-			const { program, arguments: args, cwd = '', timeout = -1 } = await ctx.readAsObject();
-			const safeCwd = await pathFilterWithIgnore(ctx, cwd, true);
-
-			const id = Math.random().toString(36).slice(2, 10);
-			const logName = `bg-program-${id}.log`;
-			const logPath = path.join(safeCwd, logName);
-			const relLog = path.relative(ctx.sandboxRoot, logPath);
-
-			const logStream = createWriteStream(logPath, { flags: 'w' });
-
-			const child = spawn(program, args || [], {
-				cwd: safeCwd,
-				stdio: ['ignore', 'pipe', 'pipe'],
-				shell: false,
-			});
-
-			child.stdout.pipe(logStream);
-			child.stderr.pipe(logStream);
-
-			let timer = timeout > 0 && setTimeout(() => killProcess(child), timeout * 1000);
-
-			bgProcesses.set(id, { child, logFile: logPath, cwd: safeCwd, timer });
-			console.log("[后台进程] 已启动 "+id, program, args, cwd);
-
-			child.on('close', () => {
-				logStream.end();
-				clearTimeout(timer);
-				console.log("[后台进程] 已结束 "+id);
-			});
-			child.on('error', () => logStream.end());
-
-			sendText(ctx.res, JSON.stringify({
-				status: "Running in background",
-				programId: id,
-				logFile: relLog
-			}));
-		});
-
-		/**
-		 * 终止后台程序
-		 */
-		router.post('/stop_bg', async (ctx) => {
-			const { programId } = await ctx.readAsObject();
-			const info = bgProcesses.get(programId);
-
-			if (!info) {
-				return sendText(ctx.res, `invalid id: ${programId}`);
-			}
-
-			const { child, logFile, cwd, timer } = info;
-			const relLog = path.relative(ctx.sandboxRoot, logFile);
-
-			if (child.killed || child.exitCode !== null) {
-				bgProcesses.delete(programId);
-				return sendText(ctx.res, JSON.stringify({
-					status: "terminated earlier",
-					exitCode: child.exitCode,
-					logFile: relLog
-				}));
-			}
-
-			console.log("[后台进程] 中止 "+programId);
-			clearTimeout(timer);
-			bgProcesses.delete(programId);
-			killProcess(child);
-
-			sendText(ctx.res, JSON.stringify({
-				status: "killed",
-				logFile: relLog
-			}));
+			sendText(ctx.res, `${typeof code === 'number'?'Exit code '+code:code}\n${text}`);
 		});
 	}
 }

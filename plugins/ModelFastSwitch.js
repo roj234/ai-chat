@@ -4,7 +4,7 @@ import {$computed, $foreach} from "unconscious";
 import {config} from "/src/states.js";
 
 export const registerModelFastSwitch = () => {
-	const main = <div className={"pretty-select up"} style={"width: auto; max-width: 200px"}>
+	const main = <div className={"pretty-select up"} title={"快速选择预设"} style={"width: auto; max-width: 200px"}>
 		<div className="input" onClick.stop={() => main.classList.toggle("open")}>
 			<span>{() => config.name ?? "default"}</span>
 			<span className={"arrow-icon ri-arrow-down-s-line"}></span>

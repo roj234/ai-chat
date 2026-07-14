@@ -6,17 +6,20 @@ import {LOG_HOOK} from "../config.js";
  * @param {Record<string, function(body: any, ctx: Partial<AiChatBackend.RouteContext>): any>} batcher
  */
 export function registerLogRoutes(router, batcher) {
-	router.get('/logs', (ctx) => {
-		const start = Number(ctx.query.start) || 0;
-		const end = Number(ctx.query.end) || Date.now();
-		const rows = ctx.db.prepare('SELECT data, time, ROWID FROM logs WHERE time >= ? AND time <= ? ORDER BY time DESC LIMIT 5000').all(start, end);
-		ctx.send(200, rows.map(row => {
+	batcher['logs'] = ([start = 0, end = Date.now(), lastRow], ctx) => {
+		if (!Number.isFinite(start) || !Number.isFinite(end) ||(lastRow && !Number.isFinite(lastRow))) return { error: "illegal params" };
+		const rows =
+			typeof lastRow === 'number'
+				? ctx.db.prepare('SELECT data, time, ROWID FROM logs WHERE ROWID < ? AND time >= ? ORDER BY time DESC LIMIT 5000').all(lastRow, start)
+				: ctx.db.prepare('SELECT data, time, ROWID FROM logs WHERE time >= ? AND time <= ? ORDER BY time DESC LIMIT 5000').all(start, end);
+		return rows.map(row => {
 			const data = deserializeRow(row, decompressLog);
 			delete data.request_id;
 			delete data.usage;
 			return data;
-		}));
-	});
+		});
+	};
+
 	batcher['log/by-rowid'] = (id, {db}) => {
 		if (!Number.isFinite(id)) return { error: "illegal id" };
 		const row = db.prepare('SELECT id, data, time FROM logs WHERE ROWID = ?').get(id);

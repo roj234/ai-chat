@@ -52,6 +52,7 @@ const testRunner = {
 						this.results.failed++;
 						const errorMsg = promiseError instanceof Error ? promiseError.message : String(promiseError);
 						this.results.errors.push(`测试 ${name}: Promise 被拒绝，错误信息: ${errorMsg}`);
+						console.error(promiseError);
 					}
 				} else {
 					// 同步返回值

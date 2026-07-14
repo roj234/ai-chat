@@ -1,18 +1,19 @@
 import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs/promises';
-import {watch} from 'fs';
+import {watch} from 'node:fs';
 import {parseArgs} from 'node:util';
 import {createRouter} from './init.js';
 import {createSyncManager, createSyncValidateMiddleware} from "./sync_service.js";
 import {WebSocketServer} from "ws";
-import {INTERACTIVE_LOGIN, PAT_SERVER_SALT, reload, WEBSOCKET_SYNC_ENABLE} from "./config.js";
+import {INTERACTIVE_LOGIN, PAT_SERVER_SALT, reload, SERVER_BASE_ADDR, WEBSOCKET_SYNC_ENABLE} from "./config.js";
 import {createZipRouter} from "./utils/zipRouter.js";
 import {closeAllConnections} from "./utils/UserManager.js";
 import {PROTOCOL_VERSION} from "./sync_const.js";
 import {ZipReader} from "unconscious/common/zip-io.js";
-import {injectLogger} from "./utils/logger.js";
+import {hookLogger} from "./utils/logger.js";
 import path from "node:path";
+import {hookFetch} from "./utils/fetch-hook.js";
 
 const options = {
 	addr: { type: 'string', short: 'a', default: '127.0.0.1' },
@@ -46,7 +47,8 @@ if (cert) {
 	serverOptions = {}
 }
 
-injectLogger();
+hookLogger();
+const _originalFetch = hookFetch();
 
 async function fileWatcher(path, callback, uiName) {
 	let retries = 0;
@@ -92,6 +94,11 @@ try {
 }
 
 const router = await createRouter(DATA_PATH, "api", workspace);
+
+router.get("/", (ctx) => {
+	if (SERVER_BASE_ADDR) ctx.res.setHeader('X-AiChat-API', SERVER_BASE_ADDR);
+	return router.zipRouter(ctx);
+})
 
 let frontendVersion = 'bundled';
 if (zipPath) {
@@ -144,9 +151,9 @@ server.listen(PORT, addr, () => {
 });
 
 // 封装一个优雅退出的函数
-function gracefulShutdown() {
+async function gracefulShutdown() {
 	console.log('[shutdown] 正在关闭数据库...');
-	closeAllConnections();
+	await closeAllConnections();
 	process.exit(0);
 }
 

@@ -100,7 +100,10 @@ export function registerMessageRoutes(batcher) {
 
 	// 列出对话消息
 	batcher["messages"] = (id, ctx) => {
-		if (ctx._skipMessages) return { error: { status: 304 } };
+		if (ctx._skipMessages) {
+			delete ctx._skipMessages;
+			return { error: { status: 304 } };
+		}
 
 		if (!Number.isFinite(id)) return { error: 'illegal id' };
 

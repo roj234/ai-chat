@@ -1,4 +1,4 @@
-const {compressGeneric, decompressGeneric} = global.compression;
+const {compressGeneric, decompressGeneric} = globalThis.AiChatAPI;
 
 export default function (router) {
 	router.push('v2/:userId/cards');

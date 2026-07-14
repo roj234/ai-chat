@@ -1,7 +1,6 @@
 import {$asyncState, $computed, $state, $store, $watch, debugSymbol, unconscious} from 'unconscious';
 import {jsonFetch} from "./utils/utils.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
-import {updateConversation} from "./database.js";
 
 /**
  * @type {boolean}
@@ -42,10 +41,11 @@ export const inputText = $state("");//$store("inputText", "", {persist: true, se
  * @type {import("unconscious").Reactive<AiChat.Preset>}
  */
 export const config = $store("config", {
-	endpoint: DEFAULT_LLM_ENDPOINT,
+	//endpoint: '',
 	mode: 'chat',
 
-	reasoning: 'medium',
+	reasoning: 'high',
+	modalities: [],
 
 	maxToolTurns: 1,
 	sound: false,
@@ -54,7 +54,7 @@ export const config = $store("config", {
 	allowHTMLTags: ["basic"],
 
 	jsonSupport: 0,
-	max_tokens: 30000,
+	max_completion_tokens: 30000,
 	top_p: 1,
 	top_k: 0,
 	min_p: 0,
@@ -87,13 +87,13 @@ $watch(selectedConversation, () => {
 		for (const cb of conversationBeforeunloadCallbacks) cb(prevConversation);
 		prevConversation = null;
 	}
-});
+}, false);
 
 
 /**
  * @type {import("unconscious").Reactive<AiChat.Conversation[]>}
  */
-export const conversations = $state([]);
+export const conversations = $state();
 
 export const resetConversation = () => {
 	selectedConversation.value = null;
@@ -101,7 +101,7 @@ export const resetConversation = () => {
 };
 
 export const ensureActiveConversation = async () => {
-	if (null == selectedConversation.id) {
+	if (null == unconscious(selectedConversation)) {
 		// 创建新对话
 		const conv = {
 			title: "",
@@ -111,11 +111,18 @@ export const ensureActiveConversation = async () => {
 		if (config.branchModeDefault) conv.bm_leaf = 1;
 
 		if (config.incognito) conv.id = -1;
-		else await updateConversation(conv, unconscious(messages), true);
+		//else await updateConversation(conv, unconscious(messages), true);
 
 		conversations.unshift(conv);
 		selectedConversation.value = conv;
 	}
+};
+
+export const switchToConversation = (conv) => {
+	const state = runningConversations.get(conv.id);
+	if (state) messages.value = unconscious(state.messages);
+	conv.ready = !!state;
+	selectedConversation.value = conv;
 };
 
 /**
@@ -153,16 +160,6 @@ export const updateModels = force => {
 	if (force || !deepEqual(value, _modelEndpoint.value)) _modelEndpoint.value = value;
 	return models;
 };
-
-/**
- *
- * @type {{
- *     scroller: HTMLElement,
- *     sendBtn: HTMLButtonElement,
- *     SettingUI: HTMLElement,
- * }}
- */
-export const Shared = {}
 
 /**
  *
@@ -208,3 +205,9 @@ let nativeTheme;
 export const getCurrentTheme = () => config.theme || nativeTheme;
 
 export const PROGRESS = debugSymbol("PrefillProgress");
+
+export const BRANCH_MANAGER = debugSymbol("BranchManager");
+export const LOCKED = debugSymbol("ConversationLocker");
+
+export const updateConversationListUI = $state();
+export const updateMessageUI = $state();

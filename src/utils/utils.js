@@ -20,8 +20,6 @@ export const cloneNamed = (obj, names) => {
 	return result;
 };
 
-export const IN_EDIT_MODE = debugSymbol("EDIT");
-
 export const loadingBlock = (message, progress) => <div className={"my-box loading"}>
 	<div className="spinner"></div>
 	<span>{message}</span>
@@ -134,18 +132,21 @@ export const prettyError = error => {
 		}
 	}
 
-	const stackRegex = /((?:https?|file|webpack|node|app):.*):(\d+):(\d+)/;
+	const stackRegex = /at (.*):(\d+):(\d+)\)$/;
 	const stackTrace = (error.stack||'').split('\n').slice(1)
 		.map(line => {
 			const match = line.match(stackRegex);
 			if (match) {
 				const fullPath = match[1];
 				const lineNumber = match[2];
+				let func = fullPath.slice(0, fullPath.indexOf(' ', fullPath.startsWith("async")?6:0)+2);
 				// 从路径中提取文件名
-				const fileName = fullPath.slice(fullPath.lastIndexOf('/') + 1);
-				return "\t"+line.slice(0, match.index).trim()+`${fileName}:${lineNumber})`;
+				let fileName = fullPath.slice(fullPath.lastIndexOf('/') + 1);
+				let start = fileName.match(/[?&]t=\d+/);
+				if (start) fileName = fileName.slice(0, start.index);
+				return "\tat "+func+line.slice(0, match.index).trim()+`${fileName}:${lineNumber})`;
 			}
-			return null;
+			return line;
 		});
 	return (error.message||error.name)+"\n"+(stackTrace.join("\n"));
 };
@@ -269,7 +270,7 @@ export const bind = (formElement, variable) => {
 /**
  *
  * @param {Blob|File} blob
- * @param {string} ext
+ * @param {string} [ext]
  */
 export const downloadFile = (blob, ext) => {
 	const filename = blob.name || `${APP_NAME}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${ext}`;

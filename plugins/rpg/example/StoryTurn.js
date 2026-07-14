@@ -2,12 +2,18 @@ import {jsonPrompt} from "../core.js";
 import "./StoryTurn.css";
 import {$once, createReactiveMarkdown, registerSchemaMessageRole, schemaToPrompt} from "/common/ReactiveJSON.js";
 import {$foreach, $update, unconscious} from "unconscious";
-import {abortCompletion, config, ensureActiveConversation, messages, selectedConversation} from "/src/states.js";
-import {updateMessageUI} from "/src/components/MessageList.jsx";
+import {
+	abortCompletion,
+	config,
+	ensureActiveConversation,
+	messages,
+	selectedConversation,
+	updateMessageUI
+} from "/src/states.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 
 import {UpdateVariable} from "../../tools/rp_kit/Variables.js";
-import {runTools} from "/src/skills.js";
+import {runTools} from "/src/toolset.js";
 
 const ID = 'my/storyTurn';
 
@@ -140,7 +146,7 @@ ${prompt}`
 	try {
 		const assistantResponse = await jsonPrompt(schemaToLLM, messages_, {
 			reasoning: {enabled: enableThink},
-			max_tokens: 8000,
+			max_completion_tokens: 8000,
 		}, ID);
 
 		const jsonData = JSON.parse(assistantResponse.content);

@@ -28,6 +28,14 @@
         opacity: 0;
     }
 
+    &.info {
+        background: var(--secondary-bg);
+
+        & .close {
+            color: var(--text);
+        }
+    }
+
     & .content {
         display: flex;
         justify-content: space-between;

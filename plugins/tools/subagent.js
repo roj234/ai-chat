@@ -1,15 +1,24 @@
-import {getToolParameters, registerTools} from "/src/skills.js";
+import {getToolParameters, registerToolset} from "/src/toolset.js";
 import {getMessages, updateConversation} from "/src/database.js";
 import {agentLoop} from "/src/api-request.js";
-import {$asyncState, $update, debugSymbol, unconscious} from "unconscious";
-import {config, conversations, messages, runningConversations, selectedConversation} from "/src/states.js";
-import {fileAccess} from "./agent.js";
+import {$asyncState, $cleanup, $state, $update, $watch, debugSymbol, unconscious} from "unconscious";
+import {
+	config,
+	conversations,
+	messages,
+	runningConversations,
+	selectedConversation,
+	switchToConversation,
+	updateMessageUI
+} from "/src/states.js";
+import {fileAccess} from "./fileAccess.js";
 import {compileSchema} from "unconscious/common/json-schema-utils.js";
-import {updateMessageUI} from "../../src/components/MessageList.jsx";
+import "./subagent.css";
 
 const readFile = fileAccess("read");
 
-const CURRENT_TASK = debugSymbol("REENTRANT_LOCK");
+const INIT_AGENT_SYM = debugSymbol("InitAgent");
+const EVAL_AGENT_SYM = debugSymbol("EvaluateAgent");
 const CONVERSATION_CACHE = debugSymbol("CONVERSATION_CACHE");
 
 /**
@@ -20,64 +29,75 @@ const CONVERSATION_CACHE = debugSymbol("CONVERSATION_CACHE");
  * @returns {Promise<void>}
  */
 async function createSubAgent(par, response, conv) {
-	let submitArgParameter;
+	/**
+	 * @type {AiChat.Conversation}
+	 */
+	const conversation = {
+		title: "子代理 " + par.name + " for #" + conv.id,
+		time: Date.now(),
+		// 继承文件系统
+		fs_type: conv.fs_type,
+		fs_base: conv.fs_base,
+		mnt: structuredClone(conv.mnt),
+		// 当前未使用
+		owner: conv.id,
+		// 覆盖系统配置
+		overrides: {
+			tools: true,
+			maxToolTurns: 0,
+			permittedTools: ['*'],
+			afkState: 1,
+			sound: false
+		},
+		allowedTools: new Set(par.tools),
+		activatedModules: new Set(['Subagent/Child'])
+	};
+
+	let schema;
 	const responseSchemaPath = par.responseSchemaPath;
 	if (responseSchemaPath) {
 		const text = await readFile({
 			path: responseSchemaPath,
 			noTruncate: true
 		}, response, conv);
-		const schema = JSON.parse(text);
+		schema = JSON.parse(text);
 		compileSchema(schema, true);
-
-		submitArgParameter = structuredClone(agentFinishParam);
-		submitArgParameter.properties.result = schema;
+		conversation.sa_schema = schema;
 	}
 
-	/**
-	 * @type {AiChat.Conversation}
-	 */
-	const conversation = {
-		title: "子代理 " + par.label + " for #" + conv.id,
-		time: Date.now(),
-		fs_type: conv.fs_type,
-		fs_base: conv.fs_base,
-		overrides: {
-			tools: submitArgParameter ? [{
-				type: "function",
-				function: {
-					name: AgentFinish.name,
-					description: AgentFinish.description,
-					parameters: submitArgParameter
-				}
-			}] : true,
-			maxToolTurns: 0,
-			permittedTools: ['*'],
-			ignoreToolError: true,
-			sound: false
-		},
-		allowedTools: new Set(par.tools),
-		activatedModules: new Set
-	};
+	const systemPromptArr = par.systemPrompt;
+	let systemPrompt = '';
+	if (systemPromptArr?.length) {
+		for (const item of systemPromptArr) {
+			if (item.type === 'file') {
+				systemPrompt += await readFile({
+					path: item.path,
+					noTruncate: true
+				}, response, conv)
+			} else {
+				systemPrompt += item.text;
+			}
+		}
+	}
 
-	const promptFromFile = par.systemPromptPath ? await readFile({
-		path: par.systemPromptPath,
-		noTruncate: true
-	}, response, conv) : "";
-	const promptStructuredOutput = responseSchemaPath ? `<structured-output>
+	if (responseSchemaPath) systemPrompt += `<structured-output>
 You MUST call the \`AgentFinish\` tool to complete your task, providing your final result conforming to the specified JSON Schema.
 Do NOT stop or return results in any other way — only \`AgentFinish\` signals task completion.
-</structured-output>` : "";
+</structured-output>`;
 
 	/**
-	 *
 	 * @type {OpenAI.Message[]}
 	 */
 	const initMessages = [];
+	if (systemPrompt) {
+		initMessages.push({
+			role: 'system',
+			content: systemPrompt,
+		});
+	} else {
+		conversation.overrides.systemPrompt = '---\n---';
+	}
 	initMessages.push({
-		role: 'system',
-		content: promptFromFile + par.systemPrompt + promptStructuredOutput,
-	}, {
 		role: 'user',
 		content: par.userMessage
 	});
@@ -90,9 +110,37 @@ Do NOT stop or return results in any other way — only \`AgentFinish\` signals 
 	return updateConversation(conv, unconscious(messages));
 }
 
-function findConversation(response) {
-	return response[CONVERSATION_CACHE] || (response[CONVERSATION_CACHE] = conversations.find(item => item.id === response.agentId));
-}
+const findConversation = response => response[CONVERSATION_CACHE] || (response[CONVERSATION_CACHE] = conversations.find(item => item.id === response.agentId));
+
+const subagentLoop = async ctx => {
+	const conversation = findConversation(ctx);
+	const messages_ = await getMessages(conversation);
+
+	let stop = messages_.at(-1).finish_reason;
+	while (stop === 'tool_calls' || stop === undefined || stop === 'interrupt') {
+		$update(updateMessageUI);
+		stop = await agentLoop(conversation, messages_, config, true);
+	}
+
+	let content;
+	if (stop === false) {
+		const tool = messages_.at(-2).tool_calls?.find(item => item.function.name === 'AgentFinish');
+		if (tool) {
+			content = tool.function.arguments;
+			messages_.pop();
+			return content;
+		}
+	} else {
+		return messages_.at(-1).content;
+	}
+};
+const subagentLoopWrapper = ctx => {
+	let promise = ctx[EVAL_AGENT_SYM];
+	if (promise) return promise;
+	promise = ctx[EVAL_AGENT_SYM] = subagentLoop(ctx);
+	promise.finally(() => delete ctx[EVAL_AGENT_SYM]);
+	return promise;
+};
 
 /**
  * @type {AiChat.FunctionTool<*>}
@@ -102,12 +150,10 @@ const CreateSubagent = {
 	description:
 		"Creates a agent to autonomously execute a task and return the result. " +
 		"Equip it with all tools needed to complete the task. " +
-		"If both 'systemPromptPath' (file) and 'systemPrompt' (text) are provided, they are concatenated - " +
-		"the file content comes first, followed by the inline text. " +
-		//"\nThe agent MAY operate in blocking mode (the call waits for the agent to finish)" +
-		//" or non‑blocking mode (the call returns immediately with an agentId; use QueryAgentStatus to poll and retrieve the outcome)." +
-		"If 'responseSchemaPath' (JSON Schema file) is provided, the agent's result will conform to that schema.",
-	interactive: true,
+		"Prompts in 'systemPrompt' array are concatenated. " +
+		"If 'responseSchemaPath' (JSON Schema file) is provided, the agent's result will conform to that schema." +
+		"\nThe agent MAY operate in async mode, the call returns immediately with an agentId; use QueryAgentStatus to poll and retrieve the outcome.",
+	interactive: "secure",
 	parameters: {
 		type: 'object',
 		properties: {
@@ -115,8 +161,27 @@ const CreateSubagent = {
 				type: "string",
 				description: "A short, human-readable label identifying the agent (e.g. 'File Explorer')."
 			},
-			systemPromptPath: { type: 'string', },
-			systemPrompt: { type: 'string', },
+			systemPrompt: {
+				type: 'array',
+				items: {
+					oneOf: [
+						{
+							type: "object",
+							properties: {
+								type: { const: "file" },
+								path: { type: "string" }
+							}
+						},
+						{
+							type: "object",
+							properties: {
+								type: { const: "text" },
+								text: { type: "string" }
+							}
+						}
+					]
+				}
+			},
 			userMessage: { type: 'string', },
 			tools: {
 				type: "array",
@@ -127,53 +192,28 @@ const CreateSubagent = {
 				default: true
 			},*/
 			responseSchemaPath: { type: "string", },
+			async: {
+				type: "boolean",
+				default: false,
+			},
 		},
 		required: ['name', 'userMessage', 'tools'],
 	},
-	async script(par, response, conv) {
-		if (response[CURRENT_TASK]) return;
+	async script(par, ctx, conv) {
+		if (ctx[INIT_AGENT_SYM]) await ctx[INIT_AGENT_SYM];
 
-		if (!response.agentId) {
-			await (response[CURRENT_TASK] = createSubAgent(par, response, conv));
-			delete response[CURRENT_TASK];
+		if (!ctx.agentId) {
+			await (ctx[INIT_AGENT_SYM] = createSubAgent(par, ctx, conv));
+			delete ctx[INIT_AGENT_SYM];
 		}
 
-		const conversation = findConversation(response);
-		const messages_ = await getMessages(conversation);
-		let lastMessage = messages_.at(-1);
-
-		ok:
-		if (lastMessage.finish_reason !== 'stop') {
-			let result;
-			do {
-				$update(updateMessageUI);
-				result = await agentLoop(conversation, messages_, config, true);
-			} while (result === 'tool_calls');
-
-			if (result === false) {
-				const tool = messages_.at(-2).tool_calls?.find(item => item.function.name === 'AgentFinish');
-				if (tool) {
-					lastMessage = messages_[messages_.length - 1] = {
-						role: 'assistant',
-						finish_reason: 'stop',
-						content: tool.function.arguments
-					};
-					await updateConversation(conversation, messages_);
-					break ok;
-				}
-			} else if (result !== 'stop') {
-				throw 'unknown state '+result;
-			} else {
-				lastMessage = messages_.at(-1);
-			}
-		}
-
-		return response.content = lastMessage.content;
-		//`AgentId: ${conversation.id}\nStatus: ${lastMessage.finish_reason}\nResult:\n${lastMessage.content}`;
+		const loop = subagentLoopWrapper(ctx);
+		if (par.async) return "Agent started, agentId="+ctx.agentId+", time="+new Date().toISOString();
+		return ctx.content = await loop;
 	},
-	title(req, ctx = {}) {
+	title(req, ctx) {
 		const par = getToolParameters(ctx, req);
-		return "创建子代理 ["+par.label+"]";
+		return "子代理 ["+par.name+"]";
 	},
 	keyFunc(keys, context) {
 		const id = context.agentId;
@@ -185,28 +225,69 @@ const CreateSubagent = {
 		}
 	},
 	renderer(resp, has_successor, tc) {
+		if (resp.time == null) return;
+
 		const evaluate = () => {
 			$update(updateMessageUI);
-			CreateSubagent.script(getToolParameters(resp, tc), resp, unconscious(selectedConversation))
-				.then(() => resp.success = true, () => resp.success = false)
+
+			const conv = unconscious(selectedConversation);
+			const msg = unconscious(messages);
+
+			CreateSubagent.script(getToolParameters(resp, tc), resp, conv)
+				.then(() => {
+					resp.success = true;
+					updateConversation(conv, msg);
+				}, () => resp.success = false)
 				.finally(() => $update(updateMessageUI))
 		};
-		if (!resp.agentId || !findConversation(resp)) {
-			return <button className={"btn primary"} onClick={() => {
-				delete resp.agentId;
-				delete resp.content;
-				evaluate();
-			}}>启动子代理</button>
-		} else {
-			const state = $asyncState(() => QueryAgentStatus.script(resp));
-			return <div>
-				<div>子代理 #{resp.agentId}: {state}</div>
-				<button disabled={() => {
-					const st = unconscious(state) || "";
-					return st === 'running' || st === 'deleted' || (st.startsWith('done') && resp.content);
-				}} className={"btn primary"} onClick={evaluate}>继续</button>
-			</div>
+
+		const par = getToolParameters(resp, tc);
+
+		// 尚未启动：没有 agentId 或 conversation 丢失
+		// 前者应该不可能触发但保留
+		if (!resp.agentId || (!has_successor && !findConversation(resp))) {
+			return <div className={`subagent-card`}>
+				<button className="sa-btn paused" onClick={() => {
+					delete resp.agentId;
+					delete resp.content;
+					evaluate();
+				}}>🚀 启动
+				</button>
+				<span className="spacer"></span>
+				{par.tools?.length > 0 && <span title={"工具:\n" + par.tools.join('\n')}>🛠 {par.tools.length}</span>}
+				{par.responseSchemaPath && <span title={"结构化输出"}>📐</span>}
+			</div>;
 		}
+
+		const trigger = $state();
+		const updateStatus = () => $update(trigger);
+		const status = $asyncState(async () => {
+			if (runningConversations.has(resp.agentId)) return [ 'running', '运行中' ];
+
+			const status = await QueryAgentStatus.script(resp);
+			if (status === 'deleted') return [ 'error', '已删除' ];
+			if (status.startsWith('done') && resp.content) return [ 'done', '已完成' ];
+			if (status.startsWith('error')) return [ 'error', '错误' ];
+			return [ 'paused', '继续' ];
+		}, trigger);
+
+		const dom = <div className={`subagent-card`}>
+			{<button className={() => `sa-btn ${status[0]}`} disabled={() => {
+				const type = status[0];
+				return type === 'running' || type === 'done' || type === 'error';
+			}} onClick={evaluate}>{() => status[1]}</button>}
+			<span className="spacer"></span>
+			{par.tools?.length > 0 && <span title={"工具:\n" + par.tools.join('\n')}>🛠 {par.tools.length}</span>}
+			{par.responseSchemaPath && <span title={"结构化输出"}>📐</span>}
+			<button className={"btn ghost"} onClick={() => {
+				switchToConversation(findConversation(resp));
+			}}>转到子代理会话 #{resp.agentId}</button>
+		</div>;
+
+		// 代理 $cleanup
+		$watch(updateMessageUI, updateStatus);
+		$cleanup(dom, [updateMessageUI, updateStatus]);
+		return dom;
 	}
 };
 
@@ -217,39 +298,59 @@ const QueryAgentStatus = {
 	name: 'QueryAgentStatus',
 	description:
 		"Poll the current state of a agent identified by its `agentId`. " +
-		"Returns one of: 'running' (still working), 'paused' (waiting for input), 'error' (terminated with an error), or 'done' (completed successfully).",
+		"Returns one of: 'running' (still working), 'error' (terminated with an error), or 'done' (completed successfully).",
 	parameters: {
 		type: 'object',
 		properties: {
 			agentId: {
 				type: 'integer',
-				description: "The numeric ID of the sagent to query, as returned by CreateAgent."
+				description: "The numeric ID of the subagent to query, as returned by CreateAgent."
 			},
+			timeout: {
+				type: 'integer',
+				description: "Blocking timeout in milliseconds for agent to finish. Omit to return immediately non-blocking."
+			}
 		},
 		required: ['agentId'],
 	},
 	async script(par, resp, conv) {
-		if (runningConversations.has(par.agentId)) return 'running';
-
 		const conversation = findConversation(par);
 		if (!conversation) return 'deleted';
 
-		const timestamp = new Date(conversation.time).toISOString();
-		const messages = await getMessages(conversation);
-		const finishReason = messages.at(-1).finish_reason;
-		if (finishReason !== 'stop') {
-			if (finishReason === "error") return 'error: '+timestamp;
-			return 'pause('+finishReason+'): '+timestamp;
+		const timeout = par.timeout;
+		if (timeout) {
+			await Promise.race([
+				new Promise((resolve) => setTimeout(resolve, timeout)),
+				subagentLoopWrapper(par)
+			]);
 		}
 
-		return 'done: '+timestamp;
+		const lastUpdate = new Date(conversation.time).toISOString();
+
+		if (runningConversations.has(par.agentId)) return 'running, lastUpdate='+lastUpdate;
+
+		const content = subagentLoopWrapper(par).catch(e => {
+			console.info('[AgentLoop]', e);
+		})
+
+		const lastMessage = (await getMessages(conversation)).at(-1);
+		const finishReason = lastMessage.finish_reason;
+		if (finishReason !== 'stop') {
+			if (finishReason === "error") return 'error, lastUpdate='+lastUpdate;
+			if (!lastMessage.tool_calls?.find(item => item.function.name === 'AgentFinish')) {
+				return 'running('+finishReason+'), lastUpdate='+lastUpdate;
+			}
+		}
+
+		return 'done: '+lastUpdate+'\n'+await content;
 	},
 };
 
-const agentFinishParam = {
+const agentFinishParameter = {
 	type: 'object',
 	properties: {
-		result: { type: "value" },
+		// 这个给 schema 之前的自动验证代码看。
+		result: { type: "value" }
 	},
 	required: ['result'],
 };
@@ -257,21 +358,46 @@ const AgentFinish = {
 	name: 'AgentFinish',
 	default: true,
 	description: "Signal that agent has completed its task.",
-	parameters: agentFinishParam,
+	parameters: agentFinishParameter,
 	script(par, resp, conv) {}
 };
 
-export const registerSubagent = () => {
-	registerTools(
-		"Subagent",
-		"Create agents to autonomously execute a task and return the result. The agent has its own system prompt and tool set, and can optionally produce structured output via a JSON Schema.",
-		[CreateSubagent/*, QueryAgentStatus*/]
-	);
+const AGENT_FINISH_CACHE = debugSymbol("SA_CHILD_FINISH");
 
-	registerTools(
-		"AgentFinish",
-		"",
-		[AgentFinish],
-		{ hidden: true }
-	);
-}
+registerToolset(
+	"Subagent",
+	"Create agents to autonomously execute a task and return the result. The agent has its own system prompt and tool set, and can optionally produce structured output via a JSON Schema.",
+	[CreateSubagent, QueryAgentStatus],
+	{
+		default: true
+	}
+);
+
+registerToolset(
+	"Subagent/Child",
+	"",
+	[AgentFinish],
+	{
+		hidden: true,
+		systemPrompt(conv, tools) {
+			const schema = conv.sa_schema;
+			if (schema) {
+				let tool = conv[AGENT_FINISH_CACHE];
+				if (!tool) {
+					const par = structuredClone(agentFinishParameter);
+					par.properties.result = schema;
+
+					conv[AGENT_FINISH_CACHE] = tool = {
+						type: "function",
+						function: {
+							name: AgentFinish.name,
+							description: AgentFinish.description,
+							parameters: par
+						}
+					};
+				}
+				tools.push(tool);
+			}
+		}
+	}
+);

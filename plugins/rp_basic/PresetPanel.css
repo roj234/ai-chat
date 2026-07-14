@@ -195,6 +195,7 @@
 @media (max-width: 768px) {
     .preset-panel {
         width: 100%;
+        min-width: 100%;
 
         & .header {
             padding: 0.75rem;

@@ -1,22 +1,24 @@
-import {SETTINGS} from "/src/settings.js";
 import {duplicateConversation} from "/src/data-exchange.js";
 import {openJsonEditor} from "/src/json_editor/jsonEditorProxy.js";
-import {messages, selectedConversation} from "/src/states.js";
+import {
+	BRANCH_MANAGER,
+	messages,
+	selectedConversation,
+	updateConversationListUI,
+	updateMessageUI
+} from "/src/states.js";
 import {$unwatch, $update, $watch, unconscious} from "unconscious";
 import {decodeObjects, serializeJSON} from "/src/utils/marshal.js";
-import {updateConversation} from "../src/database.js";
-import {updateMessageUI} from "/src/components/MessageList.jsx";
-import {updateConversationListUI} from "/src/components/ConversationList.jsx";
-import {parseJsonLenient} from "unconscious/common/Json.js";
-import {BRANCH_MANAGER, enableBranches} from "../src/utils/BranchManager.js";
+import {updateConversation} from "/src/database.js";
+import {parseJson5} from "unconscious/common/Json.js";
+import {enableBranches} from "/src/utils/BranchManager.js";
+import {onLoad} from "/src/hooks.js";
+import {DI_settings} from "/src/hooks.js";
 
-SETTINGS.push({
-	type: "element",
-	_tab: "data",
-	name: "数据调试",
-	element: <div className={"choice-scroll"}>
-		<button className="btn ghost" onClick={duplicateConversation} disabled={() => !unconscious(selectedConversation)}>复制当前对话</button>
-		{IS_ANDROID_BUILD ? null : <button className="btn ghost" onClick={async () => {
+onLoad(() => {
+	const dataDebug = DI_settings.byId("dd");
+	if (!IS_ANDROID_BUILD) {
+		dataDebug.prepend(<button className="btn ghost" onClick={async () => {
 			let jsonText, update, onclose;
 			let updatePromise = () => {
 				const conv = unconscious(selectedConversation);
@@ -34,7 +36,7 @@ SETTINGS.push({
 			[update, onclose] = openJsonEditor("conversation",
 				() => jsonText,
 				async (v) => {
-					const {messages: messages_, ...conversation} = await decodeObjects(parseJsonLenient(v));
+					const {messages: messages_, ...conversation} = await decodeObjects(parseJson5(v));
 
 					const conv = unconscious(selectedConversation);
 					if (conv?.id !== conversation.id) {
@@ -42,7 +44,9 @@ SETTINGS.push({
 						return;
 					}
 
-					Object.keys(conv).forEach(item => {delete conv[item];});
+					Object.keys(conv).forEach(item => {
+						delete conv[item];
+					});
 					Object.assign(conv, conversation);
 
 					if (conversation.bm_leaf) {
@@ -71,7 +75,8 @@ SETTINGS.push({
 				$unwatch(messages, syncToEditor);
 			});
 		}} disabled={() => !unconscious(selectedConversation)}>
-				编辑当前对话的原始数据 <i className={"ri-external-link-line"} />
-			</button>}
-	</div>
-});
+			编辑对话原始 JSON <i className={"ri-external-link-line"}/>
+		</button>);
+	}
+	dataDebug.prepend(<button className="btn ghost" onClick={duplicateConversation} disabled={() => !unconscious(selectedConversation)}>复制对话</button>);
+})

@@ -1,34 +1,18 @@
-import {parseJsonLenient} from "unconscious/common/Json.js";
-import {clearDatabase, exportConversation, importConversation} from "./data-exchange.js";
-import {abortCompletion, config, isMobile, messages, selectedConversation} from "./states.js";
-import defaultCoTPrompt from "../media/thinkPrompt.txt?raw";
-import {createPreset} from "./components/PresetDropdown.jsx";
-import SimpleModal from "./components/SimpleModal.jsx";
-import {disableBranches, enableBranches, setLastMessage} from "./utils/BranchManager.js";
-import {$computed, $watch, isPureObject, unconscious} from "unconscious";
-import {webviewSetUserAgent} from "../vendor/jsBridge.js";
-import {onLoad} from "./plugin.js";
-import {toolScriptRegistry} from "./skills.js";
+import {parseJson5} from "unconscious/common/Json.js";
+import {config, isMobile, selectedConversation} from "./states.js";
+import defaultCoTPrompt from "/media/cotPrompt.txt?raw";
+import {$computed, $watch, isPureObject} from "unconscious";
+import {webviewSetUserAgent} from "/vendor/jsBridge.js";
+import {onLoad} from "./hooks.js";
+import {toolScriptRegistry} from "./toolset.js";
 
 const defaultSystemPrompt = `You are a helpful assistant.
 {{think}}
-
-<tools>
 {{tools}}
-<markdown-tools>
-- Specify file name when download code fence:
-   \`\`\`language:filename
-   [content]
-   \`\`\`
-- Render mermaid:
-   \`\`\`mermaid
-   [content]
-   \`\`\`
-</markdown-tools>
-</tools>
-<information>
-- Current date: {{date}}
-</information>`;
+<markdown-format>
+{{mdfmt}}
+</markdown-format>
+<date>{{date}}</date>`;
 
 const defaultTitlePrompt = `### Title Requirements
 - Language: 简体中文
@@ -60,38 +44,9 @@ export const CUSTOM_CONTROLS = <>
 		<div className="tooltip">深度思考：先思考后回答，解决复杂问题</div>
 	</button>
 	<button className="ri-robot-2-line chip"
-			style:display={() => config.modalities?.includes("tool") ? "" : "none"}
-			class:active={() => config.tools}
-			onClick={() => {
-				config.tools ^= true;
-			}}>
-		<div className="tooltip">智能体：让AI使用工具<br/><small>{isMobile?"长按":"右键"}打开配置菜单</small></div>
-	</button>
-	<button className="ri-git-fork-line chip"
-			style:display={() => selectedConversation.ready ? "" : "none"}
-			class:active={() => selectedConversation.bm_leaf}
-			disabled={() => unconscious(abortCompletion)}
-			onClick={() => {
-				if (!selectedConversation.bm_leaf) {
-					SimpleModal({
-						title: "是否为当前对话启用分支功能？",
-						message: "启用后，部分功能将会与之前版本的预期行为不同\n- 您将无法同时进行多个编辑操作\n- 您将无法删除对话中间的消息\n- 编辑操作将创建新的分支（可在设置中修改）\n- 当前版本和上下文管理（技能、变量等）存在一些兼容性问题",
-						onConfirm() {
-							messages.value = enableBranches(selectedConversation, messages);
-							setLastMessage(messages.at(-1));
-						}
-					});
-				} else {
-					SimpleModal({
-						title: "是否为当前对话关闭分支功能？",
-						message: "关闭后，当前未显示的其它分支对话将被彻底删除，无法撤销",
-						onConfirm() {
-							messages.value = disableBranches(selectedConversation);
-						}
-					});
-				}
-			}}>
-		<div className="tooltip">对话分支：保存并探索对话的不同走向</div>
+			class:active={() => selectedConversation.activatedModules?.size}
+	>
+		<div className="tooltip">智能体：让AI使用工具</div>
 	</button>
 </>;
 
@@ -105,7 +60,6 @@ export const SETTINGS = [
 		choices: {
 			"关闭": false,
 			"模型总结": true,
-			"工具调用": "tool"
 		}
 	},
 	{
@@ -113,12 +67,12 @@ export const SETTINGS = [
 		name: "标题总结模型",
 		_group: "title",
 		type: "input",
-		placeholder: "留空使用对话模型"
+		placeholder: "留空使用对话模型, 用 : 前缀引用其它预设"
 	},
 	{
 		id: "titlePrompt",
 		name: "标题总结提示词",
-		title: "系统只接受带title字段的JSON",
+		title: "要求输出带title字段的JSON",
 		_group: "title",
 		type: "textbox",
 		placeholder: defaultTitlePrompt
@@ -128,9 +82,9 @@ export const SETTINGS = [
 		_order: 99, // 总是最后一个
 		type: "element",
 		element: <div className={"choice-scroll"}>
-			<a target={"_blank"} href={"https://github.com/roj234/ai-chat"}>开源地址</a>
-			<a target={"_blank"} href={"log_viewer.html"}>请求日志</a>
-			<a target={"_blank"} href={"docs.html"}>离线文档</a>
+			<a target={"_blank"} href={"https://github.com/roj234/ai-chat"}>项目地址</a>
+			<a target={"_blank"} href={"log_viewer.html"}>统计</a>
+			<a target={"_blank"} href={"docs.html"}>文档</a>
 		</div>,
 	},
 	//model
@@ -171,7 +125,7 @@ export const SETTINGS = [
 		},
 		title: {
 			"聊天补全": "/chat/completions",
-			"文本补全": "/completions\n大部分闭源模型不提供此API",
+			"文本补全": "/completions\n弃用，仅用于推理调试\n只支持纯文本输入",
 		},
 		required: true,
 		_group: 'model'
@@ -187,22 +141,22 @@ export const SETTINGS = [
 		warning: "要求：返回字符串的函数，参数为 messages: [{role: 'user' | 'assistant' | 'system', content: string}] 数组"
 	},
 	{
-		id: "max_tokens",
+		id: "max_completion_tokens",
 		_tab: "model",
 		_group: 'model',
 		name: "最大回复长度 (Max Tokens)",
-		title: "单次回复的最大 token 数量。过小会导致回答被截断。\n如服务商支持，可启用‘助手消息预填充’。\n设为 0 表示无限制（不推荐）。",
+		title: "单次回复的最大 token 数量。过小会导致回答被截断。\n设为 0 表示无限制（不推荐）。",
 		type: "number",
 		min: 0,
 		max: 65536,
-		_omit: 0
+		default: 20000
 	},
 	{
 		id: "canPrefill",
 		_tab: "model",
 		_group: 'model',
 		name: "助手消息预填充 (Assistant Prefill)",
-		title: "当回复因长度限制等原因中断时，让模型从中断处继续生成，而不是重新开始。\n部分服务商不支持。",
+		title: "当回复因长度限制等原因中断时，让模型从中断处继续生成，而不是重新开始。\n部分提供商不支持。",
 		type: "radio",
 		choices: {
 			"API支持预填充": true
@@ -212,11 +166,11 @@ export const SETTINGS = [
 		id: "prefillPath",
 		_tab: 'model',
 		_group: 'model',
-		name: "(高级) 助手消息预填充 请求体配置",
-		title: "JSON Pointer,JSON (value)",
+		name: "(高级) 预填充路径",
+		title: "配置 API 请求体中的预填充字段和值。\n格式：JSON指针路径,启用值 (默认 true)",
 		pattern: /^[a-z_/]+(,.+)?$/,
-		placeholder: "如 /prefix,true (通常留空)",
-		warning: "请输入合法的 JSON Pointer",
+		placeholder: "如 /prefix",
+		warning: "请输入有效的 JSON Pointer",
 		type: "input"
 	},
 	{
@@ -224,13 +178,14 @@ export const SETTINGS = [
 		_tab: "model",
 		_group: 'model',
 		name: "推理能力",
-		title: "覆盖并隐藏【深度思考】开关",
 		type: "radio",
 		choices: {
-			"不能推理": false,
-			"仅能推理": true,
-			"不存在": 0
-		}
+			"显示按钮": null,
+			"隐藏按钮": 0,
+			"强制关": false,
+			"强制开": true,
+		},
+		required: true,
 	},
 	{
 		id: "modalities",
@@ -241,6 +196,7 @@ export const SETTINGS = [
 		choices: {
 			"图像": 'image',
 			"音频": 'audio',
+			//"视频": 'video',
 			"工具": "tool",
 		}
 	},
@@ -261,10 +217,10 @@ export const SETTINGS = [
 	{
 		_tab: "model",
 		name: "请求优化",
-		type: "radio",
+		type: "multiple",
 		choices: {
 			"流式发送Body": "streamDuplex",
-			//"后端发送Blob": "sseBlobProxy"
+			//"后端发送Blob": "serverResponse"
 		},
 		title: {
 			"流式发送Body": "使用HTTP/2流式发送请求，避免在JS中构造超大的JSON字符串\nHTTP/1其实也支持，但谷歌为了强迫H2普及故意不支持",
@@ -277,11 +233,11 @@ export const SETTINGS = [
 		_tab: 'model',
 		_group: 'model',
 		name: "自定义请求体",
-		title: "以 JSON 格式添加额外请求体参数，将覆盖其它设置。",
+		title: "以 JSON 格式添加额外请求体参数，将覆盖任何内置设置。",
 		type: "textbox",
 		placeholder: "{\n  \"chat_template_kwargs\": {},\n}",
 		pattern(value) {
-			let data = parseJsonLenient(value);
+			let data = parseJson5(value);
 			if (!isPureObject(data)) return "必须是JSON对象";
 			return [data];
 		},
@@ -294,14 +250,14 @@ export const SETTINGS = [
 		_tab: 'prompt',
 		_group: 'prompt',
 		name: "系统提示词",
-		title: "留空使用默认提示词。\n若想完全禁用，请填入 \"---\\n---\"",
+		title: "留空使用默认提示词。填写 \"---\n---\" 以完全禁用。",
 		type: "textbox",
 		placeholder: defaultSystemPrompt
 	},
 	{
 		id: "reasoning",
 		_tab: 'prompt',
-		_group: 'prompt',
+		_group: 'model',
 		name: "推理预算",
 		type: "radio",
 		choices: {
@@ -313,12 +269,13 @@ export const SETTINGS = [
 			"超高": "xhigh"
 		},
 		title: {
-			"手动": "基于 CoT 提示词而非模型自身",
+			"手动": "关闭模型内置推理，由手动编写的 CoT 提示词驱动\n" +
+				"识别并折叠<think>、<thought>、<reasoning>等XML思考标签",
 			"最低": "1024 tokens",
-			"低": "~20% of max tokens",
-			"中": "~50% of max tokens",
-			"高": "~80% of max tokens",
-			"超高": "~95% of max tokens",
+			"低": "~20% of max_tokens",
+			"中": "~50% of max_tokens",
+			"高": "~80% of max_tokens",
+			"超高": "~95% of max_tokens",
 		},
 		required: true
 	},
@@ -326,42 +283,44 @@ export const SETTINGS = [
 		id: "CoTPrompt",
 		_tab: 'prompt',
 		_group: 'prompt',
-		name: "CoT 提示词 (手动)",
-		title: "手动注入的思维链提示，在系统提示中使用 {{think}} 引用。",
+		name: "手动 CoT 提示词",
+		title: "在系统提示词中通过 {{think}} 占位符引用此处输入的文本。\n在手动推理模式下且推理开关打开时注入，否则被替换为空字符串。",
 		type: "textbox",
 		placeholder: defaultCoTPrompt
 	},
 	{
 		id: "stripCoT",
 		_tab: 'prompt',
-		_group: 'prompt',
-		name: "移除历史思维链",
+		name: "清理历史消息中的思维链",
+		title: "不影响数据库，只控制发送到API的消息",
 		type: "radio",
+		required: true,
 		choices: {
-			"仅手动 CoT": 'm',
-			"所有": true
+			"不移除": null,
+			"仅移除手动 CoT": 'm',
+			"移除所有": true
 		}
 	},
 	{
 		id: "reasoningPath",
 		_tab: 'prompt',
 		_group: 'model',
-		name: "(高级) 推理开关 请求体配置",
-		title: "JSON Pointer, JSON (enabled), JSON (disabled)",
+		name: "(高级) 推理开关路径",
+		title: "配置 API 请求体中的推理开关字段和值。\n格式：JSON指针路径,启用值,禁用值",
 		pattern: /^([a-z_/])+(,[^,]+,[^,]+)?$/,
 		placeholder: "/reasoning/enabled,true,false",
-		warning: "请输入合法的 JSON Pointer",
+		warning: "请输入有效的 JSON Pointer",
 		type: "input"
 	},
 	{
 		id: "reasoningEffortPath",
 		_tab: 'prompt',
 		_group: 'model',
-		name: "(高级) 推理预算 请求体配置",
-		title: "JSON Pointer, 整数预算=i | 字符串 effort=s (默认)",
+		name: "(高级) 推理预算路径",
+		title: "配置 API 请求体中的推理预算字段和值。\n格式：JSON指针路径,类型 (整数 i 或字符串 s)",
 		pattern: /^[a-z_/]+(,[si])?$/,
 		placeholder: "/reasoning_effort,s",
-		warning: "请输入合法的 JSON Pointer",
+		warning: "请输入有效的 JSON Pointer",
 		type: "input"
 	},
 	// prompt
@@ -376,67 +335,67 @@ export const SETTINGS = [
 		min: 0,
 		max: 2,
 		step: 0.1,
-		_omit: 1
+		default: 1
 	},
 	{
 		id: "top_p",
 		_tab: 'sampling',
 		_group: 'sampling',
 		name: "Top-P",
-		title: "核采样 (Nucleus Sampling)。仅从累积概率达到 P 的词元中选择，平衡连贯性与多样性。\n设为 1 使用服务商默认值。\n推荐值 0.95。",
+		title: "核采样 (Nucleus Sampling)。仅从累积概率达到 P 的词元中选择，平衡连贯性与多样性。\n设为 1 使用服务商默认值。",
 		type: "number",
 		min: 0,
 		max: 1,
 		step: 0.01,
-		_omit: 1
+		default: 1
 	},
 	{
 		id: "top_k",
 		_tab: 'sampling',
 		_group: 'sampling',
 		name: "Top-K",
-		title: "仅从概率最高的前 K 个词元中采样。防止模型产生生僻词。\n设为 0 使用服务商默认值。\n推荐值 5-20。",
+		title: "仅从概率最高的前 K 个词元中采样。防止模型产生生僻词。\n设为 0 使用服务商默认值。",
 		type: "number",
 		min: 0,
 		max: 100,
 		step: 1,
-		_omit: 0
+		default: 0
 	},
 	{
 		id: "min_p",
 		_tab: 'sampling',
 		_group: 'sampling',
 		name: "Min-P",
-		title: "仅保留概率 ≥ 最高概率 × P 的词元，效果比 Top-P 更自然。\n设为 0 使用服务商默认值。\n推荐值 0.1-0.2。",
+		title: "仅保留概率 ≥ 最高概率 × P 的词元，效果比 Top-P 更自然。\n设为 0 使用服务商默认值。",
 		type: "number",
 		min: 0,
 		max: 1,
 		step: 0.01,
-		_omit: 0
+		default: 0
 	},
 	{
 		id: "frequency_penalty",
 		_tab: 'sampling',
 		_group: 'sampling',
 		name: "频率惩罚",
-		title: "基于词元已出现的次数进行惩罚，降低重复用词，防止重复短语，但过高的值可能导致模型胡言乱语。\n范围：-2.0 到 2.0。\n设为 0 使用服务商默认值。",
+		title: "基于词元出现的次数进行惩罚，降低重复用词，过高的值可能导致模型胡言乱语。\n设为 0 使用服务商默认值。",
 		type: "number",
 		min: -2,
 		max: 2,
 		step: 0.05,
-		_omit: 0
+		default: 0
 	},
 	{
 		id: "presence_penalty",
 		_tab: 'sampling',
 		_group: 'sampling',
 		name: "存在惩罚",
-		title: "基于词元是否出现过进行惩罚（出现即罚），鼓励模型谈论新话题，增加输出内容的广泛性。\n范围：-2.0 到 2.0。\n设为 0 使用服务商默认值。",
+		title: "基于词元是否出现进行惩罚，鼓励模型谈论新话题，增加输出内容的广泛性。\n设为 0 使用服务商默认值。",
 		type: "number",
 		min: -2,
 		max: 2,
 		step: 0.05,
-		_omit: 0
+		default: 0
 	},
 	{
 		id: "stop",
@@ -445,10 +404,10 @@ export const SETTINGS = [
 		name: "停止序列",
 		title: "生成过程中遇到这些字符立即停止。填写 JSON 数组格式。",
 		type: "input",
-		_omit: "",
+		default: "",
 		placeholder: "[\"\\n\", \"User: \", \"###\"]",
 		pattern(value) {
-			let data = parseJsonLenient(value);
+			let data = parseJson5(value);
 
 			if (!Array.isArray(data)) return "不是字符串数组";
 			for (const x of data)
@@ -468,7 +427,7 @@ export const SETTINGS = [
 		type: "textbox",
 		placeholder: "{\n\"(?:不是|不再是|不再|并非|没有)[^，。！？]{1,10}，而是\": 1.0\n}",
 		pattern(value) {
-			let data = parseJsonLenient(value);
+			let data = parseJson5(value);
 
 			if (Array.isArray(data)) {
 				let obj = {};
@@ -500,12 +459,12 @@ export const SETTINGS = [
 		_tab: 'sampling',
 		_group: 'sampling',
 		name: "词元偏置 (Logit Bias)",
-		title: "手动调整特定词元的概率。设置 100 会强制输出该词，-100 会完全禁用该词。通常用于引导模型使用或避开特定词汇。\n警告：先问 LLM 这个参数的具体含义，切勿直接修改，否则你会后悔的",
+		title: "调整特定词元的概率。设置 100 会强制输出该词，-100 会完全禁用该词。通常用于引导模型使用或避开特定词汇。\n警告：应用于每个输出词元，因而没有描述的那么美好",
 		placeholder: "{\n  \"\\n\\n\": -100\n}",
 		type: "textbox",
-		_omit: "",
+		default: "",
 		pattern(value) {
-			let data = parseJsonLenient(value);
+			let data = parseJson5(value);
 
 			if (!isPureObject(data)) return "只接受对象";
 			for (const k in data) {
@@ -523,47 +482,54 @@ export const SETTINGS = [
 	{
 		id: "sound",
 		_tab: "customize",
-		name: "完成通知音效",
+		name: "提示音",
 		type: "radio",
 		required: true,
 		choices: {
-			"关": false,
-			"开": "always",
+			"静音": false,
+			"生成结束时": "always",
 			"后台或错误": "background"
+		},
+		title: {
+			"生成结束时": "盯着网页太费时？\n生成完成后用声音提示，去做其他事吧！",
+			"后台或错误": "当前标签页无焦点，或请求/工具调用出错时"
 		}
 	},
 	{
 		_tab: "customize",
-		name: "流式响应时，自动展开",
+		name: "流式输出时自动展开",
+		title: "在 AI 生成过程中，自动展开对应的内容块，方便查看。",
 		type: "multiple",
 		choices: {
-			"思考": "expandThinkBlock",
+			"思考过程": "expandThinkBlock",
 			"工具调用": "expandToolCall"
 		}
 	},
 	{
+		id: "branchRegen",
 		_tab: "customize",
-		name: "对话分支选项",
-		type: "multiple",
+		name: "重新生成消息的默认行为",
+		title: "仅影响最后一条消息。重新生成更早的消息总是创建分支。",
+		type: "radio",
+		required: true,
 		choices: {
-			"新对话默认开启": "branchModeDefault",
-			"允许编辑消息历史": "branchEditHistory"
-		},
-		title: {
-			"允许编辑消息历史": "点击编辑时弹窗询问是否直接编辑消息历史，而不是创建分支"
+			"每次询问": null,
+			"覆盖回复": false,
+			"创建分支": true
 		}
 	},
 	{
 		_tab: "customize",
-		name: "其它选项",
+		name: "更多选项",
 		type: "multiple",
 		choices: {
-			"上滑隐藏输入框": "uiAutoHideInput",
+			"每天检查更新": "checkUpdate",
 			"合并连续的工具调用": "combineToolCalls",
-			"自动检查更新": "checkUpdate"
+			"生成时防止睡眠": "wakelock",
 		},
 		title: {
-			"合并连续的工具调用": "将多条工具调用消息合并为一条 (仅影响渲染)\n无法编辑合并的对话"
+			"合并连续的工具调用": "将多条连续的工具调用消息合并为一条显示\n只能编辑合并消息的最后一条\n工具调用链过长可能影响渲染性能",
+			"生成时防止睡眠": "生成回复期间，阻止系统睡眠，避免生成中断",
 		}
 	},
 	{
@@ -574,135 +540,143 @@ export const SETTINGS = [
 		required: true,
 		choices: {
 			"跟随系统": null,
-			"亮色": "light",
-			"暗色": "dark"
+			"浅色": "light",
+			"深色": "dark"
+		},
+	},
+	{
+		id: 'messageTheme',
+		_tab: "customize",
+		name: "对话界面样式（实验性）",
+		type: "radio",
+		required: true,
+		choices: {
+			"默认 (信息流)": 'def',
+			"聊天 (分靠左右)": "alt",
 		},
 	},
 	{
 		_tab: "customize",
 		id: "allowHTMLTags",
-		name: "解析HTML标签",
+		name: "允许在 Markdown 中渲染的 HTML 标签",
 		type: "multiple",
 		choices: {
-			"基础": "basic",
-			"样式": "style",
-			"代码（危险！）": "script"
+			"基本": "basic",
+			"样式 (style)": "style",
+			"脚本 (script)": "script"
 		}
 	},
 	{
 		id: "width",
 		_tab: "customize",
-		name: "对话框宽度",
+		name: "对话框宽度（像素）",
 		type: "number",
 		min: 500,
 		max: 1500,
-		step: 50
+		step: 50,
+		default: 800
 	},
 	// customize
-	// data
-	{
-		type: "element",
-		_tab: ["general", "data"],
-		_id: "import",
-		name: "导入对话、预设、备份及更多格式",
-		element: <div className={"choice-scroll"}>
-			<label className="btn ghost">导入
-				<input type="file" accept="application/zip,application/json,image/png" style="display:none;" multiple onChange={importConversation}/>
-			</label>
-		</div>
-	},
-	{
-		type: "element",
-		_tab: "data",
-		element: <div className={"choice-scroll"}>
-			<button className="btn ghost" onClick={() => exportConversation(1)}>备份对话</button>
-			<button className="btn ghost" onClick={() => exportConversation(2)}>备份预设</button>
-			<button className="btn ghost" onClick={() => exportConversation(7)}>备份所有</button>
-		</div>
-	},
-	{
-		type: "element",
-		_tab: ["general", "data"],
-		name: "将当前配置保存为新预设",
-		element: <div className={"choice-scroll"}>
-			<button className="btn ghost" onClick={() => createPreset()}>新预设</button>
-		</div>
-	},
-	{
-		type: "element",
-		_tab: "data",
-		name: "清除所有数据",
-		element: <div className={"choice-scroll"}>
-			<button className="btn danger" onClick={clearDatabase}>删库</button>
-		</div>
-	},
-	// data
+	// 因为模块加载顺序的原因 data 整个模块被拆分到 data-exchange.js 和 PresetDropdown.jsx 了
 	{
 		name: "开发",
 		type: "multiple",
 		choices: {
-			"请求调试": "reviewRequest",
-			"响应调试": "logSSE",
-			"数据库只读": "incognito",
-			"延迟提交消息": "reviewMessage",
+			"请求审核": "reviewRequest",
+			"记录响应": "logSSE",
+			"隔离模式": "incognito",
+			"延迟发送消息": "reviewMessage",
 		},
 		title: {
-			"请求调试": "预览发送到API的原始请求体",
-			"响应调试": "在控制台记录原始SSE流",
-			"数据库只读": "无痕模式：跳过数据库写入，用于调试渲染或测试推理",
-			"延迟提交消息": "点击发送按钮仅追加用户消息，第二次点击时请求LLM",
+			"请求审核": "每次API调用前弹窗预览请求体",
+			"记录响应": "在控制台输出原始SSE流",
+			"隔离模式": "对话的修改不写入数据库，在刷新后丢失\n（其它修改如 KV 或 KVList 会正常保存！）",
+			"延迟发送消息": "点击发送按钮仅插入消息\n第二次点击请求LLM",
 		}
 	},
 	{
 		id: "maxToolTurns",
 		_tab: "tools",
-		name: "模型连续调用工具（无需人工确认）的最长轮数",
+		name: "模型自主调用工具的最长轮数",
 		type: "number",
 		min: 0,
 		max: 30,
-		step: 1
+		step: 1,
+		default: 1
 	},
 	{
-		id: "ignoreToolError",
+		id: "afkState",
 		_tab: "tools",
-		name: "AFK / 让模型自己修调用",
+		name: "工具调用错误策略",
 		type: "radio",
+		required: true,
 		choices: {
-			"工具调用失败不打断自动提交": true
+			"人工处理": 0,
+			"模型处理": 1,
+			"无人值守": 2
+		},
+		title: {
+			"无人值守": '省电 (禁用 markdown 解析)\n允许远程操作 (连接同步服务)\n实验性'
 		}
 	},
 	{
 		id: "permittedTools",
 		_tab: "tools",
-		name: "全局工具审批配置",
-		placeholder: "逗号分隔自动执行的工具名称，使用感叹号前缀来手动执行，使用星号允许全部",
+		name: "全局工具批准配置",
+		title: "空格分隔自动批准的工具，前缀 ! 要求手动批准；填 * 自动批准所有",
+		placeholder: "!Delete CreateAgent",
 		type: "input",
 		pattern(value) {
-			const data = value.split(",").map(item=>item.trim());
-			if (data.filter(Boolean).length !== data.length)
-				throw "不得包含空白项";
+			const data = value.split(" ").map(item=>item.trim()).filter(Boolean);
 			for (let key of data) {
 				const ch = key[0];
 				if (ch === '*') continue;
 				if (ch === '!') key = key.slice(1);
 				if (!toolScriptRegistry[key]) {
-					throw '工具 '+key+' 不存在';
+					const matches = Object.keys(toolScriptRegistry).filter(item => item.toLowerCase().startsWith(key.toLowerCase())).slice(0, 5).join(' ');
+					throw '工具 '+key+' 不存在'+(matches.length ? '\n建议: '+matches:'');
 				}
 			}
 			return [data];
 		},
-		load: (obj) => obj && obj.join(",")
+		load: (obj) => obj && obj.join(" ")
 	},
 	// logs
 	{
 		id: "provider",
-		name: "模型渠道",
+		name: "模型供应商标识",
 		type: "input",
-		_tab: "data",
-		title: "仅用于统计, 留空使用预设名称",
+		_tab: ["model", "data"],
+		placeholder: "猫娘中转站",
+		title: "仅用于数据统计, 留空使用API域名",
 		_group: "model"
 	}
 ];
+
+// 数据库
+if (DB_MODE !== 'local') {
+	SETTINGS.push({
+		id: "db_server",
+		_tab: ["general", "data"],
+		name: "数据库后端",
+		title: "提供文件管理、多端同步、向量数据库等功能\n修改后需要刷新页面"+(DB_MODE === "mixed" ? "\n填写 :idb: 使用本地数据库" : ""),
+		type: "input",
+		pattern: (DB_MODE === "mixed" ? /^(?:(?:https?:\/\/)?.*\/api\/v2\/|:idb:$)/ : /^(?:https?:\/\/)?.*\/api\/v2\//),
+		warning: "请输入合法的服务器地址",
+		placeholder: "/api/v2/username"
+	}, {
+		id: "db_pat",
+		_tab: "data",
+		type: "secret",
+		placeholder: "个人访问密钥 (PAT)",
+	}/*, {
+		id: "db_nick",
+		_tab: "data",
+		name: "客户端名称 (远程控制用)",
+		placeholder: "家里的电脑",
+		type: "input",
+	}*/);
+}
 
 const toggleFullscreen = () => {
 	let elem = document.body;
@@ -754,7 +728,7 @@ if (isMobile) {
 	}
 }
 
-export const BODY_PARAMETERS = SETTINGS.filter(({id = "", _tab}) => (id !== 'antiSlop' && _tab === "sampling" || id === "max_tokens"));
+export const BODY_PARAMETERS = SETTINGS.filter(({id = "", _tab}) => (id !== 'antiSlop' && _tab === "sampling" || id === "max_completion_tokens"));
 BODY_PARAMETERS.forEach(item => item.body_id = item.id);
 
 export const presetKeysAlways = ["name"];
@@ -773,9 +747,9 @@ for (const [k, v] of [
 }
 
 // 删除过时的配置项
-requestIdleCallback(() => {
+onLoad(() => {
 	const keys = new Set(Object.keys(config));
-	["name", "think", "tools", "_new"].forEach(name => keys.delete(name));
+	["name", "think", "_new"].forEach(name => keys.delete(name));
 
 	SETTINGS.forEach(({id, _group, type, choices}) => {
 		if (!id) {

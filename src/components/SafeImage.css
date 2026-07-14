@@ -34,7 +34,12 @@
     border: 2px solid var(--border);
     border-top-color: var(--accent);
     border-radius: 50%;
-    animation: spin 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .spinner {
+        animation: spin 1s linear infinite;
+    }
 }
 
 @keyframes spin {

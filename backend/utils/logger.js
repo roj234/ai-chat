@@ -1,8 +1,5 @@
 
-const log = console.log;
-const error = console.error;
-
-export function injectLogger() {
+export function hookLogger() {
 	const createHandle = (func) => (str, ...args) => {
 		let template = `[${new Date().toLocaleTimeString()}] `;
 		if (typeof str === 'string') {
@@ -13,6 +10,6 @@ export function injectLogger() {
 		}
 	};
 
-	console.log = createHandle(log);
-	console.error = createHandle(error);
+	for (const key of Object.keys(console))
+		console[key] = createHandle(console[key]);
 }

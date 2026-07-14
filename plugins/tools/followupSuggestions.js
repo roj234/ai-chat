@@ -6,7 +6,7 @@
 // 可选字段 intent 用来做 UI 分组或图标，不需要可以删掉。
 
 import {messages} from "/src/states.js";
-import {registerTools} from "/src/skills.js";
+import {registerToolset} from "/src/toolset.js";
 import {submitUserChatMessage} from "/src/api-request.js";
 
 const prompt2 = `<Follow-up-Suggestions>
@@ -188,7 +188,7 @@ const SuggestFollowups = {
 	}
 };
 
-registerTools("SuggestFollowups", "让模型生成相关问题(追问)", [SuggestFollowups], {
+registerToolset("SuggestFollowups", "让模型生成相关问题(追问)", [SuggestFollowups], {
 	hidden: 'manual',
 	systemPrompt: prompt
 })

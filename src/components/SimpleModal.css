@@ -16,7 +16,7 @@
     border: 1px solid var(--border);
     box-shadow: 0 4px 12px var(--bg);
     max-width: 768px;
-    width: 90%;
+    min-width: 20%;
     max-height: 80vh;
     animation: bounceIn 0.3s ease-out;
     transform-origin: center;
@@ -28,6 +28,8 @@
         padding: 12px;
     }
     & .header {
+        display: flex;
+        align-items: center;
         background-color: var(--panel);
         border-bottom: 1px solid var(--border);
         font-size: 1.2em;

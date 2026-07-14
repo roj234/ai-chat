@@ -24,7 +24,7 @@ export function createZipRouter(zip) {
 		if (!entry) return false;
 
 		// ETag：基于 CRC32 的强校验 ETag
-		const etag = `"${entry.crc.toString(16).padStart(8, '0')}"`;
+		const etag = `"${entry.crc32.toString(16).padStart(8, '0')}"`;
 		// Last-Modified
 		const lastModified = entry.lastModified.toUTCString();
 
@@ -54,11 +54,11 @@ export function createZipRouter(zip) {
 			return true;
 		}
 
-		const compression = entry.method === 8 ? 'deflate' : entry.method === 92 ? 'br' : '';
+		const compression = entry.compression === 8 ? 'deflate' : entry.compression === 92 ? 'br' : '';
 
 		// 决定是否直接发送 ZIP 中的原始 deflate 数据
 		const encodings = (req.headers['accept-encoding'] || '').toLowerCase();
-		const accept = 0 && encodings.includes(compression);
+		const accept = encodings.includes(compression);
 
 		let headers = {
 			'Content-Type': getContentType(path),

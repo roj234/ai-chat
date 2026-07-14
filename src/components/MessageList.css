@@ -107,3 +107,54 @@
     color: var(--stats-overlay-accent);
     font-weight: bold;
 }
+
+/* 文本附件 */
+.text-attachment {
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent-2);
+    background: color-mix(in srgb, var(--accent-2) 6%, transparent);
+    border-radius: var(--border-radius-md);
+    padding: 8px 12px;
+    margin: 4px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+
+    &.deleted span {
+        text-decoration: line-through;
+        color: var(--muted);
+    }
+
+    & .attach-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 1;
+        overflow: auto;
+
+        & i {
+            font-size: 1.2rem;
+            color: var(--accent-2);
+            flex-shrink: 0;
+        }
+    }
+
+    & .attach-meta {
+        font-size: 0.75rem;
+        color: var(--muted);
+    }
+
+    & .btn {
+        padding: 4px 10px;
+        border-radius: 6px;
+        background: var(--chip-active);
+        color: var(--accent-2);
+        border: 1px solid var(--accent-2);
+
+        &:not(:disabled):hover {
+            background: var(--accent-2);
+            color: var(--bg);
+        }
+    }
+}

@@ -25,14 +25,14 @@ export const chapterData = [
     children: [
       { title: '插件开发指南', href: 'documents/plugin-development.md' },
       { title: 'API 参考', href: 'documents/api-reference.md' },
-      { title: 'RPG 管线', href: 'documents/rpg-pipeline.md' }
+      { title: 'RPG 管线', href: 'documents/rpg-pipeline.md' },
+      { title: '响应式 JSON 开发指南', href: 'documents/ReactiveJSON.md' }
     ],
   },
   {
-    title: '其他 (标题都是梗)',
+    title: '其他',
     icon: '👨',
     children: [
-      { title: '体重和歧视', href: 'documents/weights_and_biases.md' },
       { title: 'V我50', href: 'documents/license.md' },
     ],
   }

@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import {
 	SEMANTIC_SEARCH_API_BASE,
 	SEMANTIC_SEARCH_API_KEY,
@@ -20,13 +20,14 @@ if (!DataView.prototype.setFloat16) {
 	DataView.prototype.setFloat16 = function (byteOffset, value, littleEndian = false) {
 		fp16Tmp.setFloat32(0, value);
 		this.setUint16(byteOffset, float32ToFloat16Bits(fp16Tmp.getUint32(0)), littleEndian);
-	}
+	};
 
 	DataView.prototype.getFloat16 = function (byteOffset, littleEndian = false) {
 		fp16Tmp.setInt32(0, float16ToFloat32Bits(this.getUint16(byteOffset, littleEndian)));
 		return fp16Tmp.getFloat32(0);
-	}
+	};
 }
+
 /**
  * 根据配置截取文本
  * @param {string} text 原始文本
@@ -76,6 +77,33 @@ export async function getEmbedding(text) {
 }
 
 export class VectorDB {
+	/** @type {Promise<void>} 初始化完成标记 */
+	#ready;
+
+	/** @type {Promise<void>} 写互斥锁，串行化所有磁盘写入 */
+	#writeLock = Promise.resolve();
+
+	/** @type {fs.FileHandle | null} */
+	#handle = null;
+
+	/** @type {boolean} */
+	#faissReady = false;
+
+	/** @type {any | null} faiss IndexIDMap 实例 */
+	#faissIndex = null;
+
+	/** @type {any | null} 缓存的 faiss-node 模块引用 */
+	#faissModule = null;
+
+	/** @type {Map<string, bigint>} */
+	#idToFaissId = new Map();
+
+	/** @type {Map<bigint, string>} */
+	#faissIdToId = new Map();
+
+	/** @type {bigint} */
+	#faissIdCounter = 0n;
+
 	/**
 	 * @param {string} filePath 文件路径
 	 * @param {number} dimension 向量维度
@@ -91,27 +119,44 @@ export class VectorDB {
 		this.freeSlots = [];
 
 		// 版本号机制
-		this.pending = new Map;
+		this.pending = new Map();
 
-		this.fd = fs.openSync(this.filePath, 'a+');
-		this._loadOrCreateFile();
+		this.#ready = this.#init();
 	}
 
-	close() {
-		if (this.fd != null) fs.closeSync(this.fd);
-		this.fd = null;
+	// ──── 生命周期 ────────────────────────────────────
+
+	async close() {
+		await this.#ready;
+		if (this.#handle != null) {
+			await this.#handle.close();
+			this.#handle = null;
+		}
+		// 释放 faiss 索引（faiss-node 通常无需显式释放，但清引用帮助 GC）
+		this.#faissIndex = null;
+		this.#faissModule = null;
+		this.#idToFaissId.clear();
+		this.#faissIdToId.clear();
 	}
 
 	get size() {
 		return this.index.size;
 	}
 
+	// ──── 初始化 ──────────────────────────────────────
+
+	async #init() {
+		this.#handle = await fs.open(this.filePath, 'a+');
+		await this.#loadOrCreateFile();
+		await this.#initFaiss();
+	}
+
 	/**
-	 * 初始化加载：扫描整个文件建立索引和空闲列表
+	 * 异步加载：扫描整个文件建立索引和空闲列表
 	 */
-	_loadOrCreateFile() {
+	async #loadOrCreateFile() {
 		/** @type {Buffer} */
-		const buffer = fs.readFileSync(this.filePath);
+		const buffer = await fs.readFile(this.filePath);
 		let offset = 0;
 
 		while (offset + this.recordSize <= buffer.length) {
@@ -130,20 +175,94 @@ export class VectorDB {
 	}
 
 	/**
-	 *
+	 * 尝试加载 faiss-node 加速搜索。
+	 * 失败则回退到暴力搜索（#faissIndex 保持 null）。
+	 */
+	async #initFaiss() {
+		try {
+			const faiss = await import('faiss-node');
+			const IndexFlatIP = faiss.IndexFlatIP;
+			const IndexIDMap = faiss.IndexIDMap;
+
+			if (!IndexFlatIP || !IndexIDMap) {
+				console.log('faiss-node: missing expected exports, using brute-force search');
+				return;
+			}
+
+			const inner = new IndexFlatIP(this.dimension);
+			this.#faissIndex = new IndexIDMap(inner);
+			this.#faissModule = faiss;
+			this.#idToFaissId = new Map();
+			this.#faissIdToId = new Map();
+			this.#faissIdCounter = 0n;
+
+			// 将已有向量批量灌入 faiss
+			if (this.index.size > 0) {
+				const ids = new BigInt64Array(this.index.size);
+				const vectors = new FloatArray(this.index.size * this.dimension);
+				let i = 0;
+				for (const [id, item] of this.index) {
+					const faissId = this.#faissIdCounter++;
+					this.#idToFaissId.set(id, faissId);
+					this.#faissIdToId.set(faissId, id);
+					ids[i] = faissId;
+					vectors.set(item.vector, i * this.dimension);
+					i++;
+				}
+				this.#faissIndex.addWithIds(vectors, ids);
+			}
+
+			this.#faissReady = true;
+			console.log(`faiss-node: initialized with ${this.index.size} vectors`);
+		} catch (e) {
+			// 动态 import 失败（未安装）或 native 绑定加载失败，静默回退
+			console.log(`faiss-node: not available, using brute-force search (${e.message})`);
+			this.#faissIndex = null;
+			this.#faissModule = null;
+		}
+	}
+
+	// ──── 写互斥锁 ────────────────────────────────────
+
+	/**
+	 * 串行化异步写操作，防止竞态导致数据损坏。
+	 * @template T
+	 * @param {() => Promise<T>} fn
+	 * @returns {Promise<T>}
+	 */
+	async #withWriteLock(fn) {
+		const prev = this.#writeLock;
+		let resolve;
+		this.#writeLock = new Promise(r => { resolve = r; });
+		await prev;
+		try {
+			return await fn();
+		} finally {
+			resolve();
+		}
+	}
+
+	// ──── 公开 API ────────────────────────────────────
+
+	/**
+	 * 异步写入向量（从文本生成 embedding 后 upsert）。
+	 * 若短时间内对同一 ID 多次调用，仅最后一次生效。
 	 * @param {string} id
 	 * @param {string} text
+	 * @returns {Promise<void>}
 	 */
-	set(id, text) {
+	async set(id, text) {
+		await this.#ready;
 		const stamp = (this.pending.get(id) || 0) + 1;
 		this.pending.set(id, stamp);
 
-		return getEmbedding(text).then(embedding => {
+		try {
+			const embedding = await getEmbedding(text);
 			if (this.pending.get(id) === stamp) {
 				this.pending.delete(id);
-				return this.upsert(id, embedding);
+				return await this.upsert(id, embedding);
 			}
-		}).catch(e => {
+		} catch (e) {
 			if (this.pending.get(id) === stamp) {
 				this.pending.delete(id);
 				console.error("Embedding生成失败");
@@ -156,55 +275,107 @@ export class VectorDB {
 					console.error(e);
 				}
 			}
+			throw e;
+		}
+	}
+
+	/**
+	 * 写入/更新向量（磁盘存 bf16，内存存 float32）。
+	 * 在写锁内执行，确保 offset 分配与写入的原子性。
+	 * @param {string} id
+	 * @param {Float32Array | FloatArray} vector
+	 * @returns {Promise<void>}
+	 */
+	async upsert(id, vector) {
+		await this.#ready;
+		return this.#withWriteLock(async () => {
+			const floatVector = vector instanceof FloatArray ? vector : new FloatArray(vector);
+			if (floatVector.length !== this.dimension) throw new Error("Dimension mismatch");
+
+			const offset = this.index.get(id)?.offset
+				?? this.freeSlots.shift()
+				?? (await this.#handle.stat()).size;
+
+			const buf = Buffer.alloc(this.recordSize);
+			buf.write(id, 'utf8');
+
+			const view = new DataView(buf.buffer, buf.byteOffset, this.dimension * 2);
+			for (let i = 0; i < this.dimension; i++) {
+				view.setFloat16(i * 2, floatVector[i]);
+			}
+
+			await this.#handle.write(buf, 0, buf.length, offset);
+			this.index.set(id, { vector: floatVector, offset });
+			await this.#faissUpsert(id, floatVector);
 		});
 	}
 
 	/**
-	 * 写入/更新向量（磁盘存 bf16，内存存 float32）
+	 * 删除向量：将 ID 字段写零，回收槽位。
+	 * @param {string} id
+	 * @returns {Promise<void>}
 	 */
-	upsert(id, vector) {
-		const floatVector = vector instanceof FloatArray ? vector : new FloatArray(vector);
-		if (floatVector.length !== this.dimension) throw new Error("Dimension mismatch");
+	async delete(id) {
+		await this.#ready;
+		return this.#withWriteLock(async () => {
+			const item = this.index.get(id);
+			if (!item) return;
 
-		const offset = this.index.get(id)?.offset ?? this.freeSlots.shift() ?? fs.statSync(this.filePath).size;
+			const zeroes = Buffer.alloc(ID_LENGTH);
+			await this.#handle.write(zeroes, 0, zeroes.length, item.offset);
 
-		const buf = Buffer.alloc(this.recordSize);
-		buf.write(id, 'utf8');
-
-		const view = new DataView(buf.buffer, buf.byteOffset, ID_LENGTH);
-		for (let i = 0; i < this.dimension; i++) {
-			view.setFloat16(i * 2, floatVector[i]);
-		}
-
-		fs.writeSync(this.fd, buf, 0, buf.length, offset);
-		this.index.set(id, { vector: floatVector, offset });
+			this.freeSlots.push(item.offset);
+			this.index.delete(id);
+			await this.#faissDelete(id);
+		});
 	}
 
 	/**
-	 * 删除向量：标记槽位为空
+	 * @param {string} text
+	 * @param {number} topK
+	 * @param {number} threshold
+	 * @returns {Promise<{id: string, score: number}[]>}
 	 */
-	delete(id) {
-		const item = this.index.get(id);
-		if (!item) return;
-
-		const zeroes = Buffer.alloc(ID_LENGTH);
-		fs.writeSync(this.fd, zeroes, 0, zeroes.length, item.offset);
-
-		this.freeSlots.push(item.offset);
-		this.index.delete(id);
-	}
-
-	query(text, topK, threshold) {
-		return getEmbedding(text).then(emb => this.search(emb, topK, threshold));
+	async query(text, topK, threshold) {
+		await this.#ready;
+		const emb = await getEmbedding(text);
+		return this.search(emb, topK, threshold);
 	}
 
 	/**
-	 * 搜索
+	 * 搜索最相似的 topK 个向量。
+	 * 优先使用 faiss 加速索引，不可用时回退到暴力搜索。
 	 * @param {Float32Array} query
 	 * @param {number} topK
 	 * @param {number} threshold
+	 * @returns {Promise<{id: string, score: number}[]>}
 	 */
-	search(query, topK = 5, threshold = 0.3) {
+	async search(query, topK = 5, threshold = 0.3) {
+		await this.#ready;
+
+		// 尝试 faiss 搜索
+		if (this.#faissReady && this.index.size > 0) {
+			try {
+				const vec = new FloatArray(query);
+				const { distances, labels } = this.#faissIndex.search(vec, topK);
+
+				const results = [];
+				for (let i = 0; i < labels.length; i++) {
+					const faissId = labels[i];
+					const id = this.#faissIdToId.get(faissId);
+					const score = distances[i];
+					if (id && score > threshold) {
+						results.push({ id, score });
+					}
+				}
+				return results;
+			} catch (e) {
+				console.error('faiss search failed, falling back to brute-force:', e.message);
+				// 回退到暴力搜索
+			}
+		}
+
+		// 暴力搜索
 		const array = new TopK(topK, (l, r) => r.score - l.score);
 		for (const [id, item] of this.index) {
 			let score = 0;
@@ -217,5 +388,59 @@ export class VectorDB {
 		}
 
 		return array.toArray();
+	}
+
+	// ──── faiss 同步 ──────────────────────────────────
+
+	/**
+	 * 向 faiss 索引添加/更新向量。失败静默（不影响主流程）。
+	 */
+	async #faissUpsert(id, vector) {
+		if (!this.#faissReady) return;
+
+		try {
+			// 移除旧条目
+			const oldFaissId = this.#idToFaissId.get(id);
+			if (oldFaissId !== undefined) {
+				const IDSelectorBatch = this.#faissModule.IDSelectorBatch;
+				if (IDSelectorBatch) {
+					const selector = new IDSelectorBatch(new BigInt64Array([oldFaissId]));
+					this.#faissIndex.removeIds(selector);
+				}
+				this.#faissIdToId.delete(oldFaissId);
+			}
+
+			// 添加新条目
+			const faissId = this.#faissIdCounter++;
+			this.#idToFaissId.set(id, faissId);
+			this.#faissIdToId.set(faissId, id);
+
+			const vec = new FloatArray(vector);
+			this.#faissIndex.addWithIds(vec, new BigInt64Array([faissId]));
+		} catch (e) {
+			console.error(`faiss upsert failed for "${id}":`, e.message);
+		}
+	}
+
+	/**
+	 * 从 faiss 索引删除向量。失败静默。
+	 */
+	async #faissDelete(id) {
+		if (!this.#faissReady) return;
+
+		try {
+			const faissId = this.#idToFaissId.get(id);
+			if (faissId !== undefined) {
+				const IDSelectorBatch = this.#faissModule.IDSelectorBatch;
+				if (IDSelectorBatch) {
+					const selector = new IDSelectorBatch(new BigInt64Array([faissId]));
+					this.#faissIndex.removeIds(selector);
+				}
+				this.#idToFaissId.delete(id);
+				this.#faissIdToId.delete(faissId);
+			}
+		} catch (e) {
+			console.error(`faiss delete failed for "${id}":`, e.message);
+		}
 	}
 }

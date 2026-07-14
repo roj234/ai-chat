@@ -30,15 +30,15 @@ const mainPageDriver = driver({
 
 	steps: [
 		{ element: '#brain', popover: {
-			title: '欢迎使用AiChat', description: '<b>连接脑子</b><br/>填写您的API地址、密钥和模型ID<br/>输入框支持自动补全<br/>如果感到困惑，我很抱歉，因为作者的用户引导水平暂时就这样了……',
+			title: '欢迎使用AiChat', description: '<b>连接脑子</b><br/>填写您的API地址、密钥和模型ID<br/>输入框支持自动补全',
 
 				onNextClick(element, step, {driver}) {
-					document.querySelector("#settingDialog .filter > div:nth-child(12) button:nth-child(2)").scrollIntoView();
+					document.querySelector("#settingDialog .filter > div:nth-child(12) button").scrollIntoView();
 					requestAnimationFrame(() => driver.moveNext());
 				}
 		} },
 		{ element: '#settingDialog .filter > div:nth-child(12) button:nth-child(1)', popover: {
-				title: '点它', description: '如果不可点，你需要稍后点击右边的测试按钮，并按提示操作（在必要时参考文档）',
+				title: '点它', description: '如果失败了，请看完教程后修改API地址等<br/>如果连接成功，点击【测试能力】。如果你不会或不想自己修改配置，那么每次换模型都要重新测试能力',
 
 				onNextClick(element, step, {driver}) {
 					switchTab("general").then(() => driver.moveNext());

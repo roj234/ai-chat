@@ -111,7 +111,7 @@ ${prompt}`
 	try {
 		const assistantResponse = await jsonPrompt(schema, messages_, {
 			reasoning: {enabled: false},
-			max_tokens: Math.max(8192, prompt.length),
+			max_completion_tokens: Math.max(8192, prompt.length),
 		}, ID);
 
 		const jsonData = JSON.parse(assistantResponse.content);

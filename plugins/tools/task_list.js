@@ -1,6 +1,6 @@
-import {getToolParameters, registerTools, updateConversationState, watchConversationState} from "/src/skills.js";
-import {onConversationLoaded} from "/src/states.js";
-import {$foreach, $state} from "unconscious";
+import {getToolParameters, registerToolset, updateConversationState, watchConversationState} from "/src/toolset.js";
+import {config, messages, onConversationLoaded, selectedConversation} from "/src/states.js";
+import {$computed, $foreach, $state, unconscious} from "unconscious";
 import "./task_list.css";
 
 /**
@@ -8,7 +8,7 @@ import "./task_list.css";
  */
 const TaskCreate = {
 	name: 'TaskCreate',
-	description: 'Create a structured task list for your current session, and obtain integer id for further `TaskUpdate` calls. This helps track progress, organize complex tasks, and demonstrate thoroughness.',
+	description: 'Create a structured task for your current session, and obtain integer id for further `TaskUpdate` calls. This helps track progress, organize complex tasks, and demonstrate thoroughness.',
 	parameters: {
 		type: 'object',
 		properties: {
@@ -28,7 +28,7 @@ const TaskCreate = {
 		updateConversationState(conv, "TaskList:tasks");
 		return "Task created, id="+nextTaskId;
 	},
-	title(req, ctx = {}) {
+	title(req, ctx) {
 		const par = getToolParameters(ctx, req);
 		return "创建任务 ["+par.title+"]";
 	},
@@ -93,83 +93,96 @@ const TaskUpdate = {
 
 let taskDiv;
 
-export const registerTaskList = () => {
-	registerTools(
-		"TaskList",
-		"Create and manage structured task list for your current session. This helps track progress, organize complex tasks, and demonstrate thoroughness.",
-		[TaskCreate, TaskUpdate]
-	);
+registerToolset(
+	"TaskList",
+	"Create and manage structured task list for your current session. This helps track progress, organize complex tasks, and demonstrate thoroughness.",
+	[TaskCreate, TaskUpdate],
+	{
+		default: true
+	}
+);
 
-	onConversationLoaded((conv) => {
-		let done_r = $state(),
-			success_r = $state(),
-			failed_r = $state(),
-			total_r = $state(),
-			tasks_r = $state();
+onConversationLoaded((conv) => {
+	let done_r = $state(),
+		success_r = $state(),
+		failed_r = $state(),
+		total_r = $state(),
+		tasks_r = $state();
 
-		watchConversationState(conv, "TaskList:tasks", () => {
-			const tasks = conv.tasks;
-			if (!tasks?.length) {
-				if (taskDiv) {
-					taskDiv.remove();
-					taskDiv = null;
-				}
-			} else {
-				let done = 0, success = 0, failed = 0, total = tasks.length;
-				tasks.forEach((task) => {
-					switch (task.status) {
-						case 'failed':
-							failed++;
-							done++;
-							break;
-						case 'completed':
-							success++;
-							done++;
-							break;
-					}
-				});
-				done_r.value = done;
-				success_r.value = success;
-				failed_r.value = failed;
-				total_r.value = total;
-				tasks_r.value = tasks.toReversed();
-
-				if (taskDiv) return;
-				taskDiv = (
-					<div className="rp-overlay TaskListPanel">
-						<div className="header">
-							<strong className="title">任务</strong>
-							<div className="progressBar">
-								<div className="progressFill"
-									 style:reactive={{width: () => `${(done_r / total_r) * 100}%`}}/>
-							</div>
-							<span className="progressText">{done_r}/{total_r}</span>
-							<button className="collapse" onClick={() => {
-								taskDiv.value.classList.toggle("collapsed");
-							}}>▼
-							</button>
-						</div>
-						<div className="body">
-							{$foreach(tasks_r, (task, i) => (
-								<div className="TaskItem" data-status={task.status}>
-									<div className="status" data-status={task.status}/>
-									<div className="content">
-										<div className="title ellipsis">{tasks_r.length - i}. {task.title}</div>
-										{task.description && (
-											<div className="desc">{task.description}</div>
-										)}
-									</div>
-								</div>
-							), JSON.stringify)}
-						</div>
-						<div className="footer">
-							<span>成功 {success_r}</span>
-							<span>失败 {failed_r}</span>
-						</div>
-					</div>
-				);
-				document.body.append(taskDiv);
+	watchConversationState(conv, "TaskList:tasks", () => {
+		const tasks = conv.tasks;
+		if (!tasks?.length) {
+			if (taskDiv) {
+				taskDiv.remove();
+				taskDiv = null;
 			}
-		});
+		} else {
+			let done = 0, success = 0, failed = 0, total = tasks.length;
+			tasks.forEach((task) => {
+				switch (task.status) {
+					case 'failed':
+						failed++;
+						done++;
+						break;
+					case 'completed':
+						success++;
+						done++;
+						break;
+				}
+			});
+			done_r.value = done;
+			success_r.value = success;
+			failed_r.value = failed;
+			total_r.value = total;
+			tasks_r.value = tasks.toReversed();
+
+			if (taskDiv) return;
+
+			const contextUsage = $computed(() => selectedConversation.contextUsage, [messages]);
+			const contexMax = $computed(() => config.maxContext);
+			const contextUsagePct = $computed(() => {
+				const ctx = unconscious(contextUsage);
+				const pct = ((ctx / unconscious(contexMax)) * 100);
+				return isNaN(pct)?ctx||0:`${pct.toFixed(2)}%`;
+			});
+			taskDiv = (
+				<div className="rp-overlay TaskListPanel">
+					<div className="header">
+						<span className="title">任务</span>
+						<div className="progressBar">
+							<div className="progressFill"
+								 style:reactive={{width: () => `${(done_r / total_r) * 100}%`}}/>
+						</div>
+						<span className="progressText">{done_r}/{total_r}/{failed_r}</span>
+						<button className="collapse" onClick={() => {
+							taskDiv.classList.toggle("collapsed");
+						}}>▼
+						</button>
+					</div>
+					<div className="body">
+						{$foreach(tasks_r, (task, i) => (
+							<div className="TaskItem" data-status={task.status}>
+								<div className="status" data-status={task.status}/>
+								<div className="content">
+									<div className="title ellipsis">{tasks_r.length - i}. {task.title}</div>
+									{task.description && (
+										<div className="desc">{task.description}</div>
+									)}
+								</div>
+							</div>
+						), JSON.stringify)}
+					</div>
+					<div className={"header footer"}>
+						<span className="title">上下文</span>
+						<div className="progressBar">
+							<div className="progressFill"
+								 style:reactive={{width: contextUsagePct}}/>
+						</div>
+						<span className="progressText" title={contextUsage}>{contextUsagePct}</span>
+					</div>
+				</div>
+			);
+			document.body.append(taskDiv);
+		}
 	});
-}
+});

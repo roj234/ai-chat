@@ -178,9 +178,6 @@ body {
     color: var(--accent);
     margin-right: 6px;
 }
-.topbar__spacer {
-    flex: 1;
-}
 
 /* 汉堡按钮 */
 .hamburger {

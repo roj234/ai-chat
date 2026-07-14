@@ -2,30 +2,27 @@ import SimpleModal from "/src/components/SimpleModal.jsx";
 import {highlightJsonLike} from "/src/markdown/highlight.js";
 import {$computed, $state, $update, $watch, $watchWithCleanup, unconscious} from "unconscious";
 import {VirtualList} from "unconscious/common/VirtualList.js";
-import {addMCPServer, defaultGroups, toolScriptRegistry, toolset} from "/src/skills.js";
+import {addMCPServer, defaultGroups, PLACEHOLDERS, toolScriptRegistry, toolset} from "/src/toolset.js";
 import {renderMarkdownToElement} from "/src/markdown/markdown.js";
 
 import "./SkillManager.css";
 import "../rp_basic/PresetPanel.css";
-import {config, ensureActiveConversation, selectedConversation} from "/src/states.js";
-import {CUSTOM_CONTROLS, SETTINGS} from "/src/settings.js";
+import {ensureActiveConversation, selectedConversation} from "/src/states.js";
+import {CUSTOM_CONTROLS} from "/src/settings.js";
 import {Filter} from "unconscious/common/components/Filter.jsx";
 
 import {createPanel} from "../rp_basic/CreatePanel.jsx";
-import {onLoad} from "../../src/plugin.js";
+import {onLoad} from "/src/hooks.js";
+import {showToast} from "/src/components/Toast.js";
+import {prettyError} from "/src/utils/utils.js";
+import {getKV, setKV} from "/src/database.js";
 
-SETTINGS.push({
-	id: "mcps",
-	type: "element",
-	_tab: "tools",
-	element: <div className={"choice-scroll"}>
-		<button className="btn ghost" onClick={() => skillManagerPanel.open()} disabled={() => !unconscious(selectedConversation)}>工具管理</button>
-	</div>
-});
+const mcps = $state([]);
+let registeredMcps;
 
-let mcpServers = [];
+PLACEHOLDERS["mdfmt"] = `- Use \`language:label\` in the code fence to set a display label and download filename.`;
 
-const refreshTools = $computed(() => !!selectedConversation.ready);
+const refreshTools = $computed(() => !selectedConversation.ready);
 const currentTools = $computed(() => {
 	return Object.entries(toolset).filter(([k, v]) => v.hidden !== true).map(([k, v]) => ({
 		name: k,
@@ -34,17 +31,23 @@ const currentTools = $computed(() => {
 }, [refreshTools]);
 
 onLoad(() => {
-	$watch($computed(() => config.mcps), () => {
-		const mcps = config.mcps;
-		mcpServers && mcpServers.forEach(close => close());
-		mcpServers = mcps && mcps.map(({url, name, desc, ...rest}) => addMCPServer(url, name, desc, rest));
+	getKV('mcps', mcps);
+	$watch(mcps, () => {
+		const arr = unconscious(mcps);
+		if (registeredMcps) setKV('mcps', arr.length ? arr : undefined);
+
+		registeredMcps && registeredMcps.forEach(close => close());
+		registeredMcps = arr.map(({url, name, desc, ...rest}) => addMCPServer(url, name, desc, rest));
+
 		$update(refreshTools);
-	});
+	}, false);
 
 	addEventListener("beforeunload", () => {
-		mcpServers && mcpServers.forEach(close => close());
+		registeredMcps && registeredMcps.forEach(close => close());
 	});
 });
+
+const isActivated = (conv, mod) => conv.activatedModules?.has(mod);
 
 /**
  *
@@ -56,13 +59,32 @@ function createList() {
 
 		await ensureActiveConversation();
 		const conv = unconscious(selectedConversation);
-		const Use = toolScriptRegistry['Use'];
-		if (delegateTarget.checked) {
-			Use.script({modules: [key]}, {}, conv);
-		} else {
-			if (!conv.activatedModules) Use.script({modules: []}, {}, conv);
-			Use.undo({newModules: [key]}, conv);
+		if (!conv.activatedModules) {
+			conv.allowedTools = new Set;
+			conv.activatedModules = new Set;
+			//await toolScriptRegistry['Use'].script({modules: [...defaultGroups]}, {}, conv);
+			//$update(selectedConversation);
 		}
+
+		const Use = toolScriptRegistry['Use'];
+		const state = isActivated(conv, key);
+		const modules = [key];
+
+		try {
+			if (!state) {
+				await Use.script({modules}, {}, conv);
+			} else {
+				Use.undo({modules}, conv);
+			}
+		} catch (e) {
+			showToast(prettyError(e), 'error', 0);
+		}
+
+		for (const name of modules) {
+			const el = list.querySelector("li[data-name="+JSON.stringify(name)+"]");
+			if (el) el.querySelector("input[type=checkbox]").checked = isActivated(conv, key);
+		}
+		$update(selectedConversation);
 	}} />;
 
 	const virtualList = new VirtualList({
@@ -78,16 +100,14 @@ function createList() {
 					{mod.data === "MCP" && <button
 						className="preset-panel__delete-btn"
 						onClick={() => {
-							const idx = config.mcps.findIndex(mcp => mcp.name === mod.name);
+							const idx = mcps.findIndex(mcp => mcp.name === mod.name);
 
 							SimpleModal({
 								title: "确认删除",
-								message: <div dangerouslySetInnerHTML={highlightJsonLike(config.mcps[idx])}/>,
+								message: <div dangerouslySetInnerHTML={highlightJsonLike(mcps[idx])}/>,
 								accent: 'danger',
 								onConfirm() {
-									config.mcps.splice(idx, 1);
-									$update(config);
-
+									mcps.splice(idx, 1);
 									const vlIdx = virtualList.findIndex(mod);
 									virtualList.items.splice(vlIdx, 1);
 									virtualList.setItems(virtualList.items);
@@ -101,14 +121,14 @@ function createList() {
 					<input
 						className="switch"
 						type="checkbox"
-						checked={(selectedConversation.activatedModules || defaultGroups).has(mod.name)}
+						checked={isActivated(selectedConversation, mod.name)}
 					/>
 				</div>
 				{desc && renderMarkdownToElement(<div className={"md"}/>, desc)}
 			</li>;
 		},
 		keyFunc(item) {
-			return item.name+'/'+((selectedConversation.activatedModules || defaultGroups).has(item.name)?1:0);
+			return item.name+'/'+(isActivated(selectedConversation, item.name)?1:0);
 		}
 	});
 
@@ -120,7 +140,6 @@ function openSkillManager(preset, isOpen, close) {
 	const [el, vl] = createList();
 
 	$watchWithCleanup(currentTools, () => {
-		console.log("updated");
 		vl.setItems(unconscious(currentTools));
 	});
 
@@ -139,7 +158,7 @@ function openSkillManager(preset, isOpen, close) {
 								id: "name",
 								pattern(name) {
 									if (!/^[a-zA-Z0-9_-]+$/.test(name)) return "名称只能包含大小写字母数字斜杠下划线";
-									if (config.mcps.find(mcp => mcp.name === name)) return "名称与现有MCP/工具集重复";
+									if (mcps.find(mcp => mcp.name === name)) return "名称与现有MCP/工具集重复";
 									return [name];
 								},
 								required: true
@@ -160,9 +179,10 @@ function openSkillManager(preset, isOpen, close) {
 							{
 								type: "input",
 								name: "服务器地址",
-								placeholder: "支持 SSE 和 Streamable HTTP 传输协议",
+								placeholder: "仅支持 Streamable HTTP 协议",
 								id: "url",
-								pattern: /.+/,
+								pattern: /^https?:\/\/.+/,
+								warning: "请输入正确的网址",
 								required: true
 							},
 							{
@@ -196,7 +216,7 @@ function openSkillManager(preset, isOpen, close) {
 								for (const key in obj) {
 									if (!obj[key]) delete obj[key];
 								}
-								config.mcps = [ ...(config.mcps || []), obj];
+								mcps.push(obj);
 							}
 						});
 
@@ -215,7 +235,18 @@ function openSkillManager(preset, isOpen, close) {
 }
 
 const skillManagerPanel = createPanel(openSkillManager);
-CUSTOM_CONTROLS.find(el => el.matches(".ri-robot-2-line")).addEventListener("contextmenu", (e) => {
+CUSTOM_CONTROLS.find(el => el.matches(".ri-robot-2-line")).addEventListener("click", async (e) => {
 	e.preventDefault();
+	await ensureActiveConversation();
+
+	const conv = unconscious(selectedConversation);
+
+	if (!conv.activatedModules) {
+		conv.allowedTools = new Set;
+		conv.activatedModules = new Set;
+		await toolScriptRegistry['Use'].script({modules: [...defaultGroups]}, {}, conv);
+		$update(selectedConversation);
+	}
+
 	skillManagerPanel.open();
 });

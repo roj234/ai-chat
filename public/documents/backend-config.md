@@ -1,8 +1,10 @@
 
+# 配置文件甚至可以是这样的！
 
-## 配置文件
+> 这只是我在用的代码，并且可以让 config.js 更好用，不是什么要求
 
 ### 从文件加载代理路由
+> 期望的格式类似 https://deepseek-key:sk-xxxx@api.deepseek.com/beta
 
 ```js
 
@@ -31,6 +33,7 @@ fs.readFileSync("keys.txt", "utf8").split('\n').map(item=>item.trim()).filter(it
 ```
 
 ### 基于正则表达式的内容审核
+
 ```js
 
 const regex = new RegExp(fs.readFileSync("pattern.txt", "utf8").split('\n').map(item=>item.trim()).filter(item=>item&&!item.startsWith("#")).join('|'));
@@ -59,6 +62,7 @@ export const SSE_PROXY_MODERATION = (url, apiKey, ctx) => {
 	 */
 	const moderation = (text) => {
 		if (regex.test(text)) {
+			// 如果返回 truthy 值，那么信息不会发送到推理端。
 			return {error: "消息中包含敏感个人信息(PII)，请去除后发送"};
 		}
 	}

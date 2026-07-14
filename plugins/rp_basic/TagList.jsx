@@ -13,9 +13,9 @@ export function LorebookList({items, selection}) {
 		else selection.push(id);
 	}
 
-	return <div className="tag-dropdown">
+	return <div className="dropdown">
 		<button className="btn ghost">+ 使用 {() => selection.length} 个世界书</button>
-		<div className="list" onClick.delegate{"input"}={({delegateTarget}) => {
+		<div className="list long" onClick.delegate{"input"}={({delegateTarget}) => {
 			toggleLorebook(delegateTarget.dataset.id);
 		}}>
 			<label>
@@ -49,9 +49,9 @@ export function PresetList({items, selection}) {
 		selection.value = id;
 	}
 
-	return <div className="tag-dropdown">
+	return <div className="dropdown">
 		<button className="btn ghost">{() => !selection.value ? "跟随当前预设" : "锁定 "+selection.value+" 预设"}</button>
-		<div className="list" onClick.delegate{"label"}={({delegateTarget}) => {
+		<div className="list long" onClick.delegate{"label"}={({delegateTarget}) => {
 			delegateTarget.parentElement.querySelector(".selected")?.classList.remove("selected");
 			delegateTarget.classList.add("selected");
 			toggleLorebook(delegateTarget.dataset.id);

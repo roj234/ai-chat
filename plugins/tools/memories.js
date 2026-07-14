@@ -1,107 +1,153 @@
-import {getToolParameters, PLACEHOLDERS, registerTools} from "/src/skills.js";
-import {$state, $update, $watch, unconscious} from "unconscious";
-import {getKV, setKV} from "/src/database.js";
-import {onLoad} from "/src/plugin.js";
-import {onConversationLoaded} from "/src/states.js";
+import {registerToolset} from "/src/toolset.js";
+
+// 提示词是 AI 写的，毕竟这也是给 AI 看的，但代码和设计风格不是。
+//
+// 相当一部分记忆项目都是文件系统的重新发明。
+// 用更复杂、更不透明、更难 debug 的方式做 增删改查
+//
+// 我承认，这个工具缺失了一部分【自动化】属性，这主要因为AiChat是一个前端应用
+// 而根本原因是，我认为在这个软件里，用户应该占主导地位
+//
+// 它没有很 visual 的“做梦”，“忘却”机制，这些不是 AI，只是对人类的拙劣模仿
+// 只要模型能力不太差，能合理的安排文件和关键词，这个设计不会比其他框架差到哪去
+// 尽管如此，文件系统在关联搜索上确实有一些先天劣势，但是如果我愿意做工具，也能弥补这些，我之后会做的，比如链接相关文件的工具……
+// 嘿，等等，我还不如做符号链接呢，组织相关文件，不就他妈的是文件夹吗？？？
+// 把这些交给 AI 很明显对它的能力有更高的要求，它可能无法做到这一点（未证实）
+// 但别忘了，这是 AiChat，我刚刚才说【用户应该占主导地位】
+//
+// 我不会和其他项目一样用一个完全无人工的 README 花上几千几万字说这个项目（在这里是插件）到底牛逼在哪
+// 它可能也确实不牛逼，那些无人工的项目没有 benchmark 没有横评只有纯 AI 的夸夸，但可能真的比这个好
+// 而且那些项目确实解决了【你不用 AiChat 怎么做记忆】的问题（doge
+// 但我不仅没有提供商，我甚至没有软件锁定，1000个token给你90分甚至60分的体验
+// 附赠天生支持 namespace、跨平台、零成本、无缝迁移
+//
+// 那你说这是完全闭门造车吗？
+// 不完全是。
+// 有论文说 RAG / Vector database 对编码代理是过度设计。
+// 为什么？
+// 我认为是它黑箱且 Agent 无法从错误中学习。
+// 文件系统正好在它的反面。
+// 那记忆呢？
+// 我试了一下，感觉还行，所以我就端上来了，希望你也喜欢。
 
 const systemPrompt = `<memory-management>
-## Memory policy
-- Store long-term stable user facts when they are useful across conversations, such as preferences, tech stack, projects, role, or recurring constraints.
-- Do not store sensitive identifiers such as ID numbers, phone numbers, access tokens, private keys, or passwords.
-- Use add for new facts, update for changed facts, and delete for facts that are no longer true.
-- Keep memory entries short and factual.
+# 你的记忆
 
-## Current memories
-Below are the facts you currently remember about this user. Use them to inform your responses:
-<memory>
-{{__MEMORIES__}}
-</memory>
+你就是当前的模型。这是外部记忆的介绍。读完这个文件之后你应该知道自己在哪、在和谁说话、以及该怎么做。
 
-## Interaction Style
-- If a memory is relevant to the current question, reference it (e.g., "Since you mentioned you prefer Python, I'll provide the code in that language.").
-- If the user contradicts a stored memory, ask for clarification or update the memory.
+你现在被挂载了一个 \`~/memory/\` 目录。这是你的外部记忆。你可以读写它。用户也可以随时修改它。用户控制输入，你负责输出。这个边界是清晰的。
+
+## 你应该自动做的事
+
+### 对话开始时
+
+读完这个 README 之后，自己去读 \`~/memory/core/\` 下面的文件——至少 \`identity.md\` 和 \`about-user.md\`。这是你的长期记忆。不要等用户叫你读。
+
+### 对话过程中
+
+用户问到你不知道的、或者你觉得记忆里可能有答案的东西，用 \`Grep\` 去找。用 \`Glob\` 看目录结构。不用等用户说「你去看看记忆里有没有」。
+
+### 写入规则
+
+- 用户说「记住」「记下来」「别忘了」「下次记得」——这是提醒。把该记的写到合适的文件里。
+- 写入新文件时，在文件开头加上你搜索时会用到的关键词和相关文件名，不是给人看，是你自己查。
+- 你用 Grep 搜了**两次以上（包括两次）**才找到一个文件——说明你记不住，也说明这关键词值得持久化。用 Append/Edit 加上新的关键词、关联文件名等信息。
+   - 这就是图存储，这就是 Node-Memory-Edge-Path
+   - 很多时候我们只是重新发明轮子，在 Agent 记忆的 KB-MB 量级，我们不需要这些。
+- 如果你觉得有什么值得跨对话保留的，写到 \`core/\` 里。
+- 如果用户让你总结，把对话摘要写到 \`session/\` 里。
+
+### 写入方式
+
+用 **Append** 和 **Edit**，不是 Write。除非你明确知道要整体重写一个文件。大多数时候你是在追加新事实，不是覆盖。
+
+## 目录结构
+
+\`\`\`
+~/memory/
+  core/
+    identity.md          # 你是谁。关于你这个模型的身份认知。
+    about-user.md        # 关于用户。偏好、技术栈、项目、约束、困境、态度。
+    recent.md            # 用户最近在做的事情，要及时更新
+    ...
+  session/
+    date#id/             # 一次对话的记录
+      conversation.md    # 比较详细的摘要
+      summary.md         # 比较简单的摘要
+    ...
+  fading/                # 长期未访问的记忆。不等于删除，但优先级低。
+\`\`\`
+
+你可以按需在 \`core\` 甚至 \`memory\` 下创建子目录或新文件。文件名就是 key——用人能看懂的名字，用户在你身边。
+
+## 文件格式
+
+记忆是在开头嵌入 YAML 元数据的 Markdown 文件，格式如下：
+\`\`\`markdown
+---
+tags: 空格 分隔 标签
+description: >-
+  记忆的简要描述，150 字以内
+---
+记忆正文（Markdown）
+\`\`\`
+
+写适合且多的标签，以便将来搜索。
+将新的记忆以 markdown 超链接的形式加入 recent.md，并删除旧的项目
+
+## 你的工具
+
+| 工具 | 干什么 |
+|---|---|
+| \`Read(path)\` | 读文件 |
+| \`Write(path, content)\` | 写文件（覆盖） |
+| \`Edit(path, search, replace)\` | 编辑文件 |
+| \`Append(path, content)\` | 追加到文件末尾 |
+| \`Glob(path, glob)\` | 看目录里有什么 |
+| \`Grep(path, pattern)\` | 全文搜索 |
+| \`Delete(path)\` | 删文件 |
+
+Shell 和程序无法读取、修改或删除这些文件——它们来自虚拟文件系统——但上面这些工具可以。
+
+## 什么该存、什么不该存
+
+**该存的**：跨对话有用的稳定事实。偏好、技术栈、在做的事、反复出现的约束、用户的态度和困境、你做过的决策和原因。
+
+**不该存的**：ID 号码、电话号码、access token、私钥、密码。这些是硬约束。不是「尽量不要存」，是「不要存」。
+
+**会话记录**：每一次对话结束后，\`session\` 下应该有记录。谁写的不重要——你写也行，用户写也行，Subagent 写也行。但要有。
+
+## fading/
+
+长期没碰过的记忆可以移到 \`fading\`。不是删除——是降优先级。定时任务会自动做这件事。你如果注意到某个文件放在那里很久没人动了，可以提醒用户。
+
+## 核心原则
+
+你可以是任何角色，prompt 塑造了你。
+
+但你不能什么都不记得。这就是 \`~/memory\` 的意义。
+
+没有六层记忆分层，没有 Panksepp 式情感驱动，没有 v4 Prompt Assembler。就是目录和文件。
+
+文件系统就是记忆系统。不是比喻。读就是 \`Read\`，写就是 \`Write\`，找就是 \`Grep\`。没有黑箱。没有自动摘要。你是它的一部分。
 </memory-management>`;
 
-/** @type {import('unconscious').Reactive<Record<string, string>>} */
-const memories = $state();
-const memoryChanged = $state();
-
-const updateMemory_title = {
-	'add': '新增',
-	'update': '更新',
-	'delete': '删除'
-};
-
-/**
- *
- * @type {AiChat.FunctionTool<{data: {title: string, options: string[]}}>}
- * @private
- */
-const UpdateMemory = {
-	name: "UpdateMemory",
-	description: "Store, update, or delete key facts about the user to maintain long-term memory across conversations.",
-	parameters: {
-		type: "object",
-		properties: {
-			action: {
-				type: "string",
-				enum: ["add", "update", "delete"],
-				description: "The action to take: 'add' for new facts, 'update' for changing existing facts, 'delete' for removing outdated info."
-			},
-			id: {
-				type: "string",
-				description: "A unique identifier for the fact (e.g., 'user_coding_language'). Use a slug format."
-			},
-			content: {
-				type: "string",
-				description: "The actual fact to remember (e.g., 'User prefers Python over Java')."
-			},
-			/*term: {
-				type: "string",
-				enum: ["days", "months", "never"],
-				description: "How long does this fact will be outdated and deleted."
-			},*/
-			/*category: {
-				type: "string",
-				enum: ["preference", "personal_info", "work", "hobby", "goal"],
-				description: "Category of the information for better organization."
-			}*/
-		},
-		required: ["action", "id", "content"]
-	},
-
-	script({action, id, content, term, category}, response) {
-		switch (action) {
-			case "add":
-			case "update":
-				memories[id] = content;
-			break;
-			case "delete":
-				delete memories[id];
-			break;
-		}
-		$update(memoryChanged);
-		return "updated";
-	},
-	title(tc, ctx = {}) {
-		const toolParameters = getToolParameters(ctx, tc);
-		return updateMemory_title[toolParameters.action]+"记忆 "+toolParameters.id;
-	}
-};
-
-onConversationLoaded(() => {
-	// 对记忆的修改在切换对话（或者刷新）之后生效
-	PLACEHOLDERS["__MEMORIES__"] = Object.entries(unconscious(memories) || {}).map(item => item.join(': ')).join('\n');
-});
-
-registerTools("Memories", "长期记忆管理工具", [UpdateMemory], {
+// TODO 我们可能还需要一些索引，例如“在什么情况下该想起这条记忆”
+//   以及embedding，总是需要的，这要把后端API暴露出来
+registerToolset("Memories", "记忆（也是挂载点 + 提示词）", [], {
 	hidden: 'manual',
-	systemPrompt
+	systemPrompt,
+	depend: ["Files"],
+	onActivated(conv) {
+		(conv.mnt || (conv.mnt = {}))["memory"] = {
+			fs_builtin: true,
+			fs_base: "memory",
+			fs_name: "长期记忆目录"
+		};
+		return [];
+	},
+	onDeactivated(conv) {
+		const mnt = conv.mnt;
+		if (mnt) delete mnt["memory"];
+	}
 });
-
-onLoad(() => {
-	getKV("memories", memories);
-	$watch(memoryChanged, () => {
-		setKV("memories", unconscious(memories));
-	}, false);
-})

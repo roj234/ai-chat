@@ -13,12 +13,6 @@ export function markDirty(preset) {
 	preset.time = Date.now();
 }
 
-// P = 1000 * 1000 / (2 * Math.pow(36, 8))
-// 大约1.7e-7概率在1000项世界书上发生ID重复
-export function randomId() {
-	return Math.random().toString(36).slice(2, 10);
-}
-
 function handleDelete(virtualList, item, dirtyHandle) {
 	const start = virtualList.findIndex(item);
 	if (start < 0) return;
@@ -155,35 +149,10 @@ function createLorebookList(dirtyHandle) {
 			choices: {
 				"正则": "regex",
 				"常驻": "constant",
-				"向量化(未实现)": "rag",
 			},
 			title: {
 				"正则": "开启后，触发词将作为正则表达式处理，能匹配更复杂的模式。",
 				"常驻": "不依赖触发词，对话一开始就自动加入背景，适合全局性设定（如世界观基调）。",
-				"向量化(未实现)": "基于嵌入向量和输入的余弦相似度判断"
-			}
-		},
-		{
-			id: "cossim",
-			name: "余弦相似度阈值(未实现)",
-			type: "number",
-			min: 0,
-			max: 1,
-			step: 0.01
-		},
-		{
-			id: "recursion",
-			name: "连锁(未实现)",
-			type: "radio",
-			choices: {
-				"能被连锁激活": true,
-				"只被连锁激活": "only",
-				"连锁到此为止": "stop",
-			},
-			title: {
-				"能被连锁激活": "该条目能被其它条目中的关键词激活",
-				"只被连锁激活": "该条目只能被其它条目激活",
-				"连锁到此为止": "该条目不能触发其它条目"
 			}
 		},
 		{
@@ -192,8 +161,6 @@ function createLorebookList(dirtyHandle) {
 			title: "每行一个关键词，不区分大小写，空格将会被删除\n开启「正则」后直接写正则表达式",
 			placeholder: "幻想乡\n博丽神社\n雾雨魔理沙",
 			type: "textbox"
-			// 非常建议使用工具调用方案
-			// 最简单的优点：不再有字符串匹配的语言障碍
 		},
 		{
 			id: "window",
@@ -226,18 +193,12 @@ function createLorebookList(dirtyHandle) {
 		{
 			id: "role",
 			name: "消息角色",
-			ttile: "不选为任意",
+			title: "不选为任意",
 			type: "radio",
 			choices: {
 				"助手": "assistant",
 				"用户": "user",
 			},
-		},
-		{
-			id: "id",
-			name: "工具ID",
-			title: "看不懂就别动这条\n为防止重复，我使用随机生成的ID作为工具调用中的枚举约束，如果可以，请把ID换成描述性字符串，这可以节约token并减少注意力浪费，但需要确保ID在所有激活的世界书中不重复",
-			type: "input"
 		},
 	], (k, v, obj, el) => {
 		if (k === TRIGGER) {
@@ -257,7 +218,6 @@ function createLorebookList(dirtyHandle) {
 			querySelector.previousElementSibling.style.display = v ? "none" : "";
 			querySelector.style.display = v ? "none" : "";
 			el.querySelector("[data-id=\"id\"]").style.display = v ? "none" : "";
-			el.querySelector("[data-id=\"recursion\"]").style.display = v ? "none" : "";
 			if (v) {
 				delete obj[TRIGGER];
 				delete obj.recursion;
@@ -271,9 +231,6 @@ function createLorebookList(dirtyHandle) {
 				delete obj.depth;
 				delete obj.role;
 			}
-		}
-		if (k === "rag") {
-			el.querySelector("[data-id=\"cossim\"]").style.display = !v ? "none" : "";
 		}
 	});
 }
@@ -633,8 +590,6 @@ export function _CharacterEditor(char, isOpen, close) {
 
 function lorebookTemplate() {
 	return {
-		id: randomId(),
-		rag: false,
 		position: "worldInfoAfter",
 		window: 5
 	}

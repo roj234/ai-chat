@@ -56,41 +56,20 @@ npm run preview
 
 ## 部署
 
-### 纯前端部署
-
-这是纯前端项目，将 `dist/` 目录部署到任意静态文件服务器即可：
-
-```bash
-# Nginx 示例
-cp -r dist/* /var/www/html/
-
-# llama-server 示例
-llama-server --path ./dist
-```
-
-### 使用可选后端
-
-后端提供多用户、数据同步、断线重连、文件系统访问等功能。  
-后端需要你把 dist 压缩为 zip 文件才能使用（打开压缩包，需要能见到 index.html）
-
-```bash
-# 进入后端目录安装依赖
-cd backend
-npm i
-
-# 启动后端
-node backend/server.js -p <端口> --data <数据目录> --static dist.zip
-```
+见 README。
 
 #### 命令行参数
 
-| 参数 | 说明                              |
-|------|---------------------------------|
-| `-p <port>` | 监听端口                            |
-| `--data <path>` | 数据存储目录                          |
-| `--static dist.zip` | 将前端打包在 ZIP 中，由后端统一提供服务          |
-| `--workspace <path>` | 启用独立 Agent 模式（禁用数据库服务），限制文件访问范围 |
-| `--cert <path>` | 启用 HTTPS（需提供证书路径）               |
+| 参数 | 说明                       |
+|------|--------------------------|
+| `-p <port>` | 监听端口                     |
+| `--data <path>` | 数据存储目录                   |
+| `--static dist.zip` | 加载打包在 ZIP 中的前端，并提供静态文件服务 |
+| `--workspace <path>` | 专用文件服务（禁用数据库服务）          |
+| `--cert <path>` | 启用 HTTPS（需提供证书路径）        |
+
+- 只有专用文件服务，才能执行命令。
+- 设计用途：用户在沙盒中运行专用文件服务，并暴露 HTTP 端口。
 
 ### 开发后端
 
@@ -105,18 +84,7 @@ node backend/server.js -p <端口> --data <数据目录> --static dist.zip
 |------|------|--------|
 | `DB_MODE` | 数据库模式 | `local` / `remote` / `mixed` |
 | `DB_SERVER` | 默认 API 服务器地址 | URL 字符串 |
-| `DEFAULT_LLM_ENDPOINT` | 默认 LLM 端点 | URL 字符串 |
 
-## CORS 问题
+### 安卓版本
 
-由于浏览器安全策略，直接请求 LLM API 可能遇到跨域问题。解决方案：
-
-1. **后端代理**：使用可选后端的 SSE 代理功能，自动处理 CORS
-2. **反向代理**：在 LLM 服务前部署 Nginx/Caddy 添加 CORS 头
-3. **llama-server**：自带 `--path` 参数可直接部署前端，无跨域问题
-
-## 真正的即点即用版本
-
-项目不支持 `file://` 协议（ESM 按需导入需要 HTTP）。  
-你可以使用 `vite-single-file` 插件自行构建单文件版本。  
-我不建议你这么做，言尽于此。
+我不知道怎么在本地弄，因为我的电脑都没安装 Android SDK，请看 Action

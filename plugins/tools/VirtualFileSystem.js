@@ -9,11 +9,12 @@ import {
 	setKV,
 	updateConversation
 } from "/src/database.js";
-import {config, conversations, selectedConversation, Shared} from "/src/states.js";
+import {config, conversations, selectedConversation} from "/src/states.js";
 import {createWebFileSystem, resolveDirectory} from "./WebFileSystem.js";
 import {$update, unconscious} from "unconscious";
 import {NestedMap, NODE_VALUE} from "unconscious/common/NestedMap.js";
-import {serializeJSON} from "../../src/utils/marshal.js";
+import {serializeJSON} from "/src/utils/marshal.js";
+import {DI_settings} from "/src/hooks.js";
 
 /**
  * 角色名：
@@ -323,7 +324,7 @@ registry.set([".", "config.json"], {
 		config.accessToken = accessToken;
 		config.db_server = db_server;
 		config.db_pat = db_pat;
-		Shared.SettingUI.sync();
+		DI_settings.sync();
 	},
 });
 

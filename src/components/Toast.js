@@ -1,5 +1,5 @@
 import './Toast.css';
-import {onLoad} from "../plugin.js";
+import {onLoad} from "../hooks.js";
 
 const container = <div className="toasts" />;
 
@@ -11,19 +11,19 @@ onLoad((app) => app.append(container));
  * @param [type='' | 'error' | 'ok']
  * @param {number} timeout
  */
-export const showToast = (message, type='', timeout = 3000) => {
+export const showToast = (message, type, timeout = 3000) => {
 	const closeToast = () => {
 		clearTimeout(timer);
 		elm.classList.add("closing");
 		setTimeout(() => elm.remove(), 300);
 	};
 
-	const timer = timeout && setTimeout(closeToast, timeout);
+	const timer = timeout > 0 && setTimeout(closeToast, timeout);
 
-	const elm = <div className={"toast "+type}>
+	const elm = <div className={"toast "+(type||'info')}>
 		<div className="content">
 			<span>{message}</span>
-			<button className="close" onClick={closeToast}>&times;</button>
+			{timeout >= 0 && <button className="close" onClick={closeToast}>&times;</button>}
 		</div>
 	</div>;
 	container.append(elm);

@@ -1,0 +1,21 @@
+
+.voiceInput {
+    & .viz {
+        position: relative; width: 100%; height: 60px; background: rgba(0,0,0,0.3); border-radius: 8px; margin-bottom: 18px; }
+    & .viz canvas { width: 100%; height: 100%; display: block; }
+
+    & .btns { display: flex; gap: 10px; justify-content: center; }
+    & .btn {
+        border: none; border-radius: 100%; width: 60px; height: 60px;
+        font-size: 40px; transition: all 0.2s;
+    }
+    & .btn-rec {
+        background: #fff;
+        color: var(--error);
+
+        &:hover { transform: scale(1.06); }
+    }
+
+    & .status { user-select: none; text-align: center; font-size: 0.85rem; color: var(--muted); margin-bottom: 14px; min-height: 20px; }
+    & .status.err { color: var(--error); }
+}

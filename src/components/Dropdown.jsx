@@ -2,7 +2,7 @@ import "./Dropdown.css";
 
 import {$cleanup, $foreach} from "unconscious";
 import {indexInParent} from "../utils/utils.js";
-import {onLoad} from "../plugin.js";
+import {onLoad} from "../hooks.js";
 
 let instances = new Set;
 

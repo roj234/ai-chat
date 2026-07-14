@@ -5,7 +5,6 @@ import './highlight-theme.css';
 import json from 'highlight.js/lib/languages/json';
 import {VirtualList} from "unconscious/common/VirtualList.js";
 import {$cleanup} from "unconscious";
-import {onLoad} from "../plugin.js";
 import {selectableVirtualListMixin} from "unconscious/common/selectableVirtualListMixin.js";
 import {VOID_TAGS} from "fastmd";
 
@@ -84,26 +83,16 @@ const processLines = (rawHtml, openTagsStack = []) => {
 	});
 };
 
-let heightTest;
-onLoad((app) => {
-	app.append(<pre className={"code-block"} style="position:absolute;visibility:hidden;pointer-events:none">
-		<code className="hljs">
-		<div ref={heightTest} className="line"/>
-	</code>
-	</pre>);
-});
-
 const getOrCreateVL = node => {
 	let vl = node._vl;
 	if (!vl) {
 		node._vl = vl = new VirtualList({
 			overscan: 50,
-			itemHeight: heightTest.getBoundingClientRect().height,
+			itemHeight: null,
 			data: [{text: ""}],
 			renderer: (item, index) => <div className={'line'} dangerouslySetInnerHTML={item.text ?? item}/>,
 			keyFunc: (item) => item.text ?? item
 		});
-		vl._anchor = false;
 		$cleanup(node, () => vl.destroy());
 	}
 	return vl;
@@ -146,9 +135,7 @@ export const highlight = (code, language, node, is_finished) => {
 				// noinspection JSPrimitiveTypeWrapperUsage
 				virtualList.items = processLines(value, []).map(s => new String(s));
 				virtualList.scrollToBottom();
-				virtualList.render();
-				node.style.height = '';
-				virtualList.render();
+				virtualList.scrollToBottom();
 				node._value = code;
 			}, () => !node.isConnected);
 			return;

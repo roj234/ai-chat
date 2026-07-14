@@ -28,7 +28,7 @@ export function createDragSort(container, {
 	function _removeGlobalListeners() {
 		document.removeEventListener('pointermove', _onPointerMove);
 		document.removeEventListener('pointerup', _onPointerUp);
-		document.body.style.touchAction = '';
+		//document.body.style.touchAction = '';
 	}
 
 	function _resolveItem(e) {
@@ -83,7 +83,7 @@ export function createDragSort(container, {
 
 		document.addEventListener('pointermove', _onPointerMove);
 		document.addEventListener('pointerup', _onPointerUp);
-		document.body.style.touchAction = 'none';
+		//document.body.style.touchAction = 'none';
 	}
 
 	function _onPointerMove(e) {
@@ -172,6 +172,7 @@ export function createDragSort(container, {
 	function setEnabled(enabled1) {
 		enabled = !!enabled1;
 		container[enabled?"addEventListener":"removeEventListener"]('pointerdown', _onPointerDown);
+		//container.style.touchAction = enabled ? 'none' : '';
 		if (!enabled && _dragState) _endDrag(true);
 	}
 

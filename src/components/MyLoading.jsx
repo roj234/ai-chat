@@ -1,3 +1,5 @@
+import {config} from "../states.js";
+
 class MyLoading extends HTMLElement {
 	constructor() {
 		super();
@@ -21,7 +23,7 @@ class MyLoading extends HTMLElement {
 
 	connectedCallback() {
 		this.render();
-		if (this.phrases.length > 1)
+		if (this.phrases.length > 1 && config.afkState < 2)
 			this.timer = setInterval(() => {
 				this.index = (this.index + 1) % this.phrases.length;
 				this.render();

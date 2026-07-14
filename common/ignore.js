@@ -103,7 +103,8 @@ export class IgnoreMatcher {
 	 * @returns {boolean}
 	 */
 	test(relPath, isDir) {
-		if (relPath === '.git' || relPath.startsWith('.git/')) return true;
+		//if (/\/\./.test(relPath)) return true;
+		if (/(?:^|\/)\.git\/?/.test(relPath)) return true;
 
 		const [regexp, regexpDirOnly, regexpNegative, regexpDirOnlyNegative] = this.rules;
 

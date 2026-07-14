@@ -1,14 +1,14 @@
-import {ContentPart, registerTools} from "/src/skills.js";
+import {ContentPart, registerToolset} from "/src/toolset.js";
 import complete from "/media/complete.js";
 import {SETTINGS} from "/src/settings.js";
 import {config} from "/src/states.js";
 import {AudioPlayer} from "/src/components/AudioPlayer.jsx";
-import {$computed, $watch} from "unconscious";
-import {showToast} from "/src/components/Toast.js";
-import {compressImage, jsonFetch, limitMaxSide, loadingBlock, prettyError} from "/src/utils/utils.js";
+import {isPureObject} from "unconscious";
+import {compressImage, jsonFetch, limitMaxSide, loadingBlock} from "/src/utils/utils.js";
 import "./multimedia_generation.css";
-
-import comfyui_template from './comfyui_workflow.json?raw';
+import {onLoad} from "/src/hooks.js";
+import {parseJson5} from "unconscious/common/Json.js";
+import {DI_settings} from "/src/hooks.js";
 
 /**
  * 将 ComfyUI 流程模板发送至服务器并获取生成的图像 Blob
@@ -92,7 +92,7 @@ const callSDAPI = async (endpoint, params = {}) => {
 
 const generateImage = (endpoint, params) => {
 	if (endpoint.endsWith("/prompt")) {
-		return callComfyAPI(new URL(endpoint).origin, config.mg_img_comfy_workflow || comfyui_template, params);
+		return callComfyAPI(new URL(endpoint).origin, config.mg_img_comfy_workflow, params);
 	} else {
 		return callSDAPI(endpoint, params);
 	}
@@ -105,7 +105,7 @@ const generateImage = (endpoint, params) => {
  * @returns {[number, number]} [width, height]
  */
 const calculateResolution = (ratioStr, mpKey) => {
-	const targetArea = Math.min(Math.pow(parseInt(mpKey), 2), 1328 * 1328); // 总像素目标
+	const targetArea = Math.pow(parseInt(mpKey), 2);
 
 	// 2. 解析比例
 	const [wRatio, hRatio] = ratioStr.split(':').map(Number);
@@ -125,7 +125,7 @@ const calculateResolution = (ratioStr, mpKey) => {
  */
 const Draw = {
 	name: "Draw",
-	description: "根据文字描述生成图像。",
+	description: "Generate image from text.",
 	parameters: {
 		type: "object",
 		properties: {
@@ -136,37 +136,34 @@ const Draw = {
 				description: "高度详细的自然语言提示词，包含主体、环境、构图、光影及艺术风格等。",
 				//example: "a fantasy creature girl with draconic features, standing in a mystical forest at twilight. her body is partially translucent with iridescent scales in shades of violet and gold, glowing faintly with bioluminescent patterns. long, flowing hair made of woven vines and glowing moss, eyes with vertical pupils glowing crimson. wearing a cloak woven from shadow and starlight, with a belt of enchanted gemstones. the environment features towering trees with glowing mushrooms, a moonlit sky with auroras, and a stream of liquid light. the lighting is soft and ethereal, with ambient glow from magical flora and fauna. the scene is detailed with textures of organic materials, glowing textures, and surreal elements. \"Mystic Guardian\" written in glowing runes on a floating stone tablet above her, positioned at the center of the frame, using a font with intricate, flowing characters",
 			},
-			aspect_ratio: {
+			aspectRatio: {
 				type: "string",
 				pattern: "^\\d{1,2}:\\d{1,2}$",
-				//example: ["1:2", "3:4", "16:9"],
+				example: ["1:2", "3:4", "16:9"],
 				//enum: ["1:1", "3:2", "2:3", "3:4", "4:3", "16:9", "9:16"],
 			},
-			image_size: {
-				enum: ["512", "1024", "1328", "2048"],
-			},
-			return_result: {
-				type: "boolean",
-				description: "将生成结果给你查看"
+			longEdge: {
+				type: "integer",
+				minimum: 512,
+				maximum: 2048,
 			}
 		},
-		required: ["prompt", "aspect_ratio", "image_size"]
+		required: ["prompt", "aspectRatio", "longEdge"]
 	},
 
-	script: ({ prompt, negative_prompt, aspect_ratio, image_size, return_result }, context) => {
-		const [width, height] = calculateResolution(aspect_ratio, image_size);
+	script: ({ prompt, negativePrompt, aspectRatio, longEdge }, context) => {
+		const [width, height] = calculateResolution(aspectRatio, longEdge);
 
 		context.prompt = prompt;
 
 		const seed = parseInt(Math.random().toString(36).slice(2), 36);
 		return generateImage(config.mg_img_api, {
-			batch_size: 1,
 			sampler_name: "Euler",
-			cfg_scale: negative_prompt ? 4 : 1,
-			steps: 8, // Z-Image-Turbo SDA
+			cfg_scale: negativePrompt ? 4 : 1,
+			steps: 8,
 			seed,
 			prompt,
-			negative_prompt,
+			negativePrompt,
 			width,
 			height,
 		}).then(async images => {
@@ -174,7 +171,7 @@ const Draw = {
 			context.images = images;
 
 			const result = new ContentPart().text("Image generated");
-			if (return_result) result.image(await compressImage(images[0], {maxSide: 1024}));
+			if (config.modalities.includes("image")) result.image(await compressImage(images[0], {maxSide: 1024}));
 			return result;
 		});
 	},
@@ -196,53 +193,35 @@ const Draw = {
 	}
 };
 
-const available_voices = {};
-
-const syncVoices = async () => {
-	try {
+/**
+ * @type {AiChat.FunctionTool}
+ */
+const ListVoices = {
+	name: "ListVoices",
+	description: "List available voices",
+	script: async () => {
 		const voices = await jsonFetch(config.mg_tts_api+'/voices');
-		if (voices.length) {
-			available_voices.enum = voices.map(n => n.name);
-			available_voices.description = "当前存在的音色: \n\n"+voices.map(n => n.name+": "+n.description).join("\n\n");
-		} else {
-			available_voices.enum = ["无"];
-			available_voices.description = "当前没有音色, 请设计";
-		}
-	} catch (e) {
-		showToast("TTS服务连接失败\n"+prettyError(e), "error");
-		throw e;
-	}
-};
-
-let on_tts_change;
-const initTTS = () => {
-	if (on_tts_change) return Promise.resolve();
-	on_tts_change = $computed(() => config.mg_tts_api);
-
-	return new Promise((resolve, reject) => {
-		$watch(on_tts_change, () => {
-			if (on_tts_change.value) resolve(syncVoices());
-		});
-	})
+		return "当前存在的音色: \n\n"+voices.map(n => n.name+": "+n.description).join("\n\n");
+	},
 };
 
 /**
  * @type {AiChat.FunctionTool}
  */
-const TextToSpeech = {
-	name: "TextToSpeech",
-	description: "将文本转换为语音",
+const Say = {
+	name: "Say",
+	description: "Generate speech from text",
 	parameters: {
 		type: "object",
 		properties: {
+			voice: { type: "string", },
 			text: { type: "string", },
 			language: {
 				enum: ["Chinese", "English", "Japanese"],
 				default: "Chinese"
 			},
-			voice: available_voices
 		},
-		required: ["text", "language", "voice"]
+		required: ["voice", "text"]
 	},
 
 	// 这个工具需要显式的用户交互
@@ -272,7 +251,7 @@ const TextToSpeech = {
 		context.audios = [blob];
 
 		complete();
-		return '音频已生成';
+		return 'Speech generated';
 	},
 
 	renderer(context, is_frozen) {
@@ -286,14 +265,11 @@ const TextToSpeech = {
  */
 const DesignVoice = {
 	name: "DesignVoice",
-	description: "基于文字描述设计新的音色",
+	description: "Create new voice from text and instruction",
 	parameters: {
 		type: "object",
 		properties: {
-			name: {
-				type: "string",
-				description: "音色名称"
-			},
+			name: { type: "string" },
 			language: {
 				enum: ["Chinese", "English", "Japanese"],
 				description: "该音色主要使用的语言",
@@ -324,28 +300,104 @@ const DesignVoice = {
 		const result = await jsonFetch(config.mg_tts_api+'/voices/create', {
 			body: JSON.stringify({ name, language, ref_text: referenceText, instruct })
 		});
-
-		const name1 = result.name;
-		available_voices.enum.push(name1);
-		available_voices.description += `\n\n${name1}: Designed: `+instruct
-		return '音色 '+name1+' 创建成功！';
+		return 'Voice '+result.name+' created.';
 	}
 }
 
+/**
+ * @type {AiChat.FunctionTool}
+ */
+const Sing = {
+	name: "Sing",
+	description: "Create song from lyric and tags",
+	parameters: {
+		type: "object",
+		properties: {
+			duration: {
+				type: "integer",
+				description: "duration in seconds",
+				minimum: 15,
+				maximum: 300
+			},
+			bpm: {
+				type: "integer",
+			},
+			tags: {
+				type: "string",
+				example: "Cyberpunk, Synthwave, Dark Ambient, Futuristic, Cinematic Electronics, Wide Soundstage, Echo, Reverb, Industrial, Sci-fi ending"
+			},
+			keyScale: {
+				type: "string",
+				example: [
+					"C major",
+					"Gb major",
+					"F# minor"
+				]
+			},
+			lyric: {
+				type: "object",
+				description: "Omit for instrumental",
+				properties: {
+					language: {
+						enum: ["en", "ja", "zh"],
+					},
+					text: {
+						type: "string",
+					}
+				},
+				required: true
+			}
+		},
+		required: ["duration", "bpm", "tags", "keyScale"]
+	},
+
+	script: ({ duration, bpm, tags, keyScale, lyric }, context) => {
+		const seed = parseInt(Math.random().toString(36).slice(2), 36);
+		return generateImage(config.mg_img_api, {
+			duration,
+			bpm,
+			tags,
+			keyScale,
+			lyrics: lyric?.text || "",
+			language: lyric?.language || "en",
+			sampler_name: "Euler",
+			cfg_scale: 4,
+			seed,
+		}).then(images => {
+			complete();
+			context.images = images;
+			return "Song generated";
+		});
+	},
+}
+
 export const registerMultimediaGeneration = () => {
+	const DATALIST_ID = "DL-imageApiProvider";
 	SETTINGS.push({
 		id: "mg_img_api",
 		_tab: "tools",
-		name: "[MultimediaGeneration] v1.1\n\n图像生成API (SD/Comfy)",
+		name: "[MultimediaGeneration] v2.0\n\n图像生成API",
 		type: "input",
 		pattern: /^https?:\/\/.+(?:\/sdapi\/v1|\/prompt)$/,
-		placeholder: "http://localhost:1/sdapi/v1"
+		placeholder: "SD 兼容或 ComfyUI prompt API"
 	},{
 		id: "mg_img_comfy_workflow",
 		_tab: "tools",
 		name: "ComfyUI工作流模板",
 		type: "textbox",
-		placeholder: comfyui_template
+		placeholder: `使用 Export (API) 从 ComfyUI 导出的工作流 JSON 文本
+必须将输出连接到 Save to WebSocket 节点
+需要将宽高种子等替换为 {{width}} 占位符，列表如下:
+width height
+prompt negative_prompt seed
+sampler_name cfg_scale steps
+`,
+		pattern(value) {
+			if (!value.includes("SaveImageWebsocket")) return "不支持的工作流";
+			let data = parseJson5(value.replaceAll(/{{[a-z_]+}}/g, "0"));
+			if (!isPureObject(data)) return "必须是JSON对象";
+			return [value];
+		}
 	},{
 		id: "mg_tts_api",
 		_tab: "tools",
@@ -355,27 +407,34 @@ export const registerMultimediaGeneration = () => {
 		placeholder: "http://localhost:1/v1"
 	});
 
-	registerTools(
+	registerToolset(
 		"MultimediaGeneration",
-		"Generate images, audio, or video from text instructions.",
-		[Draw, TextToSpeech, DesignVoice],
+		"Generate image, audio and speech from text instructions.",
+		[Draw, ListVoices, DesignVoice, Say],
 		{
-			async onActivated() {
+			onActivated() {
 				const tools = [];
 
-				if (config.mg_tts_api) {
-					try {
-						await initTTS();
-					} catch {}
-					if (available_voices.enum) {
-						tools.push(TextToSpeech, DesignVoice);
-					}
+				if (config.mg_img_api) {
+					tools.push(Draw);
+					/*if (config.mg_img_api.endsWith("/prompt")) {
+						tools.push(Sing);
+					}*/
 				}
 
-				if (config.mg_img_api)
-					tools.push(Draw);
+				if (config.mg_tts_api)
+					tools.push(ListVoices, DesignVoice, Say);
 
 				return tools;
 			}
 		});
+
+	onLoad(() => {
+		const owner = DI_settings.byId('mg_img_api');
+		owner.append(<datalist id={DATALIST_ID}>
+			<option value={"http://127.0.0.1:8188/prompt"} label={"ComfyUI 默认"}/>
+			<option value={"http://127.0.0.1:1234/sdapi/v1"} label={"Stable-diffusion.cpp 默认"}/>
+		</datalist>);
+		owner.children[0].setAttribute("list", DATALIST_ID);
+	});
 };

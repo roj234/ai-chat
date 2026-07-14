@@ -27,8 +27,9 @@ ComfyUI 工作流需要你自己做，请参考我的示例
 ### 准备服务
 
 [首先下载服务端](https://github.com/roj234/qwen3-audio.cpp)  
-算了以后再说，小白你搞不定的  
-首先你要下载 llvm-mingw 和 llama.cpp 然后编译一下
+算了以后再说，好麻烦我不想写  
+首先你要下载 llvm-mingw 和 llama.cpp 然后编译一下  
+然后你可能要用我的 aimake 项目编译 llama.cpp
 
 ### 准备模型
 

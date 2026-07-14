@@ -1,11 +1,10 @@
 import './ToolCallCard.css';
 import {$state, $update, $watch, appendChildren, isPureObject, unconscious} from "unconscious";
 import {JsonEditor} from "./JsonEditor.jsx";
-import {runTools, TOOL_NAME, toolScriptRegistry} from "../skills.js";
-import {updateMessageUI} from "./MessageList.jsx";
+import {runTools, TOOL_NAME, toolScriptRegistry} from "../toolset.js";
 import {validateAndShowError} from "unconscious/common/json-schema-utils.js";
-import {onLoad} from "../plugin.js";
-import {selectedConversation} from "../states.js";
+import {onLoad} from "../hooks.js";
+import {selectedConversation, updateMessageUI} from "../states.js";
 
 /**
  *
@@ -145,7 +144,7 @@ export function ToolCallEditor(props) {
         <summary className="tool-header" title={"编辑工具"}>
             <div className="args-title">工具名称</div>
             <div className={"input-warp"}>
-                <input className={"text-input"} class:invalid={nameError} value={toolName} list={"tce-tool-names"}
+                <input className={"text-input"} class:invalid={nameError} value={toolName} list={"DL-tools"}
                        onInput={({target}) => toolName.value = target.value}/>
                 {() => unconscious(nameError) ? <div className={"input-warning"}>工具名称无效</div> : null}
             </div>
@@ -156,7 +155,7 @@ export function ToolCallEditor(props) {
 }
 
 onLoad((app) => {
-    app.append(<datalist id="tce-tool-names">{Object.keys(toolScriptRegistry).map(item =>
+    app.append(<datalist id="DL-tools">{Object.keys(toolScriptRegistry).map(item =>
         <option value={item} />)
     }</datalist>);
 })

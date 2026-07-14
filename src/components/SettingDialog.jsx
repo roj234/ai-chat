@@ -4,7 +4,6 @@ import {SETTINGS} from "../settings.js";
 
 import "./SettingDialog.css";
 import {PresetDropdown} from "./PresetDropdown.jsx";
-import {isMobile} from "../states.js";
 import {ITEM_KEY} from "unconscious/common/VirtualList.js";
 
 let currentTab = $state("general");
@@ -45,12 +44,15 @@ createTab("tools", "工具", "ri-wrench-line");
 const setTransparent = f => document.body?.classList.toggle("tr", f);
 
 export function SettingDialog(oldUI) {
-	const elements = Array.from(oldUI.children);
+	const byId = new Map;
+	const elements = [...oldUI.children];
 	for (let i = 0; i < SETTINGS.length; i++) {
 		const item = SETTINGS[i];
 		const element = elements[i];
 		let tabNames = item._tab || "general";
 		if (!Array.isArray(tabNames)) tabNames = [tabNames];
+		const id = item.id || item._id;
+		if (id) byId.set(id, element.lastElementChild);
 
 		for (const tabName of tabNames) {
 			element[ITEM_KEY] = item;
@@ -62,6 +64,7 @@ export function SettingDialog(oldUI) {
 			};
 		}
 	}
+	oldUI.byId = id => byId.get(id);
 
 	Object.entries(tabs).forEach(([key, {elements}]) => {
 		if (!elements.length) delete tabs[key];
@@ -70,7 +73,7 @@ export function SettingDialog(oldUI) {
 
 	let header;
 	let body;
-	let dialog = <div className="modal-overlay hide" id={"settingDialog"} style={"display:none;z-index:"+(isMobile?3:2)}>
+	let dialog = <div className="modal-overlay hide" id={"settingDialog"} style={"display:none;z-index:3"}>
 		<div ref={header} className="modal ntp">
 			<div className="sidebar-list scroll">
 				<div className={"_vl"} onClick.delegate{".chat-item"}={({delegateTarget}) => {
@@ -96,7 +99,6 @@ export function SettingDialog(oldUI) {
 							}}></button>
 				</div>
 				<div ref={body} className="filter" style={"flex:1;" +
-					"border:none;" +
 					"overflow:auto;" +
 					"scrollbar-gutter:stable;" +
 					"padding-right:6px;"}></div>

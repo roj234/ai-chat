@@ -8,6 +8,18 @@ const networkErrorHandler = err => {
 	throw err;
 };
 
+async function responseErrorHandler(res) {
+	const func = res.headers.get('content-type') === 'application/json' ? 'json' : 'text';
+	let obj = await res[func]();
+	if (obj && typeof obj === 'object') {
+		if (obj.error && Object.keys(obj).length === 1) {
+			obj = obj.error;
+		}
+	}
+	if (typeof obj !== 'string') obj = JSON.stringify(obj);
+	throw {status: res.status, message: obj};
+}
+
 /**
  * 发起JSON请求
  * @param {string} url
@@ -28,8 +40,8 @@ export const jsonFetch = (url, {key = "", ...data} = {}) => fetch(url, {
 .catch(networkErrorHandler)
 .then(res => {
 	if (!res.ok) {
-		return res.text().then(err => {
-			throw (`API错误 ${res.status}\n${err}`);
+		return responseErrorHandler(res).catch(err => {
+			throw (`API错误 (${err.status})\n${err.message}`);
 		});
 	}
 
@@ -47,11 +59,12 @@ const makeHeaders = (data, key) => {
  * 发起流式请求
  * @param {string} url
  * @param {string=} key
+ * @param {boolean=true} json
  * @param {RequestInit} data
  * @param {function(OpenAI.Response, string): void} onChunk
  * @return {Promise<Response>}
  */
-export const sseFetch = (url, {key = "", ...data} = {}, onChunk) => fetch(url, {
+export const sseFetch = (url, {key = "", json = true, ...data} = {}, onChunk) => fetch(url, {
 	method: "POST",
 	referrerPolicy: 'no-referrer',
 	...data,
@@ -63,14 +76,13 @@ export const sseFetch = (url, {key = "", ...data} = {}, onChunk) => fetch(url, {
 })
 .catch(networkErrorHandler)
 .then(async res => {
-	if (!res.ok) {
-		throw {
-			status: res.status,
-			message: await res.text()
-		};
-	}
+	if (!res.ok) return responseErrorHandler(res);
+
 	const contentType = res.headers.get('content-type');
-	if (contentType === 'application/json') return onChunk(await res.json(), '\0');
+	if (contentType === 'application/json') {
+		onChunk(await res.json(), '\0');
+		return res;
+	}
 
 	const reader = res.body.getReader();
 
@@ -95,16 +107,16 @@ export const sseFetch = (url, {key = "", ...data} = {}, onChunk) => fetch(url, {
 					const data = line.slice(6);
 					if (data === '[DONE]') return;
 
-					const json = JSON.parse(data);
-					let error = json.error;
+					const obj = json ? JSON.parse(data) : data;
+					let error = obj.error;
 					try {
-						onChunk(json, event);
+						onChunk(obj, event);
 					} catch (e) {
 						if (!error)
 							error = e;
 					}
 
-					if (error) throw error;
+					if (error) throw { status: 'SSE Chunk', message: error };
 					event = undefined;
 				}/* else {
 					if (line && !'event: '.startsWith(line) && !'data: '.startsWith(line)) {
@@ -121,36 +133,36 @@ export const sseFetch = (url, {key = "", ...data} = {}, onChunk) => fetch(url, {
 });
 
 
-const deltaBlacklist = new Set(["role", "model", "type"]);
+const neverAccumulate = new Set(["role", "model", "type", "format"]);
 /**
  *
  * @param {Object} chunk
  * @param {Object} delta
  */
 export const applyDelta = (chunk, delta) => {
-	for (const key in delta) {
-		const deltaVal = delta[key];
-		if (deltaVal == null) continue;
+	if (Array.isArray(delta)) {
+		if (!chunk) chunk = [];
 
-		let currVal = chunk[key];
-		if (Array.isArray(deltaVal)) {
-			if (!currVal) currVal = chunk[key] = [];
-
-			for (const {index, ...item} of deltaVal) {
-				if (index === undefined) { currVal.push(item); continue; }
-
-				// tool_calls
-				if (!currVal[index]) currVal[index] = {};
-				applyDelta(currVal[index], item);
-			}
-		} else if (typeof deltaVal === "object") {
-			if (!currVal) currVal = chunk[key] = {};
-			applyDelta(currVal, deltaVal);
-		} else if (typeof currVal === "string" && !deltaBlacklist.has(key)) {
-			chunk[key] += deltaVal;
-		} else {
-			chunk[key] = deltaVal;
+		for (const {index, ...item} of delta) {
+			if (index == null) { chunk.push(item); continue; }
+			chunk[index] = applyDelta(chunk[index], item);
 		}
+	} else if (typeof delta === "object") {
+		if (!chunk) chunk = {};
+
+		for (const key in delta) {
+			const deltaVal = delta[key];
+			if (deltaVal == null) continue;
+
+			if (neverAccumulate.has(key)) chunk[key] = deltaVal;
+			else chunk[key] = applyDelta(chunk[key], deltaVal);
+		}
+	} else if (typeof chunk === "string") {
+		chunk += delta;
+	} else {
+		chunk = delta;
 	}
+
+	return chunk;
 };
 

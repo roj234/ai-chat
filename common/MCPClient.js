@@ -106,7 +106,7 @@ export class MCPClient {
 				this.disconnect(e);
 			}
 		}).catch(err => {
-			if (err.status === 405 && !this.#messageUrl) {
+			if (err.status >= 400 && !this.#messageUrl) {
 				clearTimeout(timeout);
 
 				// try streamable HTTP

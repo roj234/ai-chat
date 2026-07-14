@@ -1,20 +1,22 @@
-import {$computed, $unwatch, $update, $watch, appendChild, appendChildren, unconscious} from 'unconscious';
+import {$computed, $update, $watch, appendChild, appendChildren, AS_IS, unconscious} from 'unconscious';
 import Filter from 'unconscious/common/components/Filter.jsx';
 import {jsHide, prettyError} from "./utils/utils.js";
-import {ConversationList, LOCKED, updateConversationListUI} from "./components/ConversationList.jsx";
+import {ConversationList} from "./components/ConversationList.jsx";
 import {SETTINGS} from "./settings.js";
-import {databaseError, getMessages, isIDB, listConversations, updateConversation} from "./database.js";
+import {databaseError, getMessages, initialize, isIDB, listConversations, updateConversation} from "./database.js";
 import {
 	abortCompletion,
 	config,
 	conversations,
 	isMobile,
 	lastScrollDirection,
+	LOCKED,
 	messages,
 	resetConversation,
+	runningConversations,
 	selectedConversation,
-	Shared,
-	state
+	state,
+	updateConversationListUI
 } from "./states.js";
 import {submitUserChatMessage} from "./api-request.js";
 import {MessageList} from "./components/MessageList.jsx";
@@ -24,7 +26,7 @@ import {SettingDialog} from "./components/SettingDialog.jsx";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {createUserInputComposer} from "./components/UserInputComposer.jsx";
 import {onPluginLoaded} from "/plugins/PluginRegistry.js";
-import {callOnLoadHandler} from "./plugin.js";
+import {callOnLoadHandler, DI} from "./hooks.js";
 import {enableBranches} from "./utils/BranchManager.js";
 import {checkUpdate} from "../common/updater.js";
 import {setAllowHTMLTags} from "./markdown/markdown.js";
@@ -41,8 +43,9 @@ const createApp = () => {
 		scroller,
 		updateLink;
 
-	const SettingUI = <Filter config={SETTINGS} choices={config} onChange={onSettingChanged} showTitle={isMobile} />;
-	const newSettingUI = SettingDialog(SettingUI);
+	/** @type {import("unconscious/common/components/Filter").FilterInstance} */
+	const settings = <Filter config={SETTINGS} choices={config} onChange={onSettingChanged} />;
+	const newSettingUI = SettingDialog(settings);
 
 	/**
 	 * @type CSSStyleDeclaration
@@ -125,10 +128,6 @@ const createApp = () => {
 	const [userInputComposer, backToBottomBtnShowHide] = createUserInputComposer(scroller);
 	appendChild(messagesPanel, userInputComposer);
 
-	Shared.scroller = scroller;
-	Shared.SettingUI = SettingUI;
-	Shared.toggleSidebar = toggleSidebar;
-
 	const toggleSettingUI = (id, display) => newSettingUI.showHide(id, display);
 
 	toggleSettingUI('prefillPath', false);
@@ -157,11 +156,17 @@ const createApp = () => {
 			$("app").classList.toggle('tc', isTextCompletion);
 			toggleSettingUI('template', isTextCompletion);
 			toggleSettingUI('reasoning', !isTextCompletion);
+			toggleSettingUI('canPrefill', !isTextCompletion);
+			toggleSettingUI('prefillPath', !isTextCompletion && config.canPrefill);
 			toggleSettingUI('CoTPrompt', !isTextCompletion && config.reasoning === false);
 		}
 		if (id === 'reasoning') toggleSettingUI('CoTPrompt', newValue === false);
 		if (id === 'generateTitle') toggleSettingUI('title', newValue === true);
 		if (id === 'canPrefill') toggleSettingUI('prefillPath', newValue === true);
+		if (id === 'messageTheme') {
+			const el = messagesPanel.querySelector('._vl');
+			el.className = '_vl msg-vl '+newValue;
+		}
 	}
 
 	$watch(messages, () => {
@@ -170,12 +175,14 @@ const createApp = () => {
 
 	return [
 		App,
+		settings,
+		scroller,
 		(app) => {
 			// 配置自动同步
 			addEventListener("storage", (e) => {
-				if (e.key === `${UC_PERSIST_STORE}:config`) queueMicrotask(() => SettingUI.sync(false, true));
+				if (e.key === `${UC_PERSIST_STORE}:config`) queueMicrotask(() => settings.sync(false, true));
 			});
-			SettingUI.sync(true);
+			settings.sync(true);
 
 			if (config.checkUpdate) {
 				checkUpdate().then((info) => {
@@ -195,7 +202,7 @@ const createApp = () => {
 				if (isFinite(id1) && id1 >= 0) id = id1;
 			}
 
-			listConversations().catch(err => {
+			listConversations(null).catch(err => {
 				if (err.error === "no such user") {
 					connectDatabase();
 				} else if (err.status === 401) {
@@ -205,8 +212,8 @@ const createApp = () => {
 				}
 			}).then(arr => {
 				const loading = $("loading");
-				loading.style.opacity = 0;
-				setTimeout(() => loading.remove(), 500);
+				loading.classList.add("exiting");
+				loading.addEventListener("animationend", () => loading.remove());
 
 				if (!arr) return;
 
@@ -218,22 +225,30 @@ const createApp = () => {
 				}
 			});
 
-			if (!isIDB && id != null) {
-				let lazyReplace;
-				selectedConversation.value = lazyReplace = { id, ready: false };
+			let hookGetMessages = AS_IS;
 
-				const updateAfterGotten = () => {
-					const conversation = unconscious(selectedConversation);
-					if (conversation === lazyReplace && !lazyReplace.ready) return;
-					if (!conversations.length) return;
+			if (!isIDB) {
+				// 只有远程数据库存在这个函数
+				const wsConnected = initialize(DI.RMI);
 
-					$unwatch(selectedConversation, updateAfterGotten);
-					$unwatch(conversations, updateAfterGotten);
+				// batch 优化 对话和消息放在同一个响应里
+				if (id != null) {
+					const stub = { id, ready: false };
+					selectedConversation.value = stub;
 
-					const index = conversations.findIndex(t => t.id === id);
-					if (index >= 0) conversations[index] = lazyReplace;
-				};
-				$watch([selectedConversation, conversations], updateAfterGotten, false);
+					hookGetMessages = async (promise) => {
+						hookGetMessages = AS_IS;
+
+						const messages = await promise;
+
+						const index = conversations.findIndex(t => t.id === id);
+						if (index >= 0) conversations[index] = stub;
+
+						// 等待同步服务下发 LOCKED 对象
+						await wsConnected;
+						return messages;
+					};
+				}
 			}
 
 			let prevId;
@@ -242,13 +257,14 @@ const createApp = () => {
 				app.classList.toggle("_human", !!conv?.noAI);
 				if (conv && !conv.ready) {
 					messages.value = [];
-					getMessages(conv).then(data => {
+					hookGetMessages(getMessages(conv)).then(data => {
 						conv.ready = true;
 
 						if (unconscious(selectedConversation) === conv) {
 							dontUpdateNextTime = conv;
 							$update(selectedConversation);
 							messages.value = conv.bm_leaf ? enableBranches(conv, data) : data;
+							scroller.scrollToBottom();
 						}
 					}).catch(err => {
 						showToast("消息读取失败\n"+prettyError(err), "error", 0);
@@ -261,16 +277,15 @@ const createApp = () => {
 				history.replaceState(null, "", id != null ? "#!chat/"+id : "#");
 
 				if (conv?.ready) {
-					if (prevId !== id)
-						scroller.scrollToBottom();
-
-					if (conv.resumeId && !conv[LOCKED]) {
-						if (Date.now() - conv.time < RESUME_TIMEOUT) {
-							submitUserChatMessage();
-							showToast("尝试继续意外中断的请求", 'ok');
-						} else {
-							delete conv.resumeId;
-							updateConversation(conv);
+					if (!runningConversations.has(conv.id)) {
+						if (conv.resumeId && !conv[LOCKED]) {
+							if (Date.now() - conv.time < RESUME_TIMEOUT) {
+								submitUserChatMessage();
+								showToast("尝试继续意外中断的请求", 'ok');
+							} else {
+								delete conv.resumeId;
+								updateConversation(conv);
+							}
 						}
 					}
 
@@ -279,7 +294,7 @@ const createApp = () => {
 					prevId = null;
 				}
 
-				if (isMobile && !sidebar.style.display) Shared.toggleSidebar();
+				if (isMobile && !sidebar.style.display) toggleSidebar();
 			});
 
 			// autosave
@@ -314,7 +329,7 @@ const createApp = () => {
 	];
 };
 
-export const executeLogin = () => new Promise((resolve, reject) => {
+const executeLogin = () => new Promise((resolve, reject) => {
 	const abort = new AbortController;
 	let modal;
 	sseFetch(config.db_server+"login", { signal: abort.signal }, ({code, token}) => {
@@ -340,18 +355,18 @@ export const executeLogin = () => new Promise((resolve, reject) => {
 	});
 });
 
-const connectDatabase = () => {
+const connectDatabase = async () => {
+	let apiEndpoint;
+	try {
+		const resp = await fetch(location.href, { method: "HEAD" });
+		apiEndpoint = resp.headers.get('X-AiChat-API')
+	} catch {}
+
 	SimpleModal({
 		type: "input",
 		title: "连接数据库",
-		message: [
-			"请输入" + (DB_SERVER ? "用户名或" : "") + "数据库服务地址。",
-			"之后也可以在设置页面修改。",
-			DB_MODE === "mixed" && "你也可以点击取消，使用本地数据库。"
-		].filter(Boolean).join("\n"),
-		placeholder:
-			(DB_SERVER ? "输入用户名（新用户将自动注册）" : "") +
-			(import.meta.env.DEV ? (DB_SERVER ? "\n" : "") + "留空使用开发调试账户" : ""),
+		message: `请输入${apiEndpoint ? "用户名" : "数据库服务地址"}。` + (DB_MODE === "mixed" && "\n点击取消使用本地数据库。"),
+		placeholder: (apiEndpoint ? "输入用户名（新用户将自动注册）" : "") + (import.meta.env.DEV ? "留空使用开发调试账户" : ""),
 		confirmMessage: "连接",
 		onConfirm(value) {
 			if (!value) {
@@ -367,8 +382,8 @@ const connectDatabase = () => {
 			[value, pat] = value.trim().split("@");
 
 			if (!value.toLowerCase().startsWith("http") && !value.startsWith('/')) {
-				if (!DB_SERVER) return false;
-				value = DB_SERVER + "v2/"+encodeURIComponent(value);
+				if (!apiEndpoint) return false;
+				value = apiEndpoint + "v2/"+encodeURIComponent(value);
 			}
 			if (!value.endsWith('/')) value += '/';
 			config.db_server = value;
@@ -388,21 +403,17 @@ const connectDatabase = () => {
 // Mount
 addEventListener("load", () => {
 	onPluginLoaded.then(() => {
-		const [app_, onLoad_] = createApp();
+		const [app, settings, messageContainer, onLoad_] = createApp();
 
-		const APP = $("app");
-		appendChildren(APP, app_);
-
-		if (IS_ANDROID_BUILD) {
-			$("versionCheck").remove();
-		}
+		const wrapper = $("app");
+		appendChildren(wrapper, app);
 
 		if (!isIDB && !config.db_server) {
 			connectDatabase();
 			return;
 		}
 
-		callOnLoadHandler(APP);
-		onLoad_(APP);
+		callOnLoadHandler(wrapper, settings, messageContainer);
+		onLoad_(wrapper);
 	});
 })

@@ -1,7 +1,8 @@
 import {readAsString} from "/common/chardet.js";
 import {createHashLine} from "/common/fs-common.js";
 import {IgnoreMatcher} from "/common/ignore.js";
-import {config} from "../../src/states.js";
+import {normalizePath} from "unconscious/common/path-utils.js";
+import {formatSize} from "unconscious/common/Utils.js";
 
 // ────────────────────────────────── Glob‑to‑Regex (ported from Globs.java) ──────────────────────────
 
@@ -127,35 +128,9 @@ function globToRegexPattern(globPattern) {
 	return regex.join('');
 }
 
-/**
- * Create a RegExp that matches a single file / directory name segment.
- * Throws if the segment contains '/'.
- */
-function segmentToRegex(segment) {
-	if (segment.includes('/')) throw new Error(`Segment must not contain '/': "${segment}"`);
-	if (segment === '**') return segment;
-	return new RegExp(globToRegexPattern(segment));
-}
-
 // ────────────────────────────────── FileSystem Helpers ──────────────────────────────────
 
 const CREATE = { create: true };
-
-/**
- * @param {string} path
- * @return {string[]}
- */
-export const normalizePath = path => {
-	const arr = path.split('/').filter(s => s && s !== '.');
-	for (let i = 0; i < arr.length;) {
-		if (arr[i] === '..') {
-			arr.splice(--i, 2);
-		} else {
-			i++;
-		}
-	}
-	return arr;
-}
 
 /**
  * Resolve parent directory handle and entry name from a full path (relative to root).
@@ -187,7 +162,7 @@ export const resolveDirectory = async (rootHandle, dirPath, options) => {
  * @param {FileSystemDirectoryHandle} rootHandle
  * @returns {{
  * 		readImage({path: string}): Promise<Blob>,
- * 		mkdirs({path: string}): Promise<string>,
+ * 		mkdir({path: string}): Promise<string>,
  * 		copy({src: string, dest: string, move?: boolean}): Promise<string>,
  * 		stat({path: string}): Promise<string>,
  * 		delete({path: string}): Promise<string>,
@@ -219,10 +194,10 @@ export const createWebFileSystem = rootHandle => {
 	};
 
 	const api = {
-		async mkdirs({path}) {
+		async mkdir({path}) {
 			await checkPath(path, true);
 			await resolveDirectory(rootHandle, path, CREATE);
-			return 'success';
+			return 'Success';
 		},
 
 		async copy({ src, dest, move }) {
@@ -265,7 +240,7 @@ export const createWebFileSystem = rootHandle => {
 				await copyEntry(srcHandle, destParent, destName);
 			}
 
-			return 'success';
+			return 'Success';
 		},
 
 		async stat({path}) {
@@ -297,7 +272,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			await checkPath(path, true);
 			const [ parent, name ] = await resolveParent(rootHandle, path);
 			await parent.removeEntry(name, { recursive: true });
-			return 'success';
+			return 'Success';
 		},
 
 		/**
@@ -306,7 +281,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 		 *
 		 * @param {FileSystemDirectoryHandle} rootHandle
 		 * @param {string} path
-		 * @param {string} content
+		 * @param {string|Uint8Array} content
 		 */
 		async append({path, content, newline = true}) {
 			await checkPath(path);
@@ -332,21 +307,31 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			await writable.close();
 
 			if (/\.(gitignore|ignore)$/.test(path)) await loadIgnore();
-			return "success";
+			hashLine.del(path);          // invalidate text line cache
+			return 'Success';
 		},
 
 		/** List directory, optionally with a glob filter */
-		async list({path, glob: globStr = '*', json = false}) {
+		async list({
+			path = '.',
+			pattern = '*',
+			json = false,
+			limit = 500,
+			modifiedSince = 0,
+			showDir = null,
+			showModified = false
+		}) {
 			if (!ignored) await loadIgnore();
 
-			const entries = globStr !== '*'
-				? await glob(globStr, path)
+			const entries = pattern !== '*'
+				? await glob(pattern, path)
 				: (await resolveDirectory(rootHandle, path)).entries();
 
 			let prefix = '';
 			let items = 0;
+			let modSince = modifiedSince ? +new Date(modifiedSince) : 0;
+			if (!isFinite(modSince)) throw 'Invalid date';
 
-			const MAX_COUNT = 500;
 			const result = [];
 
 			for await (const [name, handle, relDir] of entries) {
@@ -355,20 +340,25 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 
 				if (ignored.test(displayPath, isDir)) continue;
 
-				if (items >= MAX_COUNT) {
-					prefix = `[TRUNCATED: Only first ${MAX_COUNT} files shown, use a more specific glob or path]\n`;
+				if (items >= limit) {
+					prefix = `[TRUNCATED to ${limit} entries, use a more specific path or pattern]\n`;
 					break;
 				}
+				if (!json) items++;
 
 				if (handle.kind === 'file') {
 					const file = await handle.getFile();
-					result.push([displayPath, "file", file.size]);
-				} else {
+					if (file.lastModified > modSince) {
+						const item = [displayPath, "file", formatSize(file.size)];
+						if (showModified || modSince) item.push(new Date(file.lastModified).toISOString().slice(0, -5)+'Z');
+						result.push(item);
+					}
+				} else if ((showDir != null ? showDir : !modSince)) {
 					result.push([displayPath, "dir"]);
 				}
-
-				items++;
 			}
+
+			if (modSince) result.sort((a, b) => b[3].localeCompare(a[3]));
 
 			if (json) return result;
 			return result.length ? prefix+result.map(item => item.join("\t")).join("\n") : "[No result]";
@@ -380,7 +370,19 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 	 * Yields { name, relDir, handle } where handle is the FileSystemHandle.
 	 */
 	const glob = async (pattern, searchRoot) => {
-		const segments = normalizePath(pattern).map(segmentToRegex);
+		let relDir = '';
+
+		const prefix = pattern.match(/^(?:\.\/)?([^.^$+{[\]|()*?\/]+\/)+/);
+		if (prefix) {
+			relDir = prefix[0].slice(0, -1);
+			searchRoot += '/' + relDir;
+			pattern = pattern.slice(prefix[0].length);
+		}
+
+		const segments = normalizePath(pattern).map((segment) => {
+			if (segment === '**') return segment;
+			return new RegExp(globToRegexPattern(segment), 'iu');
+		});
 		// 处理空pattern
 		if (!segments.length) return;
 
@@ -438,7 +440,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			}
 		}
 
-		return walk(handle, '', 0);
+		return walk(handle, relDir, 0);
 	};
 
 	/** Resolve a File from a path relative to root handle */
@@ -449,7 +451,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 		return await fileHandle.getFile();
 	};
 
-	const hashLine = createHashLine({
+	const fsCommonApi = {
 		/**
 		 * @param {string} path
 		 * @returns {Promise<string>}
@@ -460,7 +462,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 		},
 		/**
 		 * @param {string} path
-		 * @param {string} data
+		 * @param {string|Uint8Array} data
 		 * @returns {Promise<void>}
 		 */
 		async write(path, data) {
@@ -481,20 +483,20 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			const file = await resolveFile(path);
 			return file.lastModified;
 		}
-	});
+	};
+	const hashLine = createHashLine(fsCommonApi);
+
+	// ── Binary I/O (bypass line cache) ──
+
 	return {
 		...api,
 		...hashLine,
-		async read(args) {
-			const path = args.path;
-			const isImage = path.match(/\.(png|jpg|jpeg|bmp|webp)$/i);
-			if (isImage && config.modalities.includes("image")) {
-				const file = await resolveFile(path);
-				if (file.size > 10485760) throw new Error(`File too large (${file.size} bytes)`);
-				return file;
-			}
 
-			return hashLine.read(args);
-		}
+		readRaw: ({path}) => resolveFile(path),
+		writeRaw: async ({path, content}) => {
+			await fsCommonApi.write(path, content);
+			hashLine.del(path);
+		},
+		appendRaw: api.append
 	};
 };

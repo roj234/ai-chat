@@ -1,4 +1,4 @@
-import {config, MessageRoles, onConversationLoaded} from "/src/states.js";
+import {config, MessageRoles, onConversationLoaded, updateMessageUI} from "/src/states.js";
 import {importConversationData, registerDataImportHandler} from "/src/data-exchange.js";
 import {
 	$computed,
@@ -13,12 +13,11 @@ import {
 	unconscious
 } from "unconscious";
 import {SETTINGS} from "/src/settings.js";
-import {updateMessageUI} from "/src/components/MessageList.jsx";
 
 import {cloneNamed, downloadFile, getTextContent} from "/src/utils/utils.js";
 import {readJPEG, readPNG} from "/common/upng.js";
 import {isIDB, kvListDel, kvListGet, kvListGetKeys, kvListSet} from "/src/database.js";
-import {registerTools} from "/src/skills.js";
+import {registerToolset} from "/src/toolset.js";
 import {showToast} from "/src/components/Toast.js";
 import {Dropdown} from "/src/components/Dropdown.jsx";
 import {createTab} from "/src/components/SettingDialog.jsx";
@@ -30,7 +29,7 @@ import {applyMacro, applyPreset, applyRenderReplace, createDefaultCtx, DEFAULT_U
 import {LorebookList, PresetList} from "./TagList.jsx";
 import schema from "./schema.json";
 import {compileSchema, validateAndShowError} from "unconscious/common/json-schema-utils.js";
-import {onLoad} from "/src/plugin.js";
+import {onLoad} from "/src/hooks.js";
 import {openJsonEditor} from "/src/json_editor/jsonEditorProxy.js";
 import {base64DecodeToString} from "unconscious/common/Base64.js";
 
@@ -219,7 +218,7 @@ SETTINGS.push(
 	{
 		id: "nickname",
 		name: "你的名字",
-		title: "可在角色设定中单独设置",
+		title: "可在角色卡中覆盖",
 		type: "input",
 		placeholder: DEFAULT_USER_NAME,
 		_tab: "character"
@@ -240,7 +239,6 @@ SETTINGS.push(
 		choices: {
 			"正则": false,
 			"工具": true,
-			"工具+示例": "1-shot"
 		}
 	},
 	{
@@ -267,7 +265,6 @@ SETTINGS.push(
 		type: "radio",
 		_tab: "character",
 		choices: {
-			"单系统消息": 1,
 			"交替对话": 2
 		}
 	},
@@ -282,44 +279,13 @@ onLoad(() => {
 //region 工具调用世界书 实验性
 const lorebookToolKey = [];
 let lorebookToolContent = {};
-const lorebookToolExample = [
-	{
-		"role": "user",
-		"content": "Tool Call Example:\n你觉得现在的\"格利泽581-d型共振\"对我的精神状态有影响吗？",
-	},
-	{
-		"role": "assistant",
-		"content": "",
-		"think": {
-			"content": "用户问了一个关于\"格利泽581-d型共振\"的问题。\n\n我应当优先检索世界书（Lorebook）中相关的内容。\n\n让我查看一下相关的世界书ID：\n- LORE_3054: 格利泽,共振\n\n这个ID包含了关于格利泽581-d型共振的内容。\n\n我需要调用fetch_lorebook工具来获取更详细的世界书信息，以便更准确地回答这个问题。",
-			"format": "rc"
-		},
-		"tool_calls": [
-			{
-				"id": "tool_call_1",
-				"type": "function",
-				"function": {
-					"name": "fetch_lorebook",
-					"arguments": "{\"id\":\"LORE_3054\"}"
-				}
-			}
-		],
-		"tool_responses": [
-			{
-				"success": true,
-				"content": "一种高频亚空间波动。长期接触会导致个体产生‘逻辑坍塌’，但可被‘MXHX稳定器’抵消。"
-			}
-		]
-	},
-	{
-		"role": "assistant",
-		"content": "Tool Call Example:\n关于这种共振……你不必太担心。虽然这种频率会导致通常意义上的‘逻辑坍塌’，但你身上佩戴的MXHX稳定器足以过滤掉那些干扰信号。只要你不试图去‘听’那种深蓝色的噪音，你的精神状态会非常安全。",
-		"think": {
-			"content": "好的，我获取到了\"格利泽581-d型共振\"的详细信息。现在可以结合这些信息来回答{{char}}对这个问题可能的回应。\n\n根据信息和上下文：\n1. 该共振会导致\"逻辑坍塌\"，但对有稳定器的人无害。\n2. {{user}}佩戴有稳定器\n\n现在可以结合这些信息来回答。",
-			"format": "rc"
-		}
-	}
-];
+
+// 基于Files和挂载点 TODO ~/lorebook/name/some.md
+// 伪造一个 Glob 调用？没必要，系统提示就行
+// ~/lorebook/name:
+// 幻想乡.md: asdadasda
+// 问问 AI怎么设计好 每个条目挂载 虚拟文件系统
+let promptTemplate = '';
 
 /** @type {AiChat.FunctionTool} */
 const lorebookTool = {
@@ -349,7 +315,7 @@ const lorebookTool = {
 	}
 };
 
-registerTools("st", "", [lorebookTool], {hidden: true});
+registerToolset("st", "", [lorebookTool], {hidden: true});
 //endregion
 
 // 对话从数据库加载完成回调
@@ -465,7 +431,7 @@ registerDataImportHandler("image/png", async (file, batch) => {
 	const {chara} = readPNG(imageData);
 	if (!chara) return;
 
-	const data = JSON.parse(base64DecodeToString(chara));
+	const data = JSON.parse(chara[0] === '{' ? chara : base64DecodeToString(chara));
 	const result = checkJSON(data, batch, file.name, file);
 	if (result) return await result;
 });
@@ -641,9 +607,6 @@ MessageRoles["st|char"] = {
 					})
 				}
 			}
-
-			if (config.st_useTools === "1-shot")
-				output.splice(1, 0, ...lorebookToolExample);
 		});
 	},
 	/**
@@ -916,7 +879,7 @@ const StoryConfigPanel = self => {
 		Promise.all(promises).then(update);
 	}, false);
 
-	return <div style={"display:flex;justify-content:space-around"}>
+	return <div className={"rp_tags"}>
 		<LorebookList items={lorebookList} selection={selectedLorebooks} />
 		<PresetList items={presetList} selection={selectedPreset} />
 	</div>;

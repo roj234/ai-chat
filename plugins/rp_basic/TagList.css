@@ -1,34 +1,47 @@
 
-/* 添加按钮与下拉 */
-.tag-dropdown {
-    position: relative;
-    display: inline-block;
-    width: 250px;
+.rp_tags {
+    display : flex;
+    justify-content: space-around;
 
-    & > .btn {
-        display: block;
-        border-radius: 0;
-        width: 100%;
-        border: 1px dashed var(--border) !important;
-        cursor: unset;
+    & > .dropdown {
+        width: 250px;
+
+        & > .btn {
+            border-radius: 0;
+            width: 100%;
+            border: 1px dashed var(--border) !important;
+            cursor: unset;
+        }
+
+        & > .list {
+            width: 100%;
+        }
     }
+}
 
-    & > .list {
+.dropdown {
+    position: relative;
+
+    &:not(:hover) > .list {
         display: none;
+    }
+    & > .list {
+        &.up { bottom: 100%; }
+        &.mid {
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        &.long {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
         position: absolute;
-        top: 100%;
-        left: 0;
-        width: 100%;
+        width: max-content;
         background: var(--card);
         border: 1px solid var(--border);
         box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         z-index: 1;
-        max-height: 200px;
-        overflow-y: auto;
-
-        .tag-dropdown:hover & {
-            display: block;
-        }
 
         & > label {
             display: flex;

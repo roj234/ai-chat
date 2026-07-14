@@ -2,7 +2,7 @@ import {getKV, setKV} from "/src/database.js";
 import {SETTINGS} from "/src/settings.js";
 import {$computed, $state, $watch, unconscious} from "unconscious";
 import {config, isMobile} from "/src/states.js";
-import {onLoad} from "/src/plugin.js";
+import {onLoad} from "/src/hooks.js";
 
 /** @type {import('unconscious').Reactive<Blob>} */
 const BG_BLOB = $state(), FONT_BLOB = $state();

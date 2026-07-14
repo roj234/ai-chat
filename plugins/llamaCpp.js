@@ -7,7 +7,7 @@ import {SETTINGS} from "/src/settings.js";
 import {showToast} from "/src/components/Toast.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
 import {updateStatusText} from "/src/api-request.js";
-import {onLoad} from "/src/plugin.js";
+import {onLoad} from "/src/hooks.js";
 
 const _endpoint = $state({});
 const _stateChanging = $state("");
@@ -80,18 +80,6 @@ $watch(config, () => {
 	if (isLLaMACppRouter.error) $update(_endpoint);
 });
 
-let closeToast;
-$watch(isLLaMACppRouter, () => {
-	if (isLLaMACppRouter.error.startsWith?.("网络连接失败")) {
-		closeToast = showToast(<>本地网络后端连接失败<br/>请确认后端已经启动<br/><button className={"btn primary"} onClick={({target}) => {
-			$update(_endpoint);
-		}}>重试</button></>, "error", 0);
-	} else {
-		closeToast?.();
-		closeToast = null;
-	}
-})
-
 const updateModelInfo = new IntersectionObserver((entries) => {
 	if (isLlamaCppBackend && entries.at(-1).isIntersecting) updateModels(true);
 });
@@ -104,46 +92,48 @@ const BUTTON_STYLES = {
 SETTINGS.push({
 	type: "element",
 	_tab: "model",
-	element: $computed(() => {
-		if (!isLLaMACppRouter.loading && isLLaMACppRouter.value && !isLLaMACppRouter.error) {
-			const div = <div className="filter-row">
-				<div className="filter-label">[llama] 模型路由管理</div>
-				<div className={"llama"}>
-					{$foreach(models, model => {
-						const status = model.status?.value;
-						if (!status) return;
-						return <div className="model">
-							<div>
-								<span>{model.id}</span>
-								<small>{status}</small>
+		element: $computed(() => {
+			if (!isLLaMACppRouter.loading && isLLaMACppRouter.value && !isLLaMACppRouter.error) {
+				const div = <div className="filter-row">
+					<div className="filter-label">[llama] 模型路由管理</div>
+					<div className={"llama"}>
+						{$foreach(models, model => {
+							const status = model.status?.value;
+							if (!status) return;
+							return <div className="model">
+								<div>
+									<span>{model.id}</span>
+									<small>{status}</small>
+								</div>
+								<button className={"btn "+(BUTTON_STYLES[status]??"ghost")}
+										disabled={() => _stateChanging.value || status === "loading"}
+										onClick={() => {
+											llamaModelManage(model);
+										}}
+								>{status === 'unloaded' ? '加载' : '卸载'}
+								</button>
 							</div>
-							<button className={"btn "+(BUTTON_STYLES[status]??"ghost")}
-									disabled={() => _stateChanging.value || status === "loading"}
-									onClick={() => {
-										llamaModelManage(model);
-									}}
-							>{status === 'unloaded' ? '加载' : '卸载'}
-							</button>
-						</div>
-					})}
-				</div>
-			</div>;
+						})}
+					</div>
+				</div>;
 
-			updateModelInfo.observe(div);
-			$cleanup(div, () => {updateModelInfo.unobserve(div);});
-			return div;
-		} else {
-			return null;
-		}
-	})
-},
-{
-	id: "countTokens",
-	_tab: "customize",
-	name: "统计输入框的 Token 数量",
-	title: "仅支持 llama.cpp 后端，路由模式下可能意外加载模型。",
-	type: "radio",
-	choices: {
+				updateModelInfo.observe(div);
+				$cleanup(div, () => {updateModelInfo.unobserve(div);});
+				return div;
+			} else if (isLLaMACppRouter.error.startsWith?.("网络")) {
+				return <div>[llama]: 与 llama-server 检测接口 /props 的连接异常<br/>
+					<button className={"btn primary"} onClick={() => $update(_endpoint)}>重试</button>
+				</div>
+			}
+		})
+	},
+	{
+		id: "countTokens",
+		_tab: "customize",
+		name: "统计输入框的 Token 数量",
+		title: "仅支持 llama.cpp 后端，路由模式下可能意外加载模型。",
+		type: "radio",
+		choices: {
 		"启用": true,
 	}
 });

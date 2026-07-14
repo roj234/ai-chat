@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "web-tree-sitter": "^0.26"
+  }
+}

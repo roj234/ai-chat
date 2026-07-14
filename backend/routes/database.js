@@ -17,23 +17,22 @@ import path from "node:path";
  */
 export function registerDatabaseRoutes(router, rootPath) {
 	router.delete('/database', async (ctx) => {
-		const logs = ctx.db.prepare(`SELECT id, data FROM "logs"`).all();
-		const updateLog = ctx.db.prepare(`UPDATE "logs" SET data = ? WHERE id = ?`);
+		const logs = ctx.db.prepare(`SELECT ROWID, data FROM "logs"`).all();
+		const updateLog = ctx.db.prepare(`UPDATE "logs" SET data = ? WHERE ROWID = ?`);
 		for (const row of logs) {
 			const data = decompressLog(row.data);
 			const result = await LOG_HOOK(data);
 			if (result === 'SKIP') {
-				ctx.db.prepare(`DELETE FROM "logs" WHERE id = ?`).run(row.id);
+				ctx.db.prepare(`DELETE FROM "logs" WHERE ROWID = ?`).run(row.rowid);
 				continue;
 			}
-			updateLog.run(await compressLog(data), row.id);
+			updateLog.run(await compressLog(data), row.rowid);
 		}
 
 		const conversations = ctx.db.prepare(`SELECT id, data FROM "conversations"`).all();
 		const updateConversation = ctx.db.prepare(`UPDATE "conversations" SET data = ? WHERE id = ?`);
 		for (const row of conversations) {
 			const data = decompressConversation(row.data);
-			["id", "title", "time"].forEach(key => delete data[key]);
 			updateConversation.run(await compressConversation(data), row.id);
 		}
 
@@ -41,7 +40,6 @@ export function registerDatabaseRoutes(router, rootPath) {
 		const updateMessage = ctx.db.prepare(`UPDATE "messages" SET data = ? WHERE id = ?`);
 		for (const row of messages) {
 			const data = decompressMessage(row.data);
-			["id", "owner", "time"].forEach(key => delete data[key]);
 			updateMessage.run(await compressMessage(data), row.id);
 		}
 
@@ -58,15 +56,18 @@ export function registerDatabaseRoutes(router, rootPath) {
 	});
 
 	router.post('/database/fetch', async (ctx) => {
-		const rows = ctx.db.prepare(`SELECT * FROM "logs"`).all();
-		const updateData = ctx.db.prepare(`UPDATE "logs" SET data = ? WHERE id = ?`);
-		const zenmuxToken = await fs.readFile(path.join(rootPath, "zenmux-token.txt"));
+		const rows = ctx.db.prepare(`SELECT ROWID, data FROM "logs" WHERE time >= ? ORDER BY ROWID DESC LIMIT 1000`).all(Date.now() - 86400000);
+		const updateData = ctx.db.prepare(`UPDATE "logs" SET data = ? WHERE ROWID = ?`);
+		let zenmuxToken;
 
 		let sync = 0;
 		for (const row of rows) {
-			const {id, time, ...logItem} = deserializeRow(row, decompressLog);
+			const {rowid, ...logItem} = deserializeRow(row, decompressLog);
 
 			if (logItem.provider === "ZenMux" && null == logItem.cost) {
+				if (null == zenmuxToken) zenmuxToken = await fs.readFile(path.join(rootPath, "zenmux-token.txt"));
+				if (!zenmuxToken) break;
+
 				const json = (await fetch("https://zenmux.ai/api/v1/management/generation?id="+logItem.request_id, {
 					headers: {
 						authorization: "Bearer "+zenmuxToken
@@ -92,7 +93,7 @@ export function registerDatabaseRoutes(router, rootPath) {
 				logItem.currency = "USD";
 				logItem.cost = json.ratingResponses.billAmount;
 
-				updateData.run(await compressLog(logItem), row.id);
+				updateData.run(await compressLog(logItem), rowid);
 				sync++;
 			}
 		}

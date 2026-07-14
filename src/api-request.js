@@ -1,10 +1,12 @@
 // API request
 import {createMarkdownStream} from "./markdown/markdown.js";
 import {cloneNamed, getTextContent, jsonFetch, prettyError} from "./utils/utils.js";
+import {setWakeLock} from "./utils/wakeLock.js";
 import {
 	abortCompletion,
 	config,
 	getCurrentTheme,
+	inputText,
 	isLlamaCppBackend,
 	lastScrollDirection,
 	MessageRoles,
@@ -12,35 +14,26 @@ import {
 	PROGRESS,
 	runningConversations,
 	selectedConversation,
-	Shared,
-	state
+	state,
+	updateConversationListUI,
+	updateMessageUI
 } from "./states.js";
-import {
-	getAvailableTools,
-	jsonEval,
-	parseSkillMetadata,
-	PLACEHOLDERS,
-	runTools,
-	SetTitle,
-	TOOL_NAME,
-	toolScriptRegistry
-} from "./skills.js";
+import {getAvailableTools, parseFrontmatter, PLACEHOLDERS, runTools, TOOL_NAME, toolScriptRegistry} from "./toolset.js";
 import {$stampLock, $state, $update, $watch, isReactive, unconscious} from "unconscious";
 import {showToast} from "./components/Toast.js";
-import {mergeReasoningDetails} from "./components/ThinkBlock.jsx";
 import failure from "../media/failure.js";
 import complete from "../media/complete.js";
 import {appendBillingLog, isIDB, kvListGet, updateConversation} from "./database.js";
-import {updateMessageUI} from "./components/MessageList.jsx";
 import {BODY_PARAMETERS, defaultCoTPrompt, defaultSystemPrompt, defaultTitlePrompt} from "./settings.js";
 import {createJsonStream} from "/common/StreamJsonSerializer.js";
 import {createAntiSlopSampler} from "./anti-slop-sampler.js";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {highlightJsonLike} from "./markdown/highlight.js";
-import {setConversationTitle, updateConversationListUI} from "./components/ConversationList.jsx";
-import {deepEntries} from "unconscious/common/json-schema-utils.js";
+import {setConversationTitle} from "./components/ConversationList.jsx";
+import {deepEntries, jsonEval} from "unconscious/common/json-schema-utils.js";
 import {applyDelta, sseFetch} from "/common/openai-api-utils.js";
 import {base64DecodeToUint8Array} from "unconscious/common/Base64.js";
+import {DI_messageContainer} from "./hooks.js";
 
 export const statusBadge = <span />;
 export const updateStatusText = (text, tone = '') => {
@@ -51,7 +44,7 @@ export const updateStatusText = (text, tone = '') => {
 /**
  * @return {Promise<string>}
  */
-export const submitUserChatMessage = () => agentLoop(unconscious(selectedConversation), messages, config);
+export const submitUserChatMessage = () => agentLoop(unconscious(selectedConversation), $stampLock(messages), config);
 
 /**
  *
@@ -62,13 +55,12 @@ export const submitUserChatMessage = () => agentLoop(unconscious(selectedConvers
  * @returns {Promise<false|string>}
  */
 export async function agentLoop(conversation, messages, config, backgroundTask) {
-	if (runningConversations.has(conversation.id)) return "error";
+	if (runningConversations.has(conversation.id)) throw new Error("Loop already running");
 
 	const overrides = conversation.overrides;
 	if (overrides) config = { ...config, ...overrides };
 
-	let markdownRenderer = createMarkdownStream();
-	const {scroller} = Shared;
+	let markdownRenderer = config.afkState === 2 ? (content, container) => container && (container.textContent = content) : createMarkdownStream();
 	let updateCount = 0;
 	let content_;
 	let waitingForContent;
@@ -105,11 +97,11 @@ export async function agentLoop(conversation, messages, config, backgroundTask) 
 			updateCount++;
 		}
 
-		const atBottom = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
+		const atBottom = DI_messageContainer.scrollHeight - DI_messageContainer.clientHeight - DI_messageContainer.scrollTop;
 
 		markdownRenderer(currentIsThink ? content.think.content : content.content, container);
 
-		if (atBottom < 100 && !lastScrollDirection.value) scroller.vl.scrollTo(scroller.scrollHeight);
+		if (atBottom < 100 && !lastScrollDirection.value) DI_messageContainer.vl.scrollTo(DI_messageContainer.scrollHeight);
 	}
 	function callback(type, content) {
 		if (selectedConversation.id !== conversation.id) return;
@@ -132,7 +124,6 @@ export async function agentLoop(conversation, messages, config, backgroundTask) 
 		$update(updateMessageUI);
 	}
 
-	const messages_ = $stampLock(messages);
 	const abort_ = $state(new AbortController());
 	/** @type {AiChat.LLMRequestContext} */
 	const context = {};
@@ -149,23 +140,23 @@ export async function agentLoop(conversation, messages, config, backgroundTask) 
 
 	runningConversations.set(conversation.id, {
 		abort: abort_,
-		messages: messages_
+		messages
 	});
-	$update(updateConversationListUI);
 
+	if (config.wakelock) setWakeLock(true);
+	$update(updateConversationListUI);
 	try {
 		const result = await executeCompletionRequest(
-			conversation, messages_,
-			config.tools, config.additionalBody,
+			conversation, messages,
+			true,
 			abort_, callback,
 			context, config
 		);
-
 		if (!result) return result; // false
 
 		let finishReason = result.finish_reason;
 
-		const assistantMessage = messages_.at(-1);
+		const assistantMessage = messages.at(-1);
 
 		const tone = FINISH_REASON_TONE[finishReason];
 		const is_ok = tone != null;
@@ -174,31 +165,31 @@ export async function agentLoop(conversation, messages, config, backgroundTask) 
 		const commitMessage = async () => {
 			if (promises.length) return Promise.all(promises);
 
+			let needUpdate;
 			const resumeId = conversation.resumeId;
 			if (finishReason !== 'error' || assistantMessage.error?.trim() !== "network error"/* fetch */) {
 				if (resumeId) {
-					try {
-						promises.push(jsonFetch(config.endpoint+"/abort/"+resumeId, {
-							key: config.accessToken,
-							method: 'POST'
-						}));
-					} catch (e) {
+					promises.push(jsonFetch(config.endpoint+"/abort/"+resumeId, {
+						key: config.accessToken,
+						method: 'POST'
+					}).catch(e => {
 						showToast("Abort接口调用失败\n"+e, 'error');
-					}
+					}));
 					delete conversation.resumeId;
-					// 如果这里删除了，之后可能会更新时间, 但是确实要删除这个并且调试一下重连失败的行为
+					needUpdate = true;
 				}
 			} else {
 				if (resumeId) {
-					showToast("连接意外中止\n在"+(RESUME_TIMEOUT/60000)+"分钟内点击重试按钮可以无缝继续对话", 'error');
+					assistantMessage.error = '连接意外中止\n服务器支持断线重连\n请点击输入框的【继续】按钮';
+					$update(updateMessageUI);
 				}
 			}
 
-			const has_resp = result.request_id && (finishReason !== 'error' || result.input_tokens);
-			if (has_resp || messageHasContent(assistantMessage)) {
-				promises.push(updateConversation(conversation, unconscious(messages_)));
+			const hasLog = result.request_id && (finishReason !== 'error' || result.input_tokens);
+			if (needUpdate || hasLog || hasContent(assistantMessage)) {
+				promises.push(updateConversation(conversation, unconscious(messages)));
 
-				if (has_resp) {
+				if (hasLog) {
 					isIDB && await promises.at(-1);
 					if (assistantMessage.id >= 0) result.id = assistantMessage.id;
 					promises.push(appendBillingLog(result));
@@ -218,9 +209,13 @@ export async function agentLoop(conversation, messages, config, backgroundTask) 
 				return promise;
 			};
 
-			const skipToolCalls = config.maxToolTurns && !(countAgenticTurns(messages_) % config.maxToolTurns);
+			const skipToolCalls = config.maxToolTurns && !(countAgenticTurns(messages) % config.maxToolTurns);
 			if (skipToolCalls || !await runToolsGuard()) {
 				if (skipToolCalls) assistantMessage.tool_responses = assistantMessage.tool_calls.map(tc => ({[TOOL_NAME]: tc.function.name}));
+
+				if (config.sound === "always" || !document.hasFocus())
+					skipToolCalls ? complete() : failure();
+
 				// 如果存在可能需要批准的工具调用
 				finishReason = 'interrupt';
 			}
@@ -232,10 +227,10 @@ export async function agentLoop(conversation, messages, config, backgroundTask) 
 
 		await commitMessage();
 
-		if ('interrupt' !== finishReason && 'loop' !== finishReason) {
+		if ('interrupt' !== finishReason) {
 			if ('error' !== finishReason) {
-				if (!conversation.title) {
-					generateChatTitle(conversation, messages_, config);
+				if (!conversation.title && assistantMessage.content) {
+					generateChatTitle(conversation, messages, config);
 				}
 			}
 
@@ -245,14 +240,20 @@ export async function agentLoop(conversation, messages, config, backgroundTask) 
 			}
 		}
 
-		if (selectedConversation.id !== conversation.id && !backgroundTask) {
-			finishReason = 'interrupt'; // 如果不在前台就不自动执行
-			showToast("对话 "+conversation.title+"(#"+conversation.id+") 已结束", tone ?? "error");
+		if (selectedConversation.id !== conversation.id) {
+			if (!backgroundTask && config.afkState < 2) {
+				finishReason = 'interrupt'; // 如果不在前台就不自动执行
+				showToast("对话 "+conversation.title+"(#"+conversation.id+") 已结束", tone ?? "error");
+			}
+		} else {
+			// 如果正在渲染，而且输入框有内容就中断Loop
+			if (inputText.trim()) finishReason = 'interrupt';
 		}
 
 		return finishReason;
 	} finally {
 		runningConversations.delete(conversation.id);
+		if (!runningConversations.size) setWakeLock(false);
 		$update(updateConversationListUI);
 		abort_.value = null;
 	}
@@ -284,7 +285,7 @@ const countAgenticTurns = messages => {
  * @param {AiChat.Message[]} messages
  * @param {Partial<AiChat.TitleModelConfig & AiChat.ModelConfig>} config
  */
-const generateChatTitle = (conversation, messages, config) => {
+const generateChatTitle = async (conversation, messages, config) => {
 	let s1 = getTextContent(messages[0]).slice(0, 512);
 
 	const i = s1.indexOf("\n");
@@ -293,12 +294,21 @@ const generateChatTitle = (conversation, messages, config) => {
 	let m = messages.find((item, i) => i&&item.content);
 	let s2 = m&&getTextContent(m).slice(0, 512);
 	if (config.generateTitle !== true) {
-		setConversationTitle(conversation, conversation.title, true);
+		setConversationTitle(conversation, conversation.title);
 		return;
 	}
 
+	let titleModel = config.titleModel;
+	if (titleModel?.[0] === ":") {
+		config = {
+			...config,
+			...await kvListGet('preset', titleModel.slice(1))
+		};
+		titleModel = config.titleModel;
+	}
+
 	const body = {
-		model: config.titleModel || config.model,
+		model: titleModel || config.model,
 		messages: [{
 			role: "system",
 			content: (config.titlePrompt || defaultTitlePrompt) + `
@@ -309,7 +319,7 @@ Directly output title in JSON \` { "title": <conversation title> } \`, no explai
 			role: "user",
 			content: "<turn>user\n"+s1+"</turn><turn>assistant\n"+s2+"</turn>"
 		}],
-		max_tokens: 30,
+		max_completion_tokens: 30,
 		temperature: 0.7,
 		response_format: { type: "json_object" }
 	};
@@ -320,40 +330,40 @@ Directly output title in JSON \` { "title": <conversation title> } \`, no explai
 	updateStatusText('生成标题');
 
 	const start = Date.now();
-	jsonFetch(config.endpoint+'/chat/completions', {
-		key: config.accessToken,
-		body: JSON.stringify(body)
-	}).then(json => {
+	try {
+		const json = await jsonFetch(config.endpoint+'/chat/completions', {
+			key: config.accessToken,
+			body: JSON.stringify(body)
+		});
+
 		const now = Date.now();
 		const log = {
 			usage: "tl:"+conversation.id,
-			provider: (config.provider || config.name || config.endpoint),
+			provider: (config.provider || new URL(config.endpoint).host),
 			request_id: json.id,
 			model: json.model,
 			latency: now - start,
 			finish_reason: json.choices?.[0].finish_reason || 'error'
 		};
 		extractUsageMetrics(json, log);
-		appendBillingLog(log);
+		await appendBillingLog(log);
 
 		let content = json.choices?.[0].message?.content;
 		if (!content) throw json;
 		setConversationTitle(conversation, JSON.parse(content).title);
-	}).catch(err => {
+	} catch(err) {
 		console.error(err);
 		showToast("标题生成失败\n"+prettyError(err), 'error');
-	}).finally(() => {
+	} finally {
 		updateStatusText("");
-	});
+	}
 };
 
 
 export const MARKDOWN_APPEND = 2, MARKDOWN_END = 3;
 
 export const findStreamingContainer = think => {
-	const scroller = Shared.scroller;
-
-	const bodyNode = scroller.children[0].children[0].lastElementChild?.querySelector(".body");
+	const bodyNode = DI_messageContainer.children[0].children[0].lastElementChild?.querySelector(".body");
 	if (bodyNode) {
 		const children = bodyNode.children;
 		const element = children[children.length - 1];
@@ -371,8 +381,7 @@ export const findStreamingContainer = think => {
  *
  * @param {AiChat.Conversation} conversation
  * @param {AiChat.Message[] | import("unconscious").Reactive<AiChat.Message[]>} messages
- * @param {boolean=} allowTool
- * @param {Record<string, any>} additionalBody
+ * @param {boolean=} toolChoice
  * @param {import("unconscious").Reactive<AbortController>} abortCompletion
  * @param {function(type?: number, content?: any): void} onProgress - null: refresh, T=Think, C=Content, E=End
  * @param {AiChat.LLMRequestContext} context
@@ -381,7 +390,7 @@ export const findStreamingContainer = think => {
  */
 function executeCompletionRequest(
 	conversation, messages,
-	allowTool, additionalBody,
+	toolChoice,
 	abortCompletion, onProgress,
 	context, config
 ) {
@@ -400,8 +409,7 @@ function executeCompletionRequest(
 			lastRequest = sendCompletionRequest(
 				conversation,
 				messages,
-				allowTool,
-				additionalBody,
+				toolChoice,
 				unconscious(abortCompletion),
 				onProgress,
 				context,
@@ -421,16 +429,13 @@ function executeCompletionRequest(
 	});
 }
 
-function messageHasContent(assistantMessage) {
-	return assistantMessage.think?.content || assistantMessage.content || assistantMessage.tool_calls?.length;
-}
+const hasContent = assistantMessage => assistantMessage.think?.content || assistantMessage.content || assistantMessage.tool_calls?.length;
 
 /**
  *
  * @param {AiChat.Conversation} conversation
  * @param {AiChat.Message[] | import("unconscious").Reactive<AiChat.Message[]>} messages
- * @param {boolean=} allowTool
- * @param {Record<string, any>} additionalBody
+ * @param {boolean=} toolChoice
  * @param {AbortController} abortCompletion
  * @param {function(type?: number, content?: any): void} onProgress - null: refresh, T=Think, C=Content, E=End
  * @param {AiChat.LLMRequestContext} context
@@ -439,7 +444,7 @@ function messageHasContent(assistantMessage) {
  */
 async function sendCompletionRequest(
 	conversation, messages,
-	allowTool, additionalBody,
+	toolChoice,
 	abortCompletion, onProgress,
 	context, config
 ) {
@@ -453,12 +458,12 @@ async function sendCompletionRequest(
 		/** @type {AiChat.AssistantMessage} */
 		assistantMessage,
 		/** @type {AiChat.AssistantMessage} */
-		initialAssistantMessage,
+		resumableMessage,
 		/** @type {string | Error} */
 		error,
 	} = await buildCompletionPayload(
 		conversation, messages,
-		allowTool, additionalBody,
+		toolChoice,
 		context, config
 	).catch(error => {
 		return {error};
@@ -471,7 +476,7 @@ async function sendCompletionRequest(
 		assistantMessage.finish_reason = '';
 		onProgress?.();
 	} else {
-		if (initialAssistantMessage) messages.pop();
+		if (resumableMessage) messages.pop();
 		messages.push(assistantMessage = {
 			role: 'assistant',
 			content: '',
@@ -527,7 +532,6 @@ async function sendCompletionRequest(
 
 	const endThinking = () => {
 		thinkState.duration += Date.now() - thinkState.start;
-		//thinkState.content = thinkState.content.trimEnd();
 		delete thinkState.start;
 		delete thinkState.index;
 		thinkState = assistantMessage.think = {...thinkState};
@@ -545,7 +549,7 @@ async function sendCompletionRequest(
 		}, json => {
 			if (config.logSSE) console.log("SSE response", json);
 
-			if (json.timings) {
+			if (json.timings && config.afkState < 2) {
 				const {predicted_per_second, predicted_n} = json.timings;
 
 				if (json.prompt_progress) {
@@ -575,14 +579,17 @@ async function sendCompletionRequest(
 				log.model = model;
 
 				let firstTokenTime = Date.now();
-				if (json.resumable) {
-					startTime = resumable.start;
-					firstTokenTime = resumable.ft;
+				if ((resumeObj = json.resumable)) {
+					const serverTime = resumable.now;
+					startTime = firstTokenTime - (serverTime - resumable.start);
+					firstTokenTime = firstTokenTime - (serverTime - resumable.ft);
 
-					if (thinkState) thinkState.start = startTime;
+					if (thinkState) thinkState.start = firstTokenTime;
 					if (!resumable.end && null != conversation.id) {
 						conversation.resumeId = id;
-						updateConversation(conversation);
+						updateConversation(conversation, assistantMessage.id > 0 ? null : messages);
+					} else {
+						delete conversation.resumeId;
 					}
 				}
 
@@ -590,7 +597,6 @@ async function sendCompletionRequest(
 				assistantMessage.time = firstTokenTime;
 				assistantMessage.model = model;
 			}
-			if (resumeObj) resumeObj.time = Date.now();
 
 			const [
 				/** @type {OpenAI.ChatChoice | OpenAI.TextChoice} */
@@ -600,7 +606,9 @@ async function sendCompletionRequest(
 			if (!finishReason) finishReason = chunk?.finish_reason;
 			if (finishReason) {
 				log.duration = Date.now() - startTime;
-				extractUsageMetrics(json, log);
+				const currentContext = extractUsageMetrics(json, log);
+				if (Number.isFinite(currentContext)) conversation.contextUsage = currentContext;
+				else delete conversation.contextUsage;
 			}
 
 			if (!chunk) return;
@@ -621,11 +629,7 @@ async function sendCompletionRequest(
 
 				const reasoningDetails = delta.reasoning_details;
 				if (reasoningDetails) {
-					if (!assistantMessage.reasoning_details) {
-						assistantMessage.reasoning_details = reasoningDetails;
-					} else {
-						assistantMessage.reasoning_details.push(...reasoningDetails);
-					}
+					assistantMessage.reasoning_details = applyDelta(assistantMessage.reasoning_details, reasoningDetails);
 					reasoning_format = 'rd';
 				} else if (delta.reasoning_content) {
 					reasoning_text = delta.reasoning_content;
@@ -685,14 +689,18 @@ async function sendCompletionRequest(
 			continueThinking:
 			if (reasoning_text != null) {
 				if (!thinkState) {
-					thinkState = assistantMessage.think = $state({
-						start: resumeObj ? (startTime+log.latency) : Date.now(),
-						duration: 0,
-						index: 0,
+					thinkState = {
+						duration: resumeObj ? ((resumeObj.re||resumeObj.now) - resumeObj.ft) : 0,
 						content: reasoning_text,
 						format: reasoning_format
-					});
-					if (assistantMessage.content || assistantMessage.tool_calls) endThinking();
+					};
+
+					if (!content && !assistantMessage.tool_calls) {
+						thinkState.start = Date.now();
+						thinkState.index = 0;
+						thinkState = $state(thinkState);
+					}
+					assistantMessage.think = thinkState;
 				} else {
 					if (thinkingPrefill) {
 						const isPrefillResponse = reasoning_text.startsWith(thinkState.content);
@@ -744,7 +752,7 @@ async function sendCompletionRequest(
 
 		if (!finishReason) {
 			finishReason = 'error';
-			assistantMessage.error = "network error";
+			assistantMessage.error = conversation.resumeId ? "network error" : "连接意外终止";
 		}
 	} catch (err) {
 		if (err.name === 'AbortError') {
@@ -754,14 +762,13 @@ async function sendCompletionRequest(
 			if (err !== "retry") {
 				finishReason = 'error';
 
-				// 即便服务端Session过期了，也不要清除已经生成的内容
-				if (initialAssistantMessage && !messageHasContent(assistantMessage)) {
-					assistantMessage = messages[messages.length-1] = initialAssistantMessage;
+				// 服务端resume session过期后，保留数据库中缓存的内容（这样至少还能用 /continue）
+				if (resumableMessage && !hasContent(assistantMessage)) {
+					assistantMessage = messages[messages.length-1] = resumableMessage;
 				}
 
 				if (config.sound) failure();
-				console.error(err);
-				if (err.status) err = `API错误 ${err.status}\n${err.message}`;
+				if (err.status) err = `API错误 (${err.status})\n${err.message}`;
 				assistantMessage.error = prettyError(err);
 			}
 		}
@@ -779,8 +786,7 @@ async function sendCompletionRequest(
 
 const scrollToBottom = () => {
 	requestAnimationFrame(() => {
-		const {scroller} = Shared;
-		scroller.vl.scrollTo(scroller.scrollHeight);
+		DI_messageContainer.vl.scrollTo(DI_messageContainer.scrollHeight);
 		lastScrollDirection.value = false;
 	});
 };
@@ -792,37 +798,21 @@ const allowPrefillFinishReasons = [null, "length", "interrupt", "error"];
  *
  * @param {Partial<AiChat.Conversation>} conversation
  * @param {AiChat.Message[]} messages
- * @param {boolean} allowTools
- * @param {Record<string, any>} additionalBody
+ * @param {boolean|OpenAI.Tool} toolChoice
  * @param {AiChat.LLMRequestContext} context
  * @param {Partial<AiChat.Preset>} config
  * @return {Promise<{assistantMessage: AiChat.AssistantMessage, data: {headers: {Authorization: string, "Content-Type": string}, body: string | function(): ReadableStream}, url: string}>}
  */
 async function buildCompletionPayload(
 	conversation, messages,
-	allowTools, additionalBody,
+	toolChoice,
 	context, config
 ) {
-	/**
-	 * @type {AiChat.AssistantMessage}
-	 */
-	let initialAssistantMessage= messages.at(-1);
-	if (!initialAssistantMessage) throw "No message to continue";
-	else if (initialAssistantMessage.role !== 'assistant') initialAssistantMessage = null;
-
-	let assistantMessage = initialAssistantMessage;
-	/** @type {boolean} */
-	let isPrefill;
-	if (initialAssistantMessage) {
-		const finishReason = assistantMessage.finish_reason;
-		if (!allowPrefillFinishReasons.includes(finishReason)) assistantMessage = null;
-		else if (finishReason === 'error' || !config.canPrefill) {
-			messages.pop();
-			assistantMessage = null;
-		} else {
-			isPrefill = true;
-		}
-	}
+	/** @type {AiChat.AssistantMessage} */
+	let assistantMessage= messages.at(-1);
+	if (!assistantMessage) throw "No message to continue";
+	else if (assistantMessage.role !== 'assistant') assistantMessage = null;
+	const canPrefill = config.canPrefill || config.mode === 'completions';
 
 	// Prepare request body
 	const headers = {
@@ -833,13 +823,25 @@ async function buildCompletionPayload(
 
 	const resumeId = conversation.resumeId;
 	if (resumeId != null) {
-		if (Date.now() - conversation.time < RESUME_TIMEOUT) {
-			return {
-				url: config.endpoint+'/resume/'+resumeId,
-				data: {headers},
-				assistantMessage,
-				initialAssistantMessage
-			};
+		if (assistantMessage?.finish_reason !== 'error')
+			assistantMessage = null;
+		return {
+			url: config.endpoint+'/resume/'+resumeId,
+			data: {headers},
+			resumableMessage: assistantMessage
+		};
+	}
+
+	/** @type {boolean} */
+	let isPrefill;
+	if (assistantMessage) {
+		const finishReason = assistantMessage.finish_reason;
+		if (!allowPrefillFinishReasons.includes(finishReason)) assistantMessage = null;
+		else if (finishReason === 'error' || !canPrefill) {
+			messages.pop();
+			assistantMessage = null;
+		} else {
+			isPrefill = true;
 		}
 	}
 
@@ -848,11 +850,9 @@ async function buildCompletionPayload(
 	 */
 	const json_messages = [];
 
-	let toolsUsed = conversation.activatedModules?.size > 0;
 	let callbacks = [];
 	for (let j = 0; j < messages.length; j++){
 		const m = messages[j];
-		// 为 dynamic context pruning 预留接口
 		if (m.skip) continue;
 
 		const compose = MessageRoles[m.role]?.compose;
@@ -866,8 +866,6 @@ async function buildCompletionPayload(
 
 		const {tool_calls, tool_responses, think} = m;
 		if (tool_calls) {
-			toolsUsed = true;
-
 			updateStatusText("正在执行工具");
 			await runTools(m, conversation, true);
 			updateStatusText("");
@@ -882,7 +880,7 @@ async function buildCompletionPayload(
 		}
 
 		const isPrefill = m === assistantMessage;
-		const prefillPath = config.prefillPath;
+		const prefillPath = config.mode === 'chat' && config.prefillPath;
 		if (isPrefill && prefillPath) {
 			const [path, value = "true"] = prefillPath.split(",");
 			jsonEval(json_msg, path, "set", JSON.parse(value));
@@ -909,7 +907,7 @@ async function buildCompletionPayload(
 		stream: true
 	};
 
-	for (const {id, body_id, _omit} of BODY_PARAMETERS) {
+	for (const {id, body_id, default: _omit} of BODY_PARAMETERS) {
 		const v = config[id];
 		if (v !== undefined && v !== _omit) {
 			body[body_id] = v;
@@ -924,35 +922,22 @@ async function buildCompletionPayload(
 	} else {
 		body.messages = json_messages;
 
-		if (config.modalities?.includes("tool")) {
-			// TODO use allowTools / allowNewTools or just provide?
-			if (allowTools || toolsUsed) {
-				[body.tools, toolPrompt] = await getAvailableTools(conversation);
-				// is this default=true for llama.cpp ?
-				body.parallel_tool_calls = true;
-				if (!allowTools) body.tool_choice = "none";
-				else if (typeof allowTools === "object") {
-					if (Array.isArray(allowTools)) body.tools.push(...allowTools);
-					else body.tool_choice = allowTools;
-				}
-			}
+		if (config.modalities.includes("tool") && conversation.activatedModules?.size) {
+			let tools;
+			[tools, toolPrompt] = await getAvailableTools(conversation);
+			if (tools.length) body.tools = tools;
+			// is this default=true for llama.cpp ?
+			body.parallel_tool_calls = true;
 
-			if (config.generateTitle === "tool" && !selectedConversation.title) {
-				if (body.tools) body.tools.push(SetTitle);
-				else body.tools = [SetTitle];
-				toolPrompt = `${toolPrompt || ""}<SetTitle>
-## MANDATORY - Execute After Every Response
-
-You MUST invoke the \`SetTitle\` tool as the final step of EVERY reply. 
-A reply without this call is **INCOMPLETE** and constitutes a **VIOLATION** of this directive.
-
-${config.titlePrompt || defaultTitlePrompt}
-</SetTitle>`;
+			if (!toolChoice) body.tool_choice = "none";
+			else if (typeof toolChoice === "object") {
+				if (Array.isArray(toolChoice)) body.tools.push(...toolChoice);
+				else body.tool_choice = toolChoice;
 			}
 		}
 
 		const reasoningEffort = config.reasoning;
-		const enableThink = isThinkingEnabled() && reasoningEffort;
+		const enableThink = isThinkingEnabled(config) && reasoningEffort;
 		const [reasoningPath, reasoningEnabledValue = 'true', reasoningDisabledValue = 'false'] = (config.reasoningPath||"reasoning/enabled").split(",");
 
 		if (config.forceThink !== 0) {
@@ -969,16 +954,17 @@ ${config.titlePrompt || defaultTitlePrompt}
 							"medium": 0.5,
 							"high": 0.8,
 							"xhigh": 0.95
-						}[reasoningEffort]) * body.max_tokens;
+						}[reasoningEffort]) * body.max_completion_tokens;
 					}
 				}
 				jsonEval(body, reasoningEffortPath, "set", fieldValue);
 			}
 		}
 	}
+	const additionalBody = config.additionalBody;
 	if (additionalBody) Object.assign(body, additionalBody);
 
-	let [systemPrompt, systemBody] = await buildSystemPrompt(conversation, config.systemPrompt || defaultSystemPrompt, toolPrompt);
+	let [systemPrompt, systemBody] = await buildSystemPrompt(config, conversation, config.systemPrompt || defaultSystemPrompt, toolPrompt);
 	if (systemPrompt) {
 		if (json_messages[0]?.role !== 'system')
 			json_messages.unshift({role: 'system', content: systemPrompt});
@@ -998,7 +984,7 @@ ${config.titlePrompt || defaultTitlePrompt}
 			body.post_sampling_probs = true;
 			body.n_probs = 5;
 		} else {
-			if (!config.canPrefill) throw "模型必须支持预填充和 lobprobs 以使用反语法约束采样";
+			if (!canPrefill) throw "模型必须支持预填充和 lobprobs 以使用反语法约束采样";
 			body.logprobs = true;
 			// 不支持的其实也能回滚吧，先不管了
 			body.top_logprobs = 5;
@@ -1014,10 +1000,10 @@ ${config.titlePrompt || defaultTitlePrompt}
 	}
 
 	let outputBody;
-	const {streamDuplex, sseBlobProxy} = config;
+	const {streamDuplex, serverResponse} = config;
 	const useH2Stream = streamDuplex ? 'half' : undefined;
 	if (useH2Stream) {
-		outputBody = createJsonStream(body, sseBlobProxy);
+		outputBody = createJsonStream(body, serverResponse);
 	} else {
 		const promises = [];
 		const mapping = new Map;
@@ -1062,26 +1048,27 @@ ${config.titlePrompt || defaultTitlePrompt}
 	};
 }
 
-const isThinkingEnabled = () => (typeof config.forceThink === "boolean" ? config.forceThink : config.think);
+const isThinkingEnabled = (config) => (typeof config.forceThink === "boolean" ? config.forceThink : config.think);
 
 /**
  *
+ * @param config
  * @param {AiChat.Conversation} conversation
  * @param {string} prompt
  * @param {string} toolPrompt
- * @return {[prompt: string, body: {}]}
+ * @return {Promise<[prompt: string, body: {}]>}
  */
-export const buildSystemPrompt = async (conversation, prompt, toolPrompt) => {
+export const buildSystemPrompt = async (config, conversation, prompt, toolPrompt) => {
 	let body = {};
 
 	if (prompt.startsWith("---\n")) {
-		const [meta, content] = parseSkillMetadata(prompt);
+		const [meta, content] = parseFrontmatter(prompt);
 
 		// 初始化时处理
-		if (!conversation.activatedModules) {
-			const allowedTools = meta.allowedTools;
+		const allowedTools = meta.allowedTools;
+		if (!conversation.activatedModules && allowedTools) {
 			const Use = toolScriptRegistry['Use'];
-			Use.script({modules: allowedTools}, {}, conversation);
+			Use.script({modules: allowedTools.split(" ")}, {}, conversation);
 		}
 
 		prompt = content;
@@ -1103,23 +1090,33 @@ export const buildSystemPrompt = async (conversation, prompt, toolPrompt) => {
 
 			const id = prompt.slice(i + 2, end).trim();
 			prev = end + 2;
+			if (prompt[prev] === '\n') prev++;
 
 			switch (id) {
+				case "model":
+					result += config.model;
+					break;
 				case "theme":
 					result += getCurrentTheme();
 					break;
-				case "date":
-					result += new Date().toLocaleDateString();
-					break;
+				case "language": {
+					result += navigator.language;
+				}
+				break;
+				case "date": {
+					const date = new Date();
+					result += date.getFullYear()+"-"+(""+(date.getMonth()+1)).padStart(2, "0");
+				}
+				break;
 				case "think":
-					result += isThinkingEnabled() && config.reasoning === false ? (config.CoTPrompt || defaultCoTPrompt) : "";
+					result += isThinkingEnabled(config) && config.reasoning === false ? (config.CoTPrompt || defaultCoTPrompt) : "";
 					break;
 				case "tools":
 					if (toolPrompt) result += toolPrompt.includes('{{') ? await transform(toolPrompt) : toolPrompt;
 					break;
 				default:
-					if (id.startsWith('ref:')) {
-						const preset = await kvListGet('preset', id.slice(4));
+					if (id[0] === ':') {
+						const preset = await kvListGet('preset', id.slice(1));
 						result += preset.systemPrompt;
 					} else {
 						let val = PLACEHOLDERS[id];
@@ -1145,7 +1142,7 @@ export const buildSystemPrompt = async (conversation, prompt, toolPrompt) => {
  *
  * @param {OpenAI.BaseResponse} json
  * @param {AiChat.BillingLog} log
- * @return {string}
+ * @return {number}
  */
 const extractUsageMetrics = (json, log) => {
 	console.log("usage", json);
@@ -1156,16 +1153,17 @@ const extractUsageMetrics = (json, log) => {
 
 	if (usage) {
 		let {
-			prompt_tokens, prompt_tokens_details = {},
-			completion_tokens, completion_tokens_details = {},
+			prompt_tokens, prompt_tokens_details,
+			completion_tokens, completion_tokens_details,
+			total_tokens,
 			cost
 		} = usage;
 
-		const {reasoning_tokens = 0} = completion_tokens_details;
-		const {cached_tokens = 0, cache_write_tokens = 0} = prompt_tokens_details;
+		const {reasoning_tokens = 0} = completion_tokens_details || {};
+		const {cached_tokens = 0, cache_write_tokens = 0} = prompt_tokens_details || {};
 
 		log.input_tokens = prompt_tokens - cached_tokens;
-		log.output_tokens = completion_tokens;
+		log.output_tokens = total_tokens ? total_tokens - prompt_tokens : completion_tokens; // maybe better
 
 		if (cached_tokens) log.cached_tokens = cached_tokens;
 		if (reasoning_tokens) log.reasoning_tokens = reasoning_tokens;
@@ -1174,6 +1172,8 @@ const extractUsageMetrics = (json, log) => {
 			log.cost = cost;
 			log.currency = "USD";
 		}
+
+		return total_tokens;
 	}
 
 	if (timings) {
@@ -1184,6 +1184,8 @@ const extractUsageMetrics = (json, log) => {
 		log.output_tokens = predicted_n;
 		log.cached_tokens = cache_n;
 		log.tps = predicted_per_second;
+
+		return prompt_n+predicted_n+cache_n;
 	}
 };
 
@@ -1198,8 +1200,7 @@ const streamResponseCompleted = (assistantMessage, genImages) => {
 	const {reasoning_details, tool_calls, think, content} = assistantMessage;
 
 	if (reasoning_details) {
-		let hasText;
-		[assistantMessage.reasoning_details, hasText] = mergeReasoningDetails(reasoning_details);
+		let hasText = reasoning_details.some(item => item.type === "reasoning.text" || item.type === "reasoning.summary");
 		if (hasText) delete assistantMessage.think?.content;
 	}
 	if (tool_calls) assistantMessage.tool_calls = tool_calls.map(unconscious);
@@ -1232,7 +1233,7 @@ const streamResponseCompleted = (assistantMessage, genImages) => {
 	}
 };
 
-const DISABLE_ALL = /*#__PURE__*/ new Set(["*"]);
+const DISABLE_ALL = new Set();
 
 export class APIRequest {
 	/** @type {import("unconscious").Reactive<AbortController>} */
@@ -1242,21 +1243,21 @@ export class APIRequest {
 	 *
 	 * @param {AiChat.Message[]} messages
 	 * @param {string[]=} tools
-	 * @param {Record<string, any>=} body
+	 * @param {Partial<AiChat.Preset>} overrides
 	 */
-	constructor(messages, tools, body) {
+	constructor(messages, tools, overrides) {
 		/** @type {AiChat.Conversation} */
 		this.conversation = {
 			api: 1,
-			activatedModules: DISABLE_ALL,
-			allowedTools: new Set(tools || []),
+			activatedModules: tools ? DISABLE_ALL : null,
+			allowedTools:  tools ? new Set(tools) : null,
 		};
 		/** @type {AiChat.Message[]} */
 		this.messages = messages;
 		/** @type {Record<string, any>} */
 		this.body = {
-			...config.additionalBody,
-			...body
+			...config,
+			...overrides
 		};
 	}
 
@@ -1279,9 +1280,9 @@ export class APIRequest {
 			const context = {};
 			const result = await executeCompletionRequest(
 				conversation, messages,
-				conversation.allowedTools.size, body,
+				true,
 				abort, onProgress,
-				context, config
+				context, body
 			);
 
 			const finishReason = result.finish_reason;

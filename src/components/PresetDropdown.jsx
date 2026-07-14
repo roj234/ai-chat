@@ -1,11 +1,11 @@
-import {$computed, $foreach, $state, $update} from "unconscious";
+import {$computed, $foreach, $state, $update, unconscious} from "unconscious";
 import {cloneNamed} from "../utils/utils.js";
-import {config, Shared} from "../states.js";
+import {config} from "../states.js";
 import SimpleModal from "./SimpleModal.jsx";
 import {Dropdown} from "./Dropdown.jsx";
 import {kvListDel, kvListGet, kvListGetKeys, kvListSet} from "../database.js";
-import {onLoad} from "../plugin.js";
-import {presetKeys, presetKeysAlways} from "../settings.js";
+import {DI_settings, onLoad} from "../hooks.js";
+import {presetKeys, presetKeysAlways, SETTINGS} from "../settings.js";
 
 /**
  * @type {import("unconscious").Reactive<AiChat.IDBKVList[]>}
@@ -21,17 +21,16 @@ onLoad(reloadPresetList);
  * @param {import("unconscious").Reactive<T[]>} items
  * @param {import("unconscious").Reactive<number[]>} selection
  */
-function LorebookList({items, selection}) {
-	function toggleLorebook(id) {
+function SettingList({items, selection}) {
+	function toggle(id) {
 		const x = selection.indexOf(id);
 		if (x >= 0) selection.splice(x, 1);
 		else selection.push(id);
 	}
 
-	return <div className="tag-dropdown">
-		<button className="btn ghost">+ {() => selection.length ? "已选 "+selection.length+" 个类别" : "所有配置"}</button>
-		<div className="list" onClick.delegate{"input"}={({delegateTarget}) => {
-			toggleLorebook(delegateTarget.dataset.id);
+	return <div>
+		<div onClick.delegate{"input"}={({delegateTarget}) => {
+			toggle(delegateTarget.dataset.id);
 		}}>
 			{$foreach(items, ({id, name}) => (
 				<label>
@@ -43,11 +42,12 @@ function LorebookList({items, selection}) {
 				</label>
 			))}
 		</div>
+		<div>{() => selection.length ? "已选 " + selection.length + " 个类别" : "未勾选：保存所有配置"}</div>
 	</div>;
 }
 
 
-export const createPreset = (name, categories) => {
+const createPreset = (name, categories) => {
 	if (null == name) {
 		const selection = $state([]);
 		SimpleModal({
@@ -55,11 +55,11 @@ export const createPreset = (name, categories) => {
 			title: "保存为新预设",
 			placeholder: '给你的配置起个名字...',
 			message: <>
-				<span style="font-size:smaller">您可以选择仅保存特定部分的设置（如只存采样参数）。<br/>开启后，应用此预设将不会影响未选中的配置项。</span>
-				<div style={"margin-bottom:8px;text-align:center"}><LorebookList items={Object.values(presetKeys)} selection={selection}/></div>
+				<span style="font-size:smaller">勾选需要保存在预设中的设置项。应用预设时，仅更新已选项，其余设置保持不变。</span>
+				<div style={"margin-bottom:8px;text-align:center"}><SettingList items={Object.values(presetKeys)} selection={selection}/></div>
 			</>,
 			onConfirm(value) {
-				createPreset(value, selection.value);
+				createPreset(value, unconscious(selection));
 			}
 		});
 		return;
@@ -82,6 +82,19 @@ export const createPreset = (name, categories) => {
 	})
 };
 
+SETTINGS.push(
+	{
+		type: "element",
+		_id: "pb", // 见 SettingDialog 中处理逻辑，以及引用它的 configSync.js
+		_tab: ["general", "data"],
+		_order: -1,
+		name: "当前配置",
+		element: <div className={"choice-scroll"}>
+			<button className="btn ghost" onClick={() => createPreset()}>保存到预设</button>
+		</div>
+	},
+);
+
 const setPreset = async i => {
 	const presetKey = presets[i];
 	const item = await kvListGet("preset", presetKey.name);
@@ -89,7 +102,7 @@ const setPreset = async i => {
 
 	Object.assign(config.value, item);
 	$update(config);
-	Shared.SettingUI.sync();
+	DI_settings.sync();
 	_dropdown.setSelection(i);
 };
 

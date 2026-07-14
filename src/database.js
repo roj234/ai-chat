@@ -1,13 +1,10 @@
 import {debugSymbol} from 'unconscious';
-import {config} from "./states.js";
+import {BRANCH_MANAGER, config, LOCKED} from "./states.js";
 import {deepEqual, delta} from "unconscious/common/deepEqual.js";
 import {prettyError} from "./utils/utils.js";
-import * as idb from "./database/db-indexeddb.js";
-import * as remote from "./database/db-remote.js";
+import * as idb from "./database/indexedDB.js";
+import * as remote from "./database/remoteDB.js";
 import {showToast} from "./components/Toast.js";
-import {SETTINGS} from "./settings.js";
-import {BRANCH_MANAGER} from "./utils/BranchManager.js";
-import {LOCKED} from "./components/ConversationList.jsx";
 
 export const DB_MESSAGES_DIFF = debugSymbol("DB_MESSAGES_DIFF");
 export const DB_CONVERSATION_DIFF = debugSymbol("DB_CONVERSATION_DIFF");
@@ -19,27 +16,10 @@ export const databaseError = err => {
 
 export const isIDB = DB_MODE === 'local' || config.db_server === ':idb:';
 
-if (DB_MODE !== 'local') {
-	SETTINGS.push({
-		id: "db_server",
-		_tab: ["general", "data"],
-		name: "数据库服务器",
-		title: "提供文件管理、消息搜索、多租户等功能\n修改后需要刷新页面"+(DB_MODE === "mixed" ? "\n填写 :idb: 使用本地数据库" : ""),
-		type: "input",
-		pattern: (DB_MODE === "mixed" ? /^(?:(?:https?:\/\/)?.*\/api\/v2\/|:idb:$)/ : /^(?:https?:\/\/)?.*\/api\/v2\//),
-		warning: "请输入合法的服务器地址",
-		placeholder: "/api/v2/username"
-	},{
-		id: "db_pat",
-		_tab: "data",
-		type: "secret",
-		placeholder: "个人访问密钥 (PAT)",
-	});
-}
-
 const db = isIDB ? idb : remote;
 
 export const {
+	initialize,
 	deleteDatabase,
 	/**
 	 * 列出所有会话，按创建时间降序
@@ -50,7 +30,8 @@ export const {
 	getKV, setKV,
 	kvListGetValues, kvListSet, kvListDel, kvListGetKeys, kvListGet,
 	searchMessages,
-	uploadBlob, getBlob
+	uploadBlob, getBlob,
+	listBillingLogs
 } = db;
 
 
@@ -91,6 +72,17 @@ export const getMessages = conversation => (
 
 const DIFF_IGNORE_KEYS = new Set(["id", "ready"]);
 const WAITING = debugSymbol("UPDATE_WAIT")
+
+/**
+ * @param {AiChat.Conversation} conversation
+ * @returns {Promise<AiChat.Message[]>}
+ */
+export const getMessageCache = async (conversation) => {
+	const prevUpdate = conversation[WAITING];
+	if (prevUpdate) await prevUpdate;
+	const cache = conversation[DB_MESSAGES_DIFF];
+	return cache && [...cache.values()];
+}
 
 /**
  * 更新会话
@@ -167,14 +159,15 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 			if (typeof diff !== 'object') diff = {...snapshot};
 
 			function save() {
-				if (id != null) diff.id = id;
+				if (message.id > 0) diff.id = message.id;
 				else delete diff.id;
 				diff.owner = conversation.id;
 				const saveTime = message.time;
+				const savedState = structuredClone(message);
 
 				return db.upsertMessage(diff).then((id) => {
-					message.id = id;
-					// messagesInMemory 可能已经变了，取最新的值
+					snapshot = savedState;
+					message.id = snapshot.id = id;
 					conversation[DB_MESSAGES_DIFF].set(id, snapshot);
 
 					// 消息在RTT内又修改了，重新更新
@@ -230,7 +223,7 @@ export const appendBillingLog = log => {
 	return db.appendBillingLog(log);
 };
 
-export const getBillingLog = id => {
-	if (id == null) return DONE;
-	return db.getBillingLog(id);
+export const getBillingLog = messageId => {
+	if (messageId == null) return DONE;
+	return db.getBillingLog(messageId);
 };

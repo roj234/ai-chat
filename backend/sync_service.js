@@ -14,6 +14,8 @@ import {
 	SYNC_READERS,
 	SYNC_RELEASED,
 	SYNC_RESOLVE,
+	SYNC_RPC,
+	SYNC_SEND_TO_OWNER,
 	SYNC_UNLOCKED
 } from "./sync_const.js";
 import {ALLOW_USER_NAMES, INTERACTIVE_LOGIN, RESPONSE_USE_MSGPACK_SCHEMA, RESTRICT_USER_CREATION} from "./config.js";
@@ -66,11 +68,11 @@ export function createSyncManager(wss) {
 
 	/**
 	 *
-	 * @type {Map<string, Set<{
+	 * @type {Map<string, [Set<{
 	 *     locked: Map<number, boolean>,
 	 *     ws: WebSocket,
 	 *     id: string
-	 * }>>}
+	 * }>, number[]]>}
 	 */
 	const users = new Map;
 
@@ -87,8 +89,8 @@ export function createSyncManager(wss) {
 			id: clientId
 		};
 
-		let clients = users.get(userId);
-		if (!clients) users.set(userId, clients = new Set([self]));
+		let [clients, counters] = users.get(userId) || [];
+		if (!clients) users.set(userId, [clients = new Set([self]), counters = [0]]);
 		else clients.add(self);
 
 		{
@@ -101,9 +103,10 @@ export function createSyncManager(wss) {
 			ws.send(encode([
 				SYNC_INIT,
 				[
-					clients.size,
-					Array.from(locked),
-					clientId
+					[...clients].map(x => x.id),
+					[...locked],
+					clientId,
+					counters
 				]
 			]));
 		}
@@ -133,7 +136,7 @@ export function createSyncManager(wss) {
 				}
 			}
 
-			owner.ws.send(encode([
+			owner?.ws.send(encode([
 				SYNC_READERS,
 				[
 					id,
@@ -209,6 +212,51 @@ export function createSyncManager(wss) {
 				const [type, data] = isBinary ? decodeMsg(message, {schema: msgpack_schema}) : JSON.parse(message.toString());
 				switch (type) {
 					default: throw new Error("unknown message type");
+
+					case SYNC_RPC: {
+						const [targetClientId, payload] = data;
+						for (let client of clients) {
+							if (client.id === targetClientId) {
+								const body = encode([
+									SYNC_RPC,
+									[
+										clientId,
+										payload
+									]
+								]);
+								client.ws.send(body);
+								return;
+							}
+						}
+						ws.send(encode([
+							SYNC_RPC,
+							[
+								targetClientId,
+								[-1]
+							]
+						]));
+					}
+					break;
+					case SYNC_SEND_TO_OWNER: {
+						const [targetOwner, payload] = data;
+						const owner = sendToLockOwner(targetOwner, [
+							SYNC_RPC,
+							[
+								clientId,
+								payload
+							]
+						]);
+						if (!owner) {
+							ws.send(encode([
+								SYNC_RPC,
+								[
+									targetOwner,
+									[-2]
+								]
+							]));
+						}
+					}
+					break;
 
 					case SYNC_PING: ws.send(encode([SYNC_PING])); break;
 					// 消息锁管理
@@ -328,8 +376,12 @@ export function createSyncManager(wss) {
 				break;
 			}
 
-			const clients = users.get(ctx.params.userId);
-			if (!clients) return;
+			const data = users.get(ctx.params.userId);
+			if (!data) return;
+
+			const [clients, counters] = data;
+
+			if (func[0] === 'k') counters[0]++;
 
 			const encodedBody = encode([code, body]);
 			for (const client of clients) {

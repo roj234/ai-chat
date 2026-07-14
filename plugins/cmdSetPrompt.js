@@ -1,12 +1,11 @@
-import {config, selectedConversation} from "/src/states.js";
+import {config, selectedConversation, updateMessageUI} from "/src/states.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
-import {setSystemPrompt} from "/src/skills.js";
+import {setSystemPrompt} from "/src/toolset.js";
 import {buildSystemPrompt} from "/src/api-request.js";
 import {defaultSystemPrompt} from "/src/settings.js";
 import {kvListGet} from "/src/database.js";
 import {showToast} from "/src/components/Toast.js";
 import {$update} from "unconscious";
-import {updateMessageUI} from "/src/components/MessageList.jsx";
 
 COMMAND_REGISTRY["setprompt"] = [
 	async (arg) => {
@@ -20,7 +19,7 @@ COMMAND_REGISTRY["setprompt"] = [
 			prompt = tmp;
 		}
 
-		[prompt] = await buildSystemPrompt(selectedConversation, prompt);
+		[prompt] = await buildSystemPrompt(config, selectedConversation, prompt);
 		setSystemPrompt(prompt);
 		$update(updateMessageUI);
 	},

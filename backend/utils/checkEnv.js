@@ -1,6 +1,6 @@
-import os from "os";
-import {promisify} from "util";
-import {exec} from "child_process";
+import os from "node:os";
+import {promisify} from "node:util";
+import {exec} from "node:child_process";
 
 const execPromise = promisify(exec);
 
@@ -34,44 +34,21 @@ async function execCommand(cmd) {
  * 并发收集各工具版本信息
  */
 async function detectEnv() {
+	// 并不是我歧视谁，而是LLM常用的脚本语言不就 node 和 python，最多再加一个 cpp，你看我最爱的 java 都没写 —— 反正LLM自己能检查
 	let [
 		gitResult,
 		bashResult,
 		python3Result,
 		pythonResult,
-		javaResult,
 		npmResult,
-		dockerResult,
 		cppResult,
-		goResult,
-		rustResult,
-		dotnetResult,
-		rubyResult,
-		phpResult,
-		perlResult,
-		swiftResult,
-		kotlinResult,
-		tscResult,
-		dartResult,
 	] = await Promise.all([
 		'git --version',
 		'bash --help',
 		'python3 --version',
 		'python --version',
-		'javac -version',
 		'npm --version',
-		'docker --version',
 		'g++ --version',
-		'go version',
-		'rustc --version',
-		'dotnet --version',
-		'ruby --version',
-		'php --version',
-		'perl --version',
-		'swift --version',
-		'kotlin -version',
-		'tsc --version',
-		'dart --version',
 	].map(execCommand));
 
 	const env = {};
@@ -87,8 +64,8 @@ async function detectEnv() {
 	env.git = commonMatch(gitResult);
 
 	if (bashResult.success) {
-		const match = bashResult.output.match(/version\s+(\S+)/);
-		env.bash = match ? match[1] : bashResult.output.split('\n')[0];
+		const match = bashResult.output.match(/^(BusyBox v[\d.]+)/);
+		env.bash = match ? match[1] : bashResult.output;
 	} else {
 		env.bash = 'Not found';
 	}
@@ -97,19 +74,12 @@ async function detectEnv() {
 	else if (pythonResult.success) env.python = commonMatch(pythonResult);
 	else env.python = 'Not found';
 
-	env.java = commonMatch(javaResult)
-
 	if (cppResult.success) {
-		const s = cppResult.output.replace(/\s[a-f0-9]{40}/, "");
-		env['g++'] = s.match(simplePattern)?.[2] || s;
+		env['c/cpp'] = cppResult.output.match(simplePattern)?.[0] || cppResult.output;
 	} else {
 		const clangResult = await execCommand('clang++ --version');
-		env['clang'] = clangResult.success ? clangResult.output : 'Not found';
+		env['c/cpp'] = clangResult.success ? clangResult.output.match(simplePattern)?.[0] || clangResult.output : 'Not found';
 	}
-
-	env.go = commonMatch(goResult);
-	env.rust = commonMatch(rustResult);
-	env.docker = commonMatch(dockerResult);
 
 	return env;
 }

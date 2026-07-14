@@ -2,6 +2,19 @@ import {getBlob, uploadBlob} from "../database.js";
 import {deepEntries} from "unconscious/common/json-schema-utils.js";
 import {showToast} from "../components/Toast.js";
 
+let uploadingHashes = 0;
+let closeToast;
+const beforeUpload = (n) => {
+	if (!uploadingHashes++)
+		closeToast = showToast("正在上传文件", '', 0);
+	return n;
+};
+const afterUpload = (hash) => {
+	if (!--uploadingHashes) {
+		closeToast();
+	}
+};
+
 const decodeDollar = async (v, zr) => {
 	const v1 = v.v;
 	switch (v.$) {
@@ -68,13 +81,13 @@ export const encodeObjects = (input, replacer, zipWriter) => {
 					});
 
 					return zipWriter.add("blobs/"+blobIndex, new Uint8Array(ab));
-				}): uploadBlob(val).then(hash => {
+				}): beforeUpload(uploadBlob(val)).then(hash => {
 					replacer.set(val, {
 						$: "BlobH",
 						hash,
 						name: val.name
 					});
-				}));
+				}).finally(afterUpload));
 			break;
 			case Map:
 			case Set:

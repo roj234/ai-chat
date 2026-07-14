@@ -1,40 +1,21 @@
-import {getToolParameters, registerTools} from "/src/skills.js";
-import {fileAccess, prefixTitle} from "./agent.js";
+import {getToolParameters, registerToolset} from "/src/toolset.js";
+import {fileAccess} from "./fileAccess.js";
+import {prefixTitle} from "./agent.js";
 import {compileSchema, jsonEval, parseJsonPointer, validate} from "unconscious/common/json-schema-utils.js";
-import {parseJsonLenient} from "unconscious/common/Json.js";
+import {parseJson5} from "unconscious/common/Json.js";
 
 const systemPrompt = `<json-edit-policy>
-### You have three tools for JSON files
+### RFC 6901 + extensions
 
-- **WriteJson**: Creating a new file, fully rewriting file.
-- **EditJson**: Surgically modifying a few nodes in an existing (usually large) file — set, push, or delete.
-- **ValidateJson**: Checking whether a JSON file conforms to a given JSON Schema — after edits, before commits, or for debugging.
+- Use \`~0\` and \`~1\` to escape.
+- Trailing \`-\` means append-to-array.
 
-### JSON Pointer syntax: RFC 6901 with extensions
+### Rules of thumb
 
-1. Use \`~0\` and \`~1\` to escape.
-2. Trailing \`-\` means append-to-array.
-
-### EditJson
-
-- **Update**: provide \`value\` and a pointer to an existing key or index.
-    Missing intermediate nodes are initialized to empty object {}.
-- **Push**: use \`/-\` as the final segment; \`value\` is appended to the array.
-- **Delete**: **Omit \`value\`** to remove the node at \`pointer\`.
-    Array element will be spliced: delete "/items/1" -> splice index 1
-
-### ValidateJson
-
-- Returns a list of "dot-path: error message" pairs on failure.
-- Example: $.player[0].inventory[3]: missing required fields: ["name"]
-
-### Anti-patterns (do NOT do)
-
-- Use EditJson to change 90% fields → **WriteJson** the whole file instead.
-- Use WriteJson to overwrite a large JSON file just to flip one boolean → **EditJson**.
-- Use \`/-\` on non-array → error.
-- Skip schema validation after structural edits, then wonder why downstream broke.
-</json-tools-policy>`;
+- Rewriting most of the file → **WriteJson**, otherwise **EditJson**.
+- Never use \`/-\` on a non-array.
+- After structural edits, run ValidateJson before considering the task done.
+</json-edit-policy>`;
 
 const readFile = fileAccess("read");
 const writeFile = fileAccess("write");
@@ -44,8 +25,12 @@ const writeFile = fileAccess("write");
  */
 const EditJson = {
 	name: "EditJson",
-	description: "Partially update a JSON file by targeting a specific node via JSON Pointer." +
-	 " Omit `value` to delete the node at that path.",
+	description: `Partially update a JSON file by targeting a specific node via RFC 6901 JSON Pointer.
+
+Modes:
+- **set** (default): Provide \`value\` + pointer to key/index. Missing intermediates are initialized to \`{}\`, explicitly create empty array before push if not exist.
+- **push**: Pointer ends with \`/-\` to append \`value\` to the array.
+- **delete**: Omit \`value\` to remove the node. Array elements are spliced (e.g. \`/items/1\` → splice index 1).`,
 	parameters: {
 		type: "object",
 		properties: {
@@ -64,14 +49,14 @@ const EditJson = {
 
 		let obj;
 		try {
-			obj = parseJsonLenient(text);
+			obj = parseJson5(text);
 		} catch (e) {
 			throw "file cannot be parsed:\n"+e;
 		}
 
 		const jsonPointer = parseJsonPointer(pointer);
 		let action = value === undefined ? "delete" : "set";
-		if (jsonPointer.at(-1) === '-' && value) {
+		if (jsonPointer.at(-1) === '-') {
 			action = "push";
 			jsonPointer.pop();
 		}
@@ -84,7 +69,7 @@ const EditJson = {
 			content: JSON.stringify(obj, null, 2)
 		}, response, global);
 
-		return "success. undoHandle="+JSON.stringify(undo);
+		return "Success. undoHandle="+JSON.stringify(undo);
 	},
 	title: prefixTitle("编辑JSON")
 };
@@ -94,18 +79,19 @@ const EditJson = {
  */
 const WriteJson = {
 	name: "WriteJson",
-	description: "Write or overwrite an JSON file.",
+	description: "Write a JSON file, serializing the content with 2-space indentation.",
 	parameters: {
 		type: "object",
 		properties: {
 			path: { type: "string" },
-			content: { description: "Complete JSON object or array. Replaces all existing content.", type: ["object", "array"], },
+			content: { description: "Complete JSON object or array that replaces all existing content.", type: ["object", "array"], },
+			overwrite: { type: "boolean", default: false }
 		},
 		required: ["path", "content"]
 	},
 
-	script({path, content}, response, global) {
-		return writeFile({path, content: JSON.stringify(content, null, 2)}, response, global);
+	script({path, content, overwrite}, response, global) {
+		return writeFile({path, content: JSON.stringify(content, null, 2), overwrite}, response, global);
 	},
 	title: prefixTitle("写入JSON")
 }
@@ -115,7 +101,8 @@ const WriteJson = {
  */
 const ValidateJson = {
 	name: "ValidateJson",
-	description: "Validate a JSON file (data) based on the JSON schema file.",
+	description: `Validate a JSON file (data) based on the JSON schema file - after edits, before commits, or debugging.
+Returns "valid" on success, or error messages with node path on failure.`,
 	parameters: {
 		type: "object",
 		properties: {
@@ -129,7 +116,7 @@ const ValidateJson = {
 		let schema, data;
 
 		try {
-			data = parseJsonLenient(await readFile({
+			data = parseJson5(await readFile({
 				path: dataPath,
 				noTruncate: true
 			}, response, global));
@@ -138,7 +125,7 @@ const ValidateJson = {
 		}
 
 		try {
-			schema = parseJsonLenient(await readFile({
+			schema = parseJson5(await readFile({
 				path: schemaPath,
 				noTruncate: true
 			}, response, global));
@@ -153,17 +140,18 @@ const ValidateJson = {
 		if (entries.length) return "invalid:\n"+entries.map(([k, v]) => k+": "+v).join("\n");
 		return "valid";
 	},
-	title: (req, ctx = {}) => {
+	title: (req, ctx) => {
 		const toolParameters = getToolParameters(ctx, req);
 		return "根据 "+toolParameters.schemaPath+" 验证 "+toolParameters.dataPath;
 	}
 }
 
-export const registerJsonEditor = () => (
-	registerTools(
-		"JsonEditor",
-		"JSON mutation and validation. (depends on 'Files')",
-		[EditJson, WriteJson, ValidateJson],
-		{systemPrompt}
-	)
+registerToolset(
+	"JsonEditor",
+	"JSON mutation and validation.",
+	[EditJson, WriteJson, ValidateJson],
+	{
+		systemPrompt,
+		depend: ["Files"]
+	}
 );

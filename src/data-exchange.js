@@ -1,4 +1,4 @@
-import {config, conversations, messages, selectedConversation, Shared} from "./states.js";
+import {BRANCH_MANAGER, config, conversations, messages, selectedConversation} from "./states.js";
 import {showToast} from "./components/Toast.js";
 import {deleteDatabase, getMessages, isIDB, kvListGetValues, kvListSet, updateConversation} from "./database.js";
 import {downloadFile, prettyError} from "./utils/utils.js";
@@ -7,7 +7,8 @@ import {ZipReader, ZipWriter} from "unconscious/common/zip-io.js";
 import {$computed, $state, $update, unconscious} from "unconscious";
 import {reloadPresetList} from "./components/PresetDropdown.jsx";
 import {decodeObjects, serializeJSON} from "./utils/marshal.js";
-import {BRANCH_MANAGER} from "./utils/BranchManager.js";
+import {SETTINGS} from "./settings.js";
+import {DI_settings} from "./hooks.js";
 
 const sleep = () => new Promise(resolve => setTimeout(resolve));
 
@@ -101,7 +102,7 @@ const loadBackupZip = async file => {
 		await decodeObjects(data, null);
 		Object.assign(unconscious(config), data);
 		$update(config);
-		Shared.SettingUI.sync();
+		DI_settings.sync();
 		showToast('配置已导入');
 	}
 };
@@ -168,6 +169,7 @@ export const duplicateConversation = async () => {
 		showToast('无对话选中', 'error');
 		return;
 	}
+	conv.title += ' 另存 '+new Date().toISOString();
 
 	await importConversationData({
 		...conv,
@@ -210,8 +212,8 @@ export const exportConversation = async (type, _conv) => {
 			}
 
 			await zw.add("conversations/0.json", jsonData, {
-				timestamp: data.time,
-				compress: true
+				lastModified: data.time,
+				compression: true
 			});
 		} else {
 			const successed = $state(0);
@@ -232,8 +234,8 @@ export const exportConversation = async (type, _conv) => {
 					return serializeJSON(data, 0, zw).then(text => {
 						successed.value ++;
 						return zw.add(`conversations/${reversedIndex}.json`, text, {
-							timestamp: data.time,
-							compress: true
+							lastModified: data.time,
+							compression: true
 						});
 					});
 				}));
@@ -244,7 +246,7 @@ export const exportConversation = async (type, _conv) => {
 		}
 	}
 	if (type&2) {
-		const compression = {compress: true};
+		const compression = {compression: true};
 
 		await zw.add("config.json", JSON.stringify(config), compression);
 
@@ -262,14 +264,47 @@ export const exportConversation = async (type, _conv) => {
 	}
 };
 
-export const clearDatabase = () => {
-	SimpleModal({
-		message: isIDB ? '删除所有数据（对话、预设、历史记录）？' : '重建后端数据库（压缩），有可能出现问题，请备份',
-		accent: 'danger',
-		onConfirm() {
-			deleteDatabase().then(() => {
-				location.reload();
-			})
-		}
-	});
-};
+SETTINGS.push(
+	{
+		type: "element",
+		_tab: ["general", "data"],
+		_id: "import",
+		_order: -3,
+		name: "导入对话、预设、备份及更多格式",
+		element: <div className={"choice-scroll"}>
+			<label className="btn ghost">导入
+				<input type="file" accept="application/zip,application/json,image/png" style="display:none;" multiple onChange={importConversation}/>
+			</label>
+		</div>
+	},
+	{
+		type: "element",
+		_tab: "data",
+		_order: -2,
+		element: <div className={"choice-scroll"}>
+			<button className="btn ghost" onClick={() => exportConversation(1)}>备份对话</button>
+			<button className="btn ghost" onClick={() => exportConversation(2)}>备份预设</button>
+			<button className="btn ghost" onClick={() => exportConversation(7)}>备份所有</button>
+		</div>
+	},
+	{
+		_id: "dd",
+		type: "element",
+		_tab: "data",
+		_order: -1,
+		name: "数据调试",
+		element: <div className={"choice-scroll"}>
+			<button className="btn danger" onClick={() => {
+				SimpleModal({
+					message: isIDB ? '删除所有数据（对话、预设、历史记录）？' : '重建后端数据库（压缩），有可能出现问题，请备份',
+					accent: 'danger',
+					onConfirm() {
+						deleteDatabase().then(() => {
+							location.reload();
+						})
+					}
+				});
+			}}>删库</button>
+		</div>
+	},
+);

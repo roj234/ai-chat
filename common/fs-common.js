@@ -15,7 +15,7 @@ export function createHashLine(fs) {
 		if (cached && mtime <= cached.mtime) return cached;
 
 		const str = await fs.read(path, ctx);
-		const lines = str.split(/\r?\n/).map(item => item.trimEnd());
+		const lines = str.split(/\r?\n/);
 		lines.mtime = mtime;
 		cache.set(path, new WeakRef(lines));
 		return lines;
@@ -25,7 +25,6 @@ export function createHashLine(fs) {
 		let needWarning;
 
 		const lines = await readLines(path, ctx);
-		if (noTruncate) return lines.join('\n');
 
 		const lineCount = lines.length;
 
@@ -41,6 +40,13 @@ export function createHashLine(fs) {
 
 		let last  = limit != null ? first + limit : lineCount;
 		if (last > lineCount) { last = lineCount; needWarning = 'limit'; }
+
+		if (format === 'frontmatter') {
+			let end;
+			return lines[0] === '---' && (end = lines.indexOf('---', 1)) > 0 ? lines.slice(0, end+1).join('\n') : '';
+		}
+
+		if (noTruncate) return lines.slice(first, last).join('\n');
 
 		let truncated = 0;
 		const respLines = [];
@@ -64,9 +70,11 @@ export function createHashLine(fs) {
 		let content = respLines.join('\n') + '\x03';
 		if (truncated || needWarning) {
 			if (truncated) content += `\nTRUNCATED(maxChars): Only ${respLines.length} of ${last - first} (${lineCount} total) lines shown`;
-			if (needWarning) content += `\nOVERFLOW(${needWarning}): Only ${last - first} lines available in requested range`;
+			if (needWarning) content += `\nOVERFLOW(${needWarning}): Only ${last - first} lines available in requested range (${lineCount} total lines)`;
 		} else if (last === lineCount) {
 			content += 'EOF';
+		} else {
+			content += `Total lines: ${lineCount}`;
 		}
 		return content;
 	};
@@ -95,7 +103,7 @@ export function createHashLine(fs) {
 
 		const newLines = [];
 		let lastIndex = 0;
-		let patchReport = 'success';
+		let patchReport = 'Success';
 
 		for (let i = 0; i < patches.length; i++) {
 			const [ start, end, patchLines ] = patches[i];
@@ -111,6 +119,20 @@ export function createHashLine(fs) {
 		return patchReport;
 	};
 
+	const countLines = (content) => {
+		const end = content.length;
+
+		let count = 1;
+		let index = content.indexOf('\n');
+
+		while (index !== -1 && index < end) {
+			count++;
+			index = content.indexOf('\n', index + 1);
+		}
+
+		return count;
+	};
+
 	const edit = async ({ path, search, replace, replaceAll, startLine, endLine }, ctx) => {
 		if (search === replace) throw ('"search" cannot equals to "replace"');
 
@@ -121,8 +143,10 @@ export function createHashLine(fs) {
 		if (!slice.length) throw (`file slice [${startLine}, ${endLine}] is empty!`);
 		const content = slice.join("\n");
 
-		search = search.split("\n").map(item => item.trimEnd()).join("\n");
-		replace = replace.split("\n").map(item => item.trimEnd()).join("\n");
+		search = search.split("\n").join("\n");
+		replace = replace.split("\n").join("\n");
+
+		let prefixLines, replaceLines, originalLines;
 
 		let newContent;
 		if (replaceAll) {
@@ -135,7 +159,11 @@ export function createHashLine(fs) {
 			}
 			if (count === 0) throw (`"search" was not found in the file.`);
 			if (count > 1) throw (`Found ${count} occurrences of the search string — the search must uniquely identify a single location. Please expand the 'search' to include more surrounding context.`);
-			newContent = content.slice(0, lastIdx) + replace + content.slice(lastIdx + search.length);
+			const prefix = content.slice(0, lastIdx);
+			newContent = prefix + replace + content.slice(lastIdx + search.length);
+			prefixLines = actualStart + countLines(prefix);
+			replaceLines = countLines(replace);
+			originalLines = countLines(search);
 		}
 
 		newContent = [
@@ -146,15 +174,23 @@ export function createHashLine(fs) {
 
 		await fs.write(path, newContent, ctx);
 		cache.delete(path);
-		return 'success';
+
+		const delta = replaceLines - originalLines;
+		return `Success.
+Changed lines (new file): ${prefixLines}-${prefixLines + replaceLines}
+Lines: ${lines.length} → ${lines.length + delta} (${delta > 0 ? '+': ''}${delta})`;
 	};
 
-	const write = async ({ path, lines, content }, ctx) => {
-		if (!lines) lines = content.split('\n');
-		const data = content || lines.join('\n');
-		await fs.write(path, data, ctx);
-		cache.set(path, new WeakRef(lines));
-		return 'success';
+	const write = async ({ path, content, overwrite }, ctx) => {
+		if (!overwrite) {
+			try {
+				await fs.mtime(path, ctx);
+				throw 'Error: File already exist';
+			} catch {}
+		}
+		await fs.write(path, content, ctx);
+		cache.set(path, new WeakRef(content.split('\n')));
+		return 'Success';
 	};
 
 	const del = filePath => cache.delete(filePath);

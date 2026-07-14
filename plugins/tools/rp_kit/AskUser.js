@@ -1,6 +1,6 @@
 import {$state, $update, $watch, unconscious} from "unconscious";
 import {inputText} from "/src/states.js";
-import {getToolParameters} from "/src/skills.js";
+import {getToolParameters} from "/src/toolset.js";
 
 /**
  *
@@ -11,7 +11,7 @@ export const AskUser = {
 	name: "AskUser",
 	description: "Ask the user to choose from suggested options or provide a custom answer."
 		+" Use when the next step requires user decision, clarification, or interactive branching."
-		+" You may call this tool multiple times at once."
+		+" Call this tool multiple time to ask multiple questions."
 	,
 	parameters: {
 		type: "object",
@@ -26,9 +26,10 @@ export const AskUser = {
 					type: "string",
 					description: "A concise label or explanation."
 				}
-			}
+			},
+			customAnswerLabel: { type: "string", default: 'Other choice' }
 		},
-		required: ["question", "options"]
+		required: ["question", "options", "customAnswerLabel"]
 	},
 
 	interactive: true, // 要求用户必须做出选择
@@ -70,7 +71,7 @@ export const AskUser = {
 
 						<div className="input">
 						<textarea
-							placeholder="召唤邪神"
+							placeholder={data.customAnswerLabel || "召唤邪神"}
 							ref={ta}
 							rows="2"
 							onInput={() => content.value = ta.value}

@@ -78,6 +78,9 @@ export const PAT_SERVER_SALT = '';
 /** 只接受在这个时间后签发的PAT */
 export const PAT_VALID_AFTER = new Date("2026-01-01").getTime() / 1000;
 
+/** Blob 存储最大大小 */
+export const MAX_UPLOAD_SIZE = 52428800;
+
 // ==========================================
 // 3. 安全与数据库设置
 // ==========================================
@@ -197,19 +200,26 @@ export const LOG_HOOK = (log) => {
 	if (log.cost == null) {
 		const { input_tokens = 0, cached_tokens = 0, cache_write_tokens = 0, output_tokens = 0, provider } = log;
 
+		const price = (input, out, cached, unit = 'CNY') => {
+			log.currency = unit;
+			log.cost = (input * input_tokens + cached * cached_tokens + out * output_tokens) / 1000000;
+		};
+
 		// 每百万 Token 价格
 		if (log.model === "deepseek-v4-pro") {
-			const CACHE_READ_PRICE = 0.025, INPUT_PRICE = 3, OUTPUT_PRICE = 6;
-
-			log.currency = "CNY";
-			log.cost = (INPUT_PRICE * input_tokens + CACHE_READ_PRICE * cached_tokens + OUTPUT_PRICE * output_tokens) / 1000000;
+			price(3, 6, 0.025);
 		}
-
-		if (log.model === "gpt-5.5") {
-			const CACHE_READ_PRICE = 0.5, INPUT_PRICE = 5, OUTPUT_PRICE = 30;
-
-			log.currency = "USD";
-			log.cost = (INPUT_PRICE * input_tokens + CACHE_READ_PRICE * cached_tokens + OUTPUT_PRICE * output_tokens) / 1000000;
+		if (log.model === "deepseek-v4-flash") {
+			price(1.5, 3, 0.0125);
+		}
+		if (log.model === "gpt-5.6-sol") {
+			price(5, 30, 0.5, 'USD');
+		}
+		if (log.model === "gpt-5.6-terra") {
+			price(2, 12, 0.2, 'USD');
+		}
+		if (log.model === "gpt-5.6-luna") {
+			price(0.2, 1.2, 0.02, 'USD');
 		}
 	}
 };

@@ -2,8 +2,9 @@ import {searchMessages} from "../src/database.js";
 
 import "./search.css";
 import {formatDate} from "unconscious/common/Utils.js";
-import {conversations, isMobile, selectedConversation} from "../src/states.js";
-import {onLoad} from "../src/plugin.js";
+import {conversations, isMobile, selectedConversation, switchToConversation} from "../src/states.js";
+import {onLoad} from "../src/hooks.js";
+import {renderMarkdownToElement} from "../src/markdown/markdown.js";
 
 const searchBtn = <button className={"ri-search-line btn ghost"} title={"搜索对话"} onClick={() => {
 	searchBtn.replaceWith(searchInput);
@@ -26,8 +27,10 @@ const searchInput = <div style={"position:absolute;z-index:1;background:var(--bg
 				<div className="modal-overlay" style={"background:transparent;pointer-events:none"}>
 					<div className="modal" style={"pointer-events:all;"+(isMobile?"":"max-width:60vw")}
 						 onClick={(e) => e.stopPropagation()}>
-						<div className="header"><b>{str}的搜索结果</b>
-							<button className="btn ghost" onClick={handleClose}>关闭</button>
+						<div className="header">
+							<b>{str}的搜索结果</b>
+							<div className={"spacer"} />
+							<button className="ri-close-line btn ghost" onClick={handleClose} title={"关闭"}/>
 						</div>
 						<div style={"padding:0;overflow:auto"}>
 							{convs?.length ? convs.map(AccordionItem) :
@@ -80,8 +83,7 @@ function AccordionItem(item) {
 					<button className={"btn ghost"} onClick.stop={() => {
 						if (selectedConversation.id !== item.id) {
 							const value = conversations.find(it => it.id === item.id);
-							value.ready = false;
-							selectedConversation.value = value;
+							switchToConversation(value);
 						}
 					}}>转到</button>
 				</div>
@@ -93,9 +95,9 @@ function AccordionItem(item) {
 			<div className="result-body" ref={bodyEl}>
 				<div className="messages-container">
 					{item.messages.map(msg => (
-						<div className={`message ${msg.role}`} key={msg.id}>
-							<span className="message-role">{msg.role === 'user' ? '你' : msg.model || msg.role}</span>
-							<div className="message-bubble">{msg.content}</div>
+						<div className={`msg alt ${msg.role}`}>
+							<span className="role"><b>{msg.role === 'user' ? '你' : msg.model || msg.role}</b></span>
+							<div className="body">{renderMarkdownToElement(<div className={'md'} />, msg.content)}</div>
 						</div>
 					))}
 				</div>

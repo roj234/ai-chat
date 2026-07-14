@@ -15,22 +15,20 @@ const connections = new Map();
 const usageTimestamps = new Map();
 
 /**
- *
- * @param {DatabaseSync} sqlite
- * @param {AiChatBackend.VectorDB} vector
+ * @param {string} user
  */
-function closeConnection({sqlite, vector}) {
-	sqlite.exec(SHUTDOWN_SQL);
-	sqlite.close();
+async function closeConnection(user) {
+	const data = connections.get(user);
+	if (!data) return;
+	connections.delete(user);
 
-	vector?.close();
+	data.sqlite.exec(SHUTDOWN_SQL);
+	data.sqlite.close();
+
+	await data.vector?.close();
 }
 
-export function closeAllConnections() {
-	for (const value of connections.values()) {
-		closeConnection(value);
-	}
-}
+export const closeAllConnections = () => Promise.all([...connections.keys()].map(closeConnection));
 
 /**
  *
@@ -52,7 +50,6 @@ export function loadUserData(dbPath, userId) {
 		}
 		if (oldestUser && Date.now() - oldestTime > 5000) {
 			closeConnection(connections.get(oldestUser));
-			connections.delete(oldestUser);
 			usageTimestamps.delete(oldestUser);
 		}
 	}

@@ -1,7 +1,7 @@
-import {getToolParameters, TOOL_NAME, updateConversationState, watchConversationState} from "/src/skills.js";
+import {getToolParameters, TOOL_NAME, updateConversationState, watchConversationState} from "/src/toolset.js";
 import {$state, appendChild, unconscious} from "unconscious";
 import {messages, onConversationLoaded} from "/src/states.js";
-import {onLoad} from "/src/plugin.js";
+import {onLoad} from "/src/hooks.js";
 import {renderMarkdownToElement} from "/src/markdown/markdown.js";
 import {jsonGet} from "unconscious/common/json-schema-utils.js";
 

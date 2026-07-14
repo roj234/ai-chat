@@ -12,8 +12,6 @@
     --tl-panel-max-height:480px;
 
     --tl-header-bg:       #252c34;
-    --tl-padding-x:       14px;
-    --tl-padding-y:       10px;
 
     --tl-item-gap:        6px;
     --tl-item-padding:    8px 12px;
@@ -22,7 +20,6 @@
     --tl-desc-size:       11px;
     --tl-line-height:     1.4;
 
-    --tl-progress-h:      3px;
     --tl-progress-bg:     #373e47;
     --tl-progress-fill:   #58a6ff;
 }
@@ -43,7 +40,7 @@
 .TaskListPanel {
     width: var(--tl-panel-width);
     max-height: var(--tl-panel-max-height);
-    background: var(--tl-panel-bg);
+    background: var(--tl-panel-bg) !important;
     border: 1px solid var(--tl-panel-border);
     border-radius: var(--tl-panel-radius);
     box-shadow: var(--tl-panel-shadow);
@@ -58,9 +55,7 @@
 
     /* 折叠态 */
     &.collapsed {
-        & .body,
-        & .footer { display: none; }
-
+        & .body { display: none; }
         & .collapse { rotate: 90deg; }
     }
 
@@ -69,7 +64,7 @@
         display: flex;
         align-items: center;
         gap: 10px;
-        padding: var(--tl-padding-y) var(--tl-padding-x);
+        padding: 8px 10px;
         background: var(--tl-header-bg);
         border-bottom: 1px solid var(--tl-panel-border);
         user-select: none;
@@ -78,7 +73,7 @@
     /* ── 进度条 ── */
     & .progressBar {
         flex: 1;
-        height: var(--tl-progress-h);
+        height: 2px;
         background: var(--tl-progress-bg);
         border-radius: 99px;
     }
@@ -124,7 +119,7 @@
 
     /* ── footer ── */
     & .footer {
-        padding: 6px var(--tl-padding-x);
+        padding: 6px 10px;
         color: var(--muted);
         border-top: 1px solid var(--tl-panel-border);
         display: flex;

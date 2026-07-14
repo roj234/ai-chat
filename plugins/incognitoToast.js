@@ -1,7 +1,7 @@
 import {config} from "/src/states.js";
 import {showToast} from "/src/components/Toast.js";
 import {$computed, $watch} from "unconscious";
-import {onLoad} from "/src/plugin.js";
+import {onLoad} from "/src/hooks.js";
 
 onLoad(() => {
 	let incognitoToast;

@@ -6,9 +6,8 @@ import {createHash} from 'node:crypto';
 
 import {DatabaseSync} from 'node:sqlite';
 import {cachePreparedSql} from "../utils/sqliteUtils.js";
+import {MAX_UPLOAD_SIZE} from "../config.js";
 
-// 50MB
-const MAX_UPLOAD_SIZE = 52428800;
 // 数据库版本号
 const DB_VERSION = 1;
 
@@ -33,7 +32,6 @@ CREATE TABLE blobs (
     hash BLOB PRIMARY KEY,
     type TEXT NOT NULL,
     name TEXT NOT NULL,
-	indexedName TEXT UNIQUE NULL,
     size INTEGER NOT NULL,
     lastModified INTEGER NOT NULL
 ) WITHOUT ROWID;
@@ -59,28 +57,6 @@ PRAGMA user_version = `+DB_VERSION);
 		const hashBuf = Buffer.from(hash, 'base64url');
 		const row = db.prepare('SELECT name, type, size, lastModified FROM blobs WHERE hash = ?').get(hashBuf);
 		return row ? row : {error: 'not found'};
-	};
-
-	// 文件库接口
-	batcher["blob/by-name"] = (name) => {
-		const row = db.prepare('SELECT * FROM blobs WHERE indexedName = ?').get(name);
-		if (!row) return {error: 'not found'};
-		row.hash = Buffer.from(row.hash).toString('base64url');
-		return row;
-	};
-	batcher["blob/set-name"] = ([hash, name]) => {
-		const hashBuf = Buffer.from(hash, 'base64url');
-
-		db.exec('BEGIN');
-		try {
-			db.prepare('UPDATE blobs SET indexedName = NULL WHERE indexedName = ? AND hash != ?').run(name, hashBuf)
-			const result = db.prepare('UPDATE blobs SET indexedName = ? WHERE hash = ?').run(name, hashBuf);
-			db.exec('COMMIT');
-			return result.changes > 0;
-		} catch (e) {
-			db.exec('ROLLBACK');
-			throw e;
-		}
 	};
 
 	// 下载 Blob

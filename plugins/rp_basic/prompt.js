@@ -5,7 +5,7 @@ import {debugSymbol} from "unconscious";
 export const DEFAULT_USER_NAME = 'Tav'; // see Baldur's Gate 3
 
 // 按照酒馆的命名，这叫宏
-export const applyMacro = (prompt, ctx = {}) => prompt.replaceAll(/\{\{(.+?)}}/g, (text, match) => {
+export const applyMacro = (prompt, ctx) => prompt.replaceAll(/\{\{(.+?)}}/g, (text, match) => {
 	return ctx[match] || text;
 });
 
@@ -155,23 +155,16 @@ export const applyPreset = ({prompts, regexps}, ctx, jsonMessages, prefill) => {
 		messages.shift();
 	}
 
-	if (config.st_postProcess) {
-		const offset = message[0]?.role === "system" ? 0 : 1;
-		for (let i = 0; i < messages.length; i++){
-			const item = messages[i];
-			switch (config.st_postProcess) {
-				case 1: {
-					if (item.role === "system" && i) {
-						item.role = "user";
-					}
-				}
-					break;
-				case 2: {
-					if (!offset && !i) continue;
-					item.role = (i + offset) % 2 ? "assistant" : "user";
-				}
-					break;
-			}
+	const offset = message[0]?.role === "system" ? 0 : 1;
+	for (let i = 0; i < messages.length; i++){
+		const item = messages[i];
+		if (item.role === "system" && i) {
+			item.role = "user";
+		}
+
+		if (config.st_postProcess) {
+			if (!offset && !i) continue;
+			item.role = (i + offset) % 2 ? "assistant" : "user";
 		}
 	}
 

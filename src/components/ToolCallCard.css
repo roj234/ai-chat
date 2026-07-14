@@ -59,18 +59,19 @@
     }
 
     &.tool-pending {
-        background-color: var(--tool-pending-bg);
-        border: 1px solid var(--tool-pending-border);
-        border-left: 4px solid var(--tool-pending-accent);
+        background-color: var(--warning-bg);
+        border: 1px solid var(--warning-border);
+        border-left: 4px solid var(--warning-accent);
         border-radius: 4px;
 
-        & .rerun-btn {
+        & .rerun-btn, &.pend-expand > :nth-child(3) {
             display: none;
         }
+
         & .warning {
             background: transparent;
-            border: 1px solid var(--tool-pending-accent);
-            color: var(--tool-pending-accent);
+            border: 1px solid var(--warning-accent);
+            color: var(--warning-accent);
             cursor: pointer;
 
             &:hover {

@@ -1,6 +1,6 @@
 import {$state} from "unconscious";
 import {submitUserChatMessage} from "/src/api-request.js";
-import {getToolParameters} from "/src/skills.js";
+import {getToolParameters} from "/src/toolset.js";
 
 /**
  * @type {AiChat.FunctionTool<{
@@ -10,15 +10,14 @@ import {getToolParameters} from "/src/skills.js";
 export const SetTimeout = {
 	name: "SetTimeout",
 	description:
-		"Create a real-time countdown timer and receive a message when it finishes. "
+		"Create a real-time timer and receive a message when it finishes. "
 		+ "If the user replies before the deadline, the tool call resolves with result: 'userInput'. "
-		+ "If the user fails to respond in time, the tool call resolves with result: 'timeout'. "
+		+ "Otherwise the tool call resolves with result: 'timeout'. "
 		+ "\n"
-		+ "IMPORTANT — account reading / typing latency. The user needs time to read the prompt, think, type, and send. "
-		+ "10 seconds is only appropriate for single-key / single-click prompts. "
+		+ "Use for timed interactions (QTE), reminders, or waiting real-time events. "
 		+ "\n"
-		+ "Use for timed interactions, reminders inside a scenario, or delayed real-time events. "
-		+ "Use only when real elapsed time matters, not for fictional time skips or ordinary narrative pacing.",
+		+ "Note for QTE: account reading / typing latency. The user needs time to read the prompt, think, type, and send. "
+		+ "10 seconds is only appropriate for single-key / single-click prompts. ",
 	interactive: true,
 	parameters: {
 		type: "object",
@@ -34,33 +33,50 @@ export const SetTimeout = {
 				minimum: 10,
 				maximum: 300
 			},
+			deadline: {
+				type: "string",
+				description: "ISO 8601 timestamp. Mutually exclusive with `timeout`.",
+				example: "2026-06-01T08:00:00+08:00"
+			}
 		},
-		required: ["label", "timeout"],
+		required: ["label"],
+	},
+	title(req, ctx) {
+		const par = getToolParameters(ctx, req);
+		return `等待 ${par.timeout}s: ` + par.label;
 	},
 
-	script({ timeout, label }, response)  {
-		response.deadline = Date.now() + timeout * 1000;
-		// return undefined
+	script({ timeout, deadline, label }, response)  {
+		let ddl;
+		if (timeout != null) {
+			if (deadline) throw 'Both timeout and deadline is specified';
+			ddl = Date.now() + timeout * 1000;
+		} else {
+			if (!deadline) throw 'Neither timeout or deadline is specified';
+			ddl = new Date(deadline);
+			if (isNaN(ddl)) throw 'Invalid Date';
+		}
+
+		response.deadline = ddl;
+		return ''
 	},
 	keyFunc(keys, response, frozen) {
 		keys.push(frozen);
-		if (frozen && !response.success) {
-			response.success = true;
+		if (frozen && !response.content) {
 			response.content = 'userInput';
 		}
 	},
 	renderer(response, has_successor, call) {
 		if (has_successor) return;
 
-		const {label, timeout} = getToolParameters(response, call);
+		const {timeout} = getToolParameters(response, call);
 		const deadline = response.deadline;
 
 		let start = Date.now();
 		const percent = $state(start < deadline ? 0 : 100);
 
 		const onFinish = () => {
-			if (!response.success) {
-				response.success = true;
+			if (!response.content) {
 				response.content = `timeout`;
 				submitUserChatMessage();
 			}
@@ -81,7 +97,6 @@ export const SetTimeout = {
 
 		const el = (
 			<div className="rp-timer">
-				<span>⏳ {label} ({timeout}s)</span>
 				<div className="progress">
 					<div
 						className="bar"

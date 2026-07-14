@@ -1,5 +1,5 @@
-import {getToolParameters, jsonEval, updateConversationState} from "/src/skills.js";
-import {jsonGet, parseJsonPointer} from "unconscious/common/json-schema-utils.js";
+import {getToolParameters, updateConversationState} from "/src/toolset.js";
+import {jsonEval, jsonGet, parseJsonPointer} from "unconscious/common/json-schema-utils.js";
 import {showToast} from "/src/components/Toast.js";
 import {prettyError} from "/src/utils/utils.js";
 
@@ -12,27 +12,22 @@ const operationLabels = { set: '更新', plus: '增加', delete: '移除' };
 export const UpdateVariable = {
 	name: "UpdateVariable",
 	description: `Update structured state such as inventories, HP, task progress, scores, flags, and temporary simulation data.
-Use this for state that must persist during current conversation.
-This is NOT cross-conversation memory.
+Use this for state that must persist in current conversation.
 
 Variable naming: camelCase
 
-Operation semantics:
+Operations:
+- set: Overwrite, accepts any type. Missing intermediates are initialized to \`{}\`. Pointer ends with \`/-\` to append \`value\` to the array. (eg: \`/inventory/items/-\`).
+- plus: Numeric delta, target must be a number; \`value\` is added as an increment (negative = decrement). If the path does not exist, baseline is 0.
+- delete: Remove target: omit \`value\`.  Array element target will be spliced: delete "/inventory/items/1" -> splice index 1
 
-- set     Overwrite: accepts any type. Missing intermediate objects are auto-created.
-          Use \`/-\` as the final segment to append to an array (eg: \`/inventory/items/-\`).
-- plus    Numeric delta: target must be a number; \`value\` is added as an increment (negative = decrement). If the path does not exist, baseline is 0.
-- delete  Remove target: omit \`value\`. 
-          Array element target will be spliced: delete "/inventory/items/1" -> splice index 1
-
-Return value: the new value at the pointer after the operation completes.`
-	,
+Returns new value at the pointer after the operation completes.`,
 	parameters: {
 		type: "object",
 		properties: {
 			// maybe a MOVE(from, to)
 			operation: { enum: ["set", "plus", "delete"], },
-			pointer: {pattern: "^/[a-zA-Z0-9/]+-?$", description: `JSON Pointer like "/player/hp" or "/inventory/items/0"; `},
+			pointer: {pattern: "^/[a-zA-Z0-9/]+-?$", description: `JSON Pointer (RFC 6901)`},
 			explanation: {
 				type: "string",
 				description: "One sentence human-readable summary of why change it."
@@ -106,7 +101,7 @@ Return value: the new value at the pointer after the operation completes.`
 
 		updateConversationState(conv, "IS:variables");
 	},
-	title(tc, ctx = {}) {
+	title(tc, ctx) {
 		const { pointer, operation, value } = getToolParameters(ctx, tc);
 
 		return (
@@ -136,5 +131,5 @@ export const GetVariable = {
 		const value = jsonGet(conv.variables, pointer);
 		return value === undefined ? "undefined" : value;
 	},
-	title(tc, ctx = {}) { return "读取变量 "+getToolParameters(ctx, tc).pointer; }
+	title(tc, ctx) { return "读取变量 "+getToolParameters(ctx, tc).pointer; }
 };

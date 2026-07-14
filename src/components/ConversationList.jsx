@@ -1,22 +1,29 @@
 import './ConversationList.css';
 import {VirtualList} from 'unconscious/common/VirtualList.js';
 import {formatDate} from 'unconscious/common/Utils.js';
-import {$state, $update, $watch, $watchWithCleanup, debugSymbol, ONCE_EVENT, unconscious} from 'unconscious';
+import {$state, $update, $watch, $watchWithCleanup, ONCE_EVENT, unconscious} from 'unconscious';
 import {deleteConversation, getKV, setKV, updateConversation} from "../database.js";
-import {conversations, isMobile, messages, runningConversations, selectedConversation} from "../states.js";
+import {
+	conversations,
+	isMobile,
+	LOCKED,
+	messages,
+	runningConversations,
+	selectedConversation,
+	switchToConversation,
+	updateConversationListUI
+} from "../states.js";
 import SimpleModal from "./SimpleModal.jsx";
 import {exportConversation} from "../data-exchange.js";
-import {onLoad} from "../plugin.js";
+import {onLoad} from "../hooks.js";
 import "/plugins/rp_basic/TagList.css";
 
-export const updateConversationListUI = $state();
-export const LOCKED = debugSymbol("CONV_LOCKED");
 let PINNED_ITEMS = new Set;
 
 const closeHoverMenu = (e) => {
 	if (hoverMenu.isConnected) {
 		requestAnimationFrame(() => hoverMenu.remove(true));
-		if (e.target.closest('.tag-dropdown') !== hoverMenu)
+		if (e.target.closest('.dropdown') !== hoverMenu)
 			e.stopPropagation();
 	}
 };
@@ -26,8 +33,8 @@ const closeHoverMenu = (e) => {
  * @type {import("unconscious").Reactive<number>}
  */
 const hoverConversationIndex = $state({});
-const hoverMenu = <div className={"tag-dropdown"} style={"position:fixed"}>
-	<div className="list" style={"display:block;left:-50%"}>
+const hoverMenu = <div className={"dropdown"} style={"position:fixed"}>
+	<div className="list mid" style={"display:block;"}>
 		<label data-action={"edit"}>编辑标题</label>
 		<label data-action={"export"}>导出</label>
 		<label data-action={"pin"}>{() => PINNED_ITEMS.has(unconscious(hoverConversationIndex)) ? "取消置顶" : "置顶"}</label>
@@ -179,15 +186,8 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 		if (active) active.classList.remove('active');
 		owner.classList.add('active');
 
-		const val = runningConversations.get(conv.id);
-		if (val) {
-			messages.value = val.messages;
-		} else {
-			conv.ready = false;
-		}
-
+		switchToConversation(conv);
 		skipNext = 1;
-		selectedConversation.value = conv;
 	};
 
 	const mouseHandler = (e) => {
@@ -221,7 +221,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 			return <div
 				_conv={conv}
 				className={`chat-item${unconscious(selectedConversation) === conv ? ' active' : ''}`}
-				title={conv.title+"\n"+formatDate("Y-m-d H:i:s", conv.time)}
+				title={conv.title+" (#"+conv.id+")\n"+formatDate("Y-m-d H:i:s", conv.time)}
 			>
 				{runningConversations.has(conv.id) && <span className={"spinner"} />}
 				{conv[LOCKED] && <span className="ri-lock-line" title={"其它端正在编辑"} />}
@@ -250,9 +250,15 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 		groupAndConvArr.length = 0;
 
 		const groups = groupConversations();
+		for (let i = 0; i < 5; i++) {
+			const val = groups.get(i);
+			if (val) {
+				groupAndConvArr.push(<div className="chat-group"><div>{GROUP_LABELS[i]}</div></div>, ...val);
+				groups.delete(i);
+			}
+		}
 		for (const [k, v] of [...groups].sort(([ka], [kb]) => ka - kb)) {
-			groupAndConvArr.push(<div className="chat-group"><div>{GROUP_LABELS[k] || k}</div></div>);
-			groupAndConvArr.push(...v);
+			groupAndConvArr.push(<div className="chat-group"><div>{k}</div></div>, ...v);
 		}
 		vl.render();
 	}, false);

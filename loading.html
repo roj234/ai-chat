@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>赛博朋克 Loading 页面</title>
+</head>
+<body>
+<!--START-->
+<div id="loading">
+    <style>
+        /* 背景网格 */
+        #loading {
+            --cyan: #00f0ff;
+            --magenta: #ff00de;
+            --yellow: #f5e73d;
+            --green: #39ff14;
+            --bg: #0a0a0f;
+
+            position: fixed;
+            inset: 0;
+
+            font-family: 'Courier New', 'Source Code Pro', 'Consolas', monospace;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            background-color: var(--bg);
+            background-image:
+                    linear-gradient(rgba(0, 240, 255, 0.04) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(0, 240, 255, 0.04) 1px, transparent 1px);
+            background-size: 40px 40px;
+            animation: gridMove 4s linear infinite;
+            z-index: 99;
+        }
+
+        @keyframes gridMove {
+            0% {  background-position: 0 0, 0 0; }
+            100% { background-position: 0 40px, 40px 0; }
+        }
+
+        .box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 35px;
+        }
+
+        .rings {
+            position: relative;
+            width: 160px;
+            height: 160px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            & > * {
+                position: absolute;
+                aspect-ratio: 1;
+            }
+        }
+        .ring1 {
+            width: 100%;
+            border: 2px solid transparent;
+            border-radius: 50%;
+            border-top-color: var(--cyan);
+            border-right-color: var(--cyan);
+            animation: spin 2s linear infinite;
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.4), inset 0 0 15px rgba(0, 240, 255, 0.1);
+        }
+        .ring2 {
+            width: 75%;
+            border: 2px solid transparent;
+            border-radius: 50%;
+            border-bottom-color: var(--magenta);
+            border-left-color: var(--magenta);
+            animation: spin 3s linear reverse infinite;
+            box-shadow: 0 0 15px rgba(255, 0, 222, 0.4), inset 0 0 15px rgba(255, 0, 222, 0.1);
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .hexagon {
+            width: 55%;
+
+            & svg {
+                animation: spin 8s linear infinite;
+                filter: drop-shadow(0 0 8px var(--cyan)) drop-shadow(0 0 16px rgba(0, 240, 255, 0.6));
+            }
+            & svg polygon {
+                fill: none;
+                stroke-width: 2;
+                stroke-dasharray: 200;
+                animation: hexDash 3s ease-in-out infinite;
+            }
+        }
+        @keyframes hexDash {
+            0%,
+            100% {
+                stroke-dashoffset: 0;
+                stroke: var(--yellow);
+            }
+            50% {
+                stroke-dashoffset: 400;
+                stroke: var(--cyan);
+            }
+        }
+
+        .glitch {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            animation: glitch 4s steps(1) infinite;
+        }
+        @keyframes glitch {
+            0%,
+            92%,
+            94%,
+            96%,
+            100% {
+                opacity: 0;
+                transform: translate(0, 0);
+            }
+            93% {
+                opacity: 0.8;
+                transform: translate(-6px, 2px);
+                color: var(--magenta);
+                text-shadow: -2px 0 var(--magenta), 2px 0 var(--cyan);
+            }
+            95% {
+                opacity: 0.7;
+                transform: translate(5px, -2px);
+                color: var(--cyan);
+                text-shadow: 2px 0 var(--cyan), -2px 0 var(--magenta);
+            }
+        }
+
+        .title-section {
+            text-align: center;
+            position: relative;
+
+            & .main {
+                font-size: 1.6rem;
+                font-weight: bold;
+                letter-spacing: 4px;
+                color: #fff;
+                position: relative;
+                text-shadow: 0 0 8px var(--cyan), 0 0 25px rgba(0, 240, 255, 0.5);
+            }
+            & .sub {
+                font-size: 0.75rem;
+                letter-spacing: 6px;
+                color: rgba(255, 255, 255, 0.6);
+                margin-top: 6px;
+                text-shadow: 0 0 5px rgba(0, 240, 255, 0.3);
+            }
+        }
+
+        #loading.exiting {
+            animation: crtShutdown 0.5s cubic-bezier(0.25, 0, 0.55, 1) forwards;
+            pointer-events: none;
+        }
+
+        @keyframes crtShutdown {
+            50% {
+                transform: scaleY(0.015) scaleX(1);
+            }
+            75% {
+                background-color: #fff;
+                filter: brightness(1);
+            }
+            100% {
+                transform: scaleY(0) scaleX(0);
+                filter: brightness(10);
+            }
+        }
+    </style>
+
+    <div class="box">
+        <div class="rings">
+            <div class="ring1"></div>
+            <div class="ring2"></div>
+            <div class="hexagon">
+                <svg viewBox="0 0 100 100">
+                    <polygon points="50,5 90,25 90,75 50,95 10,75 10,25" />
+                </svg>
+            </div>
+        </div>
+
+        <div class="title-section">
+            <div id="t" class="main">
+                启用 JavaScript 以继续
+                <span class="glitch">启用 JavaScript 以继续</span>
+            </div>
+            <script>
+                t.innerHTML = t.innerHTML.replaceAll("启用 JavaScript 以继续", document.startViewTransition ? "系统加载中" : "你的浏览器版本过低 (&lt; Chrome 111)<br/>我们不对因此导致的任何问题负责");
+            </script>
+            <div class="sub">SYSTEM LOADING</div>
+        </div>
+    </div>
+</div>
+<!--END-->
+</body>
+</html>

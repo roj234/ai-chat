@@ -52,7 +52,6 @@ declare namespace OpenAI {
     interface BaseReasoningDetail {
         id: string;
         format: 'unknown' | 'openai-responses-v1' | 'xai-responses-v1' | 'anthropic-claude-v1' | 'google-gemini-v1';
-        index?: number;
     }
 
     interface ReasoningSummary extends BaseReasoningDetail {
@@ -182,7 +181,7 @@ declare namespace OpenAI {
         messages: Message[];
         frequency_penalty?: number; // -2.0 到 2.0，默认 0
         presence_penalty?: number; // -2.0 到 2.0，默认 0
-        max_tokens?: number; // 最大令牌数，1 到 4096+
+        max_completion_tokens?: number; // 最大令牌数，1 到 4096+
         n?: number; // 生成的完成数量，默认 1
         temperature?: number; // 0 到 2，默认 1
         top_p?: number; // 0 到 1，默认 1

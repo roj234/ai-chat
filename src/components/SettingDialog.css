@@ -1,7 +1,7 @@
 .ntp {
     flex-direction: row;
     height: 64dvh;
-    max-width: 768px;
+    width: 90%;
 
     & >div {
         padding: 0;

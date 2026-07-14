@@ -4,8 +4,27 @@ import {applyDelta, sseFetch} from "../../common/openai-api-utils.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {Transform} from 'node:stream';
+import {createSocks5Agent} from "../utils/socks5-agent.js";
 
 const log = (str, ...args) => console.log(`[SSE Proxy] `+str, ...args);
+
+const proxyCache = new Map;
+const getProxyAgent = (proxyUrl) => {
+	if (!proxyUrl) return; // undefined
+	let proxyAgent = proxyCache.get(proxyUrl);
+	if (!proxyAgent) {
+		proxyCache.set(proxyUrl, proxyAgent = createSocks5Agent(proxyUrl));
+	}
+	return proxyAgent;
+}
+
+const agentOptions = {
+	keepAlive: true,
+	//keepAliveMsecs: 1000,
+	freeSocketTimeout: 60000,
+	scheduling: 'lifo',
+	maxSockets: 100
+};
 
 /**
  *
@@ -13,26 +32,28 @@ const log = (str, ...args) => console.log(`[SSE Proxy] `+str, ...args);
  */
 const activeRequests = new Map;
 
-function authorize(ctx) {
+function checkToken(ctx) {
 	let {authorization} = ctx.req.headers;
 	if (!authorization?.startsWith("Bearer ")) return ctx.send(403, { error: 'unknown key' });
 	authorization = authorization.slice(7);
 
-	let url;
+	let url, proxy;
 	let backend = SSE_PROXY_BACKEND[authorization];
 	if (backend) {
 		url = backend.url;
+		proxy = backend.proxy;
 		authorization = backend.authorization;
 	} else {
 		backend = SSE_PROXY_BACKEND['default'];
 		if (!backend) return ctx.send(403, { error: 'unknown key' });
 
 		url = backend.url;
+		proxy = backend.proxy;
 		if (backend.authorization) authorization = backend.authorization;
 	}
 
 	if (!url) return ctx.send(403, { error: 'unknown key' });
-	return [url, authorization];
+	return [url, authorization, proxy];
 }
 
 /**
@@ -78,9 +99,9 @@ function createLimiter(source, maxLength) {
  * @return {Promise<void>}
  */
 async function SSEHandler(logPath, apiPath, ctx) {
-	let result = authorize(ctx);
+	let result = checkToken(ctx);
 	if (!result) return;
-	let [baseUrl, authorization] = result;
+	let [baseUrl, authorization, proxyUrl] = result;
 	if (!baseUrl.endsWith("/")) baseUrl += '/';
 
 	const moderation = SSE_PROXY_MODERATION(baseUrl, authorization, ctx);
@@ -149,9 +170,11 @@ async function SSEHandler(logPath, apiPath, ctx) {
 			body,
 			duplex,
 			signal: abort.signal,
+			agent: getProxyAgent(proxyUrl),
 			key: authorization
 		}, (chunk, isPlainJson) => {
 			const now = Date.now();
+			const id = chunk.id;
 
 			if (isPlainJson) {
 				const response = JSON.stringify(chunk);
@@ -159,7 +182,8 @@ async function SSEHandler(logPath, apiPath, ctx) {
 				// non-stream response
 				if (SSE_PROXY_TRACE) {
 					const fileName = `${logPath}/${encodeURIComponent(id)}_${now%1000}.jsonl`;
-					fs.appendFile(fileName, body)
+					fs.mkdir(logPath, {recursive: true})
+						.then(() => fs.appendFile(fileName, body))
 						.then(() => fs.appendFile(fileName, '\n'))
 						.then(() => fs.appendFile(fileName, response));
 				}
@@ -170,7 +194,6 @@ async function SSEHandler(logPath, apiPath, ctx) {
 			}
 
 			if (!proxyRequest) {
-				const id = chunk.id;
 				log('响应开始', id);
 				if (null == id) return;
 
@@ -185,12 +208,12 @@ async function SSEHandler(logPath, apiPath, ctx) {
 				if (SSE_PROXY_TRACE) {
 					const fileName = `${logPath}/${encodeURIComponent(id)}_${now%1000}.jsonl`;
 					proxyRequest._fileName = fileName;
-					proxyRequest._append = fs.appendFile(fileName, body);
+					proxyRequest._append = fs.mkdir(logPath, {recursive: true}).then(() => fs.appendFile(fileName, body));
 				}
 
 				ctx.res.writeHead(200, { 'Content-Type': 'text/event-stream' });
 
-				chunk.resumable = { start: startTime, ft: now };
+				chunk.resumable = { start: startTime, ft: now, now };
 			}
 
 			const serialized = JSON.stringify(chunk);
@@ -204,6 +227,10 @@ async function SSEHandler(logPath, apiPath, ctx) {
 				for (let i = 0; i < choices.length; i++){
 					const {delta, ...rest} = choices[i];
 					if (!out_choices[i]) out_choices[i] = { delta: {} };
+
+					// reasoning end
+					if (delta.content && !completion.resumable.re)
+						completion.resumable.re = now;
 
 					Object.assign(out_choices[i], rest);
 					applyDelta(out_choices[i].delta, delta);
@@ -231,7 +258,7 @@ async function SSEHandler(logPath, apiPath, ctx) {
 			const obj = message.error ? message : { error: message };
 
 			if (proxyRequest) {
-				sendChunk(obj);
+				sendChunk(JSON.stringify(obj));
 			} else {
 				ctx.send(status, obj);
 			}
@@ -271,7 +298,6 @@ const modelCache = new Map;
  */
 export function registerSSEProxyRoutes(router, dataPath) {
 	const logPath = path.join(dataPath, "logs");
-	if (SSE_PROXY_TRACE) fs.mkdir(logPath, {recursive: true});
 
 	router.post("/models/wipe_cache", (ctx) => {
 		modelCache.clear();
@@ -279,18 +305,22 @@ export function registerSSEProxyRoutes(router, dataPath) {
 	});
 
 	router.get('/models', async (ctx) => {
-		let result = authorize(ctx);
+		let result = checkToken(ctx);
 		if (!result) return;
-		const [url, authorization] = result;
+		let [baseUrl, authorization, proxyUrl] = result;
+		if (!baseUrl.endsWith("/")) baseUrl += '/';
 
-		const key = url+"|"+authorization;
+		const key = baseUrl+"|"+authorization;
 		const res = ctx.res;
 		let cache = modelCache.get(key);
 		if (!cache || Date.now() - cache.time > 3600000) {
-			const proxyRes = await fetch(url+'/models', { headers: {
-				accept: "application/json",
-				authorization: "Bearer "+authorization,
-			} });
+			const proxyRes = await fetch(baseUrl+'models', {
+				headers: {
+					accept: "application/json",
+					authorization: "Bearer "+authorization,
+				},
+				agent: getProxyAgent(proxyUrl)
+			});
 
 			const data = await proxyRes.text();
 
@@ -328,6 +358,7 @@ export function registerSSEProxyRoutes(router, dataPath) {
 		}
 
 		// 如果是多线程，这里可能需要加锁，但是JS是谦让式协程，所以没什么好担心的
+		if (!data.resumable.end) data.resumable.now = Date.now();
 		onData(JSON.stringify(data));
 		if (isFinished) { onEnd(); return; }
 

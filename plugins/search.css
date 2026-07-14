@@ -66,48 +66,61 @@
     max-height: 2000px;
     overflow: auto;
 }
-.messages-container {
+.messages-container, .msg-vl.alt {
     padding: 16px 20px;
     display: flex;
     flex-direction: column;
     gap: 14px;
 }
-.message {
+
+.msg.alt {
     display: flex;
     flex-direction: column;
     max-width: 85%;
-}
-.message.user {
-    align-self: flex-end;
-}
-.message.assistant {
-    align-self: flex-start;
-}
-.message-role {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-    margin-bottom: 4px;
-    color: var(--muted);
-}
-.message.user .message-role {
-    text-align: right;
-}
-.message-bubble {
-    padding: 12px 16px;
-    border-radius: 16px;
-    font-size: 14px;
-    line-height: var(--md-line-height);
-    word-break: break-word;
-}
-.message.user .message-bubble {
-    background: var(--user);
-    color: white;
-}
-.message.assistant .message-bubble {
-    background: var(--chip-bg);
-    color: var(--text);
-    border: 1px solid var(--border);
+    &.user {
+        align-self: flex-end;
+        & > .role {
+            text-align: right;
+        }
+        & > .body {
+              background: var(--user);
+              color: white;
+          }
+    }
+
+    & kbd {
+        color: var(--warning-accent);
+    }
+
+    &.assistant {
+        align-self: flex-start;
+    }
+
+    & > .role {
+        font-size: 12px;
+        margin-bottom: 4px;
+        color: var(--muted);
+
+        display: flex;
+        flex-direction: column;
+    }
+    & > .body {
+        background: var(--card);
+        color: var(--text);
+        border: 1px solid var(--border);
+
+        padding: 12px 16px;
+        border-radius: 16px;
+        font-size: 14px;
+        line-height: var(--md-line-height);
+        word-break: break-word;
+
+        /* 修复溢出问题 */
+        & > * { min-width: 0; }
+
+        & > .md > :first-child { margin-top: 0; }
+        & > .md > :last-child { margin-bottom: 0; }
+    }
 }
 .no-results {
     text-align: center;

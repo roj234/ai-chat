@@ -20,6 +20,9 @@ declare namespace AiChat {
         /** 本会话中自动允许的工具 */
         grantedTools?: Set<string>,
 
+        /** 当前已用上下文大小（从response的usage提取） */
+        contextUsage?: number;
+
         // 禁用AI功能
         noAI?: true;
 
@@ -37,11 +40,11 @@ declare namespace AiChat {
         error?: string;
         // 插件注册hook用的消息可以选择隐藏自身不渲染
         hidden?: boolean;
-        // 上一条消息的ID
+        // 父消息的偏移量，分支对话用
         parent?: number;
 
         // 其他人的对话
-        name?: string;
+        label?: string;
     }
 
     type FinishReason = 'length' | 'tool_calls' | 'stop' | 'error' | 'interrupt';
@@ -90,7 +93,7 @@ declare namespace AiChat {
         accessToken: string
         model: string
         mode: 'chat' | 'completions'
-        max_tokens: number
+        max_completion_tokens: number
 
         template: string
 
@@ -152,18 +155,18 @@ declare namespace AiChat {
 
         permittedTools: string[],
         maxToolTurns: number
-        ignoreToolError: 0 | 1,
+        afkState: 0 | 1 | 2,
 
         nickname: string;
 
         // UI
         combineToolCalls: 0 | 1,
-        uiAutoHideInput: 0 | 1,
         expandThinkBlock: 0 | 1,
         expandToolCall: 0 | 1,
         think: 0 | 1,
         checkUpdate: 0 | 1,
         tools: 0 | 1,
+        wakelock: 0 | 1,
     }
 
     type BillingLog = {
@@ -272,6 +275,11 @@ declare namespace AiChat {
         title?: (request: OpenAI.ToolCall, context?: ToolResponse & Payload) => string;
 
         /**
+         * 尝试修复工具调用参数并更新调用历史
+         */
+        fix?: (parameters: Record<string, any>, error: string) => void;
+
+        /**
          *
          * @param parameters schema中定义的参数
          * @param response 工具响应（任意对象），可以存入工具调用结果，以及renderer函数需要的数据
@@ -340,7 +348,7 @@ declare namespace AiChat {
 
     type FileSystemInstance = {
         read_image({path: string}): Promise<Blob>,
-        mkdirs({path: string}): Promise<string>,
+        mkdir({path: string}): Promise<string>,
         copy({src: string, dest: string, move: boolean}): Promise<string>,
         stat({path: string}): Promise<string>,
         delete({path: string}): Promise<string>,

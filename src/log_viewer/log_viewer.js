@@ -1,9 +1,8 @@
-import {$foreach, $state, $store, ONCE_EVENT} from "unconscious";
+import {$foreach, $state, ONCE_EVENT} from "unconscious";
 import Chart from "/plugins/tools/chart.async.js";
-import {msgpack_schema, msgpack_schema_version} from "/common/MsgpackSchema.js";
-import {decodeMsg} from "unconscious/common/msgpack.js";
-import {PROTOCOL_VERSION} from "/backend/sync_const.js";
 import {formatDate} from "unconscious/common/Utils.js";
+import {isIDB, listBillingLogs} from "../database.js";
+import {requestBackend} from "../database/remoteDB.js";
 
 // ============ STATE ============
 let allLogs = [];
@@ -14,6 +13,41 @@ let currentSort = { field: 'time', direction: 'desc' };
 let autoRefreshInterval = null;
 let tokenChartInstance = null;
 let costChartInstance = null;
+
+// ============ CACHE ============
+const MAX_CACHE_SIZE = 100000;
+let cachedLogs = []; // sorted by time descending
+
+// Binary search: logs sorted by time descending → find first index with log.time <= target
+function bsearchLE(logs, target) {
+    let lo = 0, hi = logs.length - 1;
+    while (lo <= hi) {
+        const mid = (lo + hi) >>> 1;
+        if (logs[mid].time <= target) hi = mid - 1;
+        else lo = mid + 1;
+    }
+    return lo;
+}
+
+// Binary search: logs sorted by time descending → find first index with log.time < target
+function bsearchLT(logs, target) {
+    let lo = 0, hi = logs.length - 1;
+    while (lo <= hi) {
+        const mid = (lo + hi) >>> 1;
+        if (logs[mid].time < target) hi = mid - 1;
+        else lo = mid + 1;
+    }
+    return lo;
+}
+
+function normalizeCachedLog(log) {
+	// Currency conversion
+	if (log.currency === "USD") {
+		log.cost /= 0.15;
+	}
+	log.currency = "CNY";
+	return log;
+}
 
 // ============ DOM REFS ============
 /**
@@ -123,62 +157,61 @@ const setPresetRange = range => {
 	refreshData();
 };
 
-const cfg = $store("config", undefined, {persist: true, deep: false});
-
 // ============ API CALL ============
-async function makeRequest(url, params) {
-	const res = await fetch(url, {
-		headers: {
-			'Accept': 'application/vnd.msgpack,application/json',
-			'Content-Type': 'application/json',
-			'x-sv': msgpack_schema_version,
-			'x-pv': PROTOCOL_VERSION,
-			'Authorization': 'Bearer '+(cfg.db_pat||'')
-		},
-		...params,
-		referrerPolicy: "no-referrer"
-	});
+const fetchPrices = () => requestBackend("database/fetch", {"method": "POST"});
 
-	const decode = () => {
-		const contentType = res.headers.get('Content-Type');
-		if (contentType === 'application/json') return res.json();
-		if (contentType === 'application/vnd.msgpack') {
-			return res.arrayBuffer().then(ab => {
-				return decodeMsg(new DataView(ab), {
-					//multiple: true,
-					bigint: true,
-					schema: msgpack_schema
-				});
-			});
+const BATCH_LIMIT = 5000;
+// 这些函数假设毫秒时间戳是unique的了……也许哪天我真拿time做主键呢/doge
+
+const realFetchLogs = async (start, end) => {
+	const dbLogs = [];
+	let cursor;
+
+	while (dbLogs.length < MAX_CACHE_SIZE) {
+		const logs = await listBillingLogs(start, end, cursor);
+
+		for (const log of logs) {
+			dbLogs.push(normalizeCachedLog(log));
 		}
-		return res.text();
-	};
 
-	let data = await decode();
+		if (logs.length < BATCH_LIMIT) break;
 
-	if (!res.ok) {
-		if (typeof data !== "string") data = JSON.stringify(data);
-		throw new Error(`HTTP ${res.status}\n${data}`);
+		const last = logs.at(-1);
+		cursor = last.rowid;
+		end = last.time - 1;
+		if (end <= start) break;
 	}
 
-	return data;
-}
-
-function fetchPrices() {
-	return makeRequest(cfg.db_server+"database/fetch", { "method": "POST" });
-}
+	return dbLogs;
+};
 
 async function fetchLogs() {
 	const [ start, end ] = getTimeRange();
-	const url = cfg.db_server+`logs?start=${start}&end=${end}`;
-	const logs = await makeRequest(url);
-	for (const item of logs) {
-		if (item.currency === "USD") {
-			item.cost /= 0.15;
+
+	if (cachedLogs.length === 0) {
+		cachedLogs = await realFetchLogs(start, end);
+	} else {
+		const newestCachedTime = cachedLogs[0].time;
+		const oldestCachedTime = cachedLogs.at(-1).time;
+
+		const promises = [];
+
+		if (end > newestCachedTime) {
+			promises.push(realFetchLogs(Math.max(start, newestCachedTime+1), end).then(logs => logs.forEach(log => cachedLogs.unshift(log))));
 		}
-		item.currency = "CNY";
+		if (start < oldestCachedTime) {
+			promises.push(realFetchLogs(start, Math.min(end, oldestCachedTime-1)).then(logs => logs.forEach(log => cachedLogs.push(log))));
+		}
+
+		await Promise.all(promises);
 	}
-	return logs;
+
+	if (cachedLogs.length > MAX_CACHE_SIZE)
+		cachedLogs = cachedLogs.slice(-MAX_CACHE_SIZE);
+
+	const left = bsearchLE(cachedLogs, end);
+	const right = bsearchLT(cachedLogs, start);
+	return cachedLogs.slice(left, right);
 }
 
 // ============ DATA PROCESSING ============
@@ -559,41 +592,41 @@ let foreachTable = $foreach(renderLogs, (log, i) => {
 		<span style="color:#3cc8c8" title="缓存命中">{formatNumber(log.cached_tokens)}</span> : '—';
 
 	const makeDetails = () => <tr className="expand-row-detail">
-			<td colSpan="11">
-				<div className="detail-grid">
-					<div className="detail-item">
-						<span className="detail-label">ID</span>
-						<span className="detail-value">{log.request_id} (#{log.id||log.usage})</span>
-					</div>
-					<div className="detail-item">
-						<span className="detail-label">Tokens</span>
-						<span
-							className="detail-value">{log.input_tokens}{log.cached_tokens && `(+${log.cached_tokens} cached)`}↑ {log.output_tokens}{log.reasoning_tokens && `(${log.reasoning_tokens} reasoning)`}↓</span>
-					</div>
-					<div className="detail-item">
-						<span className="detail-label">缓存写入</span>
-						<span
-							className="detail-value">{log.cache_write_tokens ? log.cache_write_tokens : '—'}</span>
-					</div>
-					<div className="detail-item">
-						<span className="detail-label">延迟与耗时</span>
-						<span className="detail-value">{log.latency}ms/{log.duration}ms</span>
-					</div>
-					<div className="detail-item">
-						<span className="detail-label">渠道和模型</span>
-						<span className="detail-value">{log.provider}:{log.model}</span>
-					</div>
-					<div className="detail-item">
-						<span className="detail-label">成本</span>
-						<span className="detail-value">{formatCost(log.cost, currency)} {(currency)}</span>
-					</div>
-					<div className="detail-item">
-						<span className="detail-label">时间戳</span>
-						<span className="detail-value">{new Date(log.time).toISOString()}</span>
-					</div>
+		<td colSpan="11">
+			<div className="detail-grid">
+				<div className="detail-item">
+					<span className="detail-label">ID</span>
+					<span className="detail-value">{log.request_id} (#{log.id||log.usage})</span>
 				</div>
-			</td>
-		</tr>;
+				<div className="detail-item">
+					<span className="detail-label">Tokens</span>
+					<span
+						className="detail-value">{log.input_tokens}{log.cached_tokens && `(+${log.cached_tokens} cached)`}↑ {log.output_tokens}{log.reasoning_tokens && `(${log.reasoning_tokens} reasoning)`}↓</span>
+				</div>
+				<div className="detail-item">
+					<span className="detail-label">缓存写入</span>
+					<span
+						className="detail-value">{log.cache_write_tokens ? log.cache_write_tokens : '—'}</span>
+				</div>
+				<div className="detail-item">
+					<span className="detail-label">延迟与耗时</span>
+					<span className="detail-value">{log.latency}ms/{log.duration}ms</span>
+				</div>
+				<div className="detail-item">
+					<span className="detail-label">渠道和模型</span>
+					<span className="detail-value">{log.provider}:{log.model}</span>
+				</div>
+				<div className="detail-item">
+					<span className="detail-label">成本</span>
+					<span className="detail-value">{formatCost(log.cost, currency)} {(currency)}</span>
+				</div>
+				<div className="detail-item">
+					<span className="detail-label">时间戳</span>
+					<span className="detail-value">{new Date(log.time).toISOString()}</span>
+				</div>
+			</div>
+		</td>
+	</tr>;
 
 	const self = <tr onClick={() => toggleRow(log, self, makeDetails)}>
 		<td className="text-secondary mono" style="font-size:12px">{formatTime(log.time)}</td>
@@ -680,9 +713,9 @@ const toggleRow = async (log, row, makeDetails) => {
 	const has = row.classList.toggle("expanded");
 	if (has) {
 		if (!log.request_id) {
-			const fullLog = (await makeRequest( cfg.db_server+`batch`, {
+			const fullLog = (await requestBackend(`batch`, {
 				method: 'POST',
-				body: JSON.stringify([["log/by-rowid", log.rowid]])
+				body: [["log/by-rowid", log.rowid]]
 			}))[0];
 			if (fullLog) Object.assign(log, fullLog);
 		}
@@ -707,22 +740,26 @@ const toggleAutoRefresh = () => {
 		autoRefreshInterval = null;
 		$autoRefreshBtn.classList.remove('btn-active');
 	} else {
-		autoRefreshInterval = setInterval(refreshData, 30000);
+		autoRefreshInterval = setInterval(() => document.visibilityState === 'visible' && refreshData(true), 1000);
 		$autoRefreshBtn.classList.add('btn-active');
-		showToast('自动刷新已开启（30秒间隔）');
+		showToast('自动刷新已开启（1秒间隔）');
 	}
 };
 
-const refreshData = async () => {
+const refreshData = async (auto) => {
 	$refreshIndicator.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #6b7385;border-top-color:#4d94ff;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:4px;"></span> 加载中...';
 	try {
 		const logs = await fetchLogs();
-		allLogs = processLogs(logs);
-		updateFilters();
-		applyFilters();
+		if (auto && logs.length === allLogs.length) {
+
+		} else {
+			allLogs = processLogs(logs);
+			updateFilters();
+			applyFilters();
+			showToast(`成功加载 ${logs.length} 条日志`);
+		}
 		const now = new Date();
 		$refreshIndicator.innerHTML = `更新于 ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
-		showToast(`成功加载 ${logs.length} 条日志`);
 	} catch (err) {
 		console.error('获取日志失败:', err);
 		$refreshIndicator.innerHTML = '<span style="color:#e0556a">⚠ 加载失败</span>';
@@ -760,8 +797,7 @@ const topBar = () => {
 			<div className="btn-group" id="presetBtns" onClick.delegate{"button"}={({delegateTarget: btn}) => {
 				const range = btn.dataset.range;
 				if (range) setPresetRange(range);
-			}
-			}>
+			}}>
 				<button className="btn btn-sm" data-range="1h">1小时</button>
 				<button className="btn btn-sm" data-range="24h">24小时</button>
 				<button className="btn btn-sm" data-range="1d">今天</button>
@@ -783,18 +819,20 @@ const topBar = () => {
 			/>
 			<span className="top-bar-spacer"></span>
 			<span className="refresh-indicator" ref={$refreshIndicator}></span>
-			<button className="btn btn-sm btn-ghost" onClick={toggleAutoRefresh} ref={$autoRefreshBtn}
-					title="自动刷新">
-				<span>⏱️</span> 自动
-			</button>
-			<button className="btn btn-sm" onClick={({target}) => {
-				target.disabled = true;
-				fetchPrices().then(refreshData).finally(() => {
-					target.disabled = false;
-				})
-			}} title="刷新数据">
-				<span>🔄</span> 刷新
-			</button>
+			{!isIDB && <>
+				<button className="btn btn-sm btn-ghost" onClick={toggleAutoRefresh} ref={$autoRefreshBtn}
+						title="自动刷新">
+					<span>⏱️</span> 自动
+				</button>
+				<button className="btn btn-sm" onClick={({target}) => {
+					target.disabled = true;
+					fetchPrices().then(refreshData).finally(() => {
+						target.disabled = false;
+					})
+				}} title="刷新数据">
+					<span>🔄</span> 刷新
+				</button>
+			</>}
 		</div>
 	);
 }

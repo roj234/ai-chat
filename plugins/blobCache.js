@@ -1,6 +1,6 @@
 import {updateOnIntersected} from "../src/utils/utils.js";
 import {SETTINGS} from "/src/settings.js";
-import {onLoad} from "/src/plugin.js";
+import {onLoad} from "/src/hooks.js";
 import {$computed, $state, $watch, unconscious} from "unconscious";
 import {formatSize} from "unconscious/common/Utils.js";
 import {config} from "/src/states.js";
@@ -9,8 +9,9 @@ const SW_URL = './sw.js';
 
 let element;
 
+const swc = navigator.serviceWorker;
 
-if (DB_MODE !== 'local') {
+if (DB_MODE !== 'local' && swc) {
 	SETTINGS.push({
 		type: "element",
 		name: "远程文件缓存",
@@ -28,7 +29,7 @@ if (DB_MODE !== 'local') {
 	});
 
 	const cb = () => {
-		if (!navigator.serviceWorker?.controller) {
+		if (!swc.controller) {
 			element.replaceChildren(<button className={"btn primary"} onClick={() => enableBlobCache().then(cb)}>启用</button>);
 		} else {
 			const size = $state(0);
@@ -48,6 +49,14 @@ if (DB_MODE !== 'local') {
 			);
 		}
 	};
+	onLoad(() => swc.addEventListener('message', (event) => {
+		const [id, value] = event.data;
+		const resolve = transactions.get(id);
+		if (resolve) {
+			transactions.delete(id);
+			resolve(value);
+		}
+	}));
 	onLoad(cb);
 }
 
@@ -62,7 +71,7 @@ const transactions = new Map();
  */
 const enableBlobCache = () => (
 	swReady || (
-		swReady = navigator.serviceWorker
+		swReady = swc
 			.register(SW_URL, {type: 'module'})
 			.then((reg) => {
 				if (reg.installing) {
@@ -87,22 +96,13 @@ const sendMessage = (type, value) => enableBlobCache().then((reg) => {
 	return new Promise((resolve, reject) => {
 		const key = id++;
 		transactions.set(key, resolve);
-		navigator.serviceWorker.controller.postMessage([key, type, value]);
+		swc.controller.postMessage([key, type, value]);
 		setTimeout(() => {
 			if (transactions.delete(key)) {
 				reject(new Error(`Timeout`));
 			}
 		}, 10000);
 	})
-});
-
-navigator.serviceWorker.addEventListener('message', (event) => {
-	const [id, value] = event.data;
-	const resolve = transactions.get(id);
-	if (resolve) {
-		transactions.delete(id);
-		resolve(value);
-	}
 });
 
 /**
@@ -119,7 +119,7 @@ const getCacheSize = () => sendMessage('get');
 const setMaxCacheSize = bytes => sendMessage('set', bytes);
 
 const unregisterCache = async () => {
-	const registration = await navigator.serviceWorker.getRegistration(SW_URL);
+	const registration = await swc.getRegistration(SW_URL);
 	if (registration) return sendMessage('del').then(() => registration.unregister());
 }
 

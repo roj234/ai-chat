@@ -14,9 +14,9 @@ export const AudioPlayer = ({src, autoplay}) => {
 		return `${m}:${s < 10 ? '0' : ''}${s}`;
 	};
 
-	let filename = true;
+	let filename = 'media';
 	if (typeof src !== "string") {
-		filename = src.name;
+		filename = src.name || 'media';
 		src = src.toUrl();
 	}
 

@@ -18,7 +18,7 @@ export function blobToContentPart(file, isFileTransferWindow, attachments, force
 	}
 
 	if (file.type.startsWith('image')) {
-		if (!isFileTransferWindow && !config.modalities?.includes("image")) {
+		if (!isFileTransferWindow && !config.modalities.includes("image")) {
 			showToast("模型不支持图片，无法上传 " + file.name);
 			return;
 		}
@@ -27,7 +27,7 @@ export function blobToContentPart(file, isFileTransferWindow, attachments, force
 			image_url: {url: file}
 		});
 	} else if (file.type.startsWith('audio')) {
-		if (!isFileTransferWindow && !config.modalities?.includes("audio")) {
+		if (!isFileTransferWindow && !config.modalities.includes("audio")) {
 			showToast("模型不支持音频，无法上传 " + file.name);
 			return;
 		}
@@ -103,10 +103,13 @@ export const createAttachmentGallery = (attachments) => {
 					);
 
 				case "input_audio":
+					const inputAudio = att.input_audio;
 					return (
-						<div className="attachment audio-part"
-							 style={`--format: "${att.input_audio.format}"`}>
+						<div className="attachment audio-part" style={`--format: "${inputAudio.format}"`}>
 							<div className="ri-volume-up-fill"></div>
+							<div className="text-preview">
+								{inputAudio.data.name + "\n" + formatSize(inputAudio.data.size)}
+							</div>
 							{DeleteBtn}
 						</div>
 					);

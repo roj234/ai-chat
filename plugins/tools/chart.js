@@ -1,8 +1,11 @@
 // Chart.js 图表工具前端实现
-import {registerTools} from "/src/skills.js";
+import {getToolParameters, registerToolset} from "/src/toolset.js";
 import {$asyncState, $computed, $watch, debugSymbol} from "unconscious";
 import {selectedConversation} from "/src/states.js";
 import {errorBlock, loadingBlock} from "/src/utils/utils.js";
+import {fileAccess} from "./fileAccess.js";
+import {readAsString} from "/common/chardet.js";
+import {parseCsv} from "/common/loadCsv.js";
 
 // 预定义颜色数组
 const colorPalette = [
@@ -21,69 +24,6 @@ function hexToRgba(hex, alpha) {
 	return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-/**
- * 深度合并对象
- */
-function deepMerge(target, source) {
-	const result = { ...target };
-
-	for (const key in source) {
-		if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
-			result[key] = deepMerge(target[key] || {}, source[key]);
-		} else {
-			result[key] = source[key];
-		}
-	}
-
-	return result;
-}
-
-/**
- * 构建Chart.js配置对象
- */
-function buildChartConfig({ type, data, title }) {
-	const isPie = ['pie', 'doughnut', 'polarArea'].includes(type);
-
-	let defaultOptions = {
-		plugins: {
-			legend: {
-				position: 'bottom',
-				title: {
-					display: !!title,
-					padding: 4,
-					text: title
-				}
-			}
-		}
-	};
-	if (['radar'].includes(type)) {
-		defaultOptions = {
-			scales: {
-				r: { beginAtZero: true }
-			}
-		};
-	}
-
-	return {
-		type,
-		data: {
-			labels: data.labels,
-			datasets: data.datasets.map((dataset, index) => {
-				const baseColor = colorPalette[index % colorPalette.length];
-
-				return {
-					...dataset,
-					backgroundColor: dataset.backgroundColor || (isPie ? colorPalette : hexToRgba(baseColor, 0.2)),
-					borderColor: dataset.borderColor || (isPie ? "#fff" : baseColor),
-					borderWidth: dataset.borderWidth || 2,
-					fill: dataset.fill !== undefined ? dataset.fill : (type !== 'line')
-				};
-			})
-		},
-		options: defaultOptions//deepMerge(defaultOptions, options)
-	};
-}
-
 let Chart;
 
 /**
@@ -100,90 +40,182 @@ $watch(selectedConversation, () => {
 const CHART = debugSymbol("CHART");
 const OPTIONS = debugSymbol("OPTIONS");
 
-registerTools("Chart", "Create charts and data visualizations for numeric or structured data.", [{
+/**
+ *
+ * @param {string} path
+ * @param {Blob|string} blob
+ * @returns {Promise<string[][]>}
+ */
+async function parseCsvTsv(path, blob) {
+	const csvText = typeof blob === 'string' ? blob : await readAsString(blob);
+	return parseCsv(csvText, {
+		delimiter: path.toLowerCase().endsWith('.tsv') ? '\t' : ','
+	});
+}
+
+registerToolset("Chart", "Create charts and data visualizations from CSV files.", [{
 	name: "Chart",
 	description: "Create Chart.js visualizations from structured numeric data."
 		+" Use when visual comparison or trend understanding is useful."
-		+" Use after the data has already been prepared. If calculation, aggregation, or transformation is needed first, use code_interpreter before chart_renderer."
 	,
 	parameters: {
 		type: "object",
 		properties: {
 			type: { enum: ["line", "bar", "radar", "polarArea", "pie", "doughnut", "scatter"] },
 
-			data: {
-				type: "object",
-				properties: {
-					labels: {
-						type: "array",
-						description: "Array of labels for the X-axis (or categories).",
-						items: { type: "string" }
-					},
-					datasets: {
-						type: "array",
-						items: {
-							type: "object",
-							properties: {
-								label: { type: "string" },
-								data: {
-									type: "array",
-									items: { type: "number" }
-								},
-								//color: { type: "string", description: "Hex #RRGGBB, overrides default color palette" }
-							},
-							required: ["label", "data"]
-						}
-					}
-				},
-				required: ["labels", "datasets"]
+			path: {
+				type: "string",
+				description: "CSV / TSV dataset in workspace",
+			},
+			content: {
+				type: "string",
+				description: 'Inline file content (deprecated)'
+			},
+			delimiter: {
+				type: "string",
+				default: "'\t' for .tsv and ',' for other (e.g., inline or .csv)",
+				minLength: 1,
+				maxLength: 1
+			},
+			xLabels: {
+				type: "array",
+				description: "Array of labels for the X-axis (or categories). Omit to use first column",
+				items: { type: "string" }
+			},
+			yLabels: {
+				type: 'array',
+				description: 'Y-axis labels. Omit to use first row',
+				items: { type: 'string' }
+			},
+			datasetOptions: {
+				type: 'array',
+				items: { type: 'object' },
+				description: "Additional Chart.js options for each dataset (e.g., backgroundColor)."
 			},
 
 			title: {
 				type: "string",
 				description: "Title of chart (optional)",
 			},
-			/*options: {
-				type: "object",
-				description: "Additional Chart.js options (e.g., scales, plugins).",
-				example: { responsive: true }
-			},*/
 
-			height: {
-				type: "integer",
-				description: "(in pixels)"
-			}
+			options: {
+				type: "object",
+				description: "Additional Chart.js global options (e.g., scales, plugins).",
+				default: { responsive: true }
+			},
 		},
-		required: ["type", "data", "height"]
+		required: ["type"]
+	},
+	title(tc, ctx) {
+		const arg = getToolParameters(ctx, tc);
+		let title = "绘制" + (arg.title || '图表');
+		if (arg.path) title += " ("+arg.path+")";
+		return title;
 	},
 
 	reentrant: 'stateless',
-	async script(options, context) {
-		if (!options.data.datasets.length) throw new Error('至少需要一个数据集');
+	async script({
+		type, title,
+		path, content,
+		delimiter,
+		xLabels, yLabels,
+		datasetOptions, options,
+	}, context, conv) {
+		const readFile = fileAccess('readRaw');
 
-		const config = buildChartConfig(options);
+		if (!path && !content) throw 'Error: Neither path nor content was provided.';
 
-		context[OPTIONS] = options;
-		context[CHART] = $asyncState(() => {
+		context[CHART] = $asyncState(async () => {
+			let columns = context.columns;
+			if (!columns) {
+				const blob = path ? await readFile({path}, null, conv) : content;
+				if (blob.size > 65536) throw new Error('File '+ path+' too big (64KB)');
+				const rows = await parseCsvTsv(path, blob);
+				const columnCount = rows[0].length;
+				columns = Array.from({ length: columnCount }).map(() => ([]));
+
+				// transpose
+				for (let i = 0; i < rows.length; i++){
+					const row = rows[i];
+					for (let j = 0; j < row.length; j++)
+						columns[j].push(row[j]);
+				}
+
+				context.columns = structuredClone(columns);
+			} else {
+				columns = structuredClone(columns);
+			}
+
+			const isPie = ['pie', 'doughnut', 'polarArea'].includes(type);
+
+			let defaultOptions = {
+				plugins: {
+					legend: {
+						position: 'bottom',
+						title: {
+							display: !!title,
+							padding: 4,
+							text: title
+						}
+					}
+				}
+			};
+			if (['radar'].includes(type)) {
+				defaultOptions = {
+					scales: {
+						r: { beginAtZero: true }
+					}
+				};
+			}
+
+			if (!xLabels) {
+				xLabels = columns.shift();
+				xLabels.shift();
+			}
+
+			const chartJsOptions = {
+				type,
+				data: {
+					labels: xLabels,
+					datasets: columns.map((data, index) => {
+						const baseColor = colorPalette[index % colorPalette.length];
+						const options = datasetOptions?.[index] || {};
+						const label = yLabels?.[index] || data.shift();
+						return {
+							label,
+							data,
+							backgroundColor: options.backgroundColor || (isPie ? colorPalette : hexToRgba(baseColor, 0.2)),
+							borderColor: options.borderColor || (isPie ? "#fff" : baseColor),
+							borderWidth: options.borderWidth || 2,
+							fill: options.fill !== undefined ? options.fill : (type !== 'line')
+						};
+					})
+				},
+				options: Object.assign(defaultOptions, options)
+			};
+
+			context[OPTIONS] = chartJsOptions;
 			return import('./chart.async.js').then(m => {
 				Chart = m.default;
 				const canvas = <canvas />;
-				new Chart(canvas, config);
+				new Chart(canvas, chartJsOptions);
 				canvas.style = "";
 				return canvas;
 			});
 		});
 
-		return "rendered to UI";
+		return "Successfully displayed to user";
 	},
 	renderer(context, is_frozen) {
 		const state = context[CHART];
-		const options = context[OPTIONS];
 
 		return $computed(() => {
 			if (state.error) return errorBlock(state.error, "图表渲染失败");
 			if (state.loading) return loadingBlock("图表加载中……");
 
-			return <div style={{maxHeight: options.height+"px", display: "flex", justifyContent: "center"}}>{state.value}</div>;
+			return <div style={{maxHeight: "30vh", display: "flex", justifyContent: "center"}}>{state.value}</div>;
 		})
 	}
-}]);
+}], {
+	depend: ['Files']
+});

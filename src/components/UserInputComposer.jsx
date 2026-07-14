@@ -8,17 +8,17 @@ import {
 	messages,
 	selectedConversation
 } from "../states.js";
-import {statusBadge, submitUserChatMessage} from "../api-request.js";
+import {agentLoop, statusBadge} from "../api-request.js";
 import {blobToContentPart, createAttachmentGallery} from "./InputAttachment.jsx";
 import {CUSTOM_CONTROLS} from "../settings.js";
-import {createSendButton} from "./SendButton.jsx";
+import {createSubmitButton} from "./SubmitButton.jsx";
 import {bind} from "../utils/utils.js";
-import {$computed, $state, $watch, unconscious} from "unconscious";
+import {$computed, $stampLock, $state, $watch, unconscious} from "unconscious";
 import {handleCommand} from "../commands.js";
 import SimpleModal from "./SimpleModal.jsx";
 import {getBlob} from "../database.js";
 import {webviewUploadImage} from "/vendor/jsBridge.js";
-
+import {Recorder} from "/plugins/voiceInput/Recorder.jsx";
 
 export const createUserInputComposer = (scroller) => {
 	/** @type {import("unconscious").Reactive<OpenAI.ContentPart[]>} */
@@ -60,9 +60,13 @@ export const createUserInputComposer = (scroller) => {
 	 */
 	let userInput,
 		backToBottomBtn,
-		sendButton = createSendButton(attachments, onSend);
+		sendButton = createSubmitButton(attachments, onSend);
 
-	const element = (<div className="composer" class:hidden={() => config.uiAutoHideInput && lastScrollDirection.value}>
+	const blobCallback = blob => {
+		if (blob) blobToContentPart(blob, 0 === selectedConversation.id, attachments);
+	};
+
+	const element = (<div className="composer" class:hidden={() => isMobile && lastScrollDirection.value}>
 		<div className="logo hide-human">
 					<span style={{
 						display: "flex",
@@ -79,10 +83,7 @@ export const createUserInputComposer = (scroller) => {
 			{statusBadge}
 			<button className={"ri-arrow-down-s-line chip"} style={"display:none"} ref={backToBottomBtn}
 					onClick={() => {
-						scroller.scrollTo({
-							top: scroller.scrollHeight,
-							behavior: "smooth",
-						})
+						scroller.scrollTop = scroller.scrollHeight;
 					}} title={"返回底部"}/>
 		</div>
 		<div className="query">
@@ -105,14 +106,34 @@ export const createUserInputComposer = (scroller) => {
 			<div className="controls">
 				<div className="controls hide-human">{CUSTOM_CONTROLS}</div>
 				<div className="spacer"></div>
-				{IS_ANDROID_BUILD && <button className="ri-camera-4-fill btn ghost" title="拍照上传"
-											 onClick={() => {
-												 webviewUploadImage().then(blob => {
-													 if (blob) blobToContentPart(blob, 0 === selectedConversation.id, attachments);
-												 })
-											 }}></button>}
-				<button className="ri-attachment-2 btn ghost" title="上传附件"
-						onClick={() => fileInput.click()}></button>
+				<div className="dropdown">
+					<button className="ri-attachment-2 btn ghost" title="添加附件" onClick={isMobile ? undefined : () => fileInput.click()}></button>
+					<div className="list mid up">
+						{IS_ANDROID_BUILD && <label className="ri-camera-4-fill" onClick={() => {
+							webviewUploadImage().then(blobCallback)
+						}}>
+							拍照
+						</label>}
+						<label className="ri-mic-fill" onClick={() => {
+							const modal = <div className={'modal-overlay'}>
+								<div className={'modal'} onClick={(e) => e.stopPropagation()}>
+									<div className={"header"}>
+										<b>录音机</b>
+										<div className={"spacer"} />
+										<button className="ri-close-line btn ghost" onClick={() => modal.remove()} title={"关闭"} />
+									</div>
+									<Recorder onSubmit={(blob) => {
+										blobCallback(blob);
+										modal.remove();
+									}}/>
+								</div>
+							</div>;
+							document.body.append(modal);
+						}}>录制语音</label>
+						<label className="ri-attachment-2" onClick={() => fileInput.click()}>选择文件</label>
+					</div>
+				</div>
+
 				{sendButton}
 			</div>
 		</div>
@@ -163,8 +184,8 @@ export const createUserInputComposer = (scroller) => {
 				const huge = text.length > 200000;
 				if (!huge && null == choice) choice = await new Promise((resolve) => {
 					SimpleModal({
-						title: "文本很长 ("+text.length+"字符)",
-						message: "是否转换为附件？",
+						title: `文本较长（${text.length} 字符）`,
+						message: "是否转为附件？",
 						onConfirm(){resolve(true)},
 						onCancel() {resolve(false)}
 					})
@@ -181,7 +202,7 @@ export const createUserInputComposer = (scroller) => {
 		// modalities: ['image', 'text'],
 
 		// Syntax: 单行 ![image](1)
-		const imageRegex = /^!\[image(\d+)]|!\[blob]\(([\da-zA-Z_-]{43})\)|!\[file]\((.+?)\)$/gm;
+		const imageRegex = /^!\[image(\d+)]|!\[blob]\(([\da-zA-Z_-]{43})\)$/gm;
 		{
 			const parts = [];
 			let lastIndex = 0;
@@ -196,7 +217,7 @@ export const createUserInputComposer = (scroller) => {
 
 			// 寻找匹配的标签并插入图片
 			while ((match = imageRegex.exec(text)) !== null) {
-				const [str, imageIdxStr, hash, fileName] = match;
+				const [str, imageIdxStr, hash] = match;
 
 				if (imageIdxStr) {
 					const imageIdx = parseInt(imageIdxStr, 10) - 1;
@@ -214,8 +235,6 @@ export const createUserInputComposer = (scroller) => {
 						blobToContentPart(blob, 0 === selectedConversation.id, parts);
 						continue;
 					} catch {}
-				} else if (fileName) {
-					// TODO
 				}
 
 				parts.push({ type: "text", text: await convertToBlob(str) });
@@ -239,6 +258,7 @@ export const createUserInputComposer = (scroller) => {
 
 		const noAI = selectedConversation.noAI;
 		if (input) {
+			if (!input.length) return;
 			const userMessage = {role: 'user', content: input, time: Date.now()};
 
 			const nickname = config.nickname;
@@ -255,8 +275,10 @@ export const createUserInputComposer = (scroller) => {
 
 		if (config.reviewMessage && input) return;
 
+		const conv = unconscious(selectedConversation);
+		const messages_ = $stampLock(messages);
 		for (;;) {
-			const result = await submitUserChatMessage();
+			const result = await agentLoop(conv, messages_, config);
 			if (result !== 'tool_calls') break;
 			input = null;
 		}
@@ -265,7 +287,7 @@ export const createUserInputComposer = (scroller) => {
 	const backToBottomBtnShowHide = () => {
 		const top = scroller.scrollTop;
 		const b = scroller.scrollHeight - scroller.offsetHeight - top > 250;
-		backToBottomBtn.style.display = b ? "" : "none";
+		backToBottomBtn.style.display = b && messages.length ? "" : "none";
 	};
 
 	scroller.addEventListener("scroll", backToBottomBtnShowHide);

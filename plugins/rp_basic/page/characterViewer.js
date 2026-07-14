@@ -1,14 +1,17 @@
-import {$foreach, $state, $store, $watch, AS_IS, unconscious} from "unconscious";
+import {$foreach, $state, $watch, AS_IS, unconscious} from "unconscious";
 import {createMarkdownStream, renderMarkdownToElement} from "/src/markdown/markdown.js";
-import {callOnLoadHandler} from "/src/plugin.js";
-import {ZipWriter} from "unconscious/common/zip-io.js";
+import {callOnLoadHandler} from "/src/hooks.js";
 import {openJsonEditor} from "/src/json_editor/jsonEditorProxy.js";
 import {highlightJsonLike} from "/src/markdown/highlight.js";
 import {sseFetch} from "/common/openai-api-utils.js";
-import {webviewDownloadFile} from "/vendor/jsBridge.js";
-import {PROTOCOL_VERSION} from "/backend/sync_const.js";
+import "/src/database.js";
+import {requestBackend} from "/src/database/remoteDB.js";
+import {config} from "/src/states.js";
+import {downloadFile} from "/src/utils/utils.js";
+import {writeJPEG, writePNG} from "/common/upng.js";
+import {base64Encode} from "unconscious/common/Base64.js";
 
-const cfg = $store("config", undefined, {persist: true, deep: false});
+const API_PREFIX = 'cards/';
 const currentPage = $state(1);
 const pages = $state();
 const cards = $state();
@@ -100,27 +103,10 @@ Only output the translation result, no explanations, no additional text.`,
 	return accumulated;
 }
 
-function api(path, opts = {}) {
-	const url = path.startsWith('http') ? path : cfg.db_server + '/cards' + path;
-	const headers = opts.body !== undefined ? { 'Content-Type': 'application/json' } : {};
-	return fetch(url, { ...opts, headers: {
-		...headers,
-		...opts.headers,
-		'x-pv': PROTOCOL_VERSION,
-		'Authorization': 'Bearer '+(cfg.db_pat||'')
-	} }).then(r => {
-		if (!r.ok && r.headers.get('Content-Type')?.includes('application/json')) {
-			return r.json().then(d => { throw new Error(d.error || r.statusText); });
-		}
-		if (r.status === 204) return null;
-		return r.json();
-	});
-}
-
 let searchInput;
 async function loadCards() {
 	const search = searchInput.value;
-	const data = await api('/?page=' + currentPage + '&limit=' + limit + (search ? '&search=' + encodeURIComponent(search) : ''));
+	const data = await requestBackend(API_PREFIX+'?page=' + currentPage + '&limit=' + limit + (search ? '&search=' + encodeURIComponent(search) : ''), undefined);
 	cards.value = data.data;
 	pages.value = Math.ceil(data.total / limit);
 }
@@ -146,7 +132,7 @@ const APP = <>
 
 		return <div className="card" onClick={() => showDetail(c.name)}>
 			<div className="card-img">
-				{c.image_hash ? <img src={cfg.db_server+`/blob/${c.image_hash}`} alt={c.name}/> : <div className="no-img">&#x1F3AD;</div>}
+				{c.image_hash ? <img src={config.db_server+`/blob/${c.image_hash}`} alt={c.name}/> : <div className="no-img">&#x1F3AD;</div>}
 			</div>
 			<div className="card-body">
 				<h3>{c.name}</h3>
@@ -193,53 +179,40 @@ function goPage(p) {
 }
 
 async function showEditModal(name) {
-	const data = await api('/' + name);
+	const data = await requestBackend(API_PREFIX + name, undefined);
 
 	const [_, onClose] = openJsonEditor("usci/"+name, () => {
 		return JSON.stringify(data, null, 2);
 	}, (v) => {
 		const card = JSON.parse(v);
-		api('/' + name, { method: 'POST', body: v }).then(loadCards);
+		requestBackend(API_PREFIX + name, {method: 'POST', body: v}).then(loadCards);
 	})
 }
 
-export const downloadFile = (blob, ext, name) => {
-	const filename = `${name}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${ext}`;
-
-	if (IS_ANDROID_BUILD) {
-		webviewDownloadFile(blob, filename);
-	} else {
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = filename;
-		a.click();
-		URL.revokeObjectURL(url);
-	}
-};
 
 async function saveCard(name) {
-	const card = await api('/' + name);
-	const blob = card.image && await (await fetch(cfg.db_server+`/blob/${card.image.hash}`)).blob();
+	const card = await requestBackend(API_PREFIX + name, undefined);
+	const buf = card.image && await (await fetch(config.db_server+`/blob/${card.image.hash}`)).arrayBuffer();
 
-	if (!blob) {
-		downloadFile(new Blob([JSON.stringify(card)]), "json", name);
+	if (!buf) {
+		downloadFile(new File([JSON.stringify(card)], name+".json"));
 	} else {
-		const jsZip = ZipWriter();
-		await jsZip.add(name+".json", JSON.stringify(card));
-		await jsZip.add(name+".jpg", new Uint8Array(await blob.arrayBuffer()));
-		const blob1 = jsZip.finish();
-		downloadFile(blob1, "zip", card.name);
+		const imageData =  new Uint8Array(buf);
+		const embeddedImage = imageData[0] === 0xFF
+			? writeJPEG(imageData, JSON.stringify({ chara: card }))
+			: writePNG(imageData, { chara: base64Encode(JSON.stringify(card)) });
+
+		downloadFile(new File([embeddedImage], name+"."+(imageData[0] === 0xFF ? 'jpg' : 'png')));
 	}
 }
 
 async function showDetail(name) {
-	const {creator, image, tags, time, ...card} = await api('/' + name);
+	const {creator, image, tags, time, ...card} = await requestBackend(API_PREFIX + name, undefined);
 
 	const html = <>
 		<h2>{name} {creator && <small style="color:#78909c">by {creator}</small>}
 		</h2>
-		{image && <img src={cfg.db_server+`/blob/${image.hash}`}
+		{image && <img src={config.db_server+`/blob/${image.hash}`}
 							style="max-width:100%;max-height:300px;border-radius:8px;margin-bottom:16px;display:block"/>}
 		{tags?.length && <div className="form-group"><label>标签</label>
 			<p>{tags.join(', ')}</p>
@@ -266,8 +239,8 @@ async function showDetail(name) {
 }
 
 function confirmDelete(name) {
-	//if (!confirm('确定删除 "' + name + '"？此操作不可恢复。')) return;
-	api('/' + name, {method: 'DELETE'}).then(loadCards);
+	if (!confirm('确定删除 "' + name + '"？此操作不可恢复。')) return;
+	requestBackend(API_PREFIX + name, {method: 'DELETE'}).then(loadCards);
 }
 
 const el = document.getElementById("app");

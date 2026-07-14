@@ -1,14 +1,15 @@
 import {bakeSchema, decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
 import {brotliCompress, brotliDecompressSync, constants} from 'node:zlib';
 import {DB_COMPRESS_LEVEL, DB_COMPRESS_MIN_SIZE, DB_USE_MSGPACK_SCHEMA} from "../config.js";
-import {UTF8_TEXT_ENCODER} from "unconscious/runtime_shared.js";
+import {UTF8_TEXT_DECODER, UTF8_TEXT_ENCODER} from "unconscious/runtime_shared.js";
+import {compressBase64, compressStr, decompressStr} from "./string-compression.js";
 
 const IS_SQLITE = true;
 
 // 注意，这些schema只能追加，规则和protobuf相同
 const conversation_schema = [
 	"activatedModules", "allowedTools", "grantedTools",
-	"bm_leaf", "bm_dummy", "resumeId",
+	"bm_leaf", "bm_dummy"/* 已删除！ */, "resumeId",
 ];
 const finish_reason = ["finish_reason", null, ["stop", "length", "tool_calls", "error", "interrupt"]];
 const message_schema = [
@@ -56,7 +57,8 @@ const message_schema = [
 	["tool_responses",
 		["time", "content", "success"]
 	],
-	"name"
+	"name",
+	"parent"
 ];
 const log_schema = [
 	"model", "request_id", "provider",
@@ -71,6 +73,8 @@ bakeSchema(conversation_schema);
 bakeSchema(message_schema);
 bakeSchema(log_schema);
 
+const LOG_RESP_DICT = ['chatcmpl-', 'gen-', 'resp_'];
+
 export function deserializeRow(row, decompression = decompressGeneric) {
 	const {data, ...rest} = row;
 	const v = decompression(data);
@@ -79,8 +83,6 @@ export function deserializeRow(row, decompression = decompressGeneric) {
 	}
 	return v;
 }
-
-const UTF8_TEXT_DECODER = /* #__PURE__ */ new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
 
 /**
  *
@@ -140,17 +142,53 @@ function compressIfEnabled(data, schema) {
 	return packed;
 }
 
-export const compressMessage = (data) => compressIfEnabled(data, message_schema);
+const RD_KEYS = ['signature', 'data', 'id'];
+const RD_DICT = ['rs_'];
+
+export const compressMessage = (data) => {
+	const details = data?.reasoning_details;
+	if (Array.isArray(details)) {
+		for (const item of details) {
+			for (const key of RD_KEYS) {
+				const data = item[key];
+				if (typeof data === 'string') item[key] =  key === 'id' ? compressStr(data, RD_DICT) : compressBase64(data);
+			}
+		}
+	}
+	return compressIfEnabled(data, message_schema)
+};
 /** @param {Uint8Array|Object} data */
-export const decompressMessage = (data) => decompressIfNeeded(data, message_schema);
+export const decompressMessage = (data) => {
+	const item = decompressIfNeeded(data, message_schema);
+	const details = item?.reasoning_details;
+	if (Array.isArray(details)) {
+		console.log(details);
+		for (const item of details) {
+			for (const key of RD_KEYS) {
+				const data = item[key];
+				if (Array.isArray(data)) item[key] = decompressStr(data, RD_DICT);
+			}
+		}
+	}
+	return item;
+};
 
 export const compressConversation = (data) => compressIfEnabled(data, conversation_schema);
 /** @param {Uint8Array|Object} data */
 export const decompressConversation = (data) => decompressIfNeeded(data, conversation_schema);
 
-export const compressLog = (data) => compressIfEnabled(data, log_schema);
+export const compressLog = (data) => {
+	const reqId = data.request_id;
+	if (typeof reqId === 'string') data.request_id = compressStr(reqId, LOG_RESP_DICT);
+	return compressIfEnabled(data, log_schema);
+};
 /** @param {Uint8Array|Object} data */
-export const decompressLog = (data) => decompressIfNeeded(data, log_schema);
+export const decompressLog = (data) => {
+	const item = decompressIfNeeded(data, log_schema);
+	const reqId = item.request_id;
+	if (Array.isArray(reqId)) item.request_id = decompressStr(reqId, LOG_RESP_DICT);
+	return item;
+};
 
 export const compressGeneric = compressIfEnabled;//(data) => compressIfEnabled(data, generic_schema);
 /** @param {Uint8Array|Object} data */

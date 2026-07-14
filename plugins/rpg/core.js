@@ -1,12 +1,11 @@
 import {createMarkdownStream} from "/src/markdown/markdown.js";
 import {APIRequest, findStreamingContainer, MARKDOWN_APPEND, MARKDOWN_END} from "/src/api-request.js";
 import {$update, AS_IS, isReactive} from "unconscious";
-import {updateMessageUI} from "/src/components/MessageList.jsx";
-import {abortCompletion, config} from "/src/states.js";
-import {bundleModule, createModule} from "unconscious/common/safe-worker/safe-worker.js";
+import {abortCompletion, config, updateMessageUI} from "/src/states.js";
+import {createSandbox} from "unconscious/common/safe-worker/safe-worker.js";
 import {ZipReader} from "unconscious/common/zip-io.js";
 import {schemaToTypeScriptDefinition} from "unconscious/common/json-schema-utils.js";
-import {appendBillingLog} from "../../src/database.js";
+import {appendBillingLog} from "/src/database.js";
 
 export const jsonPrompt = async (schema, messages, body, custom_renderer_id = 'json') => {
 	const supportLevel = config.jsonSupport;
@@ -23,7 +22,12 @@ export const jsonPrompt = async (schema, messages, body, custom_renderer_id = 'j
 			};
 	}
 
-	const api = new APIRequest(messages, null, body);
+	const api = new APIRequest(messages, null, {
+		additionalBody: {
+			...config.additionalBody,
+			body
+		}
+	});
 
 	const removeCodeFence = config.jsonSupport ? AS_IS : s => s.replace(/^\s*```json|```$/, "").trim();
 
@@ -64,28 +68,49 @@ const RPGCore = {
 };
 
 const systemModule = new Map;
-systemModule.set("/plugins/rpg/pipeline.js", { module: RPGCore });
+systemModule.set("/plugins/rpg/pipeline.js", RPGCore);
 
 class Sandbox {
-	instance;
+	#sandbox;
+	#repo;
+	#module;
 
-	constructor(code) {
-		this.code = code;
+	constructor(data) {
+		this.#repo = data;
 	}
 
 	async call(method, ...args) {
-		if (!this.instance) {
-			this.instance = createModule(systemModule, null, this.code);
-			await this.instance.ready;
+		if (!this.#sandbox) {
+			const repo = this.#repo;
+			this.#sandbox = createSandbox({
+				async load(name, isSystemModule) {
+					if (typeof repo === 'string') {
+						if (name === 'index.js') return repo;
+					} else {
+						const code = await repo.getText(name);
+						if (code) return code;
+					}
+
+					throw new Error(`Module ${name} not found`);
+				},
+				log() {
+
+				}
+			}, [], {
+				hostModules: systemModule
+			});
+			await this.#sandbox.initialize();
+			this.#module = await this.#sandbox.loadModule('index.js');
 		}
 
 		let t;
-		const result = this.instance.module[method](args);
+		const result = this.#module[method](args);
 		const timeout = new Promise((_, reject) => {
 			t = setTimeout(() => {
-				reject(new Error("脚本执行超时 (5s)"));
-				this.instance.destroy();
-				this.instance = null;
+				const err = new Error("脚本执行超时 (5s)");
+				reject(err);
+				this.#sandbox.destroy(err);
+				this.#sandbox = null;
 			}, 5000);
 		});
 		result.finally(() => clearTimeout(t));
@@ -116,22 +141,5 @@ class Develop {
 	}
 }
 
-export const createSandboxEnvironment = async (archive) => {
-	const archiveModule = new Map(systemModule);
-	if (typeof archive === 'string') {
-		archiveModule.set("script.js", { code: archive });
-	} else {
-		const zip = await ZipReader(archive);
-		for (let [name, entry] of zip.entries()) {
-			if (entry.uncompressedSize < 1048576)
-				archiveModule.set(name, { code: await zip.getText(entry) });
-		}
-	}
-
-	const code = bundleModule(archiveModule, 'script.js');
-	return new Sandbox(code);
-}
-
-export const createDevelopEnvironment = async (modulePath) => {
-	return new Develop(modulePath);
-}
+export const createSandboxEnvironment = async (archive) => new Sandbox(typeof archive === 'string' ? archive : await ZipReader(archive));
+export const createDevelopEnvironment = async (modulePath) => new Develop(modulePath);

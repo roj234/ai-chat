@@ -6,53 +6,21 @@ import {copyButtonAnimation} from "../utils/utils.js";
 import {config} from "../states.js";
 
 /**
- * 合并连续的 reasoning.text 片段
- * @param {OpenAI.ReasoningDetail[]} details
- * @returns {[OpenAI.ReasoningDetail[], boolean]}
- */
-export const mergeReasoningDetails = details => {
-	if (details.length === 0) return [details, false];
-
-	const result = [];
-	let currentGroup = null;
-	let hasText = 0;
-
-	for (const item of details) {
-		if (item.type === "reasoning.text") {
-			hasText |= !!item.text;
-			// 如果当前有合并组，且格式相同，则追加文本
-			if (currentGroup && item.format === currentGroup.format) {
-				currentGroup.text += item.text;
-			} else {
-				// 需要复制吗？？
-				currentGroup = { ...item };
-				result.push(currentGroup);
-			}
-		} else {
-			result.push(item);
-		}
-	}
-
-	return [result, hasText];
-};
-
-/**
- * 获取思考文本
  * @param {OpenAI.ReasoningDetail[]} details
  * @returns {string}
  */
-const getReasoningTextFromDetails = details => {
+const extractReasoningTextFromDetails = details => {
 	let str = "";
 
 	for (const item of details) {
 		if (item.type === "reasoning.text") {
 			str += item.text;
 		} else if (item.type === "reasoning.summary") {
-			str += item.summary;
+			str += item.summary+"\n\n";
 		}
 	}
 
-	return str;
+	return str.trim();
 };
 
 const reasoningFormatNames = {
@@ -77,7 +45,7 @@ export function ThinkBlock({message, edit}) {
 			let {content, format} = think;
 			if (null == content) {
 				if (!message.reasoning_details) return;
-				content = getReasoningTextFromDetails(message.reasoning_details);
+				content = extractReasoningTextFromDetails(message.reasoning_details);
 			}
 			if (edit) {
 				const arr = [];

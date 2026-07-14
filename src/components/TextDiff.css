@@ -1,0 +1,55 @@
+.textDiff {
+    border: 1px solid var(--border);
+    border-top: none;
+    font: 14px/1.5 monospace;
+
+    & .diff {
+        overflow: hidden;
+        max-height: 3lh;
+        transition: max-height 0.2s ease;
+    }
+
+    & .ghost {
+        border: 1px solid transparent;
+        padding: 4px;
+
+        &:hover {
+            border-color: var(--border);
+        }
+    }
+
+    &.open {
+        & .diff {
+            overflow: auto;
+            max-height: 20lh;
+        }
+    }
+
+    & .line {
+        display: flex;
+
+        &:before {
+            content: ' ';
+            width: 24px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        &.add {
+            background: var(--ok-bg);
+
+            &:before {
+                content: '+';
+                color: var(--ok);
+            }
+        }
+        &.del {
+            background: var(--error-bg);
+
+            &:before {
+                content: '-';
+                color: var(--error);
+            }
+        }
+    }
+}

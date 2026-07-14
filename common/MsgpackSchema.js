@@ -1,11 +1,11 @@
 import {bakeSchema} from "unconscious/common/msgpack.js";
 
-export const msgpack_schema_version = "10";
+export const msgpack_schema_version = "11";
 export const msgpack_schema = [];
 msgpack_schema.push(
 	// generic
 	"id", "title", "time", "owner",
-	"type", "name",
+	"type", "name", "parent",
 	["$", msgpack_schema, ["BlobH", "Map", "Set", "SET", "ARR", "DEL", "STR"]],
 	"hash", "size", "lastModified",
 	"error",
@@ -13,7 +13,7 @@ msgpack_schema.push(
 
 	// conversation
 	"activatedModules", "allowedTools", "grantedTools",
-	"bm_leaf", "bm_dummy", "resumeId",
+	"bm_leaf", "resumeId",
 
 	// messages
 	["role", null, ["system", "user", "assistant"]],
