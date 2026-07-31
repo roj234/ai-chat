@@ -8,7 +8,7 @@ import "./markdown.css";
 const tags = {
 	basic: [
 		"details", "summary",
-		"b", "i", "u", "p", "br", "em", "kbd", "q", "strong", "code", "ruby", "rp", "rt", "sup", "sub", "small",
+		"b", "i", "u", "p", "br", "em", "kbd", "q", "strong", "code", "ruby", "rp", "rt", "sup", "sub", "small", "center",
 		"h1", "h2", "h3", "h4", "h5", "h6",
 		"table", "th", "tr", "td", "thead", "tbody", "pre",
 		"ul", "ol", "li",
@@ -130,9 +130,10 @@ const rendererOptions = { stream: true };
 /**
  *
  * @param {HTMLElement} output
+ * @param [options]
  * @return {import("fastmd").Parser}
  */
-export const createStreamingMarkdownParser = output => {return createMarkdownParser(createMarkdownRenderer(output, rendererOptions), mdParserOptions);};
+export const createStreamingMarkdownParser = (output, options) => {return createMarkdownParser(createMarkdownRenderer(output, rendererOptions), {...mdParserOptions, ...options});};
 
 export const createMarkdownStream = () => {
 	let parser;
@@ -143,14 +144,14 @@ export const createMarkdownStream = () => {
 	 * @param {string} buffer
 	 * @param {HTMLElement} output
 	 */
-	return (buffer, output) => {
+	return (buffer, output, options) => {
 		if (prevOutput !== output) {
 			if (parser) parser.end();
 			if (!(prevOutput = output)) return;
 
 			// 给AntiSlop的重试循环用
 			output.replaceChildren();
-			parser = createStreamingMarkdownParser(output);
+			parser = createStreamingMarkdownParser(output, options);
 			bufferIndex = 0;
 		}
 		if (!buffer || !parser) return;

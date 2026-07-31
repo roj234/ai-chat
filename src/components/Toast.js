@@ -11,7 +11,7 @@ onLoad((app) => app.append(container));
  * @param [type='' | 'error' | 'ok']
  * @param {number} timeout
  */
-export const showToast = (message, type, timeout = 3000) => {
+export const showToast = (message, type, timeout = 5000) => {
 	const closeToast = () => {
 		clearTimeout(timer);
 		elm.classList.add("closing");

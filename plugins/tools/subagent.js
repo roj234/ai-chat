@@ -1,5 +1,5 @@
-import {getToolParameters, registerToolset} from "/src/toolset.js";
-import {getMessages, updateConversation} from "/src/database.js";
+import {getToolParameters, registerToolset, toolScriptRegistry} from "/src/toolset.js";
+import {getMessages, kvListGet, updateConversation} from "/src/database.js";
 import {agentLoop} from "/src/api-request.js";
 import {$asyncState, $cleanup, $state, $update, $watch, debugSymbol, unconscious} from "unconscious";
 import {
@@ -14,6 +14,7 @@ import {
 import {fileAccess} from "./fileAccess.js";
 import {compileSchema} from "unconscious/common/json-schema-utils.js";
 import "./subagent.css";
+import {showToast} from "../../src/components/Toast.js";
 
 const readFile = fileAccess("read");
 
@@ -46,12 +47,20 @@ async function createSubAgent(par, response, conv) {
 			tools: true,
 			maxToolTurns: 0,
 			permittedTools: ['*'],
-			afkState: 1,
-			sound: false
+			afkState: 2,
+			sound: false,
 		},
 		allowedTools: new Set(par.tools),
 		activatedModules: new Set(['Subagent/Child'])
 	};
+
+	const modelType = par.model || 'inherit';
+	if (modelType !== 'inherit') {
+		const presetName = "_subagent_"+modelType;
+		const preset = await kvListGet("preset", presetName);
+		if (!preset) showToast("你未配置子代理模型定义【"+presetName+"】，回落到 inherit", "", 30000);
+		else Object.assign(conversation.overrides, preset);
+	}
 
 	let schema;
 	const responseSchemaPath = par.responseSchemaPath;
@@ -115,11 +124,12 @@ const findConversation = response => response[CONVERSATION_CACHE] || (response[C
 const subagentLoop = async ctx => {
 	const conversation = findConversation(ctx);
 	const messages_ = await getMessages(conversation);
+	const config_ = unconscious(config);
 
 	let stop = messages_.at(-1).finish_reason;
 	while (stop === 'tool_calls' || stop === undefined || stop === 'interrupt') {
 		$update(updateMessageUI);
-		stop = await agentLoop(conversation, messages_, config, true);
+		stop = await agentLoop(conversation, messages_, config_);
 	}
 
 	let content;
@@ -187,9 +197,13 @@ const CreateSubagent = {
 				type: "array",
 				items: { type: "string" },
 			},
-			/*blocking: {
-				type: "boolean",
-				default: true
+			model: {
+				enum: ["inherit", "fast", "balanced", "precise"],
+				default: "inherit"
+			},
+			/*reasoning_effort: {
+				enum: ["inherit", "low", "medium", "high"],
+				default: "inherit",
 			},*/
 			responseSchemaPath: { type: "string", },
 			async: {
@@ -203,6 +217,9 @@ const CreateSubagent = {
 		if (ctx[INIT_AGENT_SYM]) await ctx[INIT_AGENT_SYM];
 
 		if (!ctx.agentId) {
+			const missing = par.tools.filter(name => !toolScriptRegistry[name]);
+			if (missing.length) throw 'Invalid tool name: '+missing;
+
 			await (ctx[INIT_AGENT_SYM] = createSubAgent(par, ctx, conv));
 			delete ctx[INIT_AGENT_SYM];
 		}
@@ -245,7 +262,8 @@ const CreateSubagent = {
 
 		// 尚未启动：没有 agentId 或 conversation 丢失
 		// 前者应该不可能触发但保留
-		if (!resp.agentId || (!has_successor && !findConversation(resp))) {
+		const subagentConv = findConversation(resp);
+		if (!resp.agentId || (!has_successor && !subagentConv)) {
 			return <div className={`subagent-card`}>
 				<button className="sa-btn paused" onClick={() => {
 					delete resp.agentId;
@@ -265,7 +283,7 @@ const CreateSubagent = {
 			if (runningConversations.has(resp.agentId)) return [ 'running', '运行中' ];
 
 			const status = await QueryAgentStatus.script(resp);
-			if (status === 'deleted') return [ 'error', '已删除' ];
+			if (status === 'no such agent') return [ 'error', '已删除' ];
 			if (status.startsWith('done') && resp.content) return [ 'done', '已完成' ];
 			if (status.startsWith('error')) return [ 'error', '错误' ];
 			return [ 'paused', '继续' ];
@@ -279,9 +297,9 @@ const CreateSubagent = {
 			<span className="spacer"></span>
 			{par.tools?.length > 0 && <span title={"工具:\n" + par.tools.join('\n')}>🛠 {par.tools.length}</span>}
 			{par.responseSchemaPath && <span title={"结构化输出"}>📐</span>}
-			<button className={"btn ghost"} onClick={() => {
-				switchToConversation(findConversation(resp));
-			}}>转到子代理会话 #{resp.agentId}</button>
+			{subagentConv && <button className={"btn ghost"} onClick={() => {
+				switchToConversation(subagentConv);
+			}}>转到子代理会话 #{resp.agentId}</button>}
 		</div>;
 
 		// 代理 $cleanup
@@ -315,7 +333,7 @@ const QueryAgentStatus = {
 	},
 	async script(par, resp, conv) {
 		const conversation = findConversation(par);
-		if (!conversation) return 'deleted';
+		if (!conversation) return 'no such agent';
 
 		const timeout = par.timeout;
 		if (timeout) {

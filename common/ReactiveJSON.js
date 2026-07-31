@@ -10,6 +10,7 @@ import {
 	__capture,
 	__createState,
 	appendChildren,
+	AS_IS,
 	debugSymbol,
 	isReactive,
 	unconscious
@@ -79,30 +80,40 @@ export function createReactiveMarkdown(container, value) {
 			prevLen = text.length;
 		});
 	} else {
-		parser.write(value);
+		parser.write(value || "");
 		parser.end();
 	}
 
 	return container;
 }
 
+export const USER_PROMPT = debugSymbol("RealPrompt");
+EditableMessageRoles.add("userPrompt");
 MessageRoles["userPrompt"] = {
 	name: "CraftRPG提示块",
-	compose(message, output) {
-		output.push({
-			role: "user",
-			content: message.prompt
-		});
+	compose(self, output) {
+		if (self[USER_PROMPT]) {
+			output.push({
+				role: "user",
+				content: self[USER_PROMPT]
+			});
+		} else {
+			throw '找不到提示词，请重新调用SchemaRole';
+		}
 	},
-	renderContent(message, chunks, index, isEditing, messages, defaultRenderContent) {
-		chunks.push({
-			type: "think",
-			think: {
-				title: "展开完整提示",
-				content: message.prompt
-			}
-		});
-		defaultRenderContent(message, chunks, message.content);
+	renderContent(self, chunks, index, isEditing, messages, defaultRenderContent) {
+		if (self[USER_PROMPT]) {
+			chunks.push({
+				type: "think",
+				think: {
+					title: "展开完整提示",
+					content: prompt
+				}
+			});
+		} else {
+			self.role = "user";
+		}
+		defaultRenderContent(self, chunks, self.content);
 	}
 }
 
@@ -111,41 +122,67 @@ MessageRoles["userPrompt"] = {
  * @param {string} id
  * @param {string} name
  * @param {(data: import("unconscious").Reactive<Object>) => import("unconscious").Renderable} renderer
- * @param compose
+ * @param {(self: AiChat.Message, output: AiChat.Message[]) => void} compose
  * @param {OpenAI.Schema | function(AiChat.AssistantMessage): OpenAI.Schema} schema
+ * @param {(conversation: AiChat.Conversation, messages: AiChat.Message[], assistantResponse: AiChat.AssistantMessage) => void | Promise<void>} [onCompleted]
  */
-export function registerSchemaMessageRole(id, name, renderer, compose, schema) {
+export function registerSchemaMessageRole(id, name, renderer, compose, schema, onCompleted) {
 	EditableMessageRoles.add(id);
 	MessageRoles[id] = {
 		name,
 		compose,
-		renderContent(message, chunks, index, isEditing) {
-			message[MessageCopyHandler] = () => JSON.stringify(message.content, null, 2);
+		onCompleted(conversation, messages, config, log) {
+			const assistantResponse = messages.at(-1);
+			const content = assistantResponse.content;
+			assistantResponse.role = id;
+
+			const parser = createJsonParser(AS_IS, {json5: true});
+			parser.write(config.jsonSupport ? content : content.replace(/^\s*```json\s+|\s*```\s*$/, ""));
+			assistantResponse.content = parser.end(true);
+
+			const userMessage = messages.at(-2);
+			if (userMessage.role === 'userPrompt') {
+				delete userMessage.prompt;
+				// 需要换一个对象才能让 keyFunc 更新
+				// TODO 以后可以在这里放hook实现regen
+				messages[messages.length - 2] = {
+					...userMessage,
+					role: 'user'
+				}
+			}
+
+			if (onCompleted) return onCompleted(conversation, messages, assistantResponse);
+		},
+		renderContent(self, chunks, index, isEditing) {
+			self[MessageCopyHandler] = () => JSON.stringify(self.content, null, 2);
 
 			chunks.push({
 				type: "html",
 				html: () => {
-					if (isEditing(message)) {
+					if (isEditing(self)) {
 						const state = $state();
 						$watch(state, () => {
 							const val = state.obj;
 							if (val) {
 								let schema1 = schema;
-								if (typeof schema1 === 'function') schema1 = schema(message);
+								if (typeof schema1 === 'function') schema1 = schema(self);
 								const error = validateAndShowError(val, schema1);
 								if (error) {
 									state.value = {error};
 									return;
 								}
-								message.content = val;
+								self.content = val;
 							}
 						})
 						return (<div>
-							<JsonEditor value={JSON.stringify(message.content, null, 2)} state={state} />
+							<JsonEditor value={JSON.stringify(self.content, null, 2)} state={state} />
 							{() => state.error && <pre className={"error"} >{state.error}</pre> }
 						</div>);
 					} else {
-						return (<pre className={"code-block"} lang={id}><code lang={id}>{renderer(message.content)}</code></pre>);
+						let content = self.content;
+						if (self.finish_reason !== 'stop' && self.finish_reason !== 'tool_calls')
+							content = $state(content, true);
+						return (<pre className={"code-block"} lang={id}><code lang={id}>{renderer(content)}</code></pre>);
 					}
 				}
 			});
@@ -263,7 +300,11 @@ function createReactiveJSON() {
 		parser.write(json.slice(prevLen));
 		prevLen = json.length;
 
-		if (is_finished) parser.end();
+		if (is_finished) {
+			try {
+				parser.end();
+			} catch {}
+		}
 	};
 
 	return [ proxy, update ];

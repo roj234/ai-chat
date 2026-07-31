@@ -1,54 +1,50 @@
 import {createBase64Encoder} from "unconscious/common/Base64.js";
+import {UTF8_TEXT_ENCODER} from "unconscious/shared.js";
 
-const isNode = !import.meta.env?.MODE;
 const buffer = new Uint8Array([34,58,44,91,93,123,125]);
 const symbols = Array.from({ length: 7 }).map((item, i) => buffer.subarray(i, i+1));
 const QUOTE = 0, COLON = 1, COMMA = 2, LSB = 3, RSB = 4, LMB = 5, RMB = 6;
 
-export const createJsonStream = (obj, useBlobProxy) => new ReadableStream({
-	async start(controller) {
-		for await (const chunk of createJsonSerializer(useBlobProxy)(obj)) {
-			controller.enqueue(chunk);
+export const createJsonStream = (obj, replacer) => {
+	const iterator= createJsonSerializer(replacer)(obj);
+	return new ReadableStream({
+		async pull(controller) {
+			const { value, done } = await iterator.next();
+			if (done) {
+				controller.close();
+			} else {
+				controller.enqueue(value);
+			}
 		}
-		controller.close();
-	}
-});
+	});
+}
 
 /**
  * 创建一个流式 JSON 序列化器。
+ * @param {Map<Object, any>} [replacer]
  * @returns {(value: unknown) => AsyncGenerator<Uint8Array, void, void>} 一个异步生成器函数，接收任意值并逐步产出 JSON 字节块。
  */
-export const createJsonSerializer = useBlobProxy => {
-	const te = new TextEncoder();
+export const createJsonSerializer = (replacer) => {
 	let be;
 
-	async function* serialize(val) {
+	async function* serialize(val, key) {
+		if (replacer && typeof val === 'object')
+			val = replacer.get(val) ?? val;
+
 		const constructor = val?.constructor;
-		if (!isNode && (constructor === Blob || constructor === File)) {
-			const {name, type, size, hash} = val;
-			const isTextFile = type.startsWith("text/") || type === "application/json";
-			const isAudio = type.startsWith("audio/");
+		if (constructor === Blob || constructor === File) {
+			if (val.size === 0) throw "文件"+val.name+"的数据不完整或已损坏。请尝试重新上传";
 
-			if (size === 0) throw "文件"+name+"的数据不完整或已损坏。请尝试重新上传";
-			/*if (hash && useBlobProxy && DB_MODE !== "local") {
-				yield *serialize({
-					$: "Blob"+(isTextFile? "Raw" : isAudio ? "RawDataURL" : "DataURL"),
-					url: val.toUrl(),
-					type
-				});
-				return;
-			}*/
-
-			if (isTextFile) {
-				yield te.encode(JSON.stringify(await val.text()));
-			} else {
+			let isAudio;
+			if (key === 'url' || (isAudio = key === 'data')) {
+				// image or audio
 				yield symbols[QUOTE];
 
 				const reader = val.stream().getReader();
 
 				if (!isAudio) {
 					// dataUrl
-					yield te.encode(`data:${val.type};base64,`);
+					yield UTF8_TEXT_ENCODER.encode(`data:${val.type||'image/png'};base64,`);
 				}
 
 				if (!be) be = createBase64Encoder();
@@ -57,14 +53,21 @@ export const createJsonSerializer = useBlobProxy => {
 					const { done, value } = await reader.read();
 					if (done) break;
 
-					yield *be.encode(value);
+					for (const chunk of be.encode(value)) {
+						yield chunk.slice();
+					}
 				}
 
 				yield be.finish();
 				yield symbols[QUOTE];
+			} else {
+				// maybe text, video is not supported yet.
+				yield UTF8_TEXT_ENCODER.encode(JSON.stringify(await val.text()));
 			}
+			return;
+		}
 
-		} else if (Array.isArray(val)) {
+		if (Array.isArray(val)) {
 			yield symbols[LSB];
 
 			if (val.length) {
@@ -87,9 +90,9 @@ export const createJsonSerializer = useBlobProxy => {
 					const [k, v] = entries[j++];
 					if (v === undefined) continue;
 
-					yield te.encode(JSON.stringify(k));
+					yield UTF8_TEXT_ENCODER.encode(JSON.stringify(k));
 					yield symbols[COLON];
-					yield *serialize(v);
+					yield *serialize(v, k);
 					if (j === entries.length) break;
 					yield symbols[COMMA];
 				}
@@ -97,7 +100,7 @@ export const createJsonSerializer = useBlobProxy => {
 
 			yield symbols[RMB];
 		} else {
-			yield te.encode(JSON.stringify(val));
+			yield UTF8_TEXT_ENCODER.encode(JSON.stringify(val));
 		}
 	}
 

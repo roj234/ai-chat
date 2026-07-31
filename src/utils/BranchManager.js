@@ -149,16 +149,16 @@ function createBranchManager(conv, messages) {
 
 		const toDelete = new Set();
 		const dfs = (m) => {
-			toDelete.add(m);
-			const children = m[CHILDREN];
-			if (children) {
-				children.forEach(dfs);
-			} else {
-				let i = m[INDEX];
-				do {
-					m = messages[i++];
-					toDelete.add(m);
-				} while (!isLeaf(m));
+			let i = m[INDEX];
+			for(;;) {
+				toDelete.add(m);
+
+				const children = m[CHILDREN];
+				if (children) { children.forEach(dfs); break; }
+
+				if (isLeaf(m)) break;
+
+				m = messages[++i];
 			}
 		};
 		dfs(message);

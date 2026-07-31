@@ -1,4 +1,4 @@
-import {jsonPrompt} from "../core.js";
+import {runSchemaRole, USER_PROMPT} from "../core.js";
 import "./Translator.css";
 import {$once, createReactiveMarkdown, registerSchemaMessageRole, schemaToPrompt} from "/common/ReactiveJSON.js";
 import {$foreach, unconscious} from "unconscious";
@@ -79,26 +79,19 @@ const schema = {
 
 /**
  * 生成函数
- * @param {Partial<AiChat.Message>[]} messages_
+ * @param {Partial<AiChat.Message>[]} messages
  * @param {string} prompt
  */
-const sendAction = async (messages_, prompt) => {
+const sendAction = async (messages, prompt) => {
 	await ensureActiveConversation();
 	if (unconscious(abortCompletion)) return;
 
 	const time = Date.now();
-	const input_messages = [{
-		role: "user",
-		time,
-		content: prompt
-	}];
-
-	messages_.push({
-		id: -1,
+	messages.push({
 		role: "userPrompt",
 		time,
 		content: prompt,
-		prompt: `
+		[USER_PROMPT]: `
 作为精通所有语言的翻译专家，请按下方流程将用户输入翻译为【简体中文】。
 
 ${schemaToPrompt(schema, config.jsonSupport)}
@@ -108,24 +101,10 @@ ${schemaToPrompt(schema, config.jsonSupport)}
 ${prompt}`
 	});
 
-	try {
-		const assistantResponse = await jsonPrompt(schema, messages_, {
-			reasoning: {enabled: false},
-			max_completion_tokens: Math.max(8192, prompt.length),
-		}, ID);
-
-		const jsonData = JSON.parse(assistantResponse.content);
-
-		input_messages.push({
-			...assistantResponse,
-			role: ID,
-			content: jsonData
-		});
-	} catch (e) {
-		console.error(e);
-	}
-
-	messages_.splice(messages_.length - 2, 2, ...input_messages);
+	await runSchemaRole(ID, schema, messages, {
+		think: false,
+		max_completion_tokens: Math.max(8192, prompt.length),
+	});
 };
 
 /**
@@ -199,7 +178,7 @@ const renderer = (val) => {
  * @param {number} length
  * @param {AiChat.Conversation} conversation
  */
-const composer = (msg, output, _, index, length, conversation) => {
+const composer = (msg, output, _, index, length, conversation, hooks) => {
 	const {content} = msg;
 	const {some_variable, ...data} = content;
 

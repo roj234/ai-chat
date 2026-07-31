@@ -1,4 +1,4 @@
-import {jsonPrompt} from "../core.js";
+import {runSchemaRole, USER_PROMPT} from "../core.js";
 import "./StoryTurn.css";
 import {$once, createReactiveMarkdown, registerSchemaMessageRole, schemaToPrompt} from "/common/ReactiveJSON.js";
 import {$foreach, $update, unconscious} from "unconscious";
@@ -101,14 +101,13 @@ Operation semantics:
 	],
 	additionalProperties: false
 };
-// 兄弟，这不比预设牛逼？
 
 /**
  * 生成函数 (WIP)
- * @param {Partial<AiChat.Message>[]} messages_
+ * @param {Partial<AiChat.Message>[]} messages
  * @param {string} prompt
  */
-const sendAction = async (messages_, prompt) => {
+const sendAction = async (messages, prompt) => {
 	await ensureActiveConversation();
 	if (unconscious(abortCompletion)) return;
 
@@ -123,18 +122,11 @@ const sendAction = async (messages_, prompt) => {
 	}
 
 	const time = Date.now();
-	const input_messages = [{
-		role: "user", // TODO /say for re-execute?
-		time,
-		content: prompt
-	}];
-
-	messages_.push({
-		id: -1,
+	messages.push({
 		role: "userPrompt",
 		time,
 		content: prompt,
-		prompt: `${schemaToPrompt(schemaToLLM, config.jsonSupport)}${promptPrefix}
+		[USER_PROMPT]: `${schemaToPrompt(schemaToLLM, config.jsonSupport)}${promptPrefix}
 
 除非另有要求，角色使用中文进行对话
 
@@ -143,17 +135,15 @@ const sendAction = async (messages_, prompt) => {
 ${prompt}`
 	});
 
-	try {
-		const assistantResponse = await jsonPrompt(schemaToLLM, messages_, {
-			reasoning: {enabled: enableThink},
-			max_completion_tokens: 8000,
-		}, ID);
+	await runSchemaRole(ID, schemaToLLM, messages, { max_completion_tokens: 8000, });
+};
 
-		const jsonData = JSON.parse(assistantResponse.content);
+const onCompleted = async (conv, messages, assistantResponse) => {
+	const jsonData = assistantResponse.content;
 
-		const variableTool = jsonData.variables;
-
-		assistantResponse.tool_calls = variableTool.map(item => ({
+	const variables = jsonData.variables;
+	if (variables) {
+		assistantResponse.tool_calls = variables.map(item => ({
 			id: "tc_"+Math.random().toString(36).slice(2),
 			type: "function",
 			function: {
@@ -162,19 +152,21 @@ ${prompt}`
 			}
 		}));
 		assistantResponse.tool_responses = [];
-		await runTools(assistantResponse, unconscious(selectedConversation) || {allowedTools: new Set(["UpdateVariable"])}, true);
-
-		input_messages.push({
-			...assistantResponse,
-			role: ID,
-			content: jsonData
-		});
-	} catch (e) {
-		console.error(e);
+		await runTools(assistantResponse, {
+			...selectedConversation,
+			allowedTools: new Set(["UpdateVariable"])
+		}, true);
 	}
 
-	// BranchManager 唯三的 API
-	messages_.splice(messages_.length - 2, 2, ...input_messages);
+	const userMessage = messages.at(-2);
+	if (userMessage.role === 'userPrompt') {
+		delete userMessage.prompt;
+		// 需要换一个对象才能让 keyFunc 更新
+		messages[messages.length - 2] = {
+			...userMessage,
+			role: 'user'
+		}
+	}
 };
 
 /**
@@ -273,7 +265,7 @@ registerSchemaMessageRole(ID, 'CraftRPG回合参考实现', renderer, composer, 
 		"story",
 		"summary"
 	]
-});
+}, onCompleted);
 
 // 注册命令
 COMMAND_REGISTRY["turn"] = [

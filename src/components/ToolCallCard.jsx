@@ -1,10 +1,19 @@
 import './ToolCallCard.css';
-import {runTools, TOOL_NAME, toolScriptRegistry} from "../toolset.js";
+import {
+    getToolParameters,
+    getToolUserInteractionLevel,
+    runTools,
+    TOOL_IS_RUNNING,
+    TOOL_NAME,
+    toolScriptRegistry
+} from "../toolset.js";
 import {config, messages, selectedConversation} from "../states.js";
 import {$state, $update, $watch, appendChildren, isReactive, unconscious} from "unconscious";
 import {MORPH_CHILD_FUNCTION} from "../utils/utils.js";
 import morphdom from "morphdom";
 import {highlight, highlightJsonLike} from "../markdown/highlight.js";
+import SimpleModal from "./SimpleModal.jsx";
+import {updateConversation} from "../database.js";
 
 const morph = (input, data) => morphdom(input, `<pre class="args">${highlightJsonLike(data)}</pre>`);
 
@@ -21,11 +30,13 @@ export function ToolCallCard(props) {
     const { tool, message, idx } = props;
 
     const {name} = tool.function;
-    const response_content = $state();
+    const toolContent = $state();
 
     const initializeHtml = () => {
-        base._content = response_content;
-        response_content.value = message.tool_responses[idx]?.content;
+        const toolResponse = message.tool_responses[idx];
+
+        base._content = toolContent;
+        toolContent.value = toolResponse?.content;
 
         let input, output;
 
@@ -37,19 +48,31 @@ export function ToolCallCard(props) {
                 <div className="tool-body">
                     <div className="args-title">返回值
                         {isReactive(tool) ? null : <button className={"rerun-btn"} onClick={({target}) => {
-                            target.disabled = true;
-                            runTools(message, unconscious(selectedConversation), idx, true).then(() => {
-                                $update(messages);
-                            }).finally(() => {
-                                target.disabled = false;
-                            });
+                            const runOperation = () => {
+                                target.disabled = true;
+                                runTools(message, unconscious(selectedConversation), idx, true).then(() => {
+                                    $update(messages);
+                                }).finally(() => {
+                                    target.disabled = false;
+                                });
+                            }
+
+                            if (toolResponse?.[TOOL_IS_RUNNING] && null == toolResponse.content) {
+                                SimpleModal({
+                                    title: "并发警告",
+                                    message: "工具当前标记为【正在运行】，重复执行【可能】造成并发竞态，确认？",
+                                    onConfirm: runOperation
+                                });
+                            } else {
+                                runOperation();
+                            }
                         }}>
                         重新执行<span className={"tooltip"}>{`撤销工具调用并重新执行。
 某些工具不支持撤销，此时会重复执行，
 可能导致状态不一致或数据丢失。`}</span></button>}
                     </div>
-                    <pre ref={output} className="args" dangerouslySetInnerHTML={highlightJsonLike(response_content.value ?? "/* 尚未运行 */")}></pre>
-                    {() => Array.isArray(response_content.value) ? <div className="gallery">{response_content.value.map(part => {
+                    <pre ref={output} className="args" dangerouslySetInnerHTML={highlightJsonLike(unconscious(toolContent) ?? (toolResponse?.[TOOL_IS_RUNNING] ? "/* 正在运行 */" : "/* 尚未运行 */"))}></pre>
+                    {() => Array.isArray(unconscious(toolContent)) ? <div className="gallery">{unconscious(toolContent).map(part => {
                         const url = part.image_url?.url;
                         return url && <img src={typeof url === "string" ? url : url.toUrl()}/>;
                     })}</div> : null}
@@ -66,8 +89,8 @@ export function ToolCallCard(props) {
             // 这个函数自带JSON格式化，但是不应该在流式响应的时候使用它，不是么
             input.innerHTML = highlightJsonLike(tool.function.arguments);
 
-            $watch(response_content, () => {
-                morph(output, response_content.value);
+            $watch(toolContent, () => {
+                morph(output, unconscious(toolContent));
             }, false);
         }
     };
@@ -100,21 +123,20 @@ export function ToolCallCard(props) {
  * @param {HTMLDetailsElement} element
  */
 const morphToolCallCard = ({tool, message, idx}, element) => {
-    const {success, content, time, [TOOL_NAME]: tool_name} = message.tool_responses[idx] || {};
+    const conv = unconscious(selectedConversation);
+    const tc = message.tool_calls[idx];
+    const resp = message.tool_responses[idx] || {};
+    const {success, content, time, [TOOL_NAME]: tool_name} = resp;
+
     const is_errored = false === success;
 
     const classList = element.classList;
     classList.toggle("tool-error", is_errored);
 
-    const interactive = toolScriptRegistry[tool.function.name]?.interactive;
-    let pending = interactive === "secure" && null == time;
+    let pending = getToolUserInteractionLevel(conv, tool_name, getToolParameters(resp, tc, true)) === 2 && null == time && null == success;
     classList.toggle("tool-pending", pending);
 
-    const setAuditState = (target, allowUnsafe) => {
-        runTools(message, unconscious(selectedConversation), idx, allowUnsafe).then(() => {
-            $update(messages);
-        });
-    };
+    const setAuditState = (target, allowUnsafe) => runTools(message, conv, idx, allowUnsafe).then(() => $update(messages));
 
     const pend_class_name = "pend-expand";
     if (message.finish_reason && pending && !classList.contains(pend_class_name)) {
@@ -131,11 +153,12 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
                     允许
                 </button>
                 <button className={"btn primary"} onClick={({target}) => {
-                    target.previousElementSibling.click();
-
-                    const grantedTools = selectedConversation.grantedTools;
-                    if (!grantedTools) selectedConversation.grantedTools = new Set([tool_name]);
+                    const grantedTools = conv.grantedTools;
+                    if (!grantedTools) conv.grantedTools = new Set([tool_name]);
                     else grantedTools.add(tool_name);
+                    updateConversation(conv);
+
+                    target.previousElementSibling.click();
                 }} title={"总是允许(仅当前对话)"}>
                     总是允许
                 </button>
@@ -154,9 +177,9 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
 
     const is_ever_opened = element.childElementCount > 1;
     if (is_ever_opened) {
-        element._content.value = content ?? (time ? "/* 正在运行 */" : "/* 尚未运行 */");
+        element._content.value = content ?? (resp[TOOL_IS_RUNNING] ? "/* 正在运行 */" : "/* 尚未运行 */");
     } else {
-        if (message === messages[messages.length - 1] && is_errored) {
+        if (message === messages.at(-1) && is_errored) {
             element.open = true;
             element.click(); // call initializeHtml
         }

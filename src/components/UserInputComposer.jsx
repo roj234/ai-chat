@@ -8,12 +8,12 @@ import {
 	messages,
 	selectedConversation
 } from "../states.js";
-import {agentLoop, statusBadge} from "../api-request.js";
+import {statusBadge, submitUserChatMessage} from "../api-request.js";
 import {blobToContentPart, createAttachmentGallery} from "./InputAttachment.jsx";
 import {CUSTOM_CONTROLS} from "../settings.js";
 import {createSubmitButton} from "./SubmitButton.jsx";
 import {bind} from "../utils/utils.js";
-import {$computed, $stampLock, $state, $watch, unconscious} from "unconscious";
+import {$computed, $state, $watch, unconscious} from "unconscious";
 import {handleCommand} from "../commands.js";
 import SimpleModal from "./SimpleModal.jsx";
 import {getBlob} from "../database.js";
@@ -275,13 +275,7 @@ export const createUserInputComposer = (scroller) => {
 
 		if (config.reviewMessage && input) return;
 
-		const conv = unconscious(selectedConversation);
-		const messages_ = $stampLock(messages);
-		for (;;) {
-			const result = await agentLoop(conv, messages_, config);
-			if (result !== 'tool_calls') break;
-			input = null;
-		}
+		submitUserChatMessage(true);
 	}
 
 	const backToBottomBtnShowHide = () => {

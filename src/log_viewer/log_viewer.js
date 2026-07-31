@@ -41,6 +41,7 @@ function bsearchLT(logs, target) {
 }
 
 function normalizeCachedLog(log) {
+	log.cost /= 1000000;
 	// Currency conversion
 	if (log.currency === "USD") {
 		log.cost /= 0.15;
@@ -132,23 +133,35 @@ const setPresetRange = range => {
 	clearActivePresetBtn();
 	document.querySelector(`#presetBtns [data-range="${range}"]`)?.classList.add('btn-active');
 
+	const n = parseInt(range, 10);
+	const type = range[range.length - 1].toLowerCase();
 	const end = new Date();
 	const start = new Date(end);
-	const type = range[range.length-1];
+
 	switch (type) {
 		case 'h':
-			start.setHours(start.getHours()-parseInt(range, 10));
-		break;
-		case 'd':
-			start.setHours(-parseInt(range, 10) * 24, 0);
-			end.setHours(23, 59);
-		break;
-		case 'm':
-			start.setMonth(end.getMonth(), 1);
-			start.setHours(0, 0);
-			end.setMonth(end.getMonth()+1, 0);
-			end.setHours(23, 59);
-		break;
+			// 最近 n 小时：从当前时间往前推 n 小时
+			start.setTime(end.getTime() - n * 60 * 60 * 1000);
+			break;
+
+		case 'd': {
+			// 自然日，包含今天：
+			// n 天 = 从 n-1 天前的 00:00:00 到今天 23:59:59.999
+			start.setDate(start.getDate() - (n - 1));
+			start.setHours(0, 0, 0, 0);
+			end.setHours(23, 59, 59, 999);
+			break;
+		}
+
+		case 'm': {
+			// 自然月，包含当月：
+			// n 个月 = 从 n-1 个月前的 1 号 00:00:00 到当月最后一天 23:59:59.999
+			start.setMonth(start.getMonth() - (n - 1), 1);
+			start.setHours(0, 0, 0, 0);
+			end.setMonth(end.getMonth() + 1, 0);
+			end.setHours(23, 59, 59, 999);
+			break;
+		}
 	}
 
 	$startDate.value = formatDate("Y-m-dTH:i", start);
@@ -280,8 +293,8 @@ const applySort = () => {
 		let va = a[sf];
 		let vb = b[sf];
 		if (sf === 'total_tokens') {
-			va = (a.input_tokens || 0) + (a.output_tokens || 0);
-			vb = (b.input_tokens || 0) + (b.output_tokens || 0);
+			va = (a.input_tokens || 0) + (a.output_tokens || 0) + (a.cached_tokens || 0)
+			vb = (b.input_tokens || 0) + (b.output_tokens || 0) + (b.cached_tokens || 0);
 		}
 		if (va == null) va = 0;
 		if (vb == null) vb = 0;
@@ -346,7 +359,9 @@ function getBucketLabel(ts, bucketSize) {
 	const d = new Date(ts);
 	// week
 	const startOfWeek = new Date(d);
-	startOfWeek.setDate(d.getDate() - d.getDay());
+	const day = d.getDay(); // 0 是周日
+	const diff = (day + 6) % 7; // 距离本周一的天数
+	startOfWeek.setDate(d.getDate() - diff);
 	return `${String(startOfWeek.getMonth()+1).padStart(2,'0')}-${String(startOfWeek.getDate()).padStart(2,'0')} 周`;
 }
 
@@ -587,7 +602,7 @@ let renderStartIndex;
 const renderLogs = $state();
 let foreachTable = $foreach(renderLogs, (log, i) => {
 	const currency = log.currency || 'USD';
-	const totalTok = (log.input_tokens || 0) + (log.output_tokens || 0);
+	const totalTok = (log.input_tokens || 0) + (log.output_tokens || 0) + (log.cached_tokens || 0);
 	const cachedInfo = log.cached_tokens ?
 		<span style="color:#3cc8c8" title="缓存命中">{formatNumber(log.cached_tokens)}</span> : '—';
 
@@ -603,14 +618,13 @@ let foreachTable = $foreach(renderLogs, (log, i) => {
 					<span
 						className="detail-value">{log.input_tokens}{log.cached_tokens && `(+${log.cached_tokens} cached)`}↑ {log.output_tokens}{log.reasoning_tokens && `(${log.reasoning_tokens} reasoning)`}↓</span>
 				</div>
-				<div className="detail-item">
+				{log.cache_write_tokens && <div className="detail-item">
 					<span className="detail-label">缓存写入</span>
-					<span
-						className="detail-value">{log.cache_write_tokens ? log.cache_write_tokens : '—'}</span>
-				</div>
+					<span className="detail-value">{log.cache_write_tokens}</span>
+				</div>}
 				<div className="detail-item">
 					<span className="detail-label">延迟与耗时</span>
-					<span className="detail-value">{log.latency}ms/{log.duration}ms</span>
+					<span className="detail-value">{log.latency}ms{log.duration && ("/"+log.duration+"ms")}</span>
 				</div>
 				<div className="detail-item">
 					<span className="detail-label">渠道和模型</span>
@@ -618,7 +632,7 @@ let foreachTable = $foreach(renderLogs, (log, i) => {
 				</div>
 				<div className="detail-item">
 					<span className="detail-label">成本</span>
-					<span className="detail-value">{formatCost(log.cost, currency)} {(currency)}</span>
+					<span className="detail-value">{log.cost.toFixed(6)} {(currency)}</span>
 				</div>
 				<div className="detail-item">
 					<span className="detail-label">时间戳</span>
@@ -717,7 +731,10 @@ const toggleRow = async (log, row, makeDetails) => {
 				method: 'POST',
 				body: [["log/by-rowid", log.rowid]]
 			}))[0];
-			if (fullLog) Object.assign(log, fullLog);
+			if (fullLog) {
+				normalizeCachedLog(fullLog);
+				Object.assign(log, fullLog);
+			}
 		}
 		const newEl = makeDetails();
 		row.insertAdjacentElement("afterend", newEl);

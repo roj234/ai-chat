@@ -8,8 +8,8 @@ import {
 } from "../config.js";
 import {VectorDB} from "../rag/VectorDB.js";
 import {DatabaseSync} from "node:sqlite";
-import {cachePreparedSql, tableMigration} from "./sqliteUtils.js";
-import {compressMessage} from "./compression.js";
+import {cachePreparedSql} from "./sqliteUtils.js";
+import {compressLog, compressMessage, decompressLog} from "./compression.js";
 
 const connections = new Map();
 const usageTimestamps = new Map();
@@ -63,7 +63,7 @@ export function loadUserData(dbPath, userId) {
 }
 
 // 数据库版本号
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 const createConversations = `
 	CREATE TABLE conversations (
@@ -120,20 +120,24 @@ ${createKV}
 ${createKVS}
 PRAGMA user_version = `+DB_VERSION);
 	} else if (user_version < DB_VERSION) {
+		console.log("正在更新用户数据 目标版本",DB_VERSION,"当前版本",user_version);
 		if (user_version <= 1) {
 			db.exec(`CREATE INDEX idx_conversations_time ON conversations(time)`);
 		}
-		if (user_version === 114514) {
-			db.exec(`
-BEGIN TRANSACTION;
+		if (user_version <= 2) {
+			db.exec(`BEGIN TRANSACTION;`);
 
-${tableMigration(createConversations, "id, title, time, data")}
-${tableMigration(createMessages, "id, owner, time, content, data")}
-${tableMigration(createKVS, "type, name, data")}
+			const logs = db.prepare(`SELECT ROWID, data FROM "logs"`).all();
+			const updateLog = db.prepare(`UPDATE "logs" SET data = ? WHERE ROWID = ?`);
+			for (const row of logs) {
+				const data = decompressLog(row.data);
+				data.cost = Math.round(data.cost * 1000000);
+				updateLog.run(compressLog(data), row.rowid);
+			}
 
-COMMIT;
-`);
+			db.exec(`COMMIT;`);
 		}
+		console.log("更新成功");
 		db.exec(`PRAGMA user_version = `+DB_VERSION);
 	}
 

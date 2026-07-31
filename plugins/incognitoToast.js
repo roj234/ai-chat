@@ -8,7 +8,7 @@ onLoad(() => {
 	$watch($computed(() => config.incognito), () => {
 		const incognito = config.incognito;
 		if (incognito) {
-			incognitoToast = showToast("无痕模式", "error", 0);
+			incognitoToast = showToast("无痕模式", "", -1);
 		} else if (incognitoToast) {
 			incognitoToast();
 			incognitoToast = null;

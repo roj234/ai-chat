@@ -4,7 +4,7 @@ import {spawn} from 'node:child_process';
 import {readBOM} from "../../common/chardet.js";
 import iconv from "iconv-lite";
 import {getEnvironmentPrompt} from "../utils/checkEnv.js";
-import {createHashLine} from "../../common/fs-common.js";
+import {createTextFileEditHelper} from "../../common/fs-common.js";
 import {IgnoreMatcher} from "../../common/ignore.js";
 import {createReadStream, createWriteStream} from 'node:fs';
 import {pipeline} from "node:stream/promises";
@@ -20,8 +20,9 @@ import {formatSize} from "unconscious/common/Utils.js";
  */
 export const pathFilter = (ctx, relPath) => {
 	const root = ctx.fsRoot;
-	const targetPath = path.resolve(root, relPath.replace(/^\/+/, ''));
-	if (!targetPath.startsWith(root)) {
+	const targetPath = path.resolve(root, relPath);
+	// allow path like /tmp/... or C:/tmp/
+	if (!targetPath.startsWith(root) && !/^(?:[a-zA-Z]:)?[\\/]tmp(?:\/|$)/.test(targetPath)) {
 		const err = new Error('Forbidden: Path Traversal');
 		err.statusCode = 403;
 		throw err;
@@ -63,7 +64,7 @@ function tryDecode(buffer, charset) {
 	return {text,unprintable};
 }
 
-function guessCharset(buffer, candidates = ["UTF-8", "GB18030"]) {
+function guessCharset(buffer, candidates = ["UTF-8", "GBK"]) {
 	let bestResult;
 	for (const charset of candidates) {
 		const result = tryDecode(buffer, charset);
@@ -216,7 +217,7 @@ export async function registerFsRoutes(router, allowExec) {
 	};
 	const sendText = (res, text) => sendRaw(res, 200, 'text/plain', text);
 
-	const hashLine = createHashLine({
+	const hashLine = createTextFileEditHelper({
 		async read(path, ctx) {
 			const safePath = pathFilter(ctx, path);
 			const stats = await fs.stat(safePath);
@@ -338,8 +339,9 @@ nlink: ${stats.nlink}`);
 			showDir = null,
 			showModified = false
 		} = await ctx.readAsObject();
-		const safePath = await pathFilterWithIgnore(ctx, filePath, true);
-		const ignore = await getIgnoreMatcher(ctx.fsRoot, safePath);
+		const safePath = pathFilter(ctx, filePath);
+		const ignored = await getIgnoreMatcher(ctx.fsRoot, safePath);
+
 		const entries = pattern !== '*'
 			? await fs.glob(pattern, { cwd: safePath, withFileTypes: true })
 			: await fs.readdir(safePath, { withFileTypes: true });
@@ -352,9 +354,10 @@ nlink: ${stats.nlink}`);
 
 		const result = [];
 		for await (const entry of entries) {
-			const entryName = pattern !== '*' ? path.join(entry.parentPath, entry.name).slice(safePath.length+1).replaceAll(path.sep, '/') : entry.name;
+			const parentPath = entry.parentPath.slice(safePath.length+1).replaceAll(path.sep, '/');
+			const entryName = pattern !== '*' && parentPath ? parentPath+'/'+entry.name : entry.name;
 			const isDir = entry.isDirectory();
-			if (ignore.test(entryName, isDir) || dirPrefix.has(entry.parentPath.slice(safePath.length+1))) {
+			if (ignored.test(entryName, isDir) || dirPrefix.has(parentPath)) {
 				if (isDir) dirPrefix.add(entryName);
 				continue;
 			}
@@ -624,7 +627,7 @@ logPath: ${logFile}`
 		console.log("\n默认 shell: "+defaultShell);
 
 		router.get('/env', async (ctx) => {
-			return ctx.send(200, { prompt: envPrompt })
+			return ctx.send(200, { prompt: envPrompt, location: ctx.fsRoot })
 		});
 
 		router.post('/spawn', async (ctx) => {

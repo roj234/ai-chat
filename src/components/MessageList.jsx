@@ -152,7 +152,7 @@ const chunkRenderer = m => {
 							totalOutput += output_tokens;
 							totalReasoning += reasoning_tokens;
 							totalCacheWrite += cache_write_tokens;
-							totalCost += cost;
+							totalCost += cost / 1000000;
 							totalTime += duration;
 						});
 
@@ -201,7 +201,7 @@ const chunkRenderer = m => {
 								<div className="stats-row-bottom">
 									{input_tokens ? <span>↑ <b>{input_tokens}{cached_tokens?` (+${cached_tokens})`:null}</b> Tokens</span> : null}
 									{output_tokens ? <span title={"缓存写入: " + cache_write_tokens}>↓ <b>{output_tokens}{reasoning_tokens?` (${reasoning_tokens} 思考)`:null}</b> Tokens</span> : null}
-									{cost ? (<span>价格: <b>{currency === 'CNY' ? '￥' : '$'}{cost.toFixed(7)}</b></span>) : null}
+									{cost ? (<span>价格: <b>{currency === 'CNY' ? '￥' : '$'}{cost.toFixed(6)}</b></span>) : null}
 								</div>
 							</div>;
 						}}
@@ -306,7 +306,7 @@ const chunkGather = (message, chunks, index, messages) => {
 			const name = tool.function.name;
 			const fn = toolScriptRegistry[name];
 			const response = message.tool_responses?.[j];
-			if (fn?.renderer && response && (fn.interactive || response.time)) {
+			if (fn?.renderer && response && (null != fn.interactive || response.time)) {
 				chunks.push({
 					type: "tool",
 					tool_name: name,
@@ -540,7 +540,7 @@ const buttonHandler = (e) => {
 				submitUserChatMessage();
 			};
 
-			let mode = self.end_index !== msgArr.length ? true : (null != selectedConversation.bm_leaf || config.branchRegen);
+			let mode = self.end_index !== msgArr.length ? true : (null != selectedConversation.bm_leaf || config.model !== message.model || config.branchRegen);
 			if (null == mode) {
 				SimpleModal({
 					title: "询问",
@@ -565,7 +565,7 @@ const buttonHandler = (e) => {
 		case "del": {
 			if (!clickTwice(btn)) return;
 			const end = self.end_index || (self.index + 1);
-			if (selectedConversation.bm_leaf/* && hasBranchAfter(msgArr[end-1])*/) {
+			if (selectedConversation.bm_leaf && end !== msgArr.length) {
 				SimpleModal({
 					title: "警告",
 					message: "您正在删除包含分支点的对话，继续将删除它和后续所有对话。",
@@ -615,6 +615,10 @@ const buttonHandler = (e) => {
 		}
 		break;
 		case "edit": {
+			delete message.error;
+			const fr = message.finish_reason;
+			if (fr === 'error') message.finish_reason = 'stop';
+
 			selectedConversation[CURRENT_EDITING] = message;
 			self[PINNED] = true;
 

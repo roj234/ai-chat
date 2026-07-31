@@ -1,6 +1,6 @@
 // API request
 import {createMarkdownStream} from "./markdown/markdown.js";
-import {cloneNamed, getTextContent, jsonFetch, prettyError} from "./utils/utils.js";
+import {cloneNamed, getTextContent, prettyError, resolveDBRelativeURL} from "./utils/utils.js";
 import {setWakeLock} from "./utils/wakeLock.js";
 import {
 	abortCompletion,
@@ -9,6 +9,7 @@ import {
 	inputText,
 	isLlamaCppBackend,
 	lastScrollDirection,
+	LOCKED,
 	MessageRoles,
 	messages,
 	PROGRESS,
@@ -19,11 +20,11 @@ import {
 	updateMessageUI
 } from "./states.js";
 import {getAvailableTools, parseFrontmatter, PLACEHOLDERS, runTools, TOOL_NAME, toolScriptRegistry} from "./toolset.js";
-import {$stampLock, $state, $update, $watch, isReactive, unconscious} from "unconscious";
+import {$stampLock, $state, $update, $watch, AS_IS, debugSymbol, isReactive, unconscious} from "unconscious";
 import {showToast} from "./components/Toast.js";
 import failure from "../media/failure.js";
 import complete from "../media/complete.js";
-import {appendBillingLog, isIDB, kvListGet, updateConversation} from "./database.js";
+import {appendBillingLog, DB_MESSAGES_DIFF, isIDB, kvListGet, updateConversation} from "./database.js";
 import {BODY_PARAMETERS, defaultCoTPrompt, defaultSystemPrompt, defaultTitlePrompt} from "./settings.js";
 import {createJsonStream} from "/common/StreamJsonSerializer.js";
 import {createAntiSlopSampler} from "./anti-slop-sampler.js";
@@ -31,9 +32,13 @@ import SimpleModal from "./components/SimpleModal.jsx";
 import {highlightJsonLike} from "./markdown/highlight.js";
 import {setConversationTitle} from "./components/ConversationList.jsx";
 import {deepEntries, jsonEval} from "unconscious/common/json-schema-utils.js";
-import {applyDelta, sseFetch} from "/common/openai-api-utils.js";
+import {applyDelta, jsonFetch, ORIGINAL_ERROR, sseFetch} from "/common/openai-api-utils.js";
 import {base64DecodeToUint8Array} from "unconscious/common/Base64.js";
 import {DI_messageContainer} from "./hooks.js";
+import {objectIdentityHash} from "../common/object-hash.js";
+import {encodeObjects} from "./utils/marshal.js";
+import {SHA256} from "unconscious/common/SHA256.js";
+import {DONT_PARSE_HTML_IN_THINKING} from "./components/ThinkBlock.jsx";
 
 export const statusBadge = <span />;
 export const updateStatusText = (text, tone = '') => {
@@ -42,19 +47,31 @@ export const updateStatusText = (text, tone = '') => {
 };
 
 /**
+ * @param {boolean} [loop]
  * @return {Promise<string>}
  */
-export const submitUserChatMessage = () => agentLoop(unconscious(selectedConversation), $stampLock(messages), config);
+export const submitUserChatMessage = async (loop) => {
+	const conv = unconscious(selectedConversation);
+	const messages_ = $stampLock(messages);
+	const config_ = unconscious(config);
+
+	let result;
+	do {
+		result = await agentLoop(conv, messages_, config_);
+	} while (result  === 'tool_calls' && loop);
+	return result;
+};
 
 /**
  *
  * @param {AiChat.Conversation} conversation
  * @param {import("unconscious").Reactive<AiChat.Message[]>} messages
- * @param {import("unconscious").Reactive<AiChat.Preset>} config
- * @param {boolean} backgroundTask
+ * @param {AiChat.Preset & {
+ *     renderer?: Function
+ * }} config
  * @returns {Promise<false|string>}
  */
-export async function agentLoop(conversation, messages, config, backgroundTask) {
+export async function agentLoop(conversation, messages, config) {
 	if (runningConversations.has(conversation.id)) throw new Error("Loop already running");
 
 	const overrides = conversation.overrides;
@@ -62,16 +79,19 @@ export async function agentLoop(conversation, messages, config, backgroundTask) 
 
 	let markdownRenderer = config.afkState === 2 ? (content, container) => container && (container.textContent = content) : createMarkdownStream();
 	let updateCount = 0;
-	let content_;
+	let lastContent;
 	let waitingForContent;
 
-	function updateMarkdown(content, force) {
-		content_ = content;
+	const roleId = conversation.roleId;
+	const schemaPreprocess = roleId ? s => "```"+roleId+"\n"+s : AS_IS;
 
-		const currentIsThink = isReactive(content.think);
-		const container = findStreamingContainer(currentIsThink);
+	const render = (content, force) => {
+		lastContent = content;
+
+		const isThinking = isReactive(content.think);
+		const container = findStreamingContainer(isThinking);
 		if (!container) {
-			waitingForContent = currentIsThink;
+			waitingForContent = isThinking;
 			return true;
 		}
 		waitingForContent = 0;
@@ -82,7 +102,7 @@ export async function agentLoop(conversation, messages, config, backgroundTask) 
 				if (!details.classList.contains("m")) {
 					details.classList.add("m");
 					// only update when open
-					details.addEventListener("click", () => updateMarkdown(content));
+					details.addEventListener("click", () => render(content));
 				}
 				return;
 			}
@@ -92,45 +112,45 @@ export async function agentLoop(conversation, messages, config, backgroundTask) 
 			requestAnimationFrame(() => {
 				const wasUpdatedAfterCheckpoint = updateCount > 1;
 				updateCount = 0;
-				if (wasUpdatedAfterCheckpoint) updateMarkdown(content);
+				if (wasUpdatedAfterCheckpoint) render(content);
 			});
 			updateCount++;
 		}
 
 		const atBottom = DI_messageContainer.scrollHeight - DI_messageContainer.clientHeight - DI_messageContainer.scrollTop;
 
-		markdownRenderer(currentIsThink ? content.think.content : content.content, container);
+		markdownRenderer(isThinking ? content.think.content : schemaPreprocess(content.content), container, isThinking ? DONT_PARSE_HTML_IN_THINKING : null);
 
-		if (atBottom < 100 && !lastScrollDirection.value) DI_messageContainer.vl.scrollTo(DI_messageContainer.scrollHeight);
-	}
-	function callback(type, content) {
+		if (atBottom < 250 && !lastScrollDirection.value) DI_messageContainer.vl.scrollTo(DI_messageContainer.scrollHeight);
+	};
+	const renderer = (type, content) => {
 		if (selectedConversation.id !== conversation.id) return;
 
 		switch (type) {
 			case MARKDOWN_APPEND:
 				// noinspection UnnecessaryLocalVariableJS
 				const flag = waitingForContent;
-				if (updateMarkdown(content) && waitingForContent !== flag) break;
+				if (render(content) && waitingForContent !== flag) break;
 			return;
 			case MARKDOWN_END: {
-				if (content_) {
+				if (lastContent) {
 					updateCount = 0;
-					updateMarkdown(content_, true);
+					render(lastContent, true);
 					markdownRenderer();
 				}
 				if (null === content?.finish_reason) return;
 			}
 		}
 		$update(updateMessageUI);
-	}
+	};
 
-	const abort_ = $state(new AbortController());
+	const abort = $state(new AbortController());
 	/** @type {AiChat.LLMRequestContext} */
 	const context = {};
 
 	let oldValue = selectedConversation.id !== conversation.id || null;
-	$watch(abort_, () => {
-		const newValue = unconscious(abort_);
+	$watch(abort, () => {
+		const newValue = unconscious(abort);
 		// noinspection EqualityComparisonWithCoercionJS
 		if (unconscious(abortCompletion) == oldValue) {
 			abortCompletion.value = newValue;
@@ -139,37 +159,81 @@ export async function agentLoop(conversation, messages, config, backgroundTask) 
 	});
 
 	runningConversations.set(conversation.id, {
-		abort: abort_,
+		abort,
 		messages
 	});
 
 	if (config.wakelock) setWakeLock(true);
 	$update(updateConversationListUI);
 	try {
-		const result = await executeCompletionRequest(
-			conversation, messages,
-			true,
-			abort_, callback,
-			context, config
-		);
+		// retry via context.retry
+		const result = await new Promise((resolve, reject) => {
+			let retryCount = 0;
+			let lastRequest;
+
+			context.retry = () => {
+				abort.value = new AbortController();
+				retryCount++;
+				lastRequest.then(attempt);
+			};
+
+			const attempt = () => {
+				const currentRetryCount = retryCount;
+				lastRequest = sendCompletionRequest(
+					conversation,
+					messages,
+					!config.disableTools,
+					unconscious(abort),
+					renderer,
+					context,
+					config
+				).then((result) => {
+					if (currentRetryCount === retryCount) {
+						resolve(result);
+					}
+				}).catch((err) => {
+					if (currentRetryCount === retryCount) {
+						reject(err);
+					}
+				});
+			};
+
+			attempt();
+		});
 		if (!result) return result; // false
 
-		let finishReason = result.finish_reason;
+		if (roleId) {
+			try {
+				await MessageRoles[roleId].onCompleted(conversation, messages, config, result);
+			} catch (e) {
+				showToast(prettyError(e), 'error');
+			}
+			delete conversation.roleId;
+		}
 
+		let finishReason = result.finish_reason;
 		const assistantMessage = messages.at(-1);
+
+		// 读锁也应该能看消息
+		const writeProtect = conversation[LOCKED];
+		if (writeProtect) {
+			finishReason = 'interrupt';
+			messages.pop();
+		}
 
 		const tone = FINISH_REASON_TONE[finishReason];
 		const is_ok = tone != null;
 
 		const promises = [];
 		const commitMessage = async () => {
+			if (writeProtect) return;
 			if (promises.length) return Promise.all(promises);
 
 			let needUpdate;
 			const resumeId = conversation.resumeId;
 			if (finishReason !== 'error' || assistantMessage.error?.trim() !== "network error"/* fetch */) {
 				if (resumeId) {
-					promises.push(jsonFetch(config.endpoint+"/abort/"+resumeId, {
+					promises.push(jsonFetch(resolveDBRelativeURL(config.endpoint)+"/abort/"+resumeId, {
 						key: config.accessToken,
 						method: 'POST'
 					}).catch(e => {
@@ -185,11 +249,11 @@ export async function agentLoop(conversation, messages, config, backgroundTask) 
 				}
 			}
 
-			const hasLog = result.request_id && (finishReason !== 'error' || result.input_tokens);
-			if (needUpdate || hasLog || hasContent(assistantMessage)) {
+			const needLog = result.request_id && (finishReason !== 'error' || result.input_tokens);
+			if (needUpdate || needLog || hasContent(assistantMessage)) {
 				promises.push(updateConversation(conversation, unconscious(messages)));
 
-				if (hasLog) {
+				if (needLog) {
 					isIDB && await promises.at(-1);
 					if (assistantMessage.id >= 0) result.id = assistantMessage.id;
 					promises.push(appendBillingLog(result));
@@ -197,7 +261,10 @@ export async function agentLoop(conversation, messages, config, backgroundTask) 
 			}
 		};
 
-		if (is_ok && assistantMessage.tool_calls) {
+		const isForeground = selectedConversation.id === conversation.id;
+		const userInterrupt = isForeground && inputText.trim();
+
+		if (assistantMessage.tool_calls) {
 			const runToolsGuard = () => {
 				const timer = setTimeout(commitMessage, 2000);
 				addEventListener("beforeunload", commitMessage);
@@ -209,7 +276,7 @@ export async function agentLoop(conversation, messages, config, backgroundTask) 
 				return promise;
 			};
 
-			const skipToolCalls = config.maxToolTurns && !(countAgenticTurns(messages) % config.maxToolTurns);
+			const skipToolCalls = userInterrupt || !is_ok || (config.maxToolTurns && !(countAgenticTurns(messages) % config.maxToolTurns));
 			if (skipToolCalls || !await runToolsGuard()) {
 				if (skipToolCalls) assistantMessage.tool_responses = assistantMessage.tool_calls.map(tc => ({[TOOL_NAME]: tc.function.name}));
 
@@ -227,6 +294,7 @@ export async function agentLoop(conversation, messages, config, backgroundTask) 
 
 		await commitMessage();
 
+		if (userInterrupt) finishReason = 'userInput';
 		if ('interrupt' !== finishReason) {
 			if ('error' !== finishReason) {
 				if (!conversation.title && assistantMessage.content) {
@@ -234,20 +302,15 @@ export async function agentLoop(conversation, messages, config, backgroundTask) 
 				}
 			}
 
-			if ('tool_calls' !== finishReason && config.sound) {
-				if (config.sound === "always" || !document.hasFocus())
-					is_ok ? complete() : failure();
-			}
-		}
+			if ('tool_calls' !== finishReason) {
+				if (config.sound) {
+					if (config.sound === "always" || !document.hasFocus())
+						is_ok ? complete() : failure();
+				}
 
-		if (selectedConversation.id !== conversation.id) {
-			if (!backgroundTask && config.afkState < 2) {
-				finishReason = 'interrupt'; // 如果不在前台就不自动执行
-				showToast("对话 "+conversation.title+"(#"+conversation.id+") 已结束", tone ?? "error");
+				if (!isForeground && config.afkState < 2)
+					showToast("对话 "+conversation.title+"(#"+conversation.id+") 已结束", tone ?? "error");
 			}
-		} else {
-			// 如果正在渲染，而且输入框有内容就中断Loop
-			if (inputText.trim()) finishReason = 'interrupt';
 		}
 
 		return finishReason;
@@ -255,7 +318,7 @@ export async function agentLoop(conversation, messages, config, backgroundTask) 
 		runningConversations.delete(conversation.id);
 		if (!runningConversations.size) setWakeLock(false);
 		$update(updateConversationListUI);
-		abort_.value = null;
+		abort.value = null;
 	}
 }
 
@@ -320,7 +383,7 @@ Directly output title in JSON \` { "title": <conversation title> } \`, no explai
 			content: "<turn>user\n"+s1+"</turn><turn>assistant\n"+s2+"</turn>"
 		}],
 		max_completion_tokens: 30,
-		temperature: 0.7,
+		//temperature: 0.7,
 		response_format: { type: "json_object" }
 	};
 
@@ -329,9 +392,10 @@ Directly output title in JSON \` { "title": <conversation title> } \`, no explai
 
 	updateStatusText('生成标题');
 
+	const baseUrl = resolveDBRelativeURL(config.endpoint);
 	const start = Date.now();
 	try {
-		const json = await jsonFetch(config.endpoint+'/chat/completions', {
+		const json = await jsonFetch(baseUrl+'/chat/completions', {
 			key: config.accessToken,
 			body: JSON.stringify(body)
 		});
@@ -339,14 +403,14 @@ Directly output title in JSON \` { "title": <conversation title> } \`, no explai
 		const now = Date.now();
 		const log = {
 			usage: "tl:"+conversation.id,
-			provider: (config.provider || new URL(config.endpoint).host),
+			provider: (config.provider || new URL(baseUrl).host),
 			request_id: json.id,
 			model: json.model,
 			latency: now - start,
 			finish_reason: json.choices?.[0].finish_reason || 'error'
 		};
 		extractUsageMetrics(json, log);
-		await appendBillingLog(log);
+		appendBillingLog(log);
 
 		let content = json.choices?.[0].message?.content;
 		if (!content) throw json;
@@ -377,59 +441,20 @@ export const findStreamingContainer = think => {
 	}
 };
 
-/**
- *
- * @param {AiChat.Conversation} conversation
- * @param {AiChat.Message[] | import("unconscious").Reactive<AiChat.Message[]>} messages
- * @param {boolean=} toolChoice
- * @param {import("unconscious").Reactive<AbortController>} abortCompletion
- * @param {function(type?: number, content?: any): void} onProgress - null: refresh, T=Think, C=Content, E=End
- * @param {AiChat.LLMRequestContext} context
- * @param {Partial<AiChat.Preset>} config
- * @return {Promise<false | AiChat.BillingLog>}
- */
-function executeCompletionRequest(
-	conversation, messages,
-	toolChoice,
-	abortCompletion, onProgress,
-	context, config
-) {
-	return new Promise((resolve, reject) => {
-		let retryCount = 0;
-		let lastRequest;
-
-		context.retry = () => {
-			abortCompletion.value = new AbortController();
-			retryCount++;
-			lastRequest.then(attempt);
-		};
-
-		const attempt = () => {
-			const currentRetryCount = retryCount;
-			lastRequest = sendCompletionRequest(
-				conversation,
-				messages,
-				toolChoice,
-				unconscious(abortCompletion),
-				onProgress,
-				context,
-				config
-			).then((result) => {
-				if (currentRetryCount === retryCount) {
-					resolve(result);
-				}
-			}).catch((err) => {
-				if (currentRetryCount === retryCount) {
-					reject(err);
-				}
-			});
-		};
-
-		attempt();
-	});
-}
-
 const hasContent = assistantMessage => assistantMessage.think?.content || assistantMessage.content || assistantMessage.tool_calls?.length;
+
+const setMessageCacheState = (conversation, messages, hashes, state) => {
+	const indices = new Map;
+	for (const message of messages) {
+		const container = conversation[DB_MESSAGES_DIFF]?.get(message.id);
+		if (container) indices.set(container[MESSAGE_HASH], container);
+	}
+
+	for (const hash of hashes) {
+		const message = indices.get(hash);
+		if (message) message[MESSAGE_CACHED] = state;
+	}
+};
 
 /**
  *
@@ -439,7 +464,7 @@ const hasContent = assistantMessage => assistantMessage.think?.content || assist
  * @param {AbortController} abortCompletion
  * @param {function(type?: number, content?: any): void} onProgress - null: refresh, T=Think, C=Content, E=End
  * @param {AiChat.LLMRequestContext} context
- * @param {Partial<AiChat.Preset>} config
+ * @param {Partial<AiChat.LocalPreset>} config
  * @return {Promise<false | AiChat.BillingLog>}
  */
 async function sendCompletionRequest(
@@ -509,26 +534,18 @@ async function sendCompletionRequest(
 		return false;
 	}
 
+	/** @type {string} */
 	let finishReason;
-	let startTime = Date.now();
+	/** @type {number} */
+	let firstPacketTime;
 	/** @type {Partial<AiChat.BillingLog>} */
-	const log = { time: startTime, provider: (config.provider || config.name || config.endpoint) };
+	const log = { provider: (config.provider || new URL(resolveDBRelativeURL(config.endpoint)).host) };
 
 	let genImages = [];
 
 	let manualCoTCloseTag;
 	let thinkingPrefill;
 	let thinkState;
-	if ((thinkState = assistantMessage.think) && !assistantMessage.content) {
-		thinkingPrefill = true;
-		thinkState.start = startTime;
-		const format = thinkState.format;
-		manualCoTCloseTag = format.startsWith("m") && "</"+format.slice(1)+">\n";
-		thinkState = assistantMessage.think = $state(thinkState);
-		requestAnimationFrame(() => {
-			onProgress?.(MARKDOWN_APPEND, assistantMessage);
-		});
-	}
 
 	const endThinking = () => {
 		thinkState.duration += Date.now() - thinkState.start;
@@ -541,17 +558,16 @@ async function sendCompletionRequest(
 
 	// Request
 	try {
-		let resumeObj;
+		let resumable;
+
 		await sseFetch(url, {
 			...data,
 			key: config.accessToken,
 			signal: abortCompletion.signal
-		}, json => {
+		}, (json, messageType) => {
 			if (config.logSSE) console.log("SSE response", json);
 
 			if (json.timings && config.afkState < 2) {
-				const {predicted_per_second, predicted_n} = json.timings;
-
 				if (json.prompt_progress) {
 					const {processed, total} = json.prompt_progress;
 
@@ -559,43 +575,61 @@ async function sendCompletionRequest(
 					updateStatusText("预填充: "+(newValue * 100).toFixed(2)+"%");
 					if (!assistantMessage[PROGRESS]) {
 						assistantMessage[PROGRESS] = $state(newValue);
-						onProgress?.();
 					} else {
 						assistantMessage[PROGRESS].value = newValue;
+						return;
 					}
-					return;
+				} else if (PROGRESS in assistantMessage) {
+					onProgress?.();
+					delete assistantMessage[PROGRESS];
 				}
+
+				const {predicted_per_second, predicted_n} = json.timings;
 				updateStatusText("生成中, "+predicted_n+" Tokens, "+predicted_per_second.toFixed(2)+"TPS");
 			}
 
+			const res = json.resumable;
+			if (res) resumable = res;
+
 			if (!log.request_id) {
+				const acCacheCreation = json.new_cached;
+				if (acCacheCreation) {
+					setMessageCacheState(conversation, messages, acCacheCreation, true);
+					return;
+				}
+
 				updateStatusText('生成中');
 
-				const {id, model, resumable} = json;
+				const {id, model} = json;
 
 				onProgress?.();
 
 				log.request_id = id;
-				log.model = model;
+				log.model = assistantMessage.model = model;
 
-				let firstTokenTime = Date.now();
-				if ((resumeObj = json.resumable)) {
-					const serverTime = resumable.now;
-					startTime = firstTokenTime - (serverTime - resumable.start);
-					firstTokenTime = firstTokenTime - (serverTime - resumable.ft);
-
-					if (thinkState) thinkState.start = firstTokenTime;
+				firstPacketTime = Date.now();
+				if (resumable) {
 					if (!resumable.end && null != conversation.id) {
 						conversation.resumeId = id;
 						updateConversation(conversation, assistantMessage.id > 0 ? null : messages);
 					} else {
 						delete conversation.resumeId;
 					}
+
+					firstPacketTime = resumable.start;
 				}
 
-				log.latency = firstTokenTime - startTime;
-				assistantMessage.time = firstTokenTime;
-				assistantMessage.model = model;
+				log.time = assistantMessage.time = firstPacketTime;
+				if ((thinkState = assistantMessage.think) && !assistantMessage.content) {
+					thinkingPrefill = true;
+					thinkState.start = firstPacketTime;
+					const format = thinkState.format;
+					manualCoTCloseTag = format.startsWith("m") && "</"+format.slice(1)+">\n";
+					thinkState = assistantMessage.think = $state(thinkState);
+					requestAnimationFrame(() => {
+						onProgress?.(MARKDOWN_APPEND, assistantMessage);
+					});
+				}
 			}
 
 			const [
@@ -605,7 +639,7 @@ async function sendCompletionRequest(
 
 			if (!finishReason) finishReason = chunk?.finish_reason;
 			if (finishReason) {
-				log.duration = Date.now() - startTime;
+				log.duration = Date.now() - firstPacketTime;
 				const currentContext = extractUsageMetrics(json, log);
 				if (Number.isFinite(currentContext)) conversation.contextUsage = currentContext;
 				else delete conversation.contextUsage;
@@ -690,7 +724,7 @@ async function sendCompletionRequest(
 			if (reasoning_text != null) {
 				if (!thinkState) {
 					thinkState = {
-						duration: resumeObj ? ((resumeObj.re||resumeObj.now) - resumeObj.ft) : 0,
+						duration: resumable ? ((resumable.re||resumable.now) - resumable.ft) : 0,
 						content: reasoning_text,
 						format: reasoning_format
 					};
@@ -748,6 +782,11 @@ async function sendCompletionRequest(
 
 			assistantMessage.content = content;
 			if (!assistantMessage.tool_calls) onProgress?.(MARKDOWN_APPEND, assistantMessage);
+
+			// TTFT
+			if (null == log.latency && (content || thinkState || assistantMessage.tool_calls)) {
+				log.latency = (resumable?.ft||Date.now()) - firstPacketTime;
+			}
 		});
 
 		if (!finishReason) {
@@ -757,6 +796,11 @@ async function sendCompletionRequest(
 	} catch (err) {
 		if (err.name === 'AbortError') {
 			finishReason = "interrupt";
+		} else if (err.status === 409 && err.message.includes("\"cache_expired\"")) {
+			const errorInfo = err[ORIGINAL_ERROR];
+			setMessageCacheState(conversation, messages, errorInfo.hashes, false);
+			messages.pop();
+			context.retry?.();
 		} else {
 			abortCompletion.abort();
 			if (err !== "retry") {
@@ -794,13 +838,16 @@ const scrollToBottom = () => {
 // 第一个见 sendCompletionRequest 函数
 const allowPrefillFinishReasons = [null, "length", "interrupt", "error"];
 
+const MESSAGE_HASH = debugSymbol("MessageHash");
+const MESSAGE_CACHED = debugSymbol("MessageIsCachedAtServer");
+
 /**
  *
  * @param {Partial<AiChat.Conversation>} conversation
  * @param {AiChat.Message[]} messages
  * @param {boolean|OpenAI.Tool} toolChoice
  * @param {AiChat.LLMRequestContext} context
- * @param {Partial<AiChat.Preset>} config
+ * @param {Partial<AiChat.LocalPreset>} config
  * @return {Promise<{assistantMessage: AiChat.AssistantMessage, data: {headers: {Authorization: string, "Content-Type": string}, body: string | function(): ReadableStream}, url: string}>}
  */
 async function buildCompletionPayload(
@@ -826,7 +873,7 @@ async function buildCompletionPayload(
 		if (assistantMessage?.finish_reason !== 'error')
 			assistantMessage = null;
 		return {
-			url: config.endpoint+'/resume/'+resumeId,
+			url: resolveDBRelativeURL(config.endpoint)+'/resume/'+resumeId,
 			data: {headers},
 			resumableMessage: assistantMessage
 		};
@@ -850,15 +897,39 @@ async function buildCompletionPayload(
 	 */
 	const json_messages = [];
 
+	const useRefs = config.useRefs && config.mode === 'chat';
+
+	let insideBlock;
 	let callbacks = [];
-	for (let j = 0; j < messages.length; j++){
+	for (let j = 0; j < messages.length; j++) {
 		const m = messages[j];
-		if (m.skip) continue;
 
 		const compose = MessageRoles[m.role]?.compose;
 		if (compose) {
 			await compose(m, json_messages, callbacks, j, messages.length, conversation);
 			continue;
+		}
+
+		if (useRefs) {
+			const container = conversation[DB_MESSAGES_DIFF]?.get(m.id);
+			let hash = container?.[MESSAGE_HASH];
+			if (!hash) {
+				hash = await objectIdentityHash(m);
+				if (container) {
+					container[MESSAGE_HASH] = hash;
+					container[MESSAGE_CACHED] = messages.length - j > 2;
+				}
+			}
+
+			if (container?.[MESSAGE_CACHED]) {
+				json_messages.push({ role: "cached", id: hash });
+				continue;
+			} else if (container) {
+				json_messages.push({ role: "cache_new", id: hash });
+				insideBlock = true;
+			} else if (insideBlock) {
+				json_messages.push({ role: "cache_end" });
+			}
 		}
 
 		const json_msg = cloneNamed(m, ["role", "content", "tool_calls", "reasoning_details"]);
@@ -898,6 +969,9 @@ async function buildCompletionPayload(
 			delete json_msg.reasoning_details;
 		}
 	}
+
+	if (callbacks.length && useRefs)
+		throw new Error("请求体回调函数暂不支持服务端引用");
 
 	/**
 	 * @type {Partial<OpenAI.ChatCompletionRequest>}
@@ -953,7 +1027,8 @@ async function buildCompletionPayload(
 							"low": 0.2,
 							"medium": 0.5,
 							"high": 0.8,
-							"xhigh": 0.95
+							"xhigh": 0.95,
+							"max": 0.99
 						}[reasoningEffort]) * body.max_completion_tokens;
 					}
 				}
@@ -962,7 +1037,18 @@ async function buildCompletionPayload(
 		}
 	}
 	const additionalBody = config.additionalBody;
-	if (additionalBody) Object.assign(body, additionalBody);
+	if (additionalBody) {
+		Object.assign(body, additionalBody);
+
+		const getOrCreateUserId = () => config.user_id || (config.user_id = crypto.randomUUID());
+
+		if (additionalBody.user === 'auto') {
+			body.user = getOrCreateUserId();
+		}
+		if (additionalBody.session_id === 'auto') {
+			body.session_id = new SHA256().update('外币八部\0'+getOrCreateUserId()+'\0'+conversation.id).digest('hex');
+		}
+	}
 
 	let [systemPrompt, systemBody] = await buildSystemPrompt(config, conversation, config.systemPrompt || defaultSystemPrompt, toolPrompt);
 	if (systemPrompt) {
@@ -999,44 +1085,43 @@ async function buildCompletionPayload(
 		body.timings_per_token = true;
 	}
 
+	const replacer = new Map;
+	if (useRefs) await encodeObjects(json_messages, replacer);
+
+	if (useRefs) path += '/refs';
+	const url = resolveDBRelativeURL(config.endpoint)+path;
 	let outputBody;
-	const {streamDuplex, serverResponse} = config;
-	const useH2Stream = streamDuplex ? 'half' : undefined;
+	const useH2Stream = config.streamDuplex && url.startsWith("https://") ? 'half' : undefined;
 	if (useH2Stream) {
-		outputBody = createJsonStream(body, serverResponse);
+		outputBody = createJsonStream(body, replacer.size && replacer);
 	} else {
-		const promises = [];
-		const mapping = new Map;
-		for (const [val] of deepEntries(body)) {
-			const type = val?.constructor;
-			if (type === Blob || type === File) {
-				const {name, type, size, hash} = val;
-				const isTextFile = type.startsWith("text/") || type === "application/json";
-				const isAudio = type.startsWith("audio/");
+		if (!useRefs) {
+			const promises = [];
+			for (const [val, own, key] of deepEntries(json_messages)) {
+				const type = val?.constructor;
+				if (type === Blob || type === File) {
+					if (!val.size) throw "文件"+val.name+"的数据不完整或已损坏。请尝试重新上传";
 
-				if (size === 0) throw "文件"+name+"的数据不完整或已损坏。请尝试重新上传";
-				/*if (hash && sseBlobProxy && DB_MODE !== "local") {
-					path += "?blobProxy";
-					mapping.set(val, {
-						$: "Blob"+(isTextFile? "Raw" : isAudio ? "RawDataURL" : "DataURL"),
-						url: val.toUrl(),
-						type
-					});
-					continue;
-				}*/
-
-				promises.push(val[isTextFile?"text":"toDataURL"]().then(str => {
-					if (isAudio) str = str.slice(str.indexOf(",")+1);
-					mapping.set(val, str);
-				}));
+					let promise;
+					if (key === 'url') {
+						// image
+						promise = val.toDataURL().then(str => replacer.set(val, str));
+					} else if (key === 'data') {
+						// audio
+						promise = val.toDataURL().then(str => replacer.set(val, str.slice(str.indexOf(",")+1)));
+					} else {
+						// maybe text, video is not supported yet.
+						promise = val.text().then(str => replacer.set(val, str));
+					}
+					promises.push(promise);
+				}
 			}
+			await Promise.all(promises);
 		}
-		await Promise.all(promises);
 
-		outputBody = JSON.stringify(body, (_, value) => mapping.get(value) ?? value);
+		outputBody = JSON.stringify(body, replacer.size ? (_, value) => replacer.get(value) ?? value : undefined);
 	}
 
-	const url = config.endpoint+path;
 	return {
 		url,
 		data: {
@@ -1169,7 +1254,7 @@ const extractUsageMetrics = (json, log) => {
 		if (reasoning_tokens) log.reasoning_tokens = reasoning_tokens;
 		if (cache_write_tokens) log.cache_write_tokens = cache_write_tokens;
 		if (cost) {
-			log.cost = cost;
+			log.cost = Math.round(cost * 1000000);
 			log.currency = "USD";
 		}
 
@@ -1232,73 +1317,3 @@ const streamResponseCompleted = (assistantMessage, genImages) => {
 		assistantMessage.content = arr;
 	}
 };
-
-const DISABLE_ALL = new Set();
-
-export class APIRequest {
-	/** @type {import("unconscious").Reactive<AbortController>} */
-	abort = $state();
-
-	/**
-	 *
-	 * @param {AiChat.Message[]} messages
-	 * @param {string[]=} tools
-	 * @param {Partial<AiChat.Preset>} overrides
-	 */
-	constructor(messages, tools, overrides) {
-		/** @type {AiChat.Conversation} */
-		this.conversation = {
-			api: 1,
-			activatedModules: tools ? DISABLE_ALL : null,
-			allowedTools:  tools ? new Set(tools) : null,
-		};
-		/** @type {AiChat.Message[]} */
-		this.messages = messages;
-		/** @type {Record<string, any>} */
-		this.body = {
-			...config,
-			...overrides
-		};
-	}
-
-	/**
-	 *
-	 * @param {AiChat.Message | AiChat.Message[] | string} userText
-	 * @param {function(type?: number, content?: AiChat.AssistantMessage): void=} onProgress
-	 * @return {Promise<[AiChat.AssistantMessage, AiChat.BillingLog]>}
-	 */
-	async call(userText, onProgress) {
-		const {abort, messages, conversation, body} = this;
-		if (unconscious(abort)) throw "Already generating";
-		abort.value = new AbortController();
-
-		try {
-			if (typeof userText === "string") messages.push({role: 'user', content: userText, time: Date.now()});
-			else if (Array.isArray(userText)) messages.push(...userText);
-			else if (userText) messages.push(userText);
-
-			const context = {};
-			const result = await executeCompletionRequest(
-				conversation, messages,
-				true,
-				abort, onProgress,
-				context, body
-			);
-
-			const finishReason = result.finish_reason;
-			const assistantMessage = messages.at(-1);
-
-			if (finishReason === "error")
-				throw assistantMessage.error || "调用失败:"+result;
-
-			return [assistantMessage, result];
-		} finally {
-			abort.value = null;
-		}
-	}
-
-	interrupt() {
-		const abort = unconscious(this.abort);
-		if (abort) abort.abort();
-	}
-}

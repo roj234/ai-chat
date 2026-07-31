@@ -139,6 +139,11 @@ const pluginDefinitions = [
 		description: "需要两端都启用，并且被控端设为无人值守模式。",
 		load: registerRemoteControl
 	},
+	{
+		name: "耗时分析",
+		description: "使用 `/actime` 命令查看当前对话的分析",
+		load: () => import("./actime/actime.js")
+	},
 ];
 
 if (DB_MODE !== "local") {

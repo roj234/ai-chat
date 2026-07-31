@@ -1,11 +1,11 @@
-import {SETTINGS} from "/src/settings.js";
-import {jsonFetch, prettyError} from "/src/utils/utils.js";
+import {prettyError, resolveDBRelativeURL} from "/src/utils/utils.js";
 import {config} from "/src/states.js";
 import {provider_presets} from "/media/provider_presets.js";
-import {onLoad} from "/src/hooks.js";
+import {DI_settings, onLoad} from "/src/hooks.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {jsonEval} from "unconscious/common/json-schema-utils.js";
-import {DI_settings} from "/src/hooks.js";
+import {applyDelta, sseFetch} from "../common/openai-api-utils.js";
+import {highlightJsonLike} from "../src/markdown/highlight.js";
 
 const EMPTY_WAV = `UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=`;
 const EMPTY_BMP = `Qk06AAAAAAAAADYAAAAoAAAAAQAAAAEAAAABABgAAAAAAAQAAAATCwAAEwsAAAAAAAAAAAAA/wAAAA==`;
@@ -23,6 +23,8 @@ onLoad((app) => {
 	owner.children[0].setAttribute("list", DATALIST_ID);
 });
 
+let streamFlag;
+
 /**
  *
  * @param {Record<string, any>} body
@@ -30,20 +32,33 @@ onLoad((app) => {
  * @param {RegExp=} err1
  * @return {Promise<*>}
  */
-const check = (body, flag, err1) => {
+const test = async (body, flag, err1) => {
 	body.model = config.model;
+	if (streamFlag) body.stream = true;
+	if (!body.max_completion_tokens) body.max_completion_tokens = streamFlag ? 16 : 1;
 
 	if (flag !== 2) {
 		const [reasoningPath, reasoningEnabledValue = 'true', reasoningDisabledValue = 'false'] = (config.reasoningPath||"reasoning/enabled").split(",");
 		jsonEval(body, reasoningPath, "set", JSON.parse(flag === 3 ? reasoningEnabledValue : reasoningDisabledValue));
 	}
 
-	let p = jsonFetch(config.endpoint+(config.mode === "chat" ? '/chat/completions' : '/completions'), {
+	let completion;
+	let p = sseFetch(resolveDBRelativeURL(config.endpoint)+(config.mode === "chat" ? '/chat/completions' : '/completions'), {
 		key: config.accessToken,
 		body: JSON.stringify(body)
-	}).then(json => {
-		const msg = json.choices[0].message;
-		if (!msg) throw json;
+	}, (chunk, type) => {
+		if (type === '\0') completion = chunk;
+		else if (type == null) {
+			if (!completion) completion = {};
+
+			const {choices, ...rest} = chunk;
+			completion.choices = applyDelta(completion.choices, choices);
+			Object.assign(completion, rest);
+		}
+	}).then(() => {
+		let msg = completion.choices[0] || {};
+		msg = msg.delta || msg.message;
+		if (!msg) throw completion;
 		return flag === 3 ? msg.content : flag === 2 ? msg : msg.tool_calls || msg.content || msg.reasoning || msg.reasoning_content;
 	});
 
@@ -87,14 +102,17 @@ const reason_budget_keys = [
 	],
 ];
 
+const prefill_keys = [
+	"", "prefix", "partial"
+];
+
 async function checkModelCapability() {
 	const hello = () => {return{
-		messages: [{role: "user", content: "Hi"}],
-		max_completion_tokens: 1
+		messages: [{role: "user", content: "Hi"}]
 	}};
-	const isThinking = (json) => Object.keys(json).toString().includes("reason");
+	const isThinking = (json) => Object.keys(json).filter(key => json[key]).toString().includes("reason");
 
-	let json = await check(hello(), 2);
+	let json = await test(hello(), 2);
 	let reasoning = '支持';
 
 	foundAny:
@@ -104,7 +122,7 @@ async function checkModelCapability() {
 		for (const [v, k] of reason_switch_keys) {
 			const body = hello();
 			Object.assign(body, v);
-			json = await check(body, 2);
+			json = await test(body, 2);
 			if (!isThinking(json)) {
 				config.reasoningPath = k;
 				break foundAny;
@@ -124,18 +142,41 @@ async function checkModelCapability() {
 		for (const [v, k] of reason_budget_keys) {
 			const body = {
 				messages: [{role: "user", content: "Compute 375*293"}],
-				max_completion_tokens: 50
+				max_completion_tokens: 16
 			}
 			Object.assign(body, v);
-			json = await check(body, 3);
+			json = await test(body, 3);
 			if (json) {
 				config.reasoningEffortPath = k;
 				reasoningBudget = '支持';
 				break;
 			}
 		}
-
 	}
+
+	const checkPrefill = async () => {
+		const CHECK = '```json\n{"greeting": ';
+		for (const k of prefill_keys) {
+			const body = {
+				messages: [
+					{ role: 'user', content: 'Hi' },
+					{ role: 'assistant', content: CHECK, [k]: true },
+				],
+				max_completion_tokens: 32
+			}
+			try {
+				let content = await test(body, 3);
+				if (content && (content.startsWith(CHECK) || content.trim()[0] === ("\"") || content.endsWith("```"))) {
+					config.canPrefill = true;
+					config.prefillPath = k;
+					return '支持';
+				}
+			} catch {}
+		}
+		config.canPrefill = false;
+		config.prefillPath = '';
+		return '不支持';
+	};
 
 	const get_time_tool = { type: 'function', function: { name: 'get_time', parameters: {
 		type: "object",
@@ -143,7 +184,7 @@ async function checkModelCapability() {
 	} } };
 	const results = await Promise.all([
 		// tool call
-		check({
+		test({
 			messages: [{
 				role: 'user',
 				content: [
@@ -155,7 +196,7 @@ async function checkModelCapability() {
 			max_completion_tokens: 50,
 		}),
 		// audio
-		check({
+		test({
 			messages: [{
 				role: 'user',
 				content: [
@@ -163,10 +204,9 @@ async function checkModelCapability() {
 					{ type: 'input_audio', input_audio: { data: EMPTY_WAV, format: 'wav' } },
 				],
 			}],
-			max_completion_tokens: 1,
 		}, 0, /size|duration|time/i),
 		// image
-		check({
+		test({
 			messages: [{
 				role: 'user',
 				content: [
@@ -174,10 +214,9 @@ async function checkModelCapability() {
 					{ type: 'image_url', image_url: { url: "data:image/bmp;base64,"+EMPTY_BMP } },
 				],
 			}],
-			max_completion_tokens: 1,
 		}, 0, /size|1x1|width/i),
 		// video
-		check({
+		test({
 			model: config.model,
 			messages: [{
 				role: 'user',
@@ -186,34 +225,26 @@ async function checkModelCapability() {
 					{ type: 'input_video', input_video: { data: EMPTY_MP4, format: 'mp4' } },
 				],
 			}],
-			max_completion_tokens: 1,
 		}, 0, /size|1x1|duration|time|width/i),
 		// prefill
-		check({
-			messages: [
-				{ role: 'user', content: 'Hi' },
-				{ role: 'assistant', content: 'My name is not ' },
-			],
-			max_completion_tokens: 20,
-		}),
+		checkPrefill(),
 		// logprobs
-		check({
+		test({
 			messages: [
 				{ role: 'user', content: 'Hi' },
 			],
 			logprobs: true,
-			max_completion_tokens: 1,
 			top_logprobs: 2
 		}),
 		// json object
-		check({
+		test({
 			model: config.model,
-			messages: [{ role: 'user', content: 'What is your name? Use ```json\nresponse```.' }],
+			messages: [{ role: 'user', content: 'What is your name? Use ```json\nresponse\n```.' }],
 			response_format: { type: 'json_object', },
 			max_completion_tokens: 50,
 		}),
 		// json schema
-		check({
+		test({
 			model: config.model,
 			messages: [{ role: 'user', content: 'What is your name?' }],
 			response_format: {
@@ -231,13 +262,13 @@ async function checkModelCapability() {
 			},
 			max_completion_tokens: 50,
 		}),
-		check({
+		test({
 			model: config.model,
 			messages: [{ role: 'user', content: 'What is your name?' }],
 			response_format: {
 				type: 'json_schema',
 				json_schema: {
-					name: '',
+					name: 'name_schema',
 					schema: {
 						type: 'object',
 						oneOf: [{
@@ -276,7 +307,6 @@ async function checkModelCapability() {
 	if (results[2]) modalities.push("image");
 	if (results[3]) modalities.push("video");
 	config.modalities = modalities;
-	config.canPrefill = results[4]?.startsWith("My name is not ");
 
 	if (isJson(results[8])) config.jsonSupport = 3;
 	else if (isJson(results[7])) config.jsonSupport = 2;
@@ -291,32 +321,31 @@ async function checkModelCapability() {
 	return results.map((item, i) => title[i]+": "+(i===4?config.canPrefill:i>=9?item:((i>=6?isJson(item):item)?"支持":"不支持"))).join('\n');
 }
 
-SETTINGS.push({
-	name: "测试",
-	type: "element",
-	_tab: "model",
-	element: <div className={"choice-scroll"}>
-		<button className={"btn primary"} onClick={({target}) => {
-			target.disabled = true;
+onLoad(() => {
+	const target = DI_settings.byId("mode");
+	target.append(<div className={"spacer"}></div>)
+	target.append(<button className={"btn primary"} onClick={({target}) => {
+		target.disabled = true;
 
-			const mode = config.mode !== "chat";
-			check(mode ? {
+		streamFlag = true;
+		const isLegacyCompletionMode = config.mode !== "chat";
+		const check = () => {
+			test(isLegacyCompletionMode ? {
 				prompt: "Hi",
-				max_completion_tokens: 1,
 			} : {
 				messages: [{role: "user", content: "Hi"}],
-				max_completion_tokens: 1,
 			}, 1).then(() => {
 				target.textContent = "成功";
+				if (isLegacyCompletionMode) return;
+
 				SimpleModal({
 					title: "连接成功",
-					message: "如果需要测试模型能力（因为没有配置模板可用）请点击确认",
+					message: "点击确认测试模型能力并自动配置软件\n潜在花费：输入 300-3000 token (根据模型能力), 输出 ~300 token",
 					onConfirm() {
 						checkModelCapability().then((res) => {
-
 							SimpleModal({
-								title: "能力测试完成",
-								message: "数据已经保存\n"+res,
+								title: "能力探测完成",
+								message: "数据已经保存\n" + res,
 								onConfirm: null
 							})
 						});
@@ -325,16 +354,29 @@ SETTINGS.push({
 			}).catch(err => {
 				console.error(err);
 				err = prettyError(err);
-				SimpleModal({
-					title: "连接失败",
-					message: err,
-					onConfirm: null
-				})
+				if (streamFlag) {
+					SimpleModal({
+						title: "连接失败",
+						message: <div dangerouslySetInnerHTML={highlightJsonLike(err)}/>,
+					})
+				} else {
+					SimpleModal({
+						title: "连接失败\n但不排除是提供商不支持非流响应或过短的max_completion_tokens",
+						message: <div dangerouslySetInnerHTML={highlightJsonLike(err)}/>,
+						confirmMessage: "以兼容模式重试",
+						onConfirm() {
+							streamFlag = true;
+							check();
+						}
+					})
+				}
 				target.textContent = "失败";
 			}).finally(() => {
 				target.disabled = false;
 			});
-		}}>测试
-		</button>
-	</div>
-});
+		};
+
+		check();
+	}}>测试API
+	</button>);
+})

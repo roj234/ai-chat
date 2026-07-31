@@ -1,5 +1,5 @@
 import {readAsString} from "/common/chardet.js";
-import {createHashLine} from "/common/fs-common.js";
+import {createTextFileEditHelper} from "/common/fs-common.js";
 import {IgnoreMatcher} from "/common/ignore.js";
 import {normalizePath} from "unconscious/common/path-utils.js";
 import {formatSize} from "unconscious/common/Utils.js";
@@ -130,7 +130,7 @@ function globToRegexPattern(globPattern) {
 
 // ────────────────────────────────── FileSystem Helpers ──────────────────────────────────
 
-const CREATE = { create: true };
+export const CREATE = { create: true };
 
 /**
  * Resolve parent directory handle and entry name from a full path (relative to root).
@@ -139,8 +139,12 @@ const resolveParent = async (rootHandle, filePath, options) => {
 	const parts = normalizePath(filePath);
 	const name = parts.pop();
 	let parent = rootHandle;
-	for (const part of parts) {
-		parent = await parent.getDirectoryHandle(part, options);
+	try {
+		for (const part of parts) {
+			parent = await parent.getDirectoryHandle(part, options);
+		}
+	} catch {
+		throw ("Parent directory "+parts.join('/')+" not found");
 	}
 	return [ parent, name ];
 };
@@ -151,8 +155,12 @@ const resolveParent = async (rootHandle, filePath, options) => {
 export const resolveDirectory = async (rootHandle, dirPath, options) => {
 	const parts = normalizePath(dirPath);
 	let handle = rootHandle;
-	for (const part of parts) {
-		handle = await handle.getDirectoryHandle(part, options);
+	try {
+		for (const part of parts) {
+			handle = await handle.getDirectoryHandle(part, options);
+		}
+	} catch {
+		throw ("Directory "+parts.join('/')+" not found");
 	}
 	return handle;
 };
@@ -314,7 +322,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 		/** List directory, optionally with a glob filter */
 		async list({
 			path = '.',
-			pattern = '*',
+			pattern,
 			json = false,
 			limit = 500,
 			modifiedSince = 0,
@@ -322,6 +330,8 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			showModified = false
 		}) {
 			if (!ignored) await loadIgnore();
+
+			pattern = pattern || '*';
 
 			const entries = pattern !== '*'
 				? await glob(pattern, path)
@@ -484,7 +494,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			return file.lastModified;
 		}
 	};
-	const hashLine = createHashLine(fsCommonApi);
+	const hashLine = createTextFileEditHelper(fsCommonApi);
 
 	// ── Binary I/O (bypass line cache) ──
 

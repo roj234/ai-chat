@@ -33,7 +33,7 @@ import {
 	SYNC_RPC,
 	SYNC_UNLOCKED
 } from "/backend/sync_const.js";
-import {clearDirtyFlags, DB_MESSAGES_DIFF, listConversations} from "../database.js";
+import {clearDirtyFlags, DB_CONVERSATION_DIFF, DB_MESSAGES_DIFF, listConversations} from "../database.js";
 import {deepEqual, patch} from "unconscious/common/deepEqual.js";
 import {decodeMsg} from "unconscious/common/msgpack.js";
 import {msgpack_schema} from "/common/MsgpackSchema.js";
@@ -255,6 +255,7 @@ export const initSync = (address, kvRef, kvCache, rpc) => new Promise((resolve, 
 				if (index >= 0) data = patch(conversations.splice(index, 1)[0], data);
 				const isCurrent = data.id === selectedConversation.id;
 				if (type === SYNC_CONVERSATION) {
+					data[DB_CONVERSATION_DIFF] = structuredClone(data);
 					// 作废消息缓存
 					if (!isCurrent)
 						delete data[DB_MESSAGES_DIFF];

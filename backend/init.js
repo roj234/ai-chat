@@ -10,7 +10,7 @@ import {registerDatabaseRoutes} from "./routes/database.js";
 import {registerFsRoutes} from "./routes/agent.js";
 import {registerBlobRoutes} from "./routes/blob-storage.js";
 import {registerVectorDBRoutes} from "./routes/vectordb.js";
-import {registerSSEProxyRoutes} from "./routes/sse-proxy.js";
+import {proxyHandler, registerSSEProxyRoutes} from "./routes/sse-proxy.js";
 
 import {
 	ALLOW_USER_NAMES,
@@ -23,7 +23,7 @@ import {
 
 import {loadUserData} from "./utils/UserManager.js";
 import {PROTOCOL_VERSION} from "./sync_const.js";
-import {checkPAT} from "./utils/PAT.js";
+import {checkPAT, generatePAT} from "./utils/PAT.js";
 import {registerPairingRoutes} from "./routes/pairing.js";
 
 // Export plugin APIs to globalThis
@@ -34,13 +34,11 @@ import "./pluginApi.js";
  * @param rootDir {string}
  */
 const registerSSEProxy = (router, rootDir) => {
-	router.get("/sse/props", (ctx) => {
-		ctx.res.writeHead(204, {
-			vary: "Authorization",
-			"cache-control": "public"
-		});
-		ctx.res.end();
-	});
+	for (const endpoint of ['props', 'models/load', 'models/unload']) {
+		const handler = proxyHandler.bind(null, endpoint);
+		router.get("/sse/"+endpoint, handler);
+		router.post("/sse/"+endpoint, handler);
+	}
 
 	router.push("sse/v1");
 	registerSSEProxyRoutes(router, rootDir);
@@ -157,7 +155,10 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 
 			const userId = ctx.params.userId;
 			if (userId) queries.push("u="+encodeURIComponent(userId));
-			if (INTERACTIVE_LOGIN) queries.push("t="+encodeURIComponent(ctx.req.headers.authorization.slice(7)));
+			if (INTERACTIVE_LOGIN) queries.push("t="+generatePAT(ctx, {
+				capabilities: 2,
+				validUntil: Math.trunc(Date.now() / 1000) + 300
+			}));
 			return base+"?"+queries.join("&");
 		},
 		version: () => [PROTOCOL_VERSION, MAX_UPLOAD_SIZE]

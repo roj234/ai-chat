@@ -1,5 +1,6 @@
 import http from 'node:http';
 import https from 'node:https';
+import {Readable} from "node:stream";
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
@@ -41,6 +42,9 @@ function makeRequest(url, { method, headers: headersInit, body, signal, agent, .
 
 	let bodyBuffer, bodyStream;
 	if (body != null) {
+		if (body instanceof ReadableStream) {
+			body = Readable.fromWeb(body);
+		}
 		if (isNodeStream(body)) {
 			bodyStream = body;
 		} else {

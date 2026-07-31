@@ -1,11 +1,19 @@
 import {$computed, $watch, appendChildren, unconscious} from "unconscious";
 import {config, conversations} from "/src/states.js";
 import {getKV, setKV} from "/src/database.js";
-import {onLoad} from "/src/hooks.js";
+import {DI_settings, onLoad} from "/src/hooks.js";
 import {showToast} from "/src/components/Toast.js";
-import {DI_settings} from "/src/hooks.js";
 
-const LOCAL_CONFIG = "theme checkUpdate width sound expandThinkBlock expandToolCall backgroundFit db_server db_pat db_nick".split(" ");
+const LOCAL_CONFIG = `theme
+checkUpdate
+width
+sidebarWidth
+sound
+expandThinkBlock
+expandToolCall
+backgroundFit
+db_server
+db_pat`.split("\n");
 
 const saveConfig = () => {
 	const copyConfig = structuredClone(unconscious(config));

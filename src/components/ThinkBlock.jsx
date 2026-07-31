@@ -30,6 +30,8 @@ const reasoningFormatNames = {
 	mthinking: "纯文本<thinking>",
 };
 
+export const DONT_PARSE_HTML_IN_THINKING = { allowedTags: [] };
+
 /**
  *
  * @param {AiChat.AssistantMessage} think
@@ -59,7 +61,7 @@ export function ThinkBlock({message, edit}) {
 				arr.push(<EditWidget value={content} onChange={(value) => think.content = value}/>);
 				container.replaceWith(...arr);
 			} else {
-				renderMarkdownToElement(container, content);
+				renderMarkdownToElement(container, content, DONT_PARSE_HTML_IN_THINKING);
 			}
 		}
 	}

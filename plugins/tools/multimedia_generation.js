@@ -4,11 +4,11 @@ import {SETTINGS} from "/src/settings.js";
 import {config} from "/src/states.js";
 import {AudioPlayer} from "/src/components/AudioPlayer.jsx";
 import {isPureObject} from "unconscious";
-import {compressImage, jsonFetch, limitMaxSide, loadingBlock} from "/src/utils/utils.js";
+import {compressImage, limitMaxSide, loadingBlock} from "/src/utils/utils.js";
+import {jsonFetch} from "/common/openai-api-utils.js";
 import "./multimedia_generation.css";
-import {onLoad} from "/src/hooks.js";
+import {DI_settings, onLoad} from "/src/hooks.js";
 import {parseJson5} from "unconscious/common/Json.js";
-import {DI_settings} from "/src/hooks.js";
 
 /**
  * 将 ComfyUI 流程模板发送至服务器并获取生成的图像 Blob

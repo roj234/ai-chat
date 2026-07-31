@@ -38,7 +38,6 @@ export const createSyncValidateMiddleware = (DATA_PATH) => /**
 	const myUrl = new URL(req.url, baseUrl);
 
 	const userId = myUrl.searchParams.get('u');
-	const pat = myUrl.searchParams.get('t');
 	if (RESTRICT_USER_CREATION && !ALLOW_USER_NAMES.has(userId)) {
 		cb(false, 403, "no such user");
 		return;
@@ -49,8 +48,9 @@ export const createSyncValidateMiddleware = (DATA_PATH) => /**
 		get: () => loadUserData(DATA_PATH, userId).sqlite
 	});
 
-	if (INTERACTIVE_LOGIN && !checkPAT(pat || "", emulatedCtx)) {
-		cb(false, 401, "invalid or missing PAT");
+	const pat = myUrl.searchParams.get('t');
+	if (INTERACTIVE_LOGIN && checkPAT(pat || "", emulatedCtx)?.capabilities !== 2) {
+		cb(false, 401, "invalid token");
 		return;
 	}
 

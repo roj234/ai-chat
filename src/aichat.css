@@ -646,6 +646,35 @@ button[class^="ri-"] {
     & .btn { padding: var(--spacing-sm); border: none; }
 }
 
+/* resize handle */
+.resize {
+    position: absolute;
+    flex-shrink: 0;
+    z-index: 1;
+    background: var(--accent);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    user-select: none;
+}
+.resize:hover, .moving > .resize {opacity: 1}
+
+.moving {
+    transition: none !important;
+}
+
+.resize.ns {
+    margin: -0.125rem 0;
+    height: 0.25rem;
+    width: 100%;
+    cursor: ns-resize;
+}
+.resize.ew {
+    margin: 0 -0.125rem;
+    width: 0.25rem;
+    height: 100%;
+    cursor: ew-resize;
+}
+
 @media screen and (min-width: 768px) {
     .header.closed {
         position: absolute;
@@ -653,6 +682,7 @@ button[class^="ri-"] {
 
     .header.closed > .bar {
         left: 5px;
+        width: auto;
         border-bottom: none;
         & :not(:first-child) { display: none !important; }
     }

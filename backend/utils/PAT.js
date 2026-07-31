@@ -25,16 +25,18 @@ bakeSchema(pat_schema);
  *
  * @param {string} authorization
  * @param {{ req: import("node:http").IncomingMessage, db: DatabaseSync }} ctx
- * @return {boolean}
+ * @return {false | PAT}
  */
 export const checkPAT = (authorization, ctx) => {
 	if (authorization.length < 20 || authorization.length > 384) return false;
 	const userSalt = ctx.db.prepare("SELECT value from kv WHERE key = 'salt'").get();
 	if (!userSalt) return false;
 
+	let pat;
 	try {
 		const buffer = Buffer.from(authorization, 'base64url');
-		const [
+		let endOffset;
+		[
 			/** @type {PAT} */
 			pat,
 			endOffset
@@ -63,13 +65,13 @@ export const checkPAT = (authorization, ctx) => {
 		return false;
 	}
 
-	return true;
+	return pat;
 }
 
 /**
  *
  * @param {AiChatBackend.RouteContext} ctx
- * @param {number} capabilities
+ * @param {number | Partial<PAT>} capabilities
  * @return {string}
  */
 export const generatePAT = (ctx, capabilities = 0) => {
@@ -85,8 +87,11 @@ export const generatePAT = (ctx, capabilities = 0) => {
 	const pat = {
 		// created 拿来当 salt
 		created: parseInt(Date.now() / 1000),
-		capabilities
 	};
+
+	if (typeof capabilities === 'number') pat.capabilities = capabilities;
+	else Object.assign(pat, capabilities);
+
 	encodeRawMsg(pat, (array) => {
 		buffer.set(array, off);
 		off += array.length;

@@ -1,4 +1,4 @@
-import {$computed, $update, $watch, appendChild, appendChildren, AS_IS, unconscious} from 'unconscious';
+import {$computed, $update, $watch, appendChild, appendChildren, AS_IS, ONCE_EVENT, unconscious} from 'unconscious';
 import Filter from 'unconscious/common/components/Filter.jsx';
 import {jsHide, prettyError} from "./utils/utils.js";
 import {ConversationList} from "./components/ConversationList.jsx";
@@ -41,16 +41,18 @@ const createApp = () => {
 	let messagesPanel,
 		sidebar,
 		scroller,
-		updateLink;
+		updateLink,
+		resizeHandle;
 
 	/** @type {import("unconscious/common/components/Filter").FilterInstance} */
 	const settings = <Filter config={SETTINGS} choices={config} onChange={onSettingChanged} />;
 	const newSettingUI = SettingDialog(settings);
 
+	const doc = document;
 	/**
 	 * @type CSSStyleDeclaration
 	 */
-	const rootStyle = document.querySelector(":root").style;
+	const rootStyle = doc.querySelector(":root").style;
 
 	const toggleSidebar = () => {
 		if (!newSettingUI.style.display) jsHide(newSettingUI);
@@ -81,6 +83,7 @@ const createApp = () => {
 		});
 	};
 
+	const virtualConversationList = <ConversationList/>;
 	const App = (<>
 		<header className={"header"} class:closed={() => !unconscious(selectedConversation)}>
 			<div className="bar">
@@ -97,7 +100,7 @@ const createApp = () => {
 				</button>
 				<button className="ri-arrow-left-s-line btn ghost" title="收起侧边栏" onClick={toggleSidebar}></button>
 			</div>
-			<ConversationList/>
+			{virtualConversationList}
 			<div className="spacer"></div>
 			<div className="sidebar-header">
 				<a style={{fontSize: "14px", userSelect: "none", fontWeight: 700, color: "var(--text)"}}
@@ -105,6 +108,7 @@ const createApp = () => {
 				<button className="ri-wrench-line btn ghost" title="设置" onClick={() => jsHide(newSettingUI)}></button>
 			</div>
 			<div className={"bg"} onClick={toggleSidebar}></div>
+			{!isMobile && <div ref={resizeHandle} className={"resize ew"} style={"right:0"}></div>}
 		</aside>
 		<div ref={scroller} className="chat scroll"
 			 onWheel.noPassive={e => {
@@ -124,6 +128,25 @@ const createApp = () => {
 			</div>
 		</div>
 	</>);
+
+	if (!isMobile) {
+		$watch($computed(() => config.sidebarWidth), () => {
+			sidebar.style.width = config.sidebarWidth+"px";
+		});
+		resizeHandle.addEventListener("mousedown", () => {
+			sidebar.classList.add("moving");
+			virtualConversationList.vl.startMove();
+			const onMove = event => {sidebar.style.width = Math.min(Math.max(event.clientX, 200), innerWidth * 0.5, 1024)+"px";};
+			doc.addEventListener("mousemove", onMove);
+			doc.addEventListener("mouseup", () => {
+				doc.removeEventListener("mousemove", onMove);
+				sidebar.classList.remove("moving");
+				config.sidebarWidth = parseInt(sidebar.style.width);
+				settings.sync(false, true);
+				virtualConversationList.vl.attach(virtualConversationList, true);
+			}, ONCE_EVENT);
+		});
+	}
 
 	const [userInputComposer, backToBottomBtnShowHide] = createUserInputComposer(scroller);
 	appendChild(messagesPanel, userInputComposer);
@@ -249,6 +272,13 @@ const createApp = () => {
 						return messages;
 					};
 				}
+
+				$watch(conversations, () => {
+					const conv = unconscious(selectedConversation);
+					if (conv?.[LOCKED] && conversations[0] === conv && conv.resumeId && !runningConversations.has(conv.id)) {
+						submitUserChatMessage();
+					}
+				})
 			}
 
 			let prevId;
@@ -277,15 +307,15 @@ const createApp = () => {
 				history.replaceState(null, "", id != null ? "#!chat/"+id : "#");
 
 				if (conv?.ready) {
-					if (!runningConversations.has(conv.id)) {
-						if (conv.resumeId && !conv[LOCKED]) {
-							if (Date.now() - conv.time < RESUME_TIMEOUT) {
-								submitUserChatMessage();
-								showToast("尝试继续意外中断的请求", 'ok');
-							} else {
-								delete conv.resumeId;
-								updateConversation(conv);
-							}
+					if (prevId !== id && !runningConversations.has(conv.id) && conv.resumeId) {
+						if (conv[LOCKED]) {
+							submitUserChatMessage();
+						} else if (Date.now() - conv.time < RESUME_TIMEOUT) {
+							submitUserChatMessage();
+							showToast("尝试继续意外中断的请求", 'ok');
+						} else {
+							delete conv.resumeId;
+							updateConversation(conv);
 						}
 					}
 
@@ -361,23 +391,15 @@ const connectDatabase = async () => {
 		const resp = await fetch(location.href, { method: "HEAD" });
 		apiEndpoint = resp.headers.get('X-AiChat-API')
 	} catch {}
+	if (import.meta.env.DEV && !apiEndpoint) apiEndpoint = '/api/';
 
 	SimpleModal({
 		type: "input",
 		title: "连接数据库",
 		message: `请输入${apiEndpoint ? "用户名" : "数据库服务地址"}。` + (DB_MODE === "mixed" && "\n点击取消使用本地数据库。"),
-		placeholder: (apiEndpoint ? "输入用户名（新用户将自动注册）" : "") + (import.meta.env.DEV ? "留空使用开发调试账户" : ""),
+		placeholder: (apiEndpoint ? "输入用户名（新用户将自动注册）" : ""),
 		confirmMessage: "连接",
 		onConfirm(value) {
-			if (!value) {
-				if (import.meta.env.DEV) {
-					value = "/aichat/v2/user";
-					showToast("您正使用开发服务器调试账户");
-				} else {
-					return false;
-				}
-			}
-
 			let pat;
 			[value, pat] = value.trim().split("@");
 

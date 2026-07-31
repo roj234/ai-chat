@@ -1,7 +1,7 @@
 import {bakeSchema, decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
 import {brotliCompress, brotliDecompressSync, constants} from 'node:zlib';
 import {DB_COMPRESS_LEVEL, DB_COMPRESS_MIN_SIZE, DB_USE_MSGPACK_SCHEMA} from "../config.js";
-import {UTF8_TEXT_DECODER, UTF8_TEXT_ENCODER} from "unconscious/runtime_shared.js";
+import {UTF8_TEXT_DECODER, UTF8_TEXT_ENCODER} from "unconscious/shared.js";
 import {compressBase64, compressStr, decompressStr} from "./string-compression.js";
 
 const IS_SQLITE = true;
@@ -9,7 +9,7 @@ const IS_SQLITE = true;
 // 注意，这些schema只能追加，规则和protobuf相同
 const conversation_schema = [
 	"activatedModules", "allowedTools", "grantedTools",
-	"bm_leaf", "bm_dummy"/* 已删除！ */, "resumeId",
+	"bm_leaf", "_0"/* 已删除！ */, "resumeId",
 ];
 const finish_reason = ["finish_reason", null, ["stop", "length", "tool_calls", "error", "interrupt"]];
 const message_schema = [
@@ -55,7 +55,7 @@ const message_schema = [
 		]
 	],
 	["tool_responses",
-		["time", "content", "success"]
+		["time", "content", "success", "duration"]
 	],
 	"name",
 	"parent"
@@ -162,7 +162,6 @@ export const decompressMessage = (data) => {
 	const item = decompressIfNeeded(data, message_schema);
 	const details = item?.reasoning_details;
 	if (Array.isArray(details)) {
-		console.log(details);
 		for (const item of details) {
 			for (const key of RD_KEYS) {
 				const data = item[key];

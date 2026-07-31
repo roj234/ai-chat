@@ -20,5 +20,5 @@ export function createPanel(constructor) {
 		}, 300);
 	};
 
-	return {open, close};
+	return {open, close, isOpen};
 }

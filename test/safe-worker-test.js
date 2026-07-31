@@ -328,31 +328,12 @@ function testFsRPC() {
 function testThisContext() {
 	console.log('\n--- Test 13: this context ---');
 	// this context is tested via execute(), not loadModule()
-	var modules = new Map();
-	modules.set('entry', `
-    export function getContext() {
-      return this;
-    }
-  `);
-
-	const handlers = {
-		load(name) {
-			const mod = modules.get(name);
-			if (!mod) throw new Error('Module not found: ' + name);
-			return mod;
-		},
-		log() {}
-	};
-
-	const sandbox = createSandbox(handlers, ['fs']);
+	const sandbox = createSandbox({}, []);
 
 	return sandbox.initialize().then(() => {
-		return sandbox.loadModule('entry').then(mod => {
-			// loadModule doesn't pass context, so this will be undefined/globalThis
-			return mod.getContext().then(r => {
-				// In Worker, top-level this of a module is typically undefined in strict mode
-				assert(r === undefined || typeof r === 'object', 'context is undefined or object');
-			});
+		return sandbox.execute('entry', "return this.test", {test: "a"}).then(r => {
+			// In Worker, top-level this of a module is typically undefined in strict mode
+			assert(r === 'a', 'this.test !== a');
 		}).finally(() => sandbox.destroy());
 	});
 }

@@ -81,6 +81,27 @@ POST /v1/abort/:id
 
 **响应**：`{ "success": true }`
 
+#### 带提示词缓存的对话接口
+
+```http
+POST /v1/chat/completions/ref
+```
+
+该接口支持额外三种消息角色：
+- { role: 'cached', id: string }
+- { role: 'cache_new', id: string }
+- { role: 'cache_end' }
+
+cache_new 创建一个范围，从下一条消息开始，直到下一条 cached、cache_new、cache_end 或最后一条消息  
+稍后使用 cached 引用该范围，一个范围可以包含多条消息  
+通常 cache_end 可以省略，除非你需要为部分而不是每一条消息创建缓存，此时没有 cache_new 充当隐式的 cache_end
+
+请求体中可以包含 `cache_only: true`  
+此时接口直接返回 201 + JSON 响应 `{ new_cached: string[] }` 表示当前存在哪些缓存（包括之前和刚创建的），而不触发推理  
+如果不包含该字段，将插入流式请求的第一个包或非流式的同名字段
+
+若传递的 cached 消息不存在（过期），接口将返回 409 Conflict + JSON ` { error: 'cache_expired', hashes: string[] } `
+
 ---
 
 ## 2. 文件服务

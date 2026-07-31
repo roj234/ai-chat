@@ -204,7 +204,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 	const b2i = (n) => n ? 1 : 0;
 	const keyFunc = conv => conv.textContent ?? conv.id + "\0" + conv.title + "\0" + b2i(conv[LOCKED]) + b2i(runningConversations.has(conv.id));
 
-	const list = <div className="sidebar-list scroll" id="chatList" onClick={eventHandler}></div>;
+	const list = <div className="sidebar-list scroll" onClick={eventHandler}></div>;
 	const groupAndConvArr = [];
 	const vl = new VirtualList({
 		element: list,
@@ -230,6 +230,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 			</div>;
 		}
 	});
+	list.vl = vl;
 
 	$watchWithCleanup(updateConversationListUI, () => {
 		const conv = unconscious(selectedConversation);

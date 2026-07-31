@@ -20,7 +20,14 @@ declare namespace OpenAI {
         // When streaming, usage is returned exactly once in the final chunk
         // before the [DONE] message, with an empty choices array.
         usage?: OpenRouter.ResponseUsage;
+
+        // Llama.cpp
         timings?: LlamaCpp.ResponseUsage;
+        prompt_progress?: LlamaCpp.PrefillProgress;
+
+        // SSE Proxy
+        resumable?: SSEProxyResumer;
+        new_cached?: string[];
 
         provider?: string; // Model provider
     };
@@ -40,6 +47,14 @@ declare namespace OpenAI {
 
     type Response = ChatCompletionResponse | ChatCompletionChunk | TextCompletionChunk;
 
+    type SSEProxyResumer = {
+        now: number;
+        start: number;
+        ft?: number;
+        re?: number;
+        end?: true;
+    }
+
     namespace LlamaCpp {
         type ResponseUsage = {
             cache_n: number,
@@ -47,6 +62,11 @@ declare namespace OpenAI {
             predicted_n: number,
             predicted_per_second: number;
         };
+
+        type PrefillProgress = {
+            processed: number;
+            total: number;
+        }
     }
 
     interface BaseReasoningDetail {

@@ -1,0 +1,117 @@
+/* ==========================================================================
+   run-card.css
+   ─ 数据驱动：样式只认 class + CSS 变量；所有数值（高度/宽度/百分比）
+     由调用方以 inline style 注入（height / width / --avg 等）。
+   ─ 语义颜色集中在 .run-card 作用域，方便换肤，不污染宿主全局。
+   ========================================================================== */
+
+.run-card {
+	/* ---- 语义变量（全部作用在 .run-card 上） ---- */
+	--card-bg:    #ffffff;
+	--panel:      rgba(107, 114, 128, .07);
+	--c-thinking: #6b7aff;
+	--c-tool:     #12b886;
+	--c-subagent: #f59f00;
+	--c-waiting:  #adb5bd;
+}
+
+@media (prefers-color-scheme: dark) {
+	.run-card {
+		--card-bg:   #171a21;
+		--panel:     rgba(154,163,175,.08);
+		box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.5);
+	}
+}
+
+.run-card {
+	/* ---- 卡片本体 ---- */
+	width: min(460px, 100%);
+	background: var(--card-bg);
+	border: 1px solid var(--border);
+	border-radius: 14px;
+	box-shadow: 0 1px 2px rgba(16,24,40,.05), 0 4px 16px rgba(16,24,40,.07);
+	padding: 20px 20px 14px;
+	color: var(--text);
+	font-size: 13px;
+
+	/* ---------- 头部 ---------- */
+	.header {
+		display: flex; align-items: flex-start; justify-content: space-between;
+		padding-bottom: 14px; border-bottom: 1px solid var(--border);
+	}
+	.title { margin: 0; font-size: 16px; }
+	.meta { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+	.meta strong { color: var(--text); font-variant-numeric: tabular-nums; }
+
+	/* ---------- section ---------- */
+	.section { padding: 14px 0; border-bottom: 1px solid var(--border); }
+	.section:last-child { border-bottom: 0; padding-bottom: 2px; }
+	.section-title {
+		display: flex;
+		margin: 0 0 10px; font-size: 13px;
+	}
+
+	/* ---------- 1) Time Breakdown ---------- JS 只负责：给每段设 width:% 和 var(--c-<key>) 颜色 */
+	.stacked-bar {
+		display: flex; gap: 2px; height: 10px; overflow: hidden;
+		margin-bottom: 10px;
+	}
+
+	.time-breakdown { display: grid; gap: 4px 0; font-variant-numeric: tabular-nums; }
+	.tb-row { display: grid; grid-template-columns: 1fr auto 3ch; gap: 10px; align-items: baseline; }
+	.tb-row .dot { display: inline-block; width: 8px; height: 8px; border-radius: 3px; margin-right: 7px; }
+	.tb-row .name { color: var(--muted); }
+	.tb-row .dur { font-weight: 600; }
+	.tb-row .pct { color: var(--muted); text-align: right; }
+
+	/* ---------- 2) Tokens ---------- */
+	.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+	.stat { background: var(--panel); border-radius: 10px; padding: 10px 12px; }
+	.stat .label { font-size: 12px; color: var(--muted); }
+	.stat .value {
+		font-size: 17px;  margin-top: 2px;
+		font-variant-numeric: tabular-nums; letter-spacing: -.01em;
+	}
+	.stat .value small { font-size: 11px; font-weight: 500; color: var(--muted); }
+
+	/* ---------- 2b) Cache hit：二维图（x = 调用次数，y = 命中率） ----------
+	   JS 只负责：给每个 bar 设 height:%，给平均线设 --avg:%
+	   低于平均的 bar 加 .cache-bar--low（命中率低 = 值得关注） */
+	.cache-head { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; }
+	.cache-label { font-size: 11.5px; color: var(--muted); }
+
+	.cache-chart { position: relative; height: 56px; margin-top: 8px; }
+	.cache-bars { position: absolute; inset: 0; display: flex; align-items: flex-end; gap: 3px; }
+	.cache-bar {
+		flex: 1; min-height: 2px; border-radius: 2px 2px 0 0;
+		background: var(--c-tool); opacity: .9;
+	}
+	.cache-bar--low { background: var(--c-subagent); opacity: .8; }
+	.cache-bar:hover { filter: brightness(1.1); }
+	.cache-avg-line {
+		position: absolute; left: 0; right: 0; bottom: var(--avg, 0%);
+		border-top: 1.5px dashed var(--accent); z-index: 1; pointer-events: none;
+	}
+	.cache-x { display: flex; justify-content: space-between; margin-top: 5px; font-size: 10.5px; color: var(--muted); }
+
+	/* ---------- 3) Tools ----------
+	   JS 只负责：给 .tool-fill 设 width:%（相对最大调用数）
+	   慢工具（avgMs ≥ 1000）加 .tool-fill--exec 警示色 */
+	.tool-row {
+		display: grid; grid-template-columns: 56px 1fr auto; align-items: center;
+		gap: 10px; padding: 4px 0;
+	}
+	.tool-name {
+		font-size: 12px; color: var(--muted);
+		font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+		overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+	}
+	.tool-track { height: 7px; border-radius: 999px; overflow: hidden;
+		background: color-mix(in srgb, var(--muted) 12%, transparent); }
+	.tool-fill { height: 100%; border-radius: 999px;
+		background: color-mix(in srgb, var(--accent) 65%, transparent); }
+	.tool-fill--exec { background: color-mix(in srgb, var(--c-subagent) 60%, transparent); }
+	.tool-meta { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+	.tool-meta .calls { font-weight: 600; }
+	.tool-meta .avg { color: var(--muted); font-size: 11px; margin-left: 6px; }
+}

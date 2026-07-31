@@ -69,8 +69,11 @@ function createList(dirtyHandle, config, onUpdate) {
 	const virtualList = new VirtualList({
 		element: list,
 		itemHeight: 49,
-		renderer(item, index) {
+		keyFunc(item, index) {
 			item[SORT] = index + 1;
+			return index;
+		},
+		renderer(item, index) {
 			return <li _key={item}>
 				<div className={"summary"}>
 					<span className="index">{index + 1}</span>
@@ -248,8 +251,11 @@ function createTextList(handler, textFieldName) {
 	const virtualList = new VirtualList({
 		element: list,
 		itemHeight: 49,
-		renderer(item, index) {
+		keyFunc(item, index) {
 			item[SORT] = index + 1;
+			return index;
+		},
+		renderer(item, index) {
 			return <li>
 				<div className={"summary"}>
 					<span className="index">{index + 1}</span>

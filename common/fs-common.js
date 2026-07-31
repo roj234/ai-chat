@@ -6,7 +6,7 @@
  *     mtime: (function(string, any): Promise<number>)
  * }} fs
  */
-export function createHashLine(fs) {
+export function createTextFileEditHelper(fs) {
 	const cache = new Map();  // filePath -> WeakRef<lines array>
 
 	const readLines = async (path, ctx) => {
@@ -83,14 +83,36 @@ export function createHashLine(fs) {
 		const lines = await readLines(path, ctx);
 		const patches = [];
 
-		for (let { startLine, startContent, endLine, endContent, content } of changes) {
-			const patchLines = content.split('\n');
+		for (let i = 0; i < changes.length; i++) {
+			const {search, replace} = changes[i];
 
-			if (startLine > endLine) throw ('end before start.');
-			if (lines[startLine-1] !== startContent) throw (`lines[startLine] !== startContent`);
-			if (lines[endLine-1] !== endContent) throw (`lines[endLine] !== endContent`);
+			const searchLines = search.split('\n');
+			const replaceLines = replace.split('\n');
 
-			patches.push([ startLine, endLine, patchLines ]);
+			const n = searchLines.length;
+			// 用首行在行数组里定位候选位置，再逐行验证后续行
+			let matchIndex = -1;
+			let j = 0;
+			while (j + n <= lines.length) {
+				const idx = lines.indexOf(searchLines[0], j);
+				if (idx < 0) break;
+
+				fail: {
+					for (let k = 1; k < n; k++) {
+						if (lines[idx + k] !== searchLines[k]) {
+							break fail;
+						}
+					}
+
+					if (matchIndex >= 0) throw `Hunk #${i + 1} occurred multiple times (Line ${matchIndex}-${matchIndex + n} and ${idx}-${idx + n}).`;
+					matchIndex = idx;
+				}
+
+				j = idx + 1;
+			}
+			if (matchIndex < 0) throw `Hunk #${i + 1} could not be found.`;
+
+			patches.push([ matchIndex, matchIndex + n, replaceLines ]);
 		}
 
 		patches.sort(([astart], [bstart]) => astart - bstart);
@@ -98,17 +120,21 @@ export function createHashLine(fs) {
 			const [curStart, curEnd] = patches[i];
 			const [prevStart, prevEnd] = patches[i - 1];
 			if (curStart < prevEnd)
-				throw (`Edit ${i + 1} [${curStart}, ${curEnd}] overlaps with edit ${i} [${prevStart}, ${prevEnd}].`);
+				throw (`Patch ${i + 1} [${curStart}, ${curEnd}] overlaps with edit ${i} [${prevStart}, ${prevEnd}].`);
 		}
 
 		const newLines = [];
 		let lastIndex = 0;
-		let patchReport = 'Success';
+		let msg = 'Success.';
 
 		for (let i = 0; i < patches.length; i++) {
-			const [ start, end, patchLines ] = patches[i];
-			newLines.push(...lines.slice(lastIndex, start-1));
-			newLines.push(...patchLines);
+			const [ start, end, replaceLines ] = patches[i];
+			newLines.push(...lines.slice(lastIndex, start));
+
+			const startLine = newLines.length + 1;
+			msg += `\nChanged lines: ${startLine}-${startLine + replaceLines.length}`
+
+			newLines.push(...replaceLines);
 			lastIndex = end;
 		}
 		newLines.push(...lines.slice(lastIndex))
@@ -116,7 +142,10 @@ export function createHashLine(fs) {
 		newLines.mtime = Date.now();
 		await fs.write(path, newLines.join('\n'), ctx);
 		cache.set(path, new WeakRef(newLines));
-		return patchReport;
+
+		const delta = newLines.length - lines.length;
+		return msg+`
+Lines: ${lines.length} → ${newLines.length} (${delta > 0 ? '+': ''}${delta})`;
 	};
 
 	const countLines = (content) => {
@@ -143,27 +172,35 @@ export function createHashLine(fs) {
 		if (!slice.length) throw (`file slice [${startLine}, ${endLine}] is empty!`);
 		const content = slice.join("\n");
 
-		search = search.split("\n").join("\n");
-		replace = replace.split("\n").join("\n");
-
-		let prefixLines, replaceLines, originalLines;
+		let delta;
+		let msg = 'Success.';
 
 		let newContent;
 		if (replaceAll) {
-			newContent = content.replaceAll(search, replace);
+			let lastIdx = content.indexOf(search);
+			if (lastIdx < 0) throw (`"search" was not found in the file.`);
+
+			const prefix = content.slice(0, lastIdx);
+			newContent = prefix + replace + content.slice(lastIdx + search.length).replaceAll(search, replace);
+			delta = countLines(newContent) - countLines(content);
 		} else {
 			let count = 0, lastIdx = -1, idx = -1;
 			while ((idx = content.indexOf(search, idx + 1)) !== -1) {
 				count++;
 				lastIdx = idx;
 			}
-			if (count === 0) throw (`"search" was not found in the file.`);
+			if (count === 0) {
+				throw lines.join('\n').indexOf(search) >= 0 ? (`"search" exists but is not in the current range — use Grep to locate or just omit line numbers.`) : (`"search" was not found in the file.`);
+			}
 			if (count > 1) throw (`Found ${count} occurrences of the search string — the search must uniquely identify a single location. Please expand the 'search' to include more surrounding context.`);
 			const prefix = content.slice(0, lastIdx);
 			newContent = prefix + replace + content.slice(lastIdx + search.length);
-			prefixLines = actualStart + countLines(prefix);
-			replaceLines = countLines(replace);
-			originalLines = countLines(search);
+			const prefixLines = 1 + actualStart + countLines(prefix);
+			const replaceLines = countLines(replace);
+			const originalLines = countLines(search);
+			msg += `
+Changed lines: ${prefixLines}-${prefixLines + replaceLines}`;
+			delta = replaceLines - originalLines;
 		}
 
 		newContent = [
@@ -175,18 +212,19 @@ export function createHashLine(fs) {
 		await fs.write(path, newContent, ctx);
 		cache.delete(path);
 
-		const delta = replaceLines - originalLines;
-		return `Success.
-Changed lines (new file): ${prefixLines}-${prefixLines + replaceLines}
+		return msg+`
 Lines: ${lines.length} → ${lines.length + delta} (${delta > 0 ? '+': ''}${delta})`;
 	};
 
 	const write = async ({ path, content, overwrite }, ctx) => {
+		check:
 		if (!overwrite) {
 			try {
 				await fs.mtime(path, ctx);
-				throw 'Error: File already exist';
-			} catch {}
+			} catch {
+				break check;
+			}
+			throw 'Error: File already exist';
 		}
 		await fs.write(path, content, ctx);
 		cache.set(path, new WeakRef(content.split('\n')));

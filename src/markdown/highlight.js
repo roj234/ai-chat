@@ -3,7 +3,7 @@ import morphdom from "morphdom";
 import './highlight-theme.css';
 
 import json from 'highlight.js/lib/languages/json';
-import {VirtualList} from "unconscious/common/VirtualList.js";
+import {ITEM_KEY, VirtualList} from "unconscious/common/VirtualList.js";
 import {$cleanup} from "unconscious";
 import {selectableVirtualListMixin} from "unconscious/common/selectableVirtualListMixin.js";
 import {VOID_TAGS} from "fastmd";
@@ -121,22 +121,27 @@ export const highlight = (code, language, node, is_finished) => {
 		if (is_finished) {
 			delete node._cache;
 
-			const lines = code.split('\n');
-			const virtualList = getOrCreateVL(node);
-
 			lightAsync(code, language, (value) => {
-				if (!node.isConnected) return;
-
+				const canScroll = node.scrollHeight > node.offsetHeight;
+				if (!canScroll) { node.innerHTML = value; return; }
 				node.style.height = node.offsetHeight + 'px';
+
+				const lines = code.split('\n');
+				node._value = code;
+
+				const virtualList = getOrCreateVL(node);
 				node.replaceChildren(virtualList.dom);
 				virtualList.attach(node);
-				selectableVirtualListMixin(virtualList, (line) => lines[line]);
-
 				// noinspection JSPrimitiveTypeWrapperUsage
 				virtualList.items = processLines(value, []).map(s => new String(s));
+
+				selectableVirtualListMixin(virtualList, (line) => lines[line]);
+
 				virtualList.scrollToBottom();
-				virtualList.scrollToBottom();
-				node._value = code;
+				requestAnimationFrame(() => {
+					virtualList.scrollToBottom()
+					virtualList.render();
+				});
 			}, () => !node.isConnected);
 			return;
 		}
@@ -146,7 +151,7 @@ export const highlight = (code, language, node, is_finished) => {
 			const virtualList = getOrCreateVL(node);
 			node._cache = cache = { work: <span/>, pos: 0 };
 			node.replaceChildren(virtualList.dom);
-			virtualList.attach(node);
+			virtualList.attach(node, true);
 		}
 		const vl = node._vl;
 
@@ -157,6 +162,17 @@ export const highlight = (code, language, node, is_finished) => {
 		// 是的这就是他妈的比 shiki-stream 快，你去 benchmark 吧
 		// 但是不支持 subLanguage 比如 JS/CSS in HTML 因为没有上下文
 		let stableHtml = (fullStreamableLanguages.has(language) || newCode.includes("\n")) && trimLastTopLevelElement(newHtml);
+
+		const staging = cache.work;
+		const syncStagingArea = () => {
+			let last = vl.dom.lastElementChild;
+			if (!last) {
+				vl.resize();
+				last = vl.dom.lastElementChild;
+			}
+			if (last.lastElementChild !== staging)
+				last.append(staging);
+		};
 
 		success: {
 			if (stableHtml) {
@@ -175,6 +191,7 @@ export const highlight = (code, language, node, is_finished) => {
 						vl.items.at(-1).text += lines.shift();
 						vl.items.push(...lines.map(i => {return{text:i}}));
 						vl.render();
+						syncStagingArea();
 
 						cache.pos += testLength;
 
@@ -186,20 +203,20 @@ export const highlight = (code, language, node, is_finished) => {
 
 			// 强制换行，避免长文本行性能崩溃
 			if (newCode.length > 500) {
-				vl.items.at(-1).text += newHtml;
-				vl.items.push({text:""});
-				vl.render();
+				syncStagingArea();
+
+				const sumHtml = vl.items.at(-1).text += newHtml;
+				staging.insertAdjacentHTML("beforebegin", newHtml);
+				const dom = vl.getValue(vl.items.length-1);
+				if (dom) dom[ITEM_KEY] = sumHtml; // 更新虚拟列表内的key
 
 				cache.pos += newCode.length;
 				newHtml = '';
 			}
 		}
 
-		const last = vl.dom.lastElementChild;
-		if (last && last?.lastElementChild !== cache.work)
-			last.append(cache.work);
 		// 动态部分
-		morphdom(cache.work, `<span>${newHtml}</span>`);
+		morphdom(staging, `<span>${newHtml}</span>`);
 		vl.scrollTo(node.scrollHeight);
 	};
 

@@ -52,12 +52,12 @@ const schema = {
 
 ### 第一步：调用模型 （WIP，未来可能改变）
 
-使用 `jsonPrompt` 发起请求，指定类型 ID 和 Schema 约束。
+使用 `runSchemaRole` 发起请求，指定类型 ID 和 Schema 约束。
 
 ```javascript
 import {$update, unconscious} from "unconscious";
 import {messages} from "/src/states.js";
-import {jsonPrompt} from "/plugins/rpg/core.js";
+import {runSchemaRole, USER_PROMPT} from "/plugins/rpg/core.js";
 
 const ID = 'my/storyEngine';
 
@@ -67,20 +67,13 @@ async function sendAction(messages, prompt) {
 
 	// 构造用户提示
 	const time = Date.now();
-	const input_messages = [{
-		role: "user",
-		time,
-		content: prompt
-	}];
-
-	// 使用 id -1 让这条消息不保存（因为是临时的）
-    // 使用 userPrompt 角色让消息渲染 content，但实际提交给AI的内容为 prompt
+	// 使用 userPrompt 角色让消息渲染 content，但实际提交给AI的内容为 prompt
+    // 生成结束时，这条消息会被还原为 user 角色
 	messages_.push({
-		id: -1,
 		role: "userPrompt",
 		time,
 		content: prompt,
-		prompt: `
+		[USER_PROMPT]: `
 【做一些事】，格式如下（当然你也可以不用这个工具函数而是自行构造提示词）
 JSON Schema 只是提供了一层额外的约束
 
@@ -92,29 +85,22 @@ ${prompt}`
 	});
 
 	try {
-		const assistantResponse = await jsonPrompt(schema_, messages_, {
-			// 在这里可以自行修改请求体
-			reasoning: {enabled: false},
+		const assistantResponse = await runSchemaRole(ID, schema_, messages_, {
+			// 在这里可以覆盖全局的 config 对象
+			think: false,
 			max_completion_tokens: Math.max(8192, prompt.length),
-		}, ID);
-
-		const jsonData = JSON.parse(assistantResponse.content);
-		// 你可以在这里对消息进行处理
-
-		input_messages.push({
-			...assistantResponse,
-			role: ID,
-			content: jsonData
 		});
 	} catch (e) {
-		// 错误处理，jsonPrompt 不会因为网络故障抛出异常
-        // 但出现推理问题时 assistantResponse 的 finish_reason 为 error 且 content 可能不是合法的 JSON 所以还是会走到这里
+		// 错误处理，runSchemaRole 不会因为网络故障抛出异常
+		// 但出现推理问题时 assistantResponse 的 finish_reason 为 error 且 content 可能不是合法的 JSON 所以还是会走到这里
 		console.error(e);
 	}
-
-	// 将 AI 回复替换消息数组，必须使用 splice 函数，因为对话分支管理器 hook 了它
-	messages_.splice(messages_.length - 2, 2, ...input_messages);
 }
+
+const onCompleted = async (conversation, mesasges, assistantResponse) => {
+	const jsonData = assistantResponse.content;
+	// 在这里对消息进行处理
+};
 ```
 
 ### 第二步：构建响应式 UI

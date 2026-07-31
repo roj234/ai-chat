@@ -1,9 +1,7 @@
 import {getToolParameters, updateConversationState} from "/src/toolset.js";
-import {jsonEval, jsonGet, parseJsonPointer} from "unconscious/common/json-schema-utils.js";
-import {showToast} from "/src/components/Toast.js";
-import {prettyError} from "/src/utils/utils.js";
+import {jsonEval, jsonEvalUndo, jsonGet, parseJsonPointer} from "unconscious/common/json-schema-utils.js";
 
-const operationLabels = { set: '更新', plus: '增加', delete: '移除' };
+const operationLabels = { set: '更新', plus: '增加', push: '追加', delete: '移除' };
 
 /**
  *
@@ -27,7 +25,7 @@ Returns new value at the pointer after the operation completes.`,
 		properties: {
 			// maybe a MOVE(from, to)
 			operation: { enum: ["set", "plus", "delete"], },
-			pointer: {pattern: "^/[a-zA-Z0-9/]+-?$", description: `JSON Pointer (RFC 6901)`},
+			pointer: {pattern: `^(?:/[a-zA-Z0-9]+)+(?:/-)?$`, description: `JSON Pointer (RFC 6901)`},
 			explanation: {
 				type: "string",
 				description: "One sentence human-readable summary of why change it."
@@ -43,7 +41,10 @@ Returns new value at the pointer after the operation completes.`,
 		if (!variables) variables = conv.variables = {};
 
 		if (operation === 'plus') {
-			if (typeof value === 'string') value = JSON.parse(value);
+			try {
+				if (typeof value === 'string') value = JSON.parse(value);
+			} catch {}
+
 			if (typeof value !== 'number') throw "value must be a number";
 		} else if (operation === 'delete') {
 			if (value !== undefined)
@@ -70,39 +71,21 @@ Returns new value at the pointer after the operation completes.`,
 	},
 	undo(response, conv, toolCall) {
 		const variables = conv.variables;
-		if (!variables || !('undo' in response)) return;
+		const undo = response.undo;
+		if (!variables || !undo) return;
 
 		const { pointer, operation } = getToolParameters(response, toolCall);
-		const path = parseJsonPointer(pointer);
-		const undo = response.undo;
 
-		try {
-			// noinspection FallThroughInSwitchStatementJS
-			switch (operation) {
-				case 'delete':
-					if (undo._isArray) {
-						const index = path.pop();
-						jsonGet(variables, path).splice(index, 0, ...undo.value);
-						break;
-					}
-				case 'set':
-					if (operation === 'set' && path.at(-1) === '-') {
-						jsonGet(variables, path).length = undo;
-						break;
-					}
-				case 'plus':
-					jsonEval(variables, path, undo === undefined ? 'delete' : 'set', undo);
-					break;
-			}
-		} catch (e) {
-			showToast("Failed to undo\n"+prettyError(e), 'error');
-			return;
-		}
+		jsonEvalUndo(variables, pointer, operation, undo);
 
 		updateConversationState(conv, "IS:variables");
 	},
 	title(tc, ctx) {
-		const { pointer, operation, value } = getToolParameters(ctx, tc);
+		let { pointer, operation, value } = getToolParameters(ctx, tc);
+		if (pointer.endsWith("/-")) {
+			pointer = pointer.slice(0, -2);
+			operation = 'push';
+		}
 
 		return (
 			<span>[{parseJsonPointer(pointer).join('.')}] {operationLabels[operation]}: <b style={{
@@ -121,7 +104,7 @@ export const GetVariable = {
 	parameters: {
 		type: "object",
 		properties: {
-			pointer: {pattern: "^/[a-zA-Z0-9/]+$" }
+			pointer: {pattern: "^(/[a-zA-Z0-9]+)*$" }
 		},
 		required: ["pointer"]
 	},

@@ -1,6 +1,7 @@
-import {$state} from "unconscious";
+import {$state, $update} from "unconscious";
 import {submitUserChatMessage} from "/src/api-request.js";
 import {getToolParameters} from "/src/toolset.js";
+import {messages} from "../../../src/states.js";
 
 /**
  * @type {AiChat.FunctionTool<{
@@ -49,43 +50,53 @@ export const SetTimeout = {
 	script({ timeout, deadline, label }, response)  {
 		let ddl;
 		if (timeout != null) {
-			if (deadline) throw 'Both timeout and deadline is specified';
+			if (deadline) throw 'Both timeout and deadline are specified';
 			ddl = Date.now() + timeout * 1000;
 		} else {
 			if (!deadline) throw 'Neither timeout or deadline is specified';
 			ddl = new Date(deadline);
 			if (isNaN(ddl)) throw 'Invalid Date';
+			if (ddl - Date.now() < 10000) throw 'Deadline too close';
 		}
 
+		response.time = Date.now();
 		response.deadline = ddl;
 		return ''
 	},
 	keyFunc(keys, response, frozen) {
 		keys.push(frozen);
 		if (frozen && !response.content) {
-			response.content = 'userInput';
+			const deadline = response.deadline;
+			response.content = `userInput (${deadline - Date.now()}ms remaining)`;
 		}
 	},
 	renderer(response, has_successor, call) {
 		if (has_successor) return;
 
-		const {timeout} = getToolParameters(response, call);
-		const deadline = response.deadline;
+		const args = getToolParameters(response, call);
+		if (null == response.success) {
+			response.success = true;
+			response.content = SetTimeout.script(args, response);
+			$update(messages);
+		} else if (!response.success) return;
 
-		let start = Date.now();
+		let start = response.time || Date.now();
+		const deadline = response.deadline;
+		const timeout = deadline - start;
+
 		const percent = $state(start < deadline ? 0 : 100);
 
 		const onFinish = () => {
 			if (!response.content) {
 				response.content = `timeout`;
-				submitUserChatMessage();
+				submitUserChatMessage(true);
 			}
 		};
 
 		const update = () => {
 			if (!el.isConnected) return;
 
-			let remain = (deadline - Date.now()) / 1000;
+			let remain = deadline - Date.now();
 			let p = Math.max(0, 100 - (remain / timeout) * 100);
 			percent.value = p;
 
@@ -99,7 +110,7 @@ export const SetTimeout = {
 			<div className="rp-timer">
 				<div className="progress">
 					<div
-						className="bar"
+						className="pbar"
 						class:ended={() => percent.value >= 100}
 						style:width={() => `${percent.value}%`}
 					/>

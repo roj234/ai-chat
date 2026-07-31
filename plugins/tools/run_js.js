@@ -175,7 +175,7 @@ const loadSystemModule = (mod) => {
 		if (!content?.includes("javascript")) throw new Error('Failed to fetch module '+mod.path+': illegal content-type '+content);
 		return res.text();
 	});
-	if (mod.umd) return promise.then(text => `const module = {exports};`+text);
+	if (mod.umd) return promise.then(cjsWrapper);
 	return promise;
 }
 
@@ -208,6 +208,8 @@ const appendFn = fileAccess("append");
 
 const MAX_OUTPUT_LENGTH = 20000;
 const HALF = MAX_OUTPUT_LENGTH / 2;
+
+const cjsWrapper = text => `const module = {exports};` + text + "\n;Object.assign(exports,module.exports)";
 
 /**
  * @type {AiChat.FunctionTool}
@@ -270,12 +272,11 @@ export const RunJS = {
 			}, response, conv);
 			path = normalizePath(path).join('/');
 		} else {
-			if (path != null) throw 'Both path and code is specified';
+			if (path != null) throw 'Both path and code are specified';
 		}
 
-		if (reset) stopWorker();
-
-		if (!worker || !deepEqual(workerPermissions, permissions || [])) {
+		if (reset || !worker || !deepEqual(workerPermissions, permissions || [])) {
+			stopWorker();
 			const hostModules = new Map;
 			hostModules.set('@tools', {});
 
@@ -322,10 +323,12 @@ export const RunJS = {
 				if (!mod) throw new Error('Module not found: '+path);
 				return loadSystemModule(mod);
 			}
-			return readFile({
+			const promise = readFile({
 				path,
 				noTruncate: true
 			}, response, conv);
+			if (path.endsWith(".cjs")) return promise.then(cjsWrapper);
+			return promise;
 		}
 
 		// 文件 RPC 处理

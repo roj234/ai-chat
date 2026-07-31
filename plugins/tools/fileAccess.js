@@ -1,6 +1,6 @@
 import {IndexedDBAccess} from "/src/utils/dbAccess.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
-import {jsonFetch, updateOnIntersected} from "/src/utils/utils.js";
+import {updateOnIntersected} from "/src/utils/utils.js";
 import {SETTINGS} from "/src/settings.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {config, selectedConversation} from "/src/states.js";
@@ -8,6 +8,7 @@ import {showToast} from "/src/components/Toast.js";
 import {createWebFileSystem, resolveDirectory} from "./WebFileSystem.js";
 import {createVirtualFileSystem} from "./VirtualFileSystem.js";
 import {ContentPart} from "/src/toolset.js";
+import {jsonFetch} from "/common/openai-api-utils.js";
 import {$state, debugSymbol, unconscious} from "unconscious";
 import {formatSize} from "unconscious/common/Utils.js";
 import {isIDB} from "/src/database.js";
@@ -219,6 +220,8 @@ async function callFBI(mountPoint) {
 		if (fs_type === 'api') {
 			const [baseUrl, pat] = getFsApiUrlPat();
 			await ensureFsAvailability(baseUrl, pat);
+			// TODO  dialog for this
+			//mountPoint.fs_server = [baseUrl, pat];
 			fs_base = await getFSBase(1);
 		}
 		if (fs_type === 'opfs' || fs_type === 'db') {
@@ -276,7 +279,7 @@ async function callFBI(mountPoint) {
 			return remoteFileSystem(config.db_server+'fs/', config.db_pat, fs_base);
 		}
 		case "api": {
-			const [baseUrl, pat] = getFsApiUrlPat();
+			const [baseUrl, pat] = mountPoint.fs_server || getFsApiUrlPat(config.fs_server);
 			return remoteFileSystem(baseUrl, pat, fs_base);
 		}
 		case "local": {
@@ -474,23 +477,41 @@ export const callFileSystemFunc = (fs, func, parameters, conv) => {
 	return handler(parameters);
 };
 
+/**
+ *
+ * @param {string} path
+ * @param {AiChat.Conversation} conv
+ * @returns {Promise<[string, AiChat.FileSystemInstance]>}
+ */
+export const getFileSystem = async (path, conv) => {
+	if (path) {
+		if (path.startsWith("~/")) {
+			const path1 = path.slice(2).split("/");
+			const mountPoint = conv.mnt?.[path1.shift()];
+			if (!mountPoint) throw `mount point ${path} not found`;
+
+			return [path1.join('/'), await createFileSystem(mountPoint)];
+		}
+
+		if (path[0] === '/' && (conv.fs_type !== 'api' || !path.startsWith("/tmp/") && path !== '/tmp'))
+			throw `Absolute path ${JSON.stringify(path)} is strictly forbidden, use ${JSON.stringify(path==='/'?'.':path.startsWith("/home/")||path.startsWith("/root/")?'~/path/to/file':path.slice(1))} instead`;
+	}
+	const myfs = await createFileSystem(conv);
+	return [path, myfs];
+};
+
 export const fileAccess = (func) => async (parameters, _, conv) => {
-	const path = parameters.path||parameters.cwd;
-	if (path?.[0] === '/') throw `Absolute path ${JSON.stringify(path)} is strictly forbidden, use ${JSON.stringify(path==='/'?'.':path.startsWith("/home/")||path.startsWith("/root/")?'~/path/to/file':path.slice(1))} instead`;
+	let path = parameters.path||parameters.cwd;
+	// This is Global not per-fs alert
 	if (conv.fs_readonly && writeTools.has(func)) throw "Write-protect is enabled";
 
-	if (path?.startsWith("~/")) {
-		const path1 = path.slice(2).split("/");
-		const mountPoint = conv.mnt?.[path1.shift()];
-		if (mountPoint) {
-			conv = mountPoint;
-			parameters = { ...parameters };
-			parameters['cwd' in parameters ? 'cwd' : 'path'] = path1.join('/');
-		} else {
-			throw `mount point ${path} not found`;
-		}
+	let [newPath, fs] = await getFileSystem(path, conv);
+
+	if (newPath !== path) {
+		parameters = { ...parameters };
+		parameters['cwd' in parameters ? 'cwd' : 'path'] = newPath;
 	}
-	const fs = await createFileSystem(conv);
+
 	return callFileSystemFunc(fs, func, parameters, conv);
 };
 

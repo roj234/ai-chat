@@ -1,11 +1,17 @@
 import {getToolParameters, registerToolset} from "/src/toolset.js";
 import {fileAccess} from "./fileAccess.js";
 import {prefixTitle} from "./agent.js";
-import {compileSchema, jsonEval, parseJsonPointer, validate} from "unconscious/common/json-schema-utils.js";
+import {
+	compileSchema,
+	JSON_POINTER_PATTERN,
+	jsonEval,
+	parseJsonPointer,
+	validate
+} from "unconscious/common/json-schema-utils.js";
 import {parseJson5} from "unconscious/common/Json.js";
 
 const systemPrompt = `<json-edit-policy>
-### RFC 6901 + extensions
+### RFC 6901 + RFC 6902
 
 - Use \`~0\` and \`~1\` to escape.
 - Trailing \`-\` means append-to-array.
@@ -51,8 +57,11 @@ Modes:
 		try {
 			obj = parseJson5(text);
 		} catch (e) {
-			throw "file cannot be parsed:\n"+e;
+			throw "File cannot be parsed as JSON5:\n"+e;
 		}
+
+		if (!JSON_POINTER_PATTERN.test(pointer))
+			throw 'Invalid escape in pointer';
 
 		const jsonPointer = parseJsonPointer(pointer);
 		let action = value === undefined ? "delete" : "set";
@@ -60,16 +69,18 @@ Modes:
 			action = "push";
 			jsonPointer.pop();
 		}
+		if (jsonPointer.some(s=>!s))
+			throw "Found empty property key";
 
-		const undo = jsonEval(obj, jsonPointer, action, value).undo;
-		response.undo = undo;
+		response.undo = jsonEval(obj, jsonPointer, action, value).undo;
 
 		await writeFile({
 			path,
-			content: JSON.stringify(obj, null, 2)
+			content: JSON.stringify(obj, null, 2),
+			overwrite: true
 		}, response, global);
 
-		return "Success. undoHandle="+JSON.stringify(undo);
+		return "Success";
 	},
 	title: prefixTitle("编辑JSON")
 };
@@ -121,7 +132,7 @@ Returns "valid" on success, or error messages with node path on failure.`,
 				noTruncate: true
 			}, response, global));
 		} catch (e) {
-			return "data cannot be parsed:\n"+(e.message||e);
+			return "Data cannot be parsed:\n"+(e.message||e);
 		}
 
 		try {
@@ -131,14 +142,14 @@ Returns "valid" on success, or error messages with node path on failure.`,
 			}, response, global));
 			compileSchema(schema);
 		} catch (e) {
-			return "schema cannot be parsed:\n"+(e.message||e);
+			return "Schema cannot be parsed:\n"+(e.message||e);
 		}
 
 		const issues = {};
 		validate(data, schema, issues);
 		const entries = Object.entries(issues);
-		if (entries.length) return "invalid:\n"+entries.map(([k, v]) => k+": "+v).join("\n");
-		return "valid";
+		if (entries.length) return "Invalid:\n"+entries.map(([k, v]) => k+": "+v).join("\n");
+		return "Valid";
 	},
 	title: (req, ctx) => {
 		const toolParameters = getToolParameters(ctx, req);

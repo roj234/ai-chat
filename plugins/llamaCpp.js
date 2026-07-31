@@ -2,7 +2,8 @@ import {config, isLlamaCppBackend, models, setIsLlamaCppBackend, updateModels} f
 import {$asyncState, $cleanup, $computed, $foreach, $state, $unwatch, $update, $watch} from "unconscious";
 import {isLanAddress} from "/common/isLanAddress.js";
 import "./llamaCpp.css";
-import {jsonFetch, prettyError, throttled} from "/src/utils/utils.js";
+import {prettyError, resolveDBRelativeURL, throttled} from "/src/utils/utils.js";
+import {jsonFetch} from "/common/openai-api-utils.js";
 import {SETTINGS} from "/src/settings.js";
 import {showToast} from "/src/components/Toast.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
@@ -23,7 +24,7 @@ let emptyMessageTokens = -1;
 		return await _countTokens(text) - emptyMessageTokens;
 	};
 	const _countTokens = (text) => {
-		return jsonFetch(config.endpoint+"/messages/count_tokens", {
+		return jsonFetch(resolveDBRelativeURL(config.endpoint)+"/messages/count_tokens", {
 			key: config.accessToken,
 			body: JSON.stringify({
 				model: config.model,
@@ -69,7 +70,7 @@ const isLLaMACppRouter = $asyncState(({url, token}) => {
 }, _endpoint);
 
 $watch(config, () => {
-	const url = config.endpoint;
+	const url = resolveDBRelativeURL(config.endpoint);
 	const value = {
 		// remove v1 postfix
 		url: isLanAddress(url) ? url.slice(0, url.length-2) : "",

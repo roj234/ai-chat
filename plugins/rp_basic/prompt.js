@@ -20,7 +20,7 @@ const IS_SYSTEM = debugSymbol("IS_SYSTEM");
  * @param {boolean} prefill
  * @return {OpenAI.Message[]}
  */
-export const applyPreset = ({prompts, regexps}, ctx, jsonMessages, prefill) => {
+export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages, prefill) => {
 	let first = '';
 	/** @type {OpenAI.Message[]} */
 	const messages = [{
@@ -215,7 +215,7 @@ export const makeStory = (char, lbBefore = "", lbAfter = "") => {
  * @param {string} content
  * @param {number} depth
  */
-export const applyRenderReplace = ({regexps}, content, depth) => {
+export const applyRenderReplace = ({regexps = []}, content, depth) => {
 	const activeRegexps = regexps.filter(item => item.enabled && item.stage !== 'prompt');
 	return activeRegexps.length ? regexpReplace(activeRegexps, depth, content) : content;
 };

@@ -93,7 +93,7 @@ export const SETTINGS = [
 		_tab: "model",
 		name: "API 地址 (OpenAI 兼容)",
 		type: "input",
-		pattern: /^(\/|https?:\/\/)/,
+		pattern: /^(@|\/|https?:\/\/)/,
 		warning: "请输入正确的API地址",
 		placeholder: "https://api.openai.com/v1",
 		_group: 'model'
@@ -219,12 +219,12 @@ export const SETTINGS = [
 		name: "请求优化",
 		type: "multiple",
 		choices: {
-			"流式发送Body": "streamDuplex",
-			//"后端发送Blob": "serverResponse"
+			"流式序列化": "streamDuplex",
+			"消息引用": "useRefs"
 		},
 		title: {
-			"流式发送Body": "使用HTTP/2流式发送请求，避免在JS中构造超大的JSON字符串\nHTTP/1其实也支持，但谷歌为了强迫H2普及故意不支持",
-			//"后端发送Blob": "使用后端服务的SSE Proxy代替客户端发送Blob\n需要后端"
+			"流式序列化": "流式发送请求，避免在JS中构造超大的JSON字符串\n傻逼谷歌只支持HTTP/2否则我就常开了还做什么选项",
+			"消息引用": "需要 SSE 代理后端\n引用服务端缓存的消息节省流量\n在标准OpenAI兼容后端上启用会报错"
 		},
 		_group: 'model'
 	},
@@ -266,7 +266,8 @@ export const SETTINGS = [
 			"低": "low",
 			"中": "medium",
 			"高": "high",
-			"超高": "xhigh"
+			"超高": "xhigh",
+			"最高": "max",
 		},
 		title: {
 			"手动": "关闭模型内置推理，由手动编写的 CoT 提示词驱动\n" +
@@ -276,6 +277,7 @@ export const SETTINGS = [
 			"中": "~50% of max_tokens",
 			"高": "~80% of max_tokens",
 			"超高": "~95% of max_tokens",
+			"最高": "~99% of max_tokens",
 		},
 		required: true
 	},
@@ -566,16 +568,6 @@ export const SETTINGS = [
 			"脚本 (script)": "script"
 		}
 	},
-	{
-		id: "width",
-		_tab: "customize",
-		name: "对话框宽度（像素）",
-		type: "number",
-		min: 500,
-		max: 1500,
-		step: 50,
-		default: 800
-	},
 	// customize
 	// 因为模块加载顺序的原因 data 整个模块被拆分到 data-exchange.js 和 PresetDropdown.jsx 了
 	{
@@ -650,6 +642,17 @@ export const SETTINGS = [
 		placeholder: "猫娘中转站",
 		title: "仅用于数据统计, 留空使用API域名",
 		_group: "model"
+	},
+	{
+		id: "user_id",
+		name: "(高级) 用户标识",
+		type: "input",
+		_tab: ["model", "data"],
+		placeholder: "留空会自动随机生成",
+		title: "在受支持 API （如OpenRouter）保证缓存亲和性和滥用管理（防封号）\n"
+			+ "使用方法：在自定义请求体中填入 user: \"auto\" 和/或 session_id: \"auto\"。\n"
+			+ "会话 ID 将根据 user_id + 盐 + 对话ID 生成哈希值，以确保缓存亲和。",
+		_group: "model"
 	}
 ];
 
@@ -661,21 +664,15 @@ if (DB_MODE !== 'local') {
 		name: "数据库后端",
 		title: "提供文件管理、多端同步、向量数据库等功能\n修改后需要刷新页面"+(DB_MODE === "mixed" ? "\n填写 :idb: 使用本地数据库" : ""),
 		type: "input",
-		pattern: (DB_MODE === "mixed" ? /^(?:(?:https?:\/\/)?.*\/api\/v2\/|:idb:$)/ : /^(?:https?:\/\/)?.*\/api\/v2\//),
-		warning: "请输入合法的服务器地址",
-		placeholder: "/api/v2/username"
+		pattern: (DB_MODE === "mixed" ? /^(?:(?:(?:https?:\/\/)?.*\/)?api\/v2\/[^\/]+\/?|:idb:)$/ : /^(?:(?:https?:\/\/)?.*\/)?api\/v2\/[^\/]+\/?/),
+		warning: "请输入合法的后端地址 (.../api/v2/用户名)",
+		placeholder: "api/v2/username"
 	}, {
 		id: "db_pat",
 		_tab: "data",
 		type: "secret",
 		placeholder: "个人访问密钥 (PAT)",
-	}/*, {
-		id: "db_nick",
-		_tab: "data",
-		name: "客户端名称 (远程控制用)",
-		placeholder: "家里的电脑",
-		type: "input",
-	}*/);
+	});
 }
 
 const toggleFullscreen = () => {
@@ -694,10 +691,9 @@ const toggleFullscreen = () => {
 
 // 手机上删掉对话框宽度
 if (isMobile) {
-	const index = SETTINGS.findIndex(({id}) => id === "width");
 	if (IS_ANDROID_BUILD) {
 		const userAgent = navigator.userAgent;
-		SETTINGS[index] = {
+		SETTINGS.push({
 			id: "userAgent",
 			type: "input",
 			name: "UserAgent",
@@ -705,7 +701,7 @@ if (isMobile) {
 			_group: "model",
 			_tab: "model",
 			placeholder: userAgent
-		};
+		});
 		onLoad(() => {
 			$watch($computed(() => config.userAgent), () => {
 				webviewSetUserAgent(config.userAgent || userAgent);
@@ -719,13 +715,32 @@ if (isMobile) {
 			</div>
 		});
 	} else {
-		SETTINGS[index] = {
+		SETTINGS.push({
 			type: "element",
 			element: <div style={{display: "flex", justifyContent: "space-between"}}>
 				<button className="btn ghost" onClick={toggleFullscreen}>全屏</button>
 			</div>
-		};
+		});
 	}
+} else {
+	SETTINGS.push({
+		id: "width",
+		_tab: "customize",
+		name: "对话框宽度（像素）",
+		type: "number",
+		min: 500,
+		max: 1500,
+		step: 50,
+		default: 800
+	}, {
+		id: "sidebarWidth",
+		_tab: "customize",
+		name: "侧边栏宽度（像素）",
+		type: "number",
+		min: 200,
+		max: 1000,
+		step: 50
+	})
 }
 
 export const BODY_PARAMETERS = SETTINGS.filter(({id = "", _tab}) => (id !== 'antiSlop' && _tab === "sampling" || id === "max_completion_tokens"));

@@ -2,7 +2,7 @@ import {getTextContent} from "../utils/utils.js";
 import {sortMessages} from "/backend/sync_const.js";
 import {IndexedDBAccess} from "../utils/dbAccess.js";
 
-const [transaction, deleteDatabase] = IndexedDBAccess('AiChat', 8, (event) => {
+const [transaction, deleteDatabase] = IndexedDBAccess('AiChat', 9, (event) => {
 	const db = event.target.result;
 	const tx = event.target.transaction;
 
@@ -19,6 +19,19 @@ const [transaction, deleteDatabase] = IndexedDBAccess('AiChat', 8, (event) => {
 
 		// 计费日志, 插入顺序就是时间顺序
 		db.createObjectStore('logs', { keyPath: 'id' });
+	} else if (oldVersion === 8) {
+		const request = tx.objectStore('logs').openCursor();
+		request.onsuccess = (e) => {
+			const cursor = e.target.result;
+			if (cursor) {
+				const record = cursor.value;
+				if (typeof record.cost === 'number') {
+					record.cost = Math.round(record.cost * 1000000);
+					cursor.update(record);
+				}
+				cursor.continue();
+			}
+		};
 	} else {
 		alert("不支持的数据库版本，请手动更新");
 		throw "error";
@@ -144,7 +157,9 @@ export const searchMessages = keyword => {
  */
 export const getKV = (key, callback) => {
 	let promise = transaction(tx => tx.objectStore('kv').get(key), false, 'kv');
-	if (callback) promise.then(v => callback.value = v);
+	if (callback) promise.then(v => {
+		if (v != null) callback.value = v;
+	});
 	return promise;
 }
 

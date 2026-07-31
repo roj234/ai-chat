@@ -2,9 +2,23 @@ import {showToast} from "../components/Toast.js";
 import {$watch, debugSymbol, unconscious} from "unconscious";
 import {highlightJsonLike} from "../markdown/highlight.js";
 import {webviewDownloadFile} from "/vendor/jsBridge.js";
+import {config} from "../states.js";
+import {isIDB} from "../database.js";
 
-export {jsonFetch} from "/common/openai-api-utils.js";
+export const resolveDBRelativeURL = (url) => {
+	if (url[0] === '@') {
+		if (isIDB) {
+			showToast("Could not resolve ["+url+"] in IndexedDB backend");
+			return url;
+		}
 
+		const backendBase = new URL(config.db_server, document.baseURI).toString();
+		const baseDir = backendBase.split('/').slice(0, -3).join('/') + '/';
+		url = new URL(url.slice(1), baseDir).toString();
+	}
+	if (url.endsWith("/")) url = url.slice(0, -1);
+	return url;
+}
 /**
  * 只克隆指定名称
  * @param obj

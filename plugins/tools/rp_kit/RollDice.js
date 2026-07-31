@@ -36,6 +36,7 @@ export const RollDice = {
 						},
 						hidden: {
 							type: "boolean",
+							description: "Hidden from UI",
 							default: false
 						}
 					},
@@ -59,13 +60,14 @@ export const RollDice = {
 			}
 
 			if (!hidden) rolls.push({ exp: count+"d"+sides+(modifier>0?"+"+modifier:modifier||""), dices, score });
-			return [score+" = "+dices.join("+")+(label&&" ("+label+")")];
+			return [score+" = "+dices.join("+")+(modifier>0?"+"+modifier:modifier||"")+(label&&" ("+label+")")];
 		}).join("\n");
 	},
 	keyFunc(keys, {rolls}) {
 		keys.push(rolls);
 	},
 	renderer({rolls}) {
+		if (!rolls.length) return;
 		return <div className={"rp-dice"}>
 			{rolls.map(res => (
 				<div>

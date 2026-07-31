@@ -51,12 +51,24 @@ export const IndexedDBAccess = (dbName, dbVersion, upgrade_callback) => {
 		const mode = batchWrite ? "readwrite": "readonly";
 		batchQueue = batchStore = batchWrite = 0;
 
+		const results = [];
 		const tx = (db || (db = await openDb())).transaction(stores, mode);
 		tx.onerror = () => {
 			const error = new Error(tx.error?.message);
 			for (const el of queue) el[2](error);
 		};
-		for (const [fn, resolve] of queue) {
+		tx.oncomplete = () => {
+			for (let i = 0; i < queue.length; i++) {
+				queue[i][1](results[i]);
+			}
+		}
+
+		for (let i = 0; i < queue.length; i++) {
+			const [fn, _resolve] = queue[i];
+			const capturedI = i;
+			// 是的，这就是异步，所以必须在oncomplete里统一resolve，否则第一个resolve的不一定是第一个Promise，可能会导致各种难以调试的bug
+			const resolve = result => results[capturedI] = result;
+
 			const v = fn(tx, resolve);
 			if (v) v.onsuccess = (event) => resolve(event.target.result);
 		}

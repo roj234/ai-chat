@@ -1,3 +1,4 @@
+import {debugSymbol} from "unconscious/shared.js";
 
 /**
  * @param {Error} err
@@ -8,16 +9,19 @@ const networkErrorHandler = err => {
 	throw err;
 };
 
+export const ORIGINAL_ERROR = debugSymbol("OriginalError");
+
 async function responseErrorHandler(res) {
-	const func = res.headers.get('content-type') === 'application/json' ? 'json' : 'text';
+	const func = res.headers.get('content-type')?.startsWith('application/json') ? 'json' : 'text';
 	let obj = await res[func]();
+	const init = obj;
 	if (obj && typeof obj === 'object') {
 		if (obj.error && Object.keys(obj).length === 1) {
 			obj = obj.error;
 		}
 	}
 	if (typeof obj !== 'string') obj = JSON.stringify(obj);
-	throw {status: res.status, message: obj};
+	throw {status: res.status, message: obj, [ORIGINAL_ERROR]: init};
 }
 
 /**
@@ -79,7 +83,7 @@ export const sseFetch = (url, {key = "", json = true, ...data} = {}, onChunk) =>
 	if (!res.ok) return responseErrorHandler(res);
 
 	const contentType = res.headers.get('content-type');
-	if (contentType === 'application/json') {
+	if (contentType?.startsWith('application/json')) {
 		onChunk(await res.json(), '\0');
 		return res;
 	}
@@ -113,10 +117,10 @@ export const sseFetch = (url, {key = "", json = true, ...data} = {}, onChunk) =>
 						onChunk(obj, event);
 					} catch (e) {
 						if (!error)
-							error = e;
+							error = e instanceof Error ? e.message : e;
 					}
 
-					if (error) throw { status: 'SSE Chunk', message: error };
+					if (error) throw { status: 'SSE Chunk', message: typeof error === 'string' ? error : JSON.stringify(error) };
 					event = undefined;
 				}/* else {
 					if (line && !'event: '.startsWith(line) && !'data: '.startsWith(line)) {

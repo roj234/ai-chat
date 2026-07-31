@@ -59,10 +59,13 @@ const SimpleModal = ({
 			<div className="modal" onClick={(e) => e.stopPropagation()}>
 				<div className="header"><b>{title}</b></div>
 				<div className="body">
-					{message && <p>{message}</p>}
+					{typeof message === 'string' ? <p>{message}</p> : message}
 					{type === 'input' ? <input className={"text-input"}
 						onChange={(e) => inputValue = e.target.value}
 						placeholder={placeholder}
+						onKeyDown={(e) => {
+							e.key === "Enter" && handleConfirm();
+						}}
 						value={value}
 					/> : type === 'textarea' ? input = <textarea className={"text-input"}
 						onChange={(e) => inputValue = e.target.value}

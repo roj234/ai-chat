@@ -84,3 +84,7 @@
     .edit-btn { display: none; }
     .chat-item:hover .edit-btn { display: block; }
 }
+
+.moving .edit-btn {
+    display: none !important;
+}

@@ -12,6 +12,8 @@ declare namespace AiChat {
 
         /** SSE Proxy 的断点续传ID */
         resumeId?: string,
+        /** Schema 模式使用的自定义渲染器ID和后处理函数 */
+        roleId?: string;
 
         /** 已激活的模块(技能) */
         activatedModules?: Set<string>,
@@ -28,6 +30,9 @@ declare namespace AiChat {
 
         /** 分支对话，最后一条对话的ID */
         bm_leaf?: number;
+
+        /** 覆盖全局配置 */
+        overrides?: Partial<LocalPreset>;
     }
 
     export type Message = BaseMessage | AssistantMessage;
@@ -70,7 +75,10 @@ declare namespace AiChat {
     }
 
     type ToolResponse = {
+        // 工具调用时间统计
         time: number;
+        duration?: number;
+
         content?: string | OpenAI.ContentPart[];
         success?: boolean;
     }
@@ -106,7 +114,9 @@ declare namespace AiChat {
 
         modalities: ('image' | 'audio' | 'tool')[]
         additionalBody: Record<string, any>
+
         streamDuplex: boolean
+        useRefs: boolean
 
         jsonSupport: 0 | 1 | 2 | 3
     }
@@ -136,38 +146,50 @@ declare namespace AiChat {
         titlePrompt: string
     }
 
-    type Preset = ModelConfig & SamplingConfig & PromptConfig & TitleModelConfig & {
+    type MiscPreset = {
+        sound: false | 'always' | 'background',
+
+        reviewRequest: boolean,
+        reviewMessage: boolean,
+        logSSE: boolean,
+
+        permittedTools: string[],
+        maxToolTurns: number
+        afkState: 0 | 1 | 2,
+
+        // UI
+        think: 0 | 1,
+        tools: 0 | 1,
+        wakelock: 0 | 1,
+    }
+
+    type ManualOverridePreset = {
+        disableTools?: boolean;
+    }
+
+    type GlobalPreset = {
         name: string,
 
         db_server: string,
         db_pat: string,
 
         theme?: 'light' | 'dark';
-        sound: false | 'always' | 'background',
         allowHTMLTags: ('basic' | 'style' | 'script')[]
 
         blobCacheCapacity: number
 
-        reviewRequest: boolean,
-        reviewMessage: boolean,
-        logSSE: boolean,
         incognito: boolean,
-
-        permittedTools: string[],
-        maxToolTurns: number
-        afkState: 0 | 1 | 2,
 
         nickname: string;
 
-        // UI
         combineToolCalls: 0 | 1,
         expandThinkBlock: 0 | 1,
         expandToolCall: 0 | 1,
-        think: 0 | 1,
         checkUpdate: 0 | 1,
-        tools: 0 | 1,
-        wakelock: 0 | 1,
     }
+
+    type LocalPreset = ModelConfig & SamplingConfig & PromptConfig & TitleModelConfig & MiscPreset & ManualOverridePreset;
+    type Preset = LocalPreset & GlobalPreset;
 
     type BillingLog = {
         request_id: string,

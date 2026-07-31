@@ -3,10 +3,18 @@ import {config, inputText, messages, selectedConversation, updateMessageUI} from
 import {$state, $update, $watch, unconscious} from "unconscious";
 import {showToast} from "/src/components/Toast.js";
 import {AskUser} from "./rp_kit/AskUser.js";
-import {callFileSystemFunc, createFileSystem, fileAccess, FILESYSTEM_AUX_PROMPT, getFsApiUrlPat} from "./fileAccess.js";
+import {
+	callFileSystemFunc,
+	createFileSystem,
+	fileAccess,
+	FILESYSTEM_AUX_PROMPT,
+	getFileSystem,
+	getFsApiUrlPat
+} from "./fileAccess.js";
 import {RunJS, SearchModules} from "./run_js.js";
 import {readAsString} from "/common/chardet.js";
-import {downloadFile, jsonFetch} from "/src/utils/utils.js";
+import {downloadFile} from "/src/utils/utils.js";
+import {jsonFetch} from "/common/openai-api-utils.js";
 import {ZipWriter} from "unconscious/common/zip-io.js";
 import {InspectImage} from "./inspect_image.js";
 import {SetTimeout} from "./rp_kit/SetTimeout.js";
@@ -29,12 +37,13 @@ const createAsyncQueue = (concurrency = 6) => {
 }
 
 const GREP_MAX_LINE_LENGTH = 180;
+let globFiles, readFile, grepFilesBackendOnly = fileAccess('grep'), statFile;
 //region Filesystem tools
 /** @type {AiChat.FunctionTool} */
 const Glob = {
 	name: "Glob",
 	description: "Execute glob pattern in \`path\`.\nReturn TSV rows [relative path\ttype (dir or file)\tsize]",
-	script: fileAccess("list"),
+	script: globFiles = fileAccess('list'),
 	title(req, ctx ) {
 		const {path = '.', pattern = '*'} = getToolParameters(ctx, req);
 		return pattern !== "*"
@@ -53,7 +62,6 @@ const Glob = {
 	}
 };
 
-let readFile;
 /** @type {AiChat.FunctionTool} */
 const Read = {
 	name: "Read",
@@ -97,15 +105,19 @@ const Write = {
 	name: "Write",
 	description: "Write a file.",
 	script: fileAccess("write"),
+	interactive: false, // 手动指定 interactive 之后 renderer 总是会被调用，而不是必须等到执行结束
 	title: (tc, ctx) => {
 		const toolParameters = getToolParameters(ctx, tc);
 		return <div style={"display:flex"}>
 			{"写入 "+toolParameters.path}
 			<div className={"spacer"}></div>
 			<button className={"danger"} onClick={async () => {
+				const start = Date.now();
 				toolParameters.content = await readFile({path: toolParameters.path, noTruncate: true}, ctx, unconscious(selectedConversation));
 				tc.function.arguments = JSON.stringify(toolParameters);
-				ctx.time = Date.now();
+				const now = Date.now();
+				ctx.time = now;
+				ctx.duration = now - start;
 				$update(updateMessageUI);
 			}} title={"从磁盘读取文件内容，更新到最新状态"}>回读
 			</button>
@@ -115,10 +127,8 @@ const Write = {
 		keys.push(z.time);
 	},
 	renderer(ctx, frozen, tc) {
-		const args = getToolParameters(ctx, tc);
-		return <div>
-			<TextDiff oldText={''} newText={args.content}/>
-		</div>
+		const content = getToolParameters(ctx, tc).content;
+		return content ? <TextDiff oldText={''} newText={content}/> : undefined;
 	},
 
 	parameters: {
@@ -137,6 +147,7 @@ const Append = {
 	description: "Append to the end of a file. New file will be created.",
 	script: fileAccess("append"),
 	title: prefixTitle("追加"),
+	interactive: false,
 	renderer(ctx, frozen, tc) {
 		const args = getToolParameters(ctx, tc);
 		return <TextDiff oldText={''} newText={args.content} />
@@ -155,38 +166,76 @@ const Append = {
 		required: ["path", "content"]
 	}
 };
+
+// ============ 解析器：Unified Diff Hunk → search/replace ============
+function parseUnifiedHunk(text) {
+	const lines = String(text == null ? "" : text).split("\n");
+	const hunks = [];
+	let cur = null;
+	const close = () => {
+		if (cur && (cur.old.length || cur.new.length)) hunks.push(cur);
+		cur = null;
+	};
+
+	for (const raw of lines) {
+		if (/^@@/.test(raw)) {                 // hunk 表头：行号只是提示，不校验
+			close();
+			cur = { old: [], new: [] };
+			continue;
+		}
+		if (raw.startsWith("\\")) continue;    // “\ No newline at end of file”
+		if (/^---\s/.test(raw) || /^\+\+\+\s/.test(raw)) continue; // 补丁文件头，忽略
+
+		if (cur == null) {
+			if (/^[ +-]/.test(raw)) cur = { old: [], new: [] };
+			else continue;
+		}
+
+		const body = raw.length > 0 ? raw.slice(1) : "";
+		if (raw.startsWith(" "))      { cur.old.push(body); cur.new.push(body); }        // 锚点：两边共有
+		else if (raw.startsWith("-")) { cur.old.push(body); }                            // 删除
+		else if (raw.startsWith("+")) { cur.new.push(body); }                            // 插入
+		else if (raw === "")          { cur.old.push(""); cur.new.push(""); }            // 容错：漏了前缀的空行
+		else { close(); }                                                               // 非法行，结束 hunk
+	}
+	close();
+	return hunks.map(h => ({ search: h.old.join("\n"), replace: h.new.join("\n") }));
+}
+
+const patchHandler = fileAccess("patch");
+
 /** @type {AiChat.FunctionTool} */
-const EditLines = {
-	name: "EditLines",
-	description:
-		"Atomically replace one or more non-overlapping 1-based inclusive line ranges " +
-		"in a file. All startLine and endLine values refer to the " +
-		"original file before change, regardless of array order. " +
-		"An empty content string deletes the selected range.",
-	script: fileAccess("patch"),
-	title: prefixTitle("按行编辑"),
+const Patch = {
+	name: "Patch",
+	description: "Apply unified diff hunks atomically to a file. Write only changed lines + 2–3 context lines (`@@` numbers are advisory). Use `-` for removed lines, `+` for added lines, ` ` for unchanged lines.",
+	title: prefixTitle("修改"),
+	interactive: false,
+	script(par, ctx, conv) {
+		return patchHandler({
+			path: par.path,
+			changes: parseUnifiedHunk(par.diff)
+		}, ctx, conv);
+	},
+
+	renderer(ctx, frozen, tc) {
+		const par = getToolParameters(ctx, tc);
+		const chunks = parseUnifiedHunk(par.diff);
+		return <div>{chunks.map(({search, replace}) => <TextDiff oldText={search} newText={replace} strip={true} />)}</div>
+	},
+
 	parameters: {
 		type: "object",
 		properties: {
-			path: { type: "string" },
-			changes: {
-				type: "array",
-				items: {
-					type: "object",
-					properties: {
-						startContent: { type: "string", description: "EXACT one-line content of the file at startLine" },
-						endContent: { type: "string", description: "EXACT one-line content of the file at endLine" },
-						startLine: { type: "integer" },
-						endLine: { type: "integer" },
-						content: { type: "string" },
-					},
-					required: ["startContent", "endContent", "startLine", "endLine", "content"]
-				}
-			}
+			path: { type: "string", description: "文件路径" },
+			diff: {
+				type: "string",
+				description: "Unified diff block"
+			},
 		},
-		required: ["path", "changes"]
+		required: ["path", "diff"]
 	}
 };
+
 /** @type {AiChat.FunctionTool} */
 const Edit = {
 	name: "Edit",
@@ -197,6 +246,7 @@ const Edit = {
 		" when `replaceAll` is false, it must occur exactly once in that range.",
 	script: fileAccess("edit"),
 	title: prefixTitle("修改"),
+	interactive: false,
 
 	fix(par) {
 		const keys = Object.keys(par);
@@ -217,8 +267,8 @@ const Edit = {
 	},
 
 	renderer(ctx, frozen, tc) {
-		const args = getToolParameters(ctx, tc);
-		return <TextDiff oldText={args.search} newText={args.replace} strip={true} />
+		const {search, replace} = getToolParameters(ctx, tc);
+		return search != null && replace != null && search !== replace ? <TextDiff oldText={search} newText={replace} strip={true} /> : undefined;
 	},
 
 	parameters: {
@@ -250,33 +300,17 @@ const Mkdir = {
 	}
 };
 
-const getFileSystemConfig = (path, conv) => {
-	if (path?.startsWith("~/")) {
-		const path1 = path.slice(2).split("/");
-		const mountPoint = conv.mnt?.[path1.shift()];
-		if (mountPoint) {
-			return [path1.join('/'), mountPoint];
-		} else {
-			throw `mount point ${path} not found`;
-		}
-	}
-	return [path, conv];
-};
-
 /** @type {AiChat.FunctionTool} */
 const CopyMove = {
 	name: "CopyMove",
 	description: "Copy file/directory, move them when `move` is true",
-	async script(args, ctx, conv) {
-		let {src, dest, move} = args;
-		if (src[0] === '/' || dest[0] === '/') `Absolute path is strictly forbidden, use relative path instead`;
+	async script({src, dest, move}, ctx, conv) {
+		if (conv.fs_readonly) throw "Write-protect is enabled";
+		if (src === dest) throw 'src and dest are same path';
 
-		let srcFileSystemConf, destFileSystemConf;
-		[src, srcFileSystemConf] = getFileSystemConfig(src, conv);
-		[dest, destFileSystemConf] = getFileSystemConfig(dest, conv);
-
-		const srcFileSystem = await createFileSystem(srcFileSystemConf);
-		const destFileSystem = await createFileSystem(destFileSystemConf);
+		let srcFileSystem, destFileSystem;
+		[src, srcFileSystem] = await getFileSystem(src, conv);
+		[dest, destFileSystem] = await getFileSystem(dest, conv);
 
 		if (srcFileSystem === destFileSystem) {
 			return callFileSystemFunc(srcFileSystem, 'copy', {
@@ -350,7 +384,7 @@ const Delete = {
 const Stat = {
 	name: "Stat",
 	description: "Read path type, lastModified and size (if is file).",
-	script: fileAccess("stat"),
+	script: statFile = fileAccess("stat"),
 	title: prefixTitle("读元数据"),
 
 	parameters: {
@@ -392,9 +426,7 @@ b.txt
 	},
 	async script({ pattern, path = ".", glob = "**", maxFiles = 50, maxMatchesPerFile = 10 }, response, conv) {
 		if (conv.fs_type === "api" || conv.fs_type === 'db') {
-			const grep = fileAccess("grep");
-
-			let result = await grep({
+			let result = await grepFilesBackendOnly({
 				maxCount: maxMatchesPerFile,
 				maxColumns: GREP_MAX_LINE_LENGTH,
 				glob,
@@ -412,8 +444,6 @@ b.txt
 		}
 
 		// TODO copy to backend
-		const read = fileAccess("read");
-
 		let flag = 'iu';
 		const FETCH_PATTERN = /^\(\?([a-z]+)\)/;
 		const exec = FETCH_PATTERN.exec(pattern);
@@ -431,8 +461,7 @@ b.txt
 		let listError;
 		let files;
 		try {
-			const list = fileAccess("list");
-			files = await list({path, pattern: glob, json: true}, response, conv);
+			files = await globFiles({path, pattern: glob, json: true}, response, conv);
 			path += '/';
 		} catch (e) {
 			if (glob !== '**' && glob !== '*' && path !== glob && !path.endsWith("/"+glob)) throw e;
@@ -449,7 +478,7 @@ b.txt
 
 				let content;
 				try {
-					content = await read({ path: path + relPath, format: "raw", noTruncate: true }, response, conv);
+					content = await readFile({ path: path + relPath, format: "raw", noTruncate: true }, response, conv);
 				} catch {
 					if (listError) throw listError;
 					return;
@@ -491,13 +520,14 @@ b.txt
 const Mount = {
 	name: "Mount",
 	description: "Ask the user to mount a directory to ~/\`subdir\`.",
+	interactive: true,
 	parameters: {
 		type: "object",
 		properties: {
 			subdir: {type: "string",},
 			label: {
 				type: "string",
-				description: "Short human-readable instruction telling the user what content to provide and why.",
+				description: "Short human-readable instruction telling the user which folder to provide.",
 			},
 		},
 		required: ["subdir", "label"],
@@ -507,27 +537,26 @@ const Mount = {
 	script({subdir, label}, resp, conv) {
 		if (/[~/]/.test(subdir)) throw 'path contains invalid character';
 
-		(conv.mnt || (conv.mnt = {}))[subdir] = {
-			fs_name: "("+label+")"
-		};
+		resp.subdir = subdir;
+		(conv.mnt || (conv.mnt = {}))[subdir] = { fs_name: "("+label+")" };
 		return "Mounted on ~/"+subdir;
 	},
 	undo(resp, conv, tc) {
-		const subdir = getToolParameters(resp, tc).subdir;
 		const mnt = conv.mnt;
-		if (mnt) delete mnt[subdir];
+		if (mnt) delete mnt[resp.subdir || getToolParameters(resp, tc).subdir];
 	},
 
 	renderer(context, frozen, tc) {
 		const data = getToolParameters(context, tc);
+		const subdir = $state(context.subdir || data.subdir);
 		const conv = unconscious(selectedConversation);
-		const isRevoked = $state(!conv.mnt?.[data.subdir]);
+		const isRevoked = $state(!conv.mnt?.[subdir]);
 
 		return (
 			<div className={`skills`} class:revoked={isRevoked}>
 				<div className="tool-label-group">
 					<span>⚡ 挂载:</span>
-					<input className="tool-tag" value={data.subdir} disabled={frozen} />
+					<input className="tool-tag" value={subdir} disabled={frozen} />
 				</div>
 
 				<span style={{flex: 1}}></span>
@@ -568,7 +597,7 @@ const LsMount = {
 	},
 };
 //endregion
-const fileSystemTools = [Glob, Read, Grep, Stat, AskUser, Edit, Write, Append, Delete, Mkdir, CopyMove, Mount, LsMount];
+const fileSystemTools = [Glob, Read, Grep, Stat, AskUser, Edit, Patch, Write, Append, Delete, Mkdir, CopyMove, Mount, LsMount];
 const imageReadTools = [InspectImage];
 const filesystemPrompt = `<file-editing>
 - Filesystem root: '.', **MUST** use relative path, NEVER use \`/folder\`.
@@ -677,18 +706,19 @@ const shellFallbackTools = [RunJS, SearchModules];
 async function shellPrompt(conv) {
 	let shellType = '';
 	const [url, pat] = getFsApiUrlPat();
-	let {prompt}  = await jsonFetch(url+'env', { key: pat, });
+	let {prompt, location}  = await jsonFetch(url+'env', { key: pat, });
 	if (prompt.startsWith("os: Windows")) {
 		if (!prompt.includes("bash: No")) {
 			shellType = `emulated bash
-   - Don't use path like \`/c/folder\` in bash, use \`C:/folder\` instead
-   - \`/tmp\` and other UNIX directories may not exist`;
+- Use Windows-like path \`C:/folder\` instead of \`/c/folder\` in bash, 
+- \`/tmp\` and other UNIX directories may not exist`;
 		} else {
-			shellType = "powershell\n   - Powershell have many escape and encoding issues. Use script file whenever possible."
+			shellType = "powershell\n- Powershell and cmd have countless escape issues. Use script file whenever possible."
 		}
 	} else {
 		shellType = 'bash';
 	}
+	shellType += '\n- Workspace root: '+location.replaceAll('\\', '/');
 
 	return `<system-environment>
 Environment and runtimes:
@@ -697,8 +727,9 @@ ${prompt}
 <command-execution>
 ### Running commands
 
-- ALWAYS use relative path.
-- System shell: ${shellType}
+- Relative path is recommended.
+- Always use '/' as path seprator.
+- Shell: ${shellType}
 - Large output (> 20KB) will be automatically redirected to a log file.
 - Prefer a reusable script file (Python, JS, shell, etc.) over repeating commands.
 - \`explanation\` parameter:
@@ -850,7 +881,9 @@ const SendFile = {
 		</>;
 	},
 
-	script() {return "Presented to user. Download not guaranteed. Confirm before deleting.";},
+	async script(opt, ctx, conv) {
+		await statFile(opt, ctx, conv);
+		return "Presented to user. Download not guaranteed. Confirm before deleting.";},
 };
 //endregion
 const vfsTools = [RequestFile, SendFile];
@@ -883,7 +916,7 @@ registerToolset(
 				fsType = conv.fs_type;
 			}
 
-			const isVirtualFileSystem = fsType === 'opfs' || fsType === 'config';
+			const isVirtualFileSystem = fsType === 'opfs' || fsType === 'config' || fsType === 'db';
 
 			if (null == conv[FILESYSTEM_AUX_PROMPT]) {
 				if (fsType === 'api') {
@@ -939,17 +972,6 @@ registerToolset(
 	{
 		hidden: 'manual',
 		depend: ["Files"]
-	}
-);
-registerToolset(
-	"EditLines",
-	"Another edit tool trying to use lesser tokens.",
-	[EditLines],
-	{
-		systemPrompt: `<edit-lines>
-Only use \`EditLines\` when you **already \`Read\`/\`Grep\`-ed** a file and knowing line numbers.
-</edit-lines>`,
-		hidden: "manual"
 	}
 );
 

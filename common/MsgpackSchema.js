@@ -1,6 +1,6 @@
 import {bakeSchema} from "unconscious/common/msgpack.js";
 
-export const msgpack_schema_version = "11";
+export const msgpack_schema_version = "12";
 export const msgpack_schema = [];
 msgpack_schema.push(
 	// generic
@@ -51,7 +51,7 @@ msgpack_schema.push(
 		]
 	],
 	["tool_responses",
-		["time", "content", "success"]
+		["time", "content", "success", "duration"]
 	],
 
 	// logs

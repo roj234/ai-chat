@@ -5,25 +5,16 @@
 }
 
 /* AskUser */
+.rp-choice-label {
+    color: var(--rp-accent);
+    font-size: 1.1rem;
+    letter-spacing: 0.05em;
+}
+
 .rp-choice {
     display: flex;
     flex-direction: column;
-
-    & > .label {
-        font-weight: 600;
-        color: var(--rp-accent);
-        font-size: 1.1rem;
-        letter-spacing: 0.05em;
-        border-bottom: 1px solid var(--border);
-        padding-bottom: 8px;
-        margin-bottom: 8px;
-    }
-
-    & > .choices {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-    }
+    gap: 10px;
 
     & button {
         background: rgba(255, 255, 255, 0.05);
@@ -113,6 +104,7 @@
 .rp-timer {
     width: 100%;
     & .progress {
+        display: inline-block;
         width: 100%;
         height: 12px;
         background: rgba(255, 255, 255, 0.1);
@@ -124,7 +116,8 @@
         box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
     }
 
-    & .bar {
+    & .pbar {
+        display: block;
         height: 100%;
         background: linear-gradient(90deg, #3498db, #2ecc71);
         box-shadow: 0 0 10px rgba(46, 204, 113, 0.5);
@@ -134,7 +127,7 @@
         &:not(.ended)::after {
             content: "";
             position: absolute;
-            top: 0; left: 0; bottom: 0; right: 0;
+            inset: 0;
             background-image: linear-gradient(
                     45deg,
                     rgba(255,255,255,.15) 25%,
@@ -151,7 +144,7 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-    .rp-timer .bar:not(.ended)::after {
+    .rp-timer .pbar:not(.ended)::after {
         animation: progress-move 2s linear infinite;
     }
 }

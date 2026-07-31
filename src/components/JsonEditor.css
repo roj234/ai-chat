@@ -10,6 +10,7 @@
     /* 统一 textarea 和 pre 的样式 */
     & > * {
         position: absolute;
+        margin: 0;
         inset: 0;
         padding: var(--padding);
         font-size: var(--font-size);

@@ -1,10 +1,22 @@
-import {SSE_PROXY_BACKEND, SSE_PROXY_MODERATION, SSE_PROXY_TRACE, SSE_RESUME_TIMEOUT} from "../config.js";
+import {
+	SSE_PROXY_BACKEND,
+	SSE_PROXY_MODERATION,
+	SSE_PROXY_TRACE,
+	SSE_REF_CACHE_SIZE,
+	SSE_REF_TTL,
+	SSE_RESUME_TIMEOUT
+} from "../config.js";
 import {EventEmitter} from "node:events";
 import {applyDelta, sseFetch} from "../../common/openai-api-utils.js";
 import fs from "node:fs/promises";
+import {openAsBlob} from "node:fs";
 import path from "node:path";
 import {Transform} from 'node:stream';
 import {createSocks5Agent} from "../utils/socks5-agent.js";
+import {LRUCache} from "../utils/LRUCache.js";
+import {createJsonStream} from "../../common/StreamJsonSerializer.js";
+import {deepEntries} from "unconscious/common/json-schema-utils.js";
+import {isLanAddress} from "../../common/isLanAddress.js";
 
 const log = (str, ...args) => console.log(`[SSE Proxy] `+str, ...args);
 
@@ -31,6 +43,73 @@ const agentOptions = {
  * @type {Map<string, AiChatBackend.SSEProxyRequest>}
  */
 const activeRequests = new Map;
+
+/**
+ * 消息引用缓存：hash -> 完整消息对象
+ * 命中后客户端无需重复上传历史消息内容，仅引用 hash
+ */
+const messageCache = new LRUCache(SSE_REF_CACHE_SIZE);
+
+/**
+ * @param {OpenAI.Message[]} messages
+ * @param {string} blobDir
+ * @returns {Promise<[OpenAI.Message[], string[]]>}
+ */
+async function processMessageRefs(messages, blobDir) {
+	const missing = new Set;
+	const created = new Set;
+	const output = [];
+
+	let blockIndex, blockHash;
+
+	const endCacheBlock = () => {
+		if (blockHash) {
+			if (blockIndex === i) throw new Error("Empty cache_block");
+			messageCache.set(blockHash, messages.slice(blockIndex, i), SSE_REF_TTL);
+			created.add(blockHash);
+			blockHash = null;
+		}
+	};
+
+	let i = 0;
+	for (; i < messages.length; i++) {
+		const m = messages[i];
+
+		if (m.role === 'cache_end') {
+			endCacheBlock();
+		} else if (m.role === 'cached') {
+			endCacheBlock();
+
+			const cached = messageCache.get(m.id);
+			if (!cached) missing.add(m.id);
+			else output.push(...cached);
+		} else if (m.role === 'cache_new') {
+			endCacheBlock();
+
+			blockHash = m.id;
+			if (!blockHash) throw new Error("Invalid hash in cache_block");
+			blockIndex = i+1;
+		} else {
+			output.push(m);
+		}
+	}
+	endCacheBlock();
+
+	if (missing.size) return [null, [...missing]];
+
+	const tasks = [];
+
+	for (const [val, own, key] of deepEntries(output)) {
+		if (val?.$ === 'BlobH') {
+			const hash = val.hash;
+			const filePath = path.join(blobDir, hash.slice(0, 2).toLowerCase(), hash);
+			tasks.push(openAsBlob(filePath).then((blob) => own[key] = blob));
+		}
+	}
+	await Promise.all(tasks);
+
+	return [output, [...created]];
+}
 
 function checkToken(ctx) {
 	let {authorization} = ctx.req.headers;
@@ -96,9 +175,10 @@ function createLimiter(source, maxLength) {
  * @param {string} logPath
  * @param {string} apiPath
  * @param {AiChatBackend.RouteContext} ctx
+ * @param {string} blobDir blob 存储目录（用于展开消息中的 Blob 引用）
  * @return {Promise<void>}
  */
-async function SSEHandler(logPath, apiPath, ctx) {
+async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 	let result = checkToken(ctx);
 	if (!result) return;
 	let [baseUrl, authorization, proxyUrl] = result;
@@ -111,16 +191,53 @@ async function SSEHandler(logPath, apiPath, ctx) {
 	}
 
 	const MAX_BODY_LENGTH = 20971520;
-	const needBlobProxy = ctx.searchParams.has("blobProxy");
 	let body;
 	let duplex;
-	if (SSE_PROXY_TRACE || needBlobProxy || moderation) {
+	if (SSE_PROXY_TRACE || blobDir || moderation) {
 		body = await ctx.readAsString(MAX_BODY_LENGTH);
 	} else {
 		body = createLimiter(ctx.req, MAX_BODY_LENGTH);
 		duplex = 'half';
 	}
-	const abort = new AbortController();
+
+	let firstChunk;
+	if (blobDir || moderation) {
+		const obj = JSON.parse(body);
+
+		if (!Array.isArray(obj.messages) || !obj.messages.every(item => typeof item === 'object' && item.role)) {
+			ctx.send(400, { error: "bad messages array" });
+			return;
+		}
+
+		if (moderation) {
+			const result = await moderation(obj);
+			if (result) {
+				ctx.send(400, result);
+				return;
+			}
+		}
+
+		if (blobDir) {
+			const [messages, result] = await processMessageRefs(obj.messages, blobDir);
+			if (!messages) {
+				ctx.send(409, {
+					error: 'cache_expired',
+					hashes: result
+				});
+				return;
+			}
+
+			firstChunk = { new_cached: result };
+
+			obj.messages = messages;
+			if (obj.cache_only) {
+				ctx.send(201, firstChunk);
+				return;
+			}
+		}
+
+		body = createJsonStream(obj);
+	}
 
 	let completion = {};
 	/** @type {AiChatBackend.SSEProxyRequest} */
@@ -137,34 +254,17 @@ async function SSEHandler(logPath, apiPath, ctx) {
 		proxyRequest.event.emit('data', serialized);
 	}
 
-	ctx.res.on('close', () => {
-		if (!proxyRequest) abort.abort();
-	});
-
 	let hasError;
 	const startTime = Date.now();
+	const abort = new AbortController();
 
 	try {
-		if (needBlobProxy || moderation) {
-			const obj = JSON.parse(body);
-
-			if (moderation) {
-				const result = await moderation(obj);
-				if (result) {
-					ctx.send(400, result);
-					return;
-				}
-			}
-
-			if (needBlobProxy) {
-				//body = new ReadableStream
-			} else {
-				body = JSON.stringify(obj);
-			}
-		}
-
 		const optionalParams = baseUrl+apiPath;
 		if (SSE_PROXY_TRACE) log('请求发送', optionalParams);
+
+		ctx.res.on('close', () => {
+			if (!proxyRequest) abort.abort();
+		});
 
 		await sseFetch(optionalParams, {
 			body,
@@ -176,7 +276,8 @@ async function SSEHandler(logPath, apiPath, ctx) {
 			const now = Date.now();
 			const id = chunk.id;
 
-			if (isPlainJson) {
+			if (isPlainJson === '\0') {
+				if (firstChunk) Object.assign(chunk, firstChunk);
 				const response = JSON.stringify(chunk);
 
 				// non-stream response
@@ -212,12 +313,10 @@ async function SSEHandler(logPath, apiPath, ctx) {
 				}
 
 				ctx.res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+				if (firstChunk) sendChunk(JSON.stringify(firstChunk));
 
-				chunk.resumable = { start: startTime, ft: now, now };
+				completion.resumable = chunk.resumable = { start: startTime, now };
 			}
-
-			const serialized = JSON.stringify(chunk);
-			sendChunk(serialized);
 
 			proxyRequest.lastUpdated = now;
 
@@ -229,8 +328,15 @@ async function SSEHandler(logPath, apiPath, ctx) {
 					if (!out_choices[i]) out_choices[i] = { delta: {} };
 
 					// reasoning end
-					if (delta.content && !completion.resumable.re)
-						completion.resumable.re = now;
+					const resumable = completion.resumable;
+					if (null == resumable.ft && (delta.content || delta.reasoning || delta.reasoning_details || delta.reasoning_content || delta.tool_calls)) {
+						resumable.now = resumable.ft = now;
+						chunk.resumable = resumable;
+					}
+					if (null == resumable.re && delta.content) {
+						resumable.now = resumable.re = now;
+						chunk.resumable = resumable;
+					}
 
 					Object.assign(out_choices[i], rest);
 					applyDelta(out_choices[i].delta, delta);
@@ -239,6 +345,8 @@ async function SSEHandler(logPath, apiPath, ctx) {
 				completion.text = (completion.text || "") + text;
 			}
 			Object.assign(completion, rest);
+
+			sendChunk(JSON.stringify(chunk));
 		});
 	} catch (err) {
 		const id = proxyRequest?.id;
@@ -290,6 +398,54 @@ async function SSEHandler(logPath, apiPath, ctx) {
 	}
 }
 
+/**
+ * @param {string} itf
+ * @param {AiChatBackend.RouteContext} ctx
+ * @return {Promise<void>}
+ */
+export async function proxyHandler(itf, ctx) {
+	let result = checkToken(ctx);
+	if (!result) return;
+
+	let [baseUrl, authorization, proxyUrl] = result;
+	if (!baseUrl.endsWith("/")) baseUrl += '/';
+
+	const res = ctx.res;
+
+	if (!isLanAddress(baseUrl)) {
+		res.writeHead(204, {
+			vary: "Authorization",
+			"cache-control": "public"
+		});
+		res.end();
+		return;
+	}
+
+	const method = ctx.req.method;
+	let body, duplex;
+	if (method === 'POST') {
+		body = createLimiter(ctx.req, 1048576);
+		duplex = 'half';
+	}
+
+	const proxyRes = await fetch(baseUrl+'../'+itf, {
+		headers: {
+			accept: "application/json",
+			authorization: "Bearer "+authorization,
+		},
+		method,
+		body,
+		duplex,
+		//as this is a LAN address, we don't need proxy (really?)
+		agent: getProxyAgent(proxyUrl)
+	});
+
+	res.writeHead(proxyRes.status, proxyRes.headers);
+	for await (const chunk of proxyRes.body) res.write(chunk);
+	res.end();
+}
+
+
 const modelCache = new Map;
 
 /**
@@ -298,8 +454,10 @@ const modelCache = new Map;
  */
 export function registerSSEProxyRoutes(router, dataPath) {
 	const logPath = path.join(dataPath, "logs");
+	const blobDir = path.join(dataPath, "blobs");
 
 	router.post("/models/wipe_cache", (ctx) => {
+		messageCache.clear();
 		modelCache.clear();
 		ctx.send(200, { success: true });
 	});
@@ -324,7 +482,8 @@ export function registerSSEProxyRoutes(router, dataPath) {
 
 			const data = await proxyRes.text();
 
-			if (!proxyRes.ok) {
+			// 本地端点不缓存（如辣妈洗屁屁）
+			if (!proxyRes.ok || isLanAddress(baseUrl)) {
 				res.writeHead(proxyRes.status, proxyRes.headers);
 				res.end(data);
 				return
@@ -339,8 +498,9 @@ export function registerSSEProxyRoutes(router, dataPath) {
 		res.writeHead(200, { 'Content-Type': "application/json" });
 		res.end(cache.data);
 	});
-	router.post('/chat/completions', SSEHandler.bind(null, logPath, "chat/completions"));
-	router.post('/completions', SSEHandler.bind(null, logPath, "completions"));
+	if (SSE_REF_CACHE_SIZE > 0) router.post('/chat/completions/refs', SSEHandler.bind(null, logPath, "chat/completions", blobDir));
+	router.post('/chat/completions', SSEHandler.bind(null, logPath, "chat/completions", null));
+	router.post('/completions', SSEHandler.bind(null, logPath, "completions", null));
 
 	router.post('/resume/:id', async (ctx) => {
 		const {id} = ctx.params;

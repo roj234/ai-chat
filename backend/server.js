@@ -95,13 +95,13 @@ try {
 
 const router = await createRouter(DATA_PATH, "api", workspace);
 
-router.get("/", (ctx) => {
-	if (SERVER_BASE_ADDR) ctx.res.setHeader('X-AiChat-API', SERVER_BASE_ADDR);
-	return router.zipRouter(ctx);
-})
-
 let frontendVersion = 'bundled';
 if (zipPath) {
+	router.get("/", (ctx) => {
+		if (SERVER_BASE_ADDR) ctx.res.setHeader('X-AiChat-API', SERVER_BASE_ADDR);
+		return router.zipRouter(ctx);
+	})
+
 	await fileWatcher(zipPath, async (zipPath) => {
 		const fileBuffer = await fs.readFile(zipPath);
 		const zip = await ZipReader(fileBuffer);

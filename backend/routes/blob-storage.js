@@ -1,6 +1,6 @@
 import {join} from 'node:path';
 import {createReadStream, createWriteStream} from 'node:fs';
-import {access, mkdir, rename, unlink} from 'node:fs/promises';
+import {access, mkdir, rename, rmdir, unlink} from 'node:fs/promises';
 import {pipeline} from 'node:stream/promises';
 import {createHash} from 'node:crypto';
 
@@ -272,6 +272,9 @@ PRAGMA user_version = `+DB_VERSION);
 		try {
 			await unlink(dataPath);
 			db.prepare('DELETE FROM blobs WHERE hash = ?').run(hashBuf);
+
+			// 避免残留空目录
+			await rmdir(getStoragePath(hash)).catch(() => {});
 
 			ctx.send(200, true);
 		} catch (err) {

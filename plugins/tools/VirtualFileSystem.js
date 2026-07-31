@@ -10,7 +10,7 @@ import {
 	updateConversation
 } from "/src/database.js";
 import {config, conversations, selectedConversation} from "/src/states.js";
-import {createWebFileSystem, resolveDirectory} from "./WebFileSystem.js";
+import {CREATE, createWebFileSystem, resolveDirectory} from "./WebFileSystem.js";
 import {$update, unconscious} from "unconscious";
 import {NestedMap, NODE_VALUE} from "unconscious/common/NestedMap.js";
 import {serializeJSON} from "/src/utils/marshal.js";
@@ -306,11 +306,17 @@ registry.set([".", "conversations"], {
 	}
 });
 
-const tempHandle = {};
-Object.defineProperty(tempHandle, "handle", {
-	get: async () => (await resolveDirectory(await navigator.storage.getDirectory(), "tmp/c"+selectedConversation.id, { create: true }))
-});
-registry.set([".", "tmp"], tempHandle);
+export const getTempDirectory = async () => (await resolveDirectory(await navigator.storage.getDirectory(), "tmp/"+selectedConversation.id, CREATE));
+export const deleteTempDirectory = async() => {
+	try {
+		const parent = (await navigator.storage.getDirectory()).getDirectoryHandle("tmp");
+		await parent.removeEntry(String(selectedConversation.id), { recursive: true });
+	} catch {}
+}
+
+const TEMP_DIRECTORY = {};
+Object.defineProperty(TEMP_DIRECTORY, "handle", { get: getTempDirectory });
+registry.set([".", "tmp"], TEMP_DIRECTORY);
 
 registry.set([".", "config.json"], {
 	read(name) {

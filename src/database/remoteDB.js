@@ -5,7 +5,7 @@ import {decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
 import {msgpack_schema, msgpack_schema_version} from "/common/MsgpackSchema.js";
 import {SHA256} from "unconscious/common/SHA256.js";
 import {base64Encode} from "unconscious/common/Base64.js";
-import {prettyError} from "../utils/utils.js";
+import {prettyError, resolveDBRelativeURL} from "../utils/utils.js";
 import {$store, $update, AS_IS, unconscious} from "unconscious";
 import SimpleModal from "../components/SimpleModal.jsx";
 import {delta} from "unconscious/common/deepEqual.js";
@@ -208,12 +208,14 @@ export const deleteMessage = batched("message/delete");
 const showIncompatibleDialog = backendVersion => {
 	SimpleModal({
 		title: "通信协议不兼容",
-		message: '前端版本 '+PROTOCOL_VERSION+'\n后端版本 '+backendVersion+'\n解决方法：更新后端/前端',
-		confirmMessage: "更换数据库服务",
-		onConfirm() {
-			config.db_server = '';
-			location.reload()
-		},
+		message:
+			"检测到前后端通信协议版本不一致，可能导致功能异常或数据错误。\n\n" +
+			`前端版本：${PROTOCOL_VERSION}\n` +
+			`后端版本：${backendVersion}\n\n` +
+			`建议：请更新${PROTOCOL_VERSION > backendVersion ? "后端" : "前端"}至匹配版本后再继续。\n` +
+			"警告：数据无价，请勿在更新前执行写入操作。",
+		confirmMessage: "了解风险，继续",
+		accent: "danger",
 		onCancel: null
 	});
 };
@@ -230,10 +232,7 @@ export const initialize = (rpcHandler) => {
 	});
 	return batched("sync")().then(async syncServer => {
 		if (syncServer) {
-			if (syncServer.startsWith("/")) {
-				syncServer = (<a href={syncServer} />).href.replace(/^http/, "ws");
-			}
-			clientId = await initSync(syncServer, kvRef, kvListCache, rpcHandler);
+			clientId = await initSync(resolveDBRelativeURL(syncServer).replace(/^http/, "ws"), kvRef, kvListCache, rpcHandler);
 		}
 	});
 };

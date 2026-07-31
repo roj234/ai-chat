@@ -47,7 +47,7 @@ export default {
         {
             name: 'inject-build-time',
             transformIndexHtml(html) {
-                return html.replace("{{loading}}", LOADING_TEMPLATE);
+                return html.replace("{{loading}}", LOADING_TEMPLATE).replace("<link rel=\"manifest\" href=\"manifest.json\" />", "");
             }
         }
     ],

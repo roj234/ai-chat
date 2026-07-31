@@ -58,9 +58,10 @@ export const WEBSOCKET_SYNC_ENABLE = true;
  * @returns {string} 完整的 WebSocket WS/WSS URL
  */
 export const WEBSOCKET_SYNC_BASE = (ctx) => {
-	// 默认获取当前请求 Host。
-	// 注意：若处于反向代理后或使用了 HTTPS，需手动修改此处
-	return `ws://${ctx.req.headers.host}/api/sync`;
+	// 默认用@返回相对数据库API的地址。
+	// 你也可以返回绝对URL如 ws://${ctx.req.headers.host}/api
+	// 或相对于网页的URL（谨慎使用，不兼容安卓）
+	return `@sync`;
 };
 
 /** 是否开启用户注册限制 */
@@ -179,6 +180,13 @@ export const SSE_PROXY_TRACE = false;
 /** 会话恢复超时时间 (毫秒)：默认 15 分钟 */
 export const SSE_RESUME_TIMEOUT = 1000 * 60 * 15;
 
+/** 消息引用（msg_ref）文本缓存 TTL (毫秒)：默认 24 小时 */
+export const SSE_REF_TTL = 1000 * 60 * 60 * 24;
+
+/** 消息引用缓存条目上限（LRU 驱逐） */
+export const SSE_REF_CACHE_SIZE = 1000;
+
+
 // ==========================================
 // 5. 计费与价格映射 (Billing)
 // ==========================================
@@ -202,7 +210,7 @@ export const LOG_HOOK = (log) => {
 
 		const price = (input, out, cached, unit = 'CNY') => {
 			log.currency = unit;
-			log.cost = (input * input_tokens + cached * cached_tokens + out * output_tokens) / 1000000;
+			log.cost = Math.trunc(input * input_tokens + cached * cached_tokens + out * output_tokens);
 		};
 
 		// 每百万 Token 价格

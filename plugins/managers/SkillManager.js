@@ -96,7 +96,7 @@ function createList() {
 				<div className={"summary"}>
 					<span className="name">{mod.name}</span>
 					{mod.hidden && <small title={"需要人工操作"}>手动</small>}
-					{mod.allowedTools?.length && <small title={mod.allowedTools.join("\n")}>{mod.allowedTools.length} 个工具</small>}
+					{mod.tools?.length && <small title={mod.tools.join("\n")}>{mod.tools.length} 个工具</small>}
 					{mod.data === "MCP" && <button
 						className="preset-panel__delete-btn"
 						onClick={() => {
@@ -144,7 +144,7 @@ function openSkillManager(preset, isOpen, close) {
 	});
 
 	return (
-		<div className={`preset-panel skill-manager`} class:open={() => isOpen.value}>
+		<div className={`preset-panel skill-manager`} class:open={isOpen}>
 			<div className="header">
 				<h2 className="title">工具和技能配置</h2>
 				<div style={"display:flex;gap:0.5rem"}>
@@ -179,7 +179,7 @@ function openSkillManager(preset, isOpen, close) {
 							{
 								type: "input",
 								name: "服务器地址",
-								placeholder: "仅支持 Streamable HTTP 协议",
+								placeholder: "支持 Streamable HTTP 和 SSE 协议",
 								id: "url",
 								pattern: /^https?:\/\/.+/,
 								warning: "请输入正确的网址",
@@ -238,14 +238,17 @@ const skillManagerPanel = createPanel(openSkillManager);
 CUSTOM_CONTROLS.find(el => el.matches(".ri-robot-2-line")).addEventListener("click", async (e) => {
 	e.preventDefault();
 	await ensureActiveConversation();
+	const open = unconscious(skillManagerPanel.isOpen);
 
 	const conv = unconscious(selectedConversation);
 
-	if (!conv.activatedModules) {
+	const ms = conv.activatedModules;
+	if (!ms || (!open && !ms.size)) {
 		conv.allowedTools = new Set;
 		conv.activatedModules = new Set;
 		await toolScriptRegistry['Use'].script({modules: [...defaultGroups]}, {}, conv);
 		$update(selectedConversation);
+		$update(refreshTools);
 	}
 
 	skillManagerPanel.open();

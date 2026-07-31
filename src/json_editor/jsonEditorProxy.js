@@ -1,6 +1,9 @@
+import {$store, $watch, unconscious} from "unconscious";
 
-if (IS_ANDROID_BUILD) /*#__PURE__*/ alert("App构建不应引入EditorProxy模块！");
-else {
+import {isMobile} from "../states.js";
+import {createEditorApp} from "./jsonEditorApp.js";
+
+if (!isMobile) {
 	window.editorProxy = {
 		onClose(name) {
 			const callbacks = windows.get(name);
@@ -28,6 +31,45 @@ const windows = new Map;
  */
 export function openJsonEditor(key, getValue, setValue) {
 	const scopedKey = `${UC_PERSIST_STORE}:${key}`;
+
+	if (isMobile) {
+		let skip;
+		const textState = $store(getValue());
+		const update = () => {
+			textState.value = getValue();
+			skip = true;
+		};
+		const callbacks = [];
+		const onClose = callback => callbacks.push(callback);
+		$watch(textState, () => {
+			if (skip) skip = false;
+			else setValue(unconscious(textState));
+		}, false);
+
+
+		const self = (h) => {
+			return (e) => {
+				if (e.target === element) h(e);
+			}
+		};
+
+		const handleClose = () => {
+			for (let callback of callbacks) {
+				callback();
+			}
+			element.remove();
+		}
+
+		const element = (
+			<div className="modal-overlay" onContextMenu.self.prevent={handleClose}>
+				<div className="modal" style={"width:100vw;max-height:100vh;"} onClick={(e) => e.stopPropagation()}>
+					{createEditorApp(textState, handleClose)}
+				</div>
+			</div>
+		);
+		document.body.append(element);
+		return [update, onClose];
+	}
 
 	Object.defineProperty(editorProxy, scopedKey, {
 		get: getValue,

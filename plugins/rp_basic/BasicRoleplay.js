@@ -157,7 +157,7 @@ function createSchemaEditColumn(typeId, template, editorConstructor) {
 					}}>
 				导出
 			</button>
-			{IS_ANDROID_BUILD ? null : <button className={"btn ghost"} disabled={() => !selectedItem.value} onClick={() => {
+			{<button className={"btn ghost"} disabled={() => !selectedItem.value} onClick={() => {
 				const key = typeId + ":" + selectedItem.name;
 
 				let skipNext;

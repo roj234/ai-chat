@@ -1,6 +1,7 @@
 import {$asyncState, $computed, $state, $store, $watch, debugSymbol, unconscious} from 'unconscious';
-import {jsonFetch} from "./utils/utils.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
+import {jsonFetch} from "../common/openai-api-utils.js";
+import {resolveDBRelativeURL} from "./utils/utils.js";
 
 /**
  * @type {boolean}
@@ -108,7 +109,6 @@ export const ensureActiveConversation = async () => {
 			time: Date.now(),
 			ready: true
 		};
-		if (config.branchModeDefault) conv.bm_leaf = 1;
 
 		if (config.incognito) conv.id = -1;
 		//else await updateConversation(conv, unconscious(messages), true);
@@ -145,7 +145,7 @@ export const setIsLlamaCppBackend = (b, b2) => {
  * @type {import("unconscious").ReactivePromise<AiChat.ApiModel[]>}
  */
 export const models = $asyncState(endpoint => {
-	return endpoint?.url ? jsonFetch(endpoint.url + "/models", {key: endpoint.key}).then(({data}) => data) : [];
+	return endpoint?.url ? jsonFetch(resolveDBRelativeURL(endpoint.url) + "/models", {key: endpoint.key}).then(({data}) => data) : [];
 }, _modelEndpoint);
 
 /**
@@ -154,7 +154,7 @@ export const models = $asyncState(endpoint => {
  */
 export const updateModels = force => {
 	const value = {
-		url: config.endpoint,
+		url: resolveDBRelativeURL(config.endpoint),
 		key: config.accessToken
 	};
 	if (force || !deepEqual(value, _modelEndpoint.value)) _modelEndpoint.value = value;

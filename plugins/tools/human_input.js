@@ -2,7 +2,6 @@ import {getToolParameters, registerToolset} from "/src/toolset.js";
 import {inputText} from "/src/states.js";
 import {$state, $update, $watch, unconscious} from "unconscious";
 import "./rp_kit/interactive_simulation.css";
-import {prefixTitle} from "./agent.js";
 
 /**
  * @type {AiChat.FunctionTool<*>}
@@ -25,7 +24,10 @@ const HumanInput = {
 		},
 		required: ['task', 'expected']
 	},
-	title: prefixTitle("操作:", "task"),
+	title(tc, ctx) {
+		const par = getToolParameters(ctx, tc);
+		return <div className={'rp-choice-label'}>请操作: {par.task}</div>;
+	},
 	script() {},
 	renderer(response, frozen, tc) {
 		let content = $state(response.content);
@@ -39,17 +41,15 @@ const HumanInput = {
 
 		const data = getToolParameters(response, tc);
 		return <div className={"rp-choice"}>
-			<div className="choices">
-				<div className="input">
-						<textarea
-							placeholder={data.expected}
-							ref={ta}
-							rows="5"
-							onInput={() => content.value = ta.value}
-							disabled={frozen}
-							value={content}
-						/>
-				</div>
+			<div className="input">
+				<textarea
+					placeholder={data.expected}
+					ref={ta}
+					rows="8"
+					onInput={() => content.value = ta.value}
+					disabled={frozen}
+					value={content}
+				/>
 			</div>
 		</div>;
 	},
