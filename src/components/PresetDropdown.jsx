@@ -1,11 +1,11 @@
 import {$computed, $foreach, $state, $update, unconscious} from "unconscious";
-import {cloneNamed} from "../utils/utils.js";
 import {config} from "../states.js";
 import SimpleModal from "./SimpleModal.jsx";
 import {Dropdown} from "./Dropdown.jsx";
 import {kvListDel, kvListGet, kvListGetKeys, kvListSet} from "../database.js";
 import {DI_settings, onLoad} from "../hooks.js";
 import {presetKeys, presetKeysAlways, SETTINGS} from "../settings.js";
+import {cloneNamed} from "../utils/pure-utils.js";
 
 /**
  * @type {import("unconscious").Reactive<AiChat.IDBKVList[]>}

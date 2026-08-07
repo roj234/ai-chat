@@ -182,7 +182,7 @@ const loadSystemModule = (mod) => {
 // [ func, in, out ]
 const rpcMethods = {
 	read: [ (args) => ({ path: args[0], noTruncate: true }), AS_IS ],
-	write: [ (args) => ({ path: args[0], content: args[1] }) ],
+	write: [ (args) => ({ path: args[0], content: args[1], overwrite: true }) ],
 	append: [ (args) => ({ path: args[0], content: args[1], newline: false }) ],
 	mkdir: [ (args) => ({ path: args[0] }) ],
 	delete: [ (args) => ({ path: args[0] }) ],
@@ -328,7 +328,7 @@ export const RunJS = {
 				noTruncate: true
 			}, response, conv);
 			if (path.endsWith(".cjs")) return promise.then(cjsWrapper);
-			return promise;
+			return promise.catch(e => { throw ("Could not fetch module "+path) });
 		}
 
 		// 文件 RPC 处理
@@ -376,7 +376,7 @@ export const RunJS = {
 		let promise;
 		const appendToLogFile = (content, flush) => {
 			buffer += content;
-			if (buffer.length > 65536 || flush) {
+			if (buffer.length > 524288 || flush) {
 				const mybuf = buffer;
 				buffer = '';
 

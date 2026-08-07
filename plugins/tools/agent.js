@@ -21,20 +21,9 @@ import {SetTimeout} from "./rp_kit/SetTimeout.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {prettyTime} from "unconscious/common/Utils.js";
 import {TextDiff} from "/src/components/TextDiff.jsx";
+import {createAsyncQueue} from "/src/utils/pure-utils.js";
 
 export const prefixTitle = (prefix, key='path') => (req, ctx) => prefix + ' ' + getToolParameters(ctx, req)[key];
-const createAsyncQueue = (concurrency = 6) => {
-	const taskQueue = new Set;
-
-	return [async runTask => {
-		while (taskQueue.size >= concurrency) {
-			await Promise.race(taskQueue);
-		}
-
-		const self = runTask().finally(() => taskQueue.delete(self));
-		taskQueue.add(self);
-	}, () => Promise.all(taskQueue)];
-}
 
 const GREP_MAX_LINE_LENGTH = 180;
 let globFiles, readFile, grepFilesBackendOnly = fileAccess('grep'), statFile;
@@ -706,7 +695,11 @@ const shellFallbackTools = [RunJS, SearchModules];
 async function shellPrompt(conv) {
 	let shellType = '';
 	const [url, pat] = getFsApiUrlPat();
-	let {prompt, location}  = await jsonFetch(url+'env', { key: pat, });
+	const base = conv.fs_base;
+	let endpoint = url+'env';
+	if (base) endpoint += '?root='+encodeURIComponent(base);
+
+	let {prompt, location}  = await jsonFetch(endpoint, { key: pat, });
 	if (prompt.startsWith("os: Windows")) {
 		if (!prompt.includes("bash: No")) {
 			shellType = `emulated bash
@@ -980,6 +973,7 @@ COMMAND_REGISTRY['fsync'] = [
 		const list = fileAccess('list');
 		const conv = unconscious(selectedConversation);
 		const lastTime = messages.at(-1).time;
+		if (null == lastTime) return;
 		const result = await list({
 			pattern: '**',
 			json: true,

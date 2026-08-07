@@ -1,6 +1,6 @@
 // API request
 import {createMarkdownStream} from "./markdown/markdown.js";
-import {cloneNamed, getTextContent, prettyError, resolveDBRelativeURL} from "./utils/utils.js";
+import {getTextContent, prettyError, resolveDBRelativeURL} from "./utils/utils.js";
 import {setWakeLock} from "./utils/wakeLock.js";
 import {
 	abortCompletion,
@@ -39,6 +39,7 @@ import {objectIdentityHash} from "../common/object-hash.js";
 import {encodeObjects} from "./utils/marshal.js";
 import {SHA256} from "unconscious/common/SHA256.js";
 import {DONT_PARSE_HTML_IN_THINKING} from "./components/ThinkBlock.jsx";
+import {cloneNamed} from "./utils/pure-utils.js";
 
 export const statusBadge = <span />;
 export const updateStatusText = (text, tone = '') => {
@@ -121,7 +122,7 @@ export async function agentLoop(conversation, messages, config) {
 
 		markdownRenderer(isThinking ? content.think.content : schemaPreprocess(content.content), container, isThinking ? DONT_PARSE_HTML_IN_THINKING : null);
 
-		if (atBottom < 250 && !lastScrollDirection.value) DI_messageContainer.vl.scrollTo(DI_messageContainer.scrollHeight);
+		if (atBottom < 250 && !unconscious(lastScrollDirection)) DI_messageContainer.vl.scrollTo(DI_messageContainer.scrollHeight);
 	};
 	const renderer = (type, content) => {
 		if (selectedConversation.id !== conversation.id) return;
@@ -525,7 +526,7 @@ async function sendCompletionRequest(
 		})
 	}
 
-	if (onProgress) scrollToBottom();
+	if (onProgress && !unconscious(lastScrollDirection)) scrollToBottom();
 
 	if (error) {
 		if (config.sound) failure();

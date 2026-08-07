@@ -14,7 +14,7 @@ import {
 } from "unconscious";
 import {SETTINGS} from "/src/settings.js";
 
-import {cloneNamed, downloadFile, getTextContent} from "/src/utils/utils.js";
+import {downloadFile, getTextContent} from "/src/utils/utils.js";
 import {readJPEG, readPNG} from "/common/upng.js";
 import {isIDB, kvListDel, kvListGet, kvListGetKeys, kvListSet} from "/src/database.js";
 import {registerToolset} from "/src/toolset.js";
@@ -32,6 +32,7 @@ import {compileSchema, validateAndShowError} from "unconscious/common/json-schem
 import {onLoad} from "/src/hooks.js";
 import {openJsonEditor} from "/src/json_editor/jsonEditorProxy.js";
 import {base64DecodeToString} from "unconscious/common/Base64.js";
+import {cloneNamed} from "/src/utils/pure-utils.js";
 
 compileSchema(schema);
 

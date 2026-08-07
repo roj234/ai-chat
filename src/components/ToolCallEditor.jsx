@@ -111,6 +111,10 @@ export function ToolCallEditor(props) {
                         const idx = index();
                         message.tool_calls.splice(idx, 1);
                         message.tool_responses.splice(idx, 1);
+                        if (!message.tool_calls.length) {
+                            delete message.tool_calls;
+                            delete message.tool_responses;
+                        }
                         $update(updateMessageUI);
                     }}>
                         删除

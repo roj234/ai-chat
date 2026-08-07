@@ -19,7 +19,8 @@ function buildData(messages, logs) {
 
 		const thisStart = m.time;
 		if (prevEnd) {
-			waitingTimeSum += thisStart - prevEnd;
+			const delta = thisStart - prevEnd;
+			waitingTimeSum += delta > 3600000 ? 0 : delta;
 			prevEnd = 0; // 不计算多条user消息之间吗？
 		}
 
@@ -35,7 +36,7 @@ function buildData(messages, logs) {
 		if (resps) {
 			const calls = m.tool_calls;
 			for (let i = 0; i < calls.length; i++) {
-				const duration = resps[i].duration;
+				const duration = resps[i].duration || 0;
 				const toolName = calls[i].function.name;
 				const a = agg.get(toolName) || { calls: 0, sumMs: 0 };
 				a.calls++; a.sumMs += duration;

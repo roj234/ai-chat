@@ -662,7 +662,7 @@ export const undoToolCalls = (global, messages, first, reentrantOnly) => {
 					const impl = toolScriptRegistry[tc.function.name];
 					if (tr.time == null || (reentrantOnly && !impl?.reentrant)) continue;
 
-					impl.undo?.(tr, global, tc);
+					impl?.undo?.(tr, global, tc);
 				} catch (e) {
 					console.error(e);
 					showToast(<div>无法撤销工具调用【{tc.function.name}】<br/>

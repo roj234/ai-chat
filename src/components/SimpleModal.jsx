@@ -28,15 +28,15 @@ const SimpleModal = ({
 	let inputValue = '';
 	const ignoreCancel = onCancel === null;
 
-	const handleClose = () => {
-		if (ignoreCancel || false === onCancel?.(inputValue)) {
+	const handleClose = async () => {
+		if (ignoreCancel || false === await onCancel?.(inputValue)) {
 			return;
 		}
 		element.remove();
 	}
 
-	const handleConfirm = () => {
-		if (false === onConfirm?.(inputValue)) {
+	const handleConfirm = async () => {
+		if (false === await onConfirm?.(inputValue)) {
 			return;
 		}
 		element.remove();

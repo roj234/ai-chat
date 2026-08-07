@@ -2,6 +2,7 @@ import {getToolParameters, parseFrontmatter, registerToolset} from "/src/toolset
 import {debugSymbol} from "unconscious";
 import {fileAccess} from "./fileAccess.js";
 import skillDescription from './skill-description.md?raw';
+import {createAsyncQueue} from "../../src/utils/pure-utils.js";
 
 const SKILL_CACHE = debugSymbol("SkillCache");
 const glob = fileAccess("list");
@@ -61,20 +62,30 @@ Available skills:
 			json: true
 		}, 0, conv);
 
+		const sortable = [];
+		const [enqueue, finish] = createAsyncQueue();
 		for (const [relPath, type] of skills) {
 			const path = "~/.skills/"+relPath;
-			const str = await readFile({
-				path,
-				format: 'frontmatter'
-			}, {}, conv);
-			const [metadata, content, offset] = parseFrontmatter(str);
-			if (!('name' in metadata)) continue;
-			if (metadata.xAiChatShellOnly && conv.fs_type !== 'api') continue;
+			await enqueue(async () => {
+				const str = await readFile({
+					path,
+					format: 'frontmatter'
+				}, {}, conv);
+				const [metadata, content, offset] = parseFrontmatter(str);
+				if (!('name' in metadata)) return;
+				if (metadata.xAiChatShellOnly && conv.fs_type !== 'api') return;
+				index[metadata.name] = [path, offset];
 
-			index[metadata.name] = [path, offset];
-			if (!metadata.disableModelInvocation)
-				prompt += metadata.name+":\n"+metadata.description+"\n\n";
+				if (!metadata.disableModelInvocation)
+					sortable.push(metadata)
+			});
 		}
+
+		await finish();
+
+		sortable.sort((a, b) => a.name.localeCompare(b.name)).forEach(metadata => {
+			prompt += metadata.name+":\n"+metadata.description+"\n\n";
+		});
 
 		return conv[SKILL_CACHE] = {
 			index,
