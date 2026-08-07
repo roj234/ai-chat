@@ -29,7 +29,14 @@ export const TextDiff = ({
 			<div className="code-header">
 				<span>
 					{diff.length > 3 && <button className="ghost" onClick={({target}) => {
-						target.textContent = target.closest('pre').classList.toggle('open') ? '显示更少' : '显示更多';
+						if (diffDiv) {
+							diffDiv.style.setProperty('--collapsed-height', `${diffDiv.scrollHeight}px`);
+							// 先提交起始高度，确保首次展开也能触发 max-height 动画。
+							diffDiv.offsetHeight;
+						}
+						const open = target.closest('pre').classList.toggle('open');
+						target.textContent = open ? '显示更少' : '显示更多';
+
 						if (diffDiv) {
 							diffDiv.replaceChildren();
 							const vl = new VirtualList({

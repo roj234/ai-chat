@@ -1,8 +1,14 @@
 import {OpenAI} from "./openai";
 
 declare namespace AiChat {
+    type Mount = {
+        fs_type: 'db' | 'api' | 'local' | 'config' | 'opfs';
+        fs_base?: string;
+        fs_server?: string;
+        fs_builtin?: string;
+    }
 
-    export type Conversation = {
+    export type Conversation = Mount & {
         id: number,
         title: string,
         time: number,
@@ -31,7 +37,11 @@ declare namespace AiChat {
         /** 分支对话，最后一条对话的ID */
         bm_leaf?: number;
 
-        /** 覆盖全局配置 */
+        mnt?: Record<string, Mount>;
+
+        /** 覆盖全局配置，高于 config 优先级 */
+        preset?: string;
+        /** 覆盖全局配置，高于 preset 优先级 */
         overrides?: Partial<LocalPreset>;
     }
 
@@ -141,7 +151,7 @@ declare namespace AiChat {
     }
 
     type TitleModelConfig = {
-        generateTitle: boolean | 'tool'
+        generateTitle: boolean | 'eager'
         titleModel: string
         titlePrompt: string
     }
@@ -156,6 +166,9 @@ declare namespace AiChat {
         permittedTools: string[],
         maxToolTurns: number
         afkState: 0 | 1 | 2,
+
+        // really misc
+        disableFinishToast?: boolean;
 
         // UI
         think: 0 | 1,
@@ -232,7 +245,7 @@ declare namespace AiChat {
     }
 
     type ToolPart = {
-        type: "tool_call";
+        type: "tool";
         tool: OpenAI.ToolCall;
         message: AssistantMessage;
         // index of message.tool_calls
@@ -240,8 +253,8 @@ declare namespace AiChat {
     }
 
     type ToolUIPart = {
-        type: "tool";
-        tool_name: string;
+        type: "tool_ui";
+        name: string;
         response: ToolResponse;
         // indexOf messages[]
         idx: number;
@@ -322,8 +335,9 @@ declare namespace AiChat {
          * UI渲染函数
          * @param context 和 script 中传入的 response 是同一个对象
          * @param has_successor 是否不是最后一条消息，可以决定生成什么HTML
+         * @param message 如果渲染器修改了消息（主要是那些 interactive=true 的）需要调用 markMessageDirty 函数
          */
-        renderer?: (context: ToolResponse & Payload, has_successor: boolean, toolCall: OpenAI.ToolCall) => HTMLElement;
+        renderer?: (context: ToolResponse & Payload, has_successor: boolean, toolCall: OpenAI.ToolCall, message: AssistantMessage) => HTMLElement;
         /**
          * 判断是否需要重新生成HTML
          * 往keys里面填任何对象
@@ -331,8 +345,9 @@ declare namespace AiChat {
          * @param keys 响应式列表的key
          * @param context 和 script 中传入的 response 是同一个对象
          * @param has_successor 是否不是最后一条消息
+         * @param message 如果渲染器修改了消息（主要是那些 interactive=true 的）需要调用 markMessageDirty 函数
          */
-        keyFunc?: (keys: Array, context: ToolResponse & Payload, has_successor: boolean) => void;
+        keyFunc?: (keys: Array, context: ToolResponse & Payload, has_successor: boolean, message: AssistantMessage) => void;
     }
 
     type FunctionTool<Payload> = OpenAI.FunctionToolJSON & FunctionToolImpl<Payload>;
@@ -539,6 +554,8 @@ declare namespace AiChat {
             ): void;
             // 返回 void 表示继续后面的处理，添加内部的keys，否则直接以这些keys结束
             keyFunc?(chunk: ResponseContentPart, keys: any[]): any[] | void;
+
+            onCompleted?(conversation: Conversation, messages: Message[], preset: Preset, result: BillingLog): void | Promise<void>;
         }
 
         type MessageComposedCallback = (messages: Message[], output: OpenAI.Message[], body: Record<string, any>, is_prefill: boolean) => void;
@@ -592,7 +609,6 @@ declare namespace AiChat {
             position: 'worldInfoBefore' | 'worldInfoAfter' | 'depth',
             role: 'assistant' | 'user' | null,
             depth: number,
-            id: string;
         }
 
         type MyPreset = IDBKVList & {

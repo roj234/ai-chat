@@ -4,8 +4,9 @@ import {provider_presets} from "/media/provider_presets.js";
 import {DI_settings, onLoad} from "/src/hooks.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {jsonEval} from "unconscious/common/json-schema-utils.js";
-import {applyDelta, sseFetch} from "../common/openai-api-utils.js";
-import {highlightJsonLike} from "../src/markdown/highlight.js";
+import {applyDelta, sseFetch} from "/common/openai-api-utils.js";
+import {highlightJsonLike} from "/src/markdown/highlight.js";
+import {AsyncButton} from "/src/components/AsyncButton.jsx";
 
 const EMPTY_WAV = `UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=`;
 const EMPTY_BMP = `Qk06AAAAAAAAADYAAAAoAAAAAQAAAAEAAAABABgAAAAAAAQAAAATCwAAEwsAAAAAAAAAAAAA/wAAAA==`;
@@ -250,7 +251,7 @@ async function checkModelCapability() {
 			response_format: {
 				type: 'json_schema',
 				json_schema: {
-					name: '',
+					name: 'my_schema',
 					schema: { type: 'object',
 						properties: {
 							my_name_is: {type: 'string'},
@@ -268,7 +269,7 @@ async function checkModelCapability() {
 			response_format: {
 				type: 'json_schema',
 				json_schema: {
-					name: 'name_schema',
+					name: 'my_schema',
 					schema: {
 						type: 'object',
 						oneOf: [{
@@ -324,10 +325,8 @@ async function checkModelCapability() {
 onLoad(() => {
 	const target = DI_settings.byId("mode");
 	target.append(<div className={"spacer"}></div>)
-	target.append(<button className={"btn primary"} onClick={({target}) => {
-		target.disabled = true;
-
-		streamFlag = true;
+	target.append(<AsyncButton pendingText={"测试中"} okText={"成功"} failText={"失败"} className={"btn primary"} onClick={(target) => new Promise((resolve, reject) => {
+		streamFlag = false;
 		const isLegacyCompletionMode = config.mode !== "chat";
 		const check = () => {
 			test(isLegacyCompletionMode ? {
@@ -335,8 +334,7 @@ onLoad(() => {
 			} : {
 				messages: [{role: "user", content: "Hi"}],
 			}, 1).then(() => {
-				target.textContent = "成功";
-				if (isLegacyCompletionMode) return;
+				if (isLegacyCompletionMode) return resolve();
 
 				SimpleModal({
 					title: "连接成功",
@@ -346,10 +344,12 @@ onLoad(() => {
 							SimpleModal({
 								title: "能力探测完成",
 								message: "数据已经保存\n" + res,
-								onConfirm: null
+								onConfirm: null,
+								onCancel: resolve
 							})
 						});
-					}
+					},
+					onCancel: resolve
 				})
 			}).catch(err => {
 				console.error(err);
@@ -358,7 +358,8 @@ onLoad(() => {
 					SimpleModal({
 						title: "连接失败",
 						message: <div dangerouslySetInnerHTML={highlightJsonLike(err)}/>,
-					})
+						onCancel: reject
+					});
 				} else {
 					SimpleModal({
 						title: "连接失败\n但不排除是提供商不支持非流响应或过短的max_completion_tokens",
@@ -367,16 +368,11 @@ onLoad(() => {
 						onConfirm() {
 							streamFlag = true;
 							check();
-						}
+						},
+						onCancel: reject
 					})
 				}
-				target.textContent = "失败";
-			}).finally(() => {
-				target.disabled = false;
 			});
 		};
-
-		check();
-	}}>测试API
-	</button>);
+	})}>测试API</AsyncButton>);
 })

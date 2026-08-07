@@ -1,6 +1,7 @@
 import {$state, $update, $watch, unconscious} from "unconscious";
 import {inputText} from "/src/states.js";
 import {getToolParameters} from "/src/toolset.js";
+import {markMessageDirty} from "/src/database.js";
 
 const USER_PREFIX = "User choice:\n";
 
@@ -35,7 +36,7 @@ export const AskUser = {
 		required: ["question", "options"]
 	},
 
-	interactive: true, // 要求用户必须做出选择
+	interactive: true,
 	title(tc, ctx) {
 		const par = getToolParameters(ctx, tc);
 		return <div className={'rp-choice-label'}>✦ {par.question}</div>;
@@ -46,7 +47,7 @@ export const AskUser = {
 	keyFunc(keys, response, frozen) {
 		keys.push(response.content, frozen);
 	},
-	renderer(response, frozen, tc) {
+	renderer(response, frozen, tc, message) {
 		const content = $state(response.content?.slice(response.content.startsWith(USER_PREFIX) ? USER_PREFIX.length : 0));
 		if (frozen) {
 			return <div className={"rp-choice"}>
@@ -58,6 +59,7 @@ export const AskUser = {
 			const value = unconscious(content).trim();
 			response.success = !!value;
 			response.content = value ? USER_PREFIX + value : '';
+			markMessageDirty(message);
 			$update(inputText);
 		}, false);
 		let ta;

@@ -95,7 +95,7 @@ export const generatePAT = (ctx, capabilities = 0) => {
 	encodeRawMsg(pat, (array) => {
 		buffer.set(array, off);
 		off += array.length;
-	}, pat_schema);
+	}, {schema: pat_schema});
 
 	const hmac = createHmac('sha256', PAT_SERVER_SALT);
 

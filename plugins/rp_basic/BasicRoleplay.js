@@ -14,10 +14,10 @@ import {
 } from "unconscious";
 import {SETTINGS} from "/src/settings.js";
 
-import {cloneNamed, downloadFile, getTextContent} from "/src/utils/utils.js";
+import {cloneNamed, downloadFile} from "/src/utils/utils.js";
 import {readJPEG, readPNG} from "/common/upng.js";
 import {isIDB, kvListDel, kvListGet, kvListGetKeys, kvListSet} from "/src/database.js";
-import {registerToolset} from "/src/toolset.js";
+import {getToolParameters, registerToolset} from "/src/toolset.js";
 import {showToast} from "/src/components/Toast.js";
 import {Dropdown} from "/src/components/Dropdown.jsx";
 import {createTab} from "/src/components/SettingDialog.jsx";
@@ -32,6 +32,11 @@ import {compileSchema, validateAndShowError} from "unconscious/common/json-schem
 import {onLoad} from "/src/hooks.js";
 import {openJsonEditor} from "/src/json_editor/jsonEditorProxy.js";
 import {base64DecodeToString} from "unconscious/common/Base64.js";
+import {LorebookMatcher} from "./LorebookMatcher.js";
+import {VirtualDirectory} from "../tools/VirtualFileSystem.js";
+import {NestedMap} from "unconscious/common/NestedMap.js";
+import {FS_INSTANCE} from "../tools/fileAccess.js";
+import {createWebFileSystem} from "../tools/WebFileSystem.js";
 
 compileSchema(schema);
 
@@ -52,7 +57,7 @@ const definition = {
 
 
 // MyCharacterInstance用到的非序列化属性
-const _instances = debugSymbol("MCI_READY");
+const CTX = debugSymbol("MCI_READY");
 
 //region createSchemaEditColumn
 function showOverwriteConfirm(item, typeStr, callback) {
@@ -231,14 +236,15 @@ SETTINGS.push(
 		_tab: "character"
 	},
 	{
-		id: "st_useTools",
+		id: "st_lorebookImp",
 		name: "世界书实现",
 		type: "radio",
 		required: true,
 		_tab: "character",
 		choices: {
 			"正则": false,
-			"工具": true,
+			"工具": "tool",
+			"文件系统": "fs"
 		}
 	},
 	{
@@ -280,42 +286,31 @@ onLoad(() => {
 const lorebookToolKey = [];
 let lorebookToolContent = {};
 
-// 基于Files和挂载点 TODO ~/lorebook/name/some.md
-// 伪造一个 Glob 调用？没必要，系统提示就行
-// ~/lorebook/name:
-// 幻想乡.md: asdadasda
-// 问问 AI怎么设计好 每个条目挂载 虚拟文件系统
-let promptTemplate = '';
-
 /** @type {AiChat.FunctionTool} */
-const lorebookTool = {
-	name: "fetch_lorebook",
-	description: "读取世界书。" +
-		"当讲述者在角色扮演过程中遇到世界书有介绍的项目时，调用该工具获取详细内容\n你可以多次调用该工具",
+const FetchLorebook = {
+	name: "FetchLorebook",
+	description: "获取Lorebook条目的详细内容。\n当讲述者在角色扮演过程中遇到世界书有介绍的项目时调用",
 	parameters: {
 		type: "object",
 		properties: {
-			id: {
+			name: {
 				type: "string",
 				enum: lorebookToolKey
 			}
 		},
-		required: ["id"]
+		required: ["name"]
 	},
 
-	script({id}, response) {
-		response.id = id;
-		return lorebookToolContent[id].content;
+	script({name}) {
+		return lorebookToolContent[name].content;
 	},
-	renderer({id}) {
-		const lorebookValue = lorebookToolContent[id];
-		return lorebookValue && <blockquote>
-			读取世界书条目：{lorebookValue.triggers.join("\n")}
-		</blockquote>
+	title(tc, ctx) {
+		const id = getToolParameters(ctx, tc).name;
+		return `读取世界书：${lorebookToolContent[id]?.name}`
 	}
 };
 
-registerToolset("st", "", [lorebookTool], {hidden: true});
+registerToolset("ST/Register", "", [FetchLorebook], {hidden: true});
 //endregion
 
 // 对话从数据库加载完成回调
@@ -363,8 +358,10 @@ onConversationLoaded((conv, messages) => {
 	}
 
 	Promise.all(promises).finally(() => {
-		charInstance[_instances] = readyObj;
-		if (readyObj.character?.greetings?.length) {
+		charInstance[CTX] = readyObj;
+		const character = readyObj.character;
+		charInstance.time = character?.time;
+		if (character?.greetings?.length) {
 			messages.splice(1, 0, {
 				id: -1, // 不保存到数据库
 				role: "st|greeting",
@@ -456,7 +453,7 @@ registerDataImportHandler("image/jpeg", async (file, batch) => {
 async function createConversation(char) {
 	await importConversationData({
 		title: "[Char] "+char.name,
-		time: char.time || Date.now(),
+		time: Date.now(),
 		messages: [
 			{
 				role: "st|char",
@@ -465,7 +462,6 @@ async function createConversation(char) {
 					name: char.name,
 					// ""为嵌入世界书（若存在）保留
 					lorebookNames: [""],
-					activatedLorebookItems: new Set,
 					greeting: 0
 				}
 			}
@@ -480,7 +476,7 @@ async function createConversation(char) {
 MessageRoles["st|char"] = {
 	name: "角色卡",
 	reactive(self) {
-		return !self.key[_instances]?.stable;
+		return !self.key[CTX]?.stable;
 	},
 	/**
 	 *
@@ -497,7 +493,7 @@ MessageRoles["st|char"] = {
 				lorebooks,
 				/** @type {AiChat.DnD.MyPreset} */
 				preset = unconscious(currentPreset)
-			} = self[_instances];
+			} = self[CTX];
 
 			//region 插入消息
 			if (char.autoMessages?.length) {
@@ -511,72 +507,99 @@ MessageRoles["st|char"] = {
 			//endregion
 			let lbBefore = '', lbAfter = '', lbLast = '';
 			//region 处理世界书
+			const lorebookCaches = self[CTX].lbAndOtherCache || (self[CTX].lbAndOtherCache = {});
 
 			/** @type {AiChat.DnD.MyLorebookPage[]} */
-			const pages = [];
-			for (let lorebook of lorebooks) {
-				if (lorebook) pages.push(...lorebook.pages.filter(item => item.enabled && item.content));
+			let pages = lorebookCaches.pages, constantPages = lorebookCaches.constant;
+
+			if (!pages) {
+				lorebookCaches.pages = pages = [];
+				lorebookCaches.constant = constantPages = [];
+				for (let lorebook of lorebooks) {
+					if (lorebook) {
+						lorebook.pages.forEach(page => {
+							if (!page.enabled || !page.content) return;
+							if (page.constant) constantPages.push(page);
+							else pages.push(page);
+						})
+					}
+				}
 			}
 
-			if (config.st_useTools) {
-				const {allowedTools} = conv;
-				if (!allowedTools) conv.allowedTools = new Set([lorebookTool.name]);
-				else allowedTools.add(lorebookTool.name);
-
-				lorebookToolKey.length = 0;
-				lorebookToolContent = {};
-
-				const keywords = [];
-				for (let page of pages) {
-					if (page.constant) lbBefore += "\n\n"+page.content;
-					else {
-						lorebookToolKey.push(page.id);
-						lorebookToolContent[page.id] = page.content;
-						keywords.push(" - "+page.id+": "+page.triggers.join(","));
+			const insertBook = book => {
+				const content = "\n\n" + book.content;
+				if (book.position === "worldInfoBefore") lbBefore += content;
+				else if (book.position === "worldInfoAfter") lbAfter += content;
+				else {
+					let depth = book.depth;
+					for (let i = output.length - 1; i >= 0; i--) {
+						const o = output[i];
+						if ((!book.role || o.role === book.role) && !--depth) {
+							o.content += lbLast;
+							break;
+						}
 					}
 				}
-				lbBefore += "\n\n<lorebook>\n世界书ID与关键词的映射：\n"+keywords.join("\n")+"\n</lorebook>";
+			};
+			constantPages.forEach(insertBook);
+
+			const implType = config.st_lorebookImp;
+
+			const {allowedTools} = conv;
+			allowedTools?.delete(FetchLorebook.name);
+			delete conv.mnt?.lorebook;
+
+			if (implType) {
+				if ('fs' === implType) {
+					const map = new NestedMap();
+
+					for (let lorebook of lorebooks) {
+						if (lorebook) {
+							const keys = new Map;
+							lorebook.pages.forEach(page => {
+								let counter = keys.get(page.name) || 0;
+								map.set([".", lorebook.name, page.name+(counter?"_"+counter:"")+".md"], {
+									read() {
+										return page.content;
+									},
+								});
+								keys.set(page.name, counter+1);
+							})
+						}
+					}
+
+					(conv.mnt || (conv.mnt = {})).lorebook = {
+						[FS_INSTANCE]: createWebFileSystem(new VirtualDirectory(map))
+					};
+
+					lbBefore += "\n\n<lorebook>\nLorebook 在文件夹 `~/lorebook/` 中\n使用Read、Grep、Glob工具读取你的知识</lorebook>";
+				} else {
+					if (!allowedTools) conv.allowedTools = new Set([FetchLorebook.name]);
+					else allowedTools.add(FetchLorebook.name);
+
+					let keywords = lorebookCaches.toolKeywords;
+					if (!keywords) {
+						lorebookCaches.toolKeywords = keywords = [];
+						lorebookToolKey.length = 0;
+						lorebookToolContent = {};
+
+						for (let page of pages) {
+							const name = page.name;
+							lorebookToolKey.push(name);
+							if (lorebookToolContent[name]) throw `世界书名称 ${name} 重复了`;
+							lorebookToolContent[name] = page.content;
+							keywords.push(" - "+name+": "+page.triggers.join(","));
+						}
+					}
+
+					lbBefore += "\n\n<lorebook>\nLorebook 名称与关键词：\n"+keywords.join("\n")+"\n</lorebook>";
+				}
 			} else {
-				const activeBooks = self.content.activatedLorebookItems;
-
-				for (let book of pages) {
-					let found = activeBooks.has(book.id) || book.constant;
-
-					// TODO 最好做一个基于滑动窗口的缓存
-					if (!book.constant) {
-						found = false;
-
-						const min = book.window === 50 ? 0 : Math.max(0, output.length - book.window);
-						for (let i = output.length-1; i >= min; i--) {
-							let text = getTextContent(output[i])?.toLowerCase();
-
-							found = new RegExp(book.triggers.join("|"), 'miu').exec(text);
-							if (found) break;
-						}
-					}
-
-					if (found) {
-						activeBooks.add(book.id);
-						const content = "\n\n"+book.content;
-						if (book.position === "worldInfoBefore") lbBefore += content;
-						else if (book.position === "worldInfoAfter") lbAfter += content;
-						else {
-							let depth = book.depth;
-							for (let i = output.length-1; i >= 0; i--) {
-								const o = output[i];
-								if ((!book.role || o.role === book.role) && !--depth) {
-									o.content += lbLast;
-									break;
-								}
-							}
-						}
-					} else {
-						activeBooks.delete(book.id);
-					}
-				}
-
-				// TODO 用名字而不是ID方便调试
-				self[_instances].activatedLorebookItems.value = Array.from(activeBooks.keys());
+				/** @type {LorebookMatcher} */
+				const matcher = lorebookCaches.matcher || (lorebookCaches.matcher = new LorebookMatcher(pages));
+				const activeBooks = matcher.match(output);
+				activeBooks.forEach(insertBook);
+				self[CTX].activatedLorebookItems.value = activeBooks.map(k => k.name);
 			}
 			//endregion
 
@@ -616,7 +639,7 @@ MessageRoles["st|char"] = {
 	 * @param index
 	 */
 	renderContent(self, chunks, index) {
-		if (!self[_instances]) {
+		if (!self[CTX]) {
 			chunks.push({ type: "loading", text: "加载中" });
 			return;
 		}
@@ -630,7 +653,7 @@ MessageRoles["st|char"] = {
 			preset,
 			/** @type {import("unconscious").Reactive<string[]>} */
 			activatedLorebookItems
-		} = self[_instances];
+		} = self[CTX];
 
 		if (!char) {
 			chunks.push({
@@ -761,7 +784,7 @@ MessageRoles["st|greeting"] = {
 	 * @param output
 	 */
 	compose({content: card}, output) {
-		const char = card[_instances].character;
+		const char = card[CTX].character;
 		output.push({
 			role: "assistant",
 			content: applyMacro(char.greetings[card.content.greeting], createDefaultCtx(char))
@@ -773,7 +796,7 @@ MessageRoles["st|greeting"] = {
 	 */
 	renderContent(self, chunks) {
 		const card = self.content;
-		const char = card[_instances].character;
+		const char = card[CTX].character;
 		const greetings = char.greetings;
 
 		let index = card.content.greeting;
@@ -806,7 +829,7 @@ MessageRoles["assistant"] = {
 	renderContent(message, chunks, index, isEditing, messages, defaultRenderContent) {
 		defaultRenderContent(message, chunks, message.content);
 
-		const isRP = messages[0]?.[_instances];
+		const isRP = messages[0]?.[CTX];
 		if (!isRP) return;
 
 		const preset = isRP.preset || unconscious(currentPreset);
@@ -848,16 +871,18 @@ const StoryConfigPanel = self => {
 	const selectedPreset = $state(self.content.presetName);
 
 	const update = () => {
-		self[_instances].stable = false;
+		self[CTX].stable = false;
+		//delete self[CTX].lorebookPages;
+		delete self[CTX].lbAndOtherCache;
 		$update(updateMessageUI);
-		queueMicrotask(() => self[_instances].stable = true);
+		queueMicrotask(() => self[CTX].stable = true);
 	};
 
 	$watch(selectedPreset, () => {
 		const name = selectedPreset.value;
 		kvListGet("st|preset", name).then(item => {
 			self.content.presetName = name;
-			self[_instances].preset = item;
+			self[CTX].preset = item;
 			update();
 		});
 	}, false);
@@ -865,7 +890,7 @@ const StoryConfigPanel = self => {
 	$watch(selectedLorebooks, () => {
 		const nameArr = selectedLorebooks.value;
 		const valueArr = Array(nameArr.length);
-		self[_instances].lorebooks.value = valueArr;
+		self[CTX].lorebooks.value = valueArr;
 
 		const promises = [];
 
@@ -882,6 +907,7 @@ const StoryConfigPanel = self => {
 	return <div className={"rp_tags"}>
 		<LorebookList items={lorebookList} selection={selectedLorebooks} />
 		<PresetList items={presetList} selection={selectedPreset} />
+		<button className={"btn ghost"} onClick={update}>清除缓存<span className={"tooltip"}>修改世界书或预设之后清除内部缓存</span></button>
 	</div>;
 };
 
@@ -896,7 +922,7 @@ const _LorebookPage = item => {
 	if (constant) attributes.push("常驻");
 	if (recursion) attributes.push("递归");
 	if (regex) attributes.push("正则");
-	if (window === 50) attributes.push("永久激活");
+	if (window === 0) attributes.push("永久激活");
 	if (position === "depth") position += "@"+depth;
 
 	const el = <details onClick.once={() => {

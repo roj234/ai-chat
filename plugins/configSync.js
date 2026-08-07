@@ -3,6 +3,7 @@ import {config, conversations} from "/src/states.js";
 import {getKV, setKV} from "/src/database.js";
 import {DI_settings, onLoad} from "/src/hooks.js";
 import {showToast} from "/src/components/Toast.js";
+import {AsyncButton} from "/src/components/AsyncButton.jsx";
 
 const LOCAL_CONFIG = `theme
 checkUpdate
@@ -43,30 +44,6 @@ const loadConfig = (db_server, db_pat) => getKV("config").catch((err) => {
 	config.value = newCfg;
 	DI_settings.sync();
 });
-
-/**
- * @param {string} text
- * @param {string} pendingText
- * @param {string} okText
- * @param {string} failText
- * @param {string} className
- * @param {function(): Promise<any>} onClick
- * @constructor
- */
-const AsyncButton = ({ pendingText, okText, failText = '操作失败', onClick, className = 'btn ghost' }, text) => {
-	return <button className={className} onClick={({target}) => {
-		target.textContent = pendingText;
-		target.disabled = true;
-		onClick().then(() => {
-			target.textContent = okText;
-		}, () => {
-			target.textContent = failText;
-		}).finally(() => setTimeout(() => {
-			target.textContent = text;
-			target.disabled = false;
-		}, 1000));
-	}}>{text}</button>;
-}
 
 export const registerConfigSync = () => {
 	let {db_server, db_pat, _new: isNew} = config;

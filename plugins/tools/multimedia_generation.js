@@ -4,11 +4,12 @@ import {SETTINGS} from "/src/settings.js";
 import {config} from "/src/states.js";
 import {AudioPlayer} from "/src/components/AudioPlayer.jsx";
 import {isPureObject} from "unconscious";
-import {compressImage, limitMaxSide, loadingBlock} from "/src/utils/utils.js";
+import {loadingBlock} from "/src/utils/utils.js";
 import {jsonFetch} from "/common/openai-api-utils.js";
 import "./multimedia_generation.css";
 import {DI_settings, onLoad} from "/src/hooks.js";
 import {parseJson5} from "unconscious/common/Json.js";
+import {compressImage, limitMaxSide} from "/src/utils/pure-utils.js";
 
 /**
  * 将 ComfyUI 流程模板发送至服务器并获取生成的图像 Blob
@@ -224,7 +225,6 @@ const Say = {
 		required: ["voice", "text"]
 	},
 
-	// 这个工具需要显式的用户交互
 	interactive: true,
 	script: async ({ text, language, voice }, context) => {
 		const response = await fetch(config.mg_tts_api+'/audio/speech', {

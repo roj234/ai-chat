@@ -27,7 +27,7 @@ import {
 } from "../utils/utils.js";
 import "./MessageList.css";
 import {toolScriptRegistry, undoToolCalls} from "../toolset.js";
-import {getBillingLog} from "../database.js";
+import {getBillingLog, markMessageDirty} from "../database.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
 import {
 	cloneMessage,
@@ -114,14 +114,13 @@ const chunkRenderer = m => {
 				})}</div>;
 			case "think":
 				return <ThinkBlock message={item} edit={isEditing(m.key)}/>;
-			case "tool_call":
-				return isEditing(m.key) ? <ToolCallEditor {...item} /> : <ToolCallCard {...item} />;
 			case "tool":
+				return isEditing(m.key) ? <ToolCallEditor {...item} /> : <ToolCallCard {...item} />;
+			case "tool_ui":
+				const frozen = item.idx < messages.length - 1;
 				try {
-					let has_successor = item.idx !== messages.length - 1;
-					return toolScriptRegistry[item.tool_name].renderer(item.response, has_successor, item.tool);
+					return toolScriptRegistry[item.name].renderer(item.response, frozen, item.tool, messages[item.idx]);
 				} catch (e) {
-					console.error(e);
 					return errorBlock(e, "工具UI渲染失败");
 				}
 			case "usage":
@@ -298,7 +297,7 @@ const chunkGather = (message, chunks, index, messages) => {
 		for (let j = 0; j < tool_calls.length; j++) {
 			const tool = tool_calls[j];
 			chunks.push({
-				type: "tool_call",
+				type: "tool",
 				tool,
 				message,
 				idx: j
@@ -308,8 +307,8 @@ const chunkGather = (message, chunks, index, messages) => {
 			const response = message.tool_responses?.[j];
 			if (fn?.renderer && response && (null != fn.interactive || response.time)) {
 				chunks.push({
-					type: "tool",
-					tool_name: name,
+					type: "tool_ui",
+					name: name,
 					idx: index,
 					response,
 					tool
@@ -372,17 +371,17 @@ function chunkKeyFunc(message, chunk) {
 		}
 		break;
 		case "think": add(chunk.think.title ? [chunk.think.title, chunk.think.content] : chunk.think); break;
-		case "tool_call": keys.push(chunk.tool); break;
-		case "tool": {
+		case "tool": keys.push(chunk.tool); break;
+		case "tool_ui": {
 			// 这里到底需要哪些字段，重构的我都忘了
-			const {response, time, tool_name, idx} = chunk;
+			const {response, time, name, idx} = chunk;
 			keys.push(response);
 			keys.push(time);
 
 			let kf;
-			if ((kf = toolScriptRegistry[tool_name]?.keyFunc)) {
+			if ((kf = toolScriptRegistry[name]?.keyFunc)) {
 				const has_successor = idx !== messages.length - 1;
-				kf(keys, response, has_successor);
+				kf(keys, response, has_successor, messages[idx]);
 				return keys;
 			} else {
 				keys.push(response.success);
@@ -413,7 +412,7 @@ const editBtn = <button data-action="edit" title="编辑" className="ri-edit-2-f
 const branchBtn = <button data-action="branch" title="在此处分叉" className="ri-git-fork-line ghost" />
 const saveBtn = <button data-action="save" title="保存" className="ri-check-line ghost" />;
 const insertThinkBtn = <button data-action="think" title="插入思考块" className="ri-ai-generate-text ghost" />;
-const insertToolBtn = <button data-action="tool" title="插入工具块" className="ri-tools-line ghost" />;
+const insertToolBtn = <button data-action="tool_ui" title="插入工具块" className="ri-tools-line ghost" />;
 
 const orderedButtons = [editBtn, saveBtn, branchBtn, insertThinkBtn, insertToolBtn, copyBtn, undoBtn, regenBtn, deleteBtn];
 
@@ -464,7 +463,7 @@ function updateButtons(m, container) {
 			if (!key.think) {
 				buttons.push(insertThinkBtn);
 			}
-			if (config.modalities.includes("tool") || key.tool_responses) {
+			if (config.modalities.includes("tool_ui") || key.tool_responses) {
 				buttons.push(insertToolBtn);
 			}
 		}
@@ -587,7 +586,7 @@ const buttonHandler = (e) => {
 			$update(updateMessageUI);
 		}
 		break;
-		case "tool": {
+		case "tool_ui": {
 			if (!message.tool_calls) {
 				message.tool_calls = [];
 				message.tool_responses = [];
@@ -628,8 +627,9 @@ const buttonHandler = (e) => {
 		}
 		break;
 		case "save": {
-			if (message.think && !message.think.content) delete message.think;
+			if (message.think && !message.think.duration && !message.think.content) delete message.think;
 
+			markMessageDirty(message);
 			selectedConversation[CURRENT_EDITING] = null;
 			self[PINNED] = false;
 			vl.setItem(vl.findIndex(self), self);
@@ -718,26 +718,15 @@ const combinedMessages = $computed((oldMessages) => {
 			content: chunks,
 		};
 
-		const isAssistantMessage = message.role === "assistant";
-		let isReactiveElement = true || isAssistantMessage || MessageRoles[message.role]?.reactive;
-		if (typeof isReactiveElement === 'function') isReactiveElement = isReactiveElement(ref);
-
-		if (!oldMessage || isReactiveElement) chunkGather(message, chunks, i, arr);
+		chunkGather(message, chunks, i, arr);
 
 		i++;
 		out.push(ref);
 
-		if (!isReactiveElement) {
-			getBranchChunk(message, chunks);
-			ref[PINNED] = isEditing(message);
-			ref.time = ref.key.time;
-			continue;
-		}
-
 		/** @type {boolean} */
 		let generationEnded;
 
-		if (isAssistantMessage) {
+		if (message.role === "assistant") {
 			if (config.combineToolCalls) {
 				for (; i < arr.length; i++) {
 					if (message.finish_reason !== "tool_calls" || isEditing(arr[i]) || arr[i].role !== "assistant") break;

@@ -1,5 +1,4 @@
 import {
-	config,
 	messages,
 	onConversationBeforeunload,
 	onConversationLoaded,
@@ -15,6 +14,7 @@ import {showToast} from "./components/Toast.js";
 import {MCPClient} from "/common/MCPClient.js";
 import {parseJson5} from "unconscious/common/Json.js";
 import {highlightJsonLike} from "./markdown/highlight.js";
+import {getCombinedPreset, markMessageDirty} from "./database.js";
 
 export const TOOL_NAME = debugSymbol("TOOL_NAME");
 export const TOOL_IS_RUNNING = debugSymbol("TOOL_IS_RUNNING");
@@ -39,7 +39,7 @@ export const toolset = {};
  * 根据工具摘要按需激活的工具元数据
  * @type {Record<string, OpenAI.Tool>}
  */
-const tools = {};
+export const tools = {};
 /**
  * 工具脚本，调用后执行的代码都在这里
  * @type {Record<string, AiChat.FunctionToolImpl & { parameters?: OpenAI.ObjectSchema, default?: boolean }>}
@@ -82,34 +82,41 @@ toolScriptRegistry["Use"] = {
 
 		const newToolNames = [];
 
-		for (const moduleName of modules) {
-			if (!toolset[moduleName] || activatedModules.has(moduleName))
-				throw "Tool schema validation error:\n$.modules: value("+JSON.stringify(moduleName)+") must in "+JSON.stringify(listUsableToolset(activatedModules));
-
-			let {tools: toolArr, onActivated, depend} = toolset[moduleName];
-
-			if (depend) depend.forEach(mod => {
-				if (!activatedModules.has(mod)) modules.push(mod);
-			})
-
-			if (onActivated) {
-				toolArr = await onActivated(conv);
-				toolArr = toolArr?.map(t => t.name || t) || [];
-			}
-
-			activatedModules.add(moduleName);
-			toolArr?.forEach(name => {
-				if (!allowedTools.has(name)) {
-					allowedTools.add(name);
-					newToolNames.push(name);
-				}
-			});
-		}
-
 		response.modules = modules;
 		// UIOnly
 		response.newTools = newToolNames;
-		return "You can use these tools now: "+newToolNames.join(", ");
+
+		try {
+			for (const moduleName of modules) {
+				if (!toolset[moduleName] || activatedModules.has(moduleName))
+					throw "Tool schema validation error:\n$.modules: value("+JSON.stringify(moduleName)+") must in "+JSON.stringify(listUsableToolset(activatedModules));
+
+				let {tools: toolArr, onActivated, depend} = toolset[moduleName];
+
+				if (depend) depend.forEach(mod => {
+					if (!activatedModules.has(mod)) modules.push(mod);
+				})
+
+				activatedModules.add(moduleName);
+				if (onActivated) {
+					toolArr = await onActivated(conv);
+					toolArr = toolArr?.map(t => t.name || t) || [];
+				}
+
+				toolArr?.forEach(name => {
+					if (!allowedTools.has(name)) {
+						allowedTools.add(name);
+						newToolNames.push(name);
+					}
+				});
+			}
+		} catch (e) {
+			this.undo(response, conv);
+			for (const moduleName of modules) activatedModules.delete(moduleName);
+			throw e;
+		}
+
+		return "You can use these tools now: "+newToolNames.map(s => s.slice(s.lastIndexOf(":")+1)).join(", ");
 	},
 
 	renderer(context) {
@@ -198,7 +205,7 @@ export const getAvailableTools = async (conversation) => {
 						modules: {
 							type: "array",
 							minItems: 1,
-							items: { enum: tmpArr },
+							items: { type: "string", enum: tmpArr },
 						}
 					},
 					required: ["modules"]
@@ -356,9 +363,10 @@ const NO_PARAMETERS = {
  * @param {AiChat.FunctionTool[]} toolDefs
  * @param {{
  *     namespace?: string,
- *     onActivated?: function(): AiChat.FunctionTool[],
+ *     onActivated?: function(AiChat.Conversation): AiChat.FunctionTool[],
+ *     onDeactivated?: function(AiChat.Conversation),
  *     hidden?: boolean | 'manual',
- *     systemPrompt: string,
+ *     systemPrompt: string | function(AiChat.Conversation): string | Promise<string>,
  *     default?: boolean,
  *     data?: any
  * }} extra
@@ -412,13 +420,15 @@ export const registerToolset = (name, description, toolDefs, {
  */
 export const addMCPServer = (mcpBaseUrl, mcpName, mcpDescription = "External tools (MCP Server).", options) => {
 	const client = new MCPClient(mcpBaseUrl, options);
+	const mcpToolGroup = /*"MCP_"+*/mcpName;
+	const registryPrefix = 'MCP:'+mcpToolGroup+":";
+
 	let toolArrayPromise;
 
-	const mcpToolGroup = /*"MCP_"+*/mcpName;
 	client.statusListener = (open) => {
 		if (!open) {
 			if (toolArrayPromise) toolArrayPromise.then(toolNames => {
-				for (const name in toolNames) {
+				for (const name of toolNames) {
 					delete tools[name];
 					delete toolScriptRegistry[name];
 				}
@@ -433,7 +443,7 @@ export const addMCPServer = (mcpBaseUrl, mcpName, mcpDescription = "External too
 				// execution: {taskSupport: 'forbidden'}
 
 				const displayName = (options.prefix?mcpToolGroup+"_":"")+name;
-				const registryName = 'MCP:'+mcpToolGroup+":"+name;
+				const registryName = registryPrefix+name;
 
 				tools[registryName] = {
 					type: "function", function: {
@@ -475,11 +485,17 @@ export const addMCPServer = (mcpBaseUrl, mcpName, mcpDescription = "External too
 	registerToolset(mcpToolGroup, mcpDescription, [], {
 		async systemPrompt(conv) {
 			if (!client.isOpen) {
-				toolset[mcpToolGroup].tools = await connectServer();
+				const tools = await connectServer();
+				toolset[mcpToolGroup].tools = tools;
+				delete conv[NSLOOKUP];
 
-				// 刷新可用的工具列表
-				const Use = toolScriptRegistry['Use'];
-				Use.undo({modules: []}, conv);
+				const allowedTools = conv.allowedTools;
+				for (const name of allowedTools) {
+					if (name.startsWith(registryPrefix)) {
+						allowedTools.delete(name)
+					}
+				}
+				tools.forEach(name => allowedTools.add(name));
 			}
 			return ''
 		},
@@ -503,15 +519,15 @@ onConversationBeforeunload((conv) => delete conv[CONV_REACTIVE_MAP]);
  * @param {AiChat.Conversation} conv
  * @param {string} name
  * @param {Record<string, any>} parameters
- * @returns {number}
+ * @returns {Promise<number>}
  */
-export const getToolUserInteractionLevel = (conv, name, parameters) => {
+const getToolUserInteractionLevel = async (conv, name, parameters) => {
 	let fn = toolScriptRegistry[name];
-	const allowed = config.permittedTools;
+	const allowed = (await getCombinedPreset(conv)).permittedTools;
 	let interactive = allowed?.includes("!"+name) ? 'secure' : fn?.interactive;
 	if (interactive) {
 		if (typeof interactive === "function") {
-			interactive = interactive(parameters, conv);
+			interactive = await interactive(parameters, conv);
 		}
 		if (interactive === "secure") {
 			return !allowed?.includes(name) && !allowed?.includes('*') && !conv.grantedTools?.has(name) ? 2 : 0;
@@ -523,6 +539,8 @@ export const getToolUserInteractionLevel = (conv, name, parameters) => {
 	return 0;
 }
 
+const UNSAFE_TOOL_DENY_MESSAGE = "User doesn't permit this tool use. Nothing changed. STOP and wait for user.";
+
 /**
  *
  * @param {AiChat.AssistantMessage} response
@@ -531,8 +549,11 @@ export const getToolUserInteractionLevel = (conv, name, parameters) => {
  * @param {boolean=} allowUnsafe
  * @return {Promise<boolean>}
  */
-export const runTools = async ({tool_calls, tool_responses}, conv, forceRerun, allowUnsafe) => {
-	let autoNext = true;
+export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
+	markMessageDirty(response);
+	const {tool_calls, tool_responses} = response;
+
+	let autoCommit = true;
 
 	const callTool = async i => {
 		const tc = tool_calls[i];
@@ -598,21 +619,24 @@ export const runTools = async ({tool_calls, tool_responses}, conv, forceRerun, a
 				}
 			}
 
-			const uiLevel = getToolUserInteractionLevel(conv, name, parameters);
-			const now = Date.now();
+			msg.time = Date.now();
+			const uiLevel = await getToolUserInteractionLevel(conv, name, parameters);
 			if (uiLevel) {
-				autoNext = false;
+				autoCommit = false;
 				if (uiLevel === 2) {
-					if (forceRerun === true || (forceRerun === i && !allowUnsafe)) {
-						msg.time = now;
-						throw "User doesn't permit this tool use. Nothing changed. STOP and wait for user.";
+					if (null == forceRerun) {
+						delete msg.time;
+						return;
 					}
 
-					if (forceRerun !== i) return;
+					if (!allowUnsafe) {
+						throw UNSAFE_TOOL_DENY_MESSAGE;
+					}
 				}
+			} else if (false === allowUnsafe) {
+				throw UNSAFE_TOOL_DENY_MESSAGE;
 			}
 
-			msg.time = now;
 			msg[TOOL_IS_RUNNING] = true;
 			let result = fn.script(parameters, msg, conv);
 			if (result instanceof Promise) {
@@ -631,8 +655,8 @@ export const runTools = async ({tool_calls, tool_responses}, conv, forceRerun, a
 			console.error(e);
 			msg.success = false;
 			msg.content = prettyError(e);
-			if (!config.afkState)
-				autoNext = false;
+			if (!(await getCombinedPreset(conv)).afkState)
+				autoCommit = false;
 		}
 		delete msg[TOOL_IS_RUNNING];
 		if (forceRerun === true && null == msg.content) throw 'some interactive tool need user input';
@@ -642,7 +666,7 @@ export const runTools = async ({tool_calls, tool_responses}, conv, forceRerun, a
 	if (typeof forceRerun === "number") await callTool(forceRerun);
 	else for (let i = 0; i < tool_calls.length; i++) await callTool(i);
 
-	return autoNext;
+	return autoCommit;
 };
 
 /**
@@ -662,7 +686,7 @@ export const undoToolCalls = (global, messages, first, reentrantOnly) => {
 					const impl = toolScriptRegistry[tc.function.name];
 					if (tr.time == null || (reentrantOnly && !impl?.reentrant)) continue;
 
-					impl.undo?.(tr, global, tc);
+					impl?.undo?.(tr, global, tc);
 				} catch (e) {
 					console.error(e);
 					showToast(<div>无法撤销工具调用【{tc.function.name}】<br/>

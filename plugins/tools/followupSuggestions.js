@@ -8,6 +8,8 @@
 import {messages} from "/src/states.js";
 import {registerToolset} from "/src/toolset.js";
 import {submitUserChatMessage} from "/src/api-request.js";
+import {unconscious} from "unconscious";
+import {markMessageDirty} from "/src/database.js";
 
 const prompt2 = `<Follow-up-Suggestions>
 After **EVERY** reply — without exception — you MUST call the
@@ -145,9 +147,9 @@ const SuggestFollowups = {
 	script({suggestions}, response) {
 		response.options = suggestions;
 	},
-	renderer(response, frozen) {
+	renderer(response, frozen, message) {
 		const removeToolCall = () => {
-			const value = messages.value;
+			const value = unconscious(messages);
 			for (let i = value.length - 1; i >= 0; i --){
 				const msg = value[i];
 				const toolResponses = msg.tool_responses;
@@ -164,6 +166,7 @@ const SuggestFollowups = {
 					toolResponses.splice(selfIndex, 1);
 					msg.tool_calls.splice(selfIndex, 1);
 				}
+				markMessageDirty(msg);
 			}
 		};
 

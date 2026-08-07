@@ -20,6 +20,8 @@ const options = {
 	port: { type: 'string', short: 'p', default: '3000' },
 	cert: { type: 'string', default: '' },
 	static: { type: 'string', default: '' },
+	'no-sandbox': { type: 'boolean', default: false },
+	'hide-user': { type: 'boolean', default: false },
 	config: { type: 'string', short: 'c', default: './config.js' },
 	data: { type: 'string', default: 'data' },
 	workspace: { type: 'string', default: '' },
@@ -29,6 +31,7 @@ const { values: {
 	static: zipPath,
 	config: configPath,
 	data, workspace,
+	'no-sandbox': noSandbox, 'hide-user': hideUser
 } } = parseArgs({ options });
 const PORT = parseInt(port, 10);
 const DATA_PATH = path.resolve(data);
@@ -110,7 +113,7 @@ if (zipPath) {
 			const ver = JSON.parse(meta);
 			frontendVersion = ver.v;
 			if (ver.b) frontendVersion += " (b"+ver.b+")";
-			if (ver.t) frontendVersion += " at "+new Date(ver.t).toISOString();
+			if (ver.t) frontendVersion += " 构建于 "+new Date(ver.t).toISOString();
 		}
 
 		router.zipRouter = createZipRouter(zip);
@@ -128,6 +131,11 @@ if (WEBSOCKET_SYNC_ENABLE) {
 	router.sync = createSyncManager(wss);
 }
 
+globalThis.AIChatArgs = {
+	noSandbox,
+	hideUser
+}
+
 server.listen(PORT, addr, () => {
 	console.log(`
    █████╗ ██╗ ██████╗██╗  ██╗ █████╗ ████████╗
@@ -140,22 +148,34 @@ server.listen(PORT, addr, () => {
   >> 理性之人使自己适应世界，不理性之人坚持要世界适应自己。因此，一切进步都依赖于不理性之人。 —— 萧伯纳
   >> Copyright (c) 2025-2026 Roj234
 
-  Build:    {{BUILD_TIME}} (commit: {{GIT_COMMIT}})`);
-	console.log(`  Status:   Listening on http://${addr}:${PORT}`);
+  构建于:   {{BUILD_TIME}} (commit: {{GIT_COMMIT}})`);
+	console.log(`  地址:     http${cert?'s':''}://${addr}:${PORT}`);
 	if (workspace) {
-		console.log(`  Mode:     Containerd in ${JSON.stringify(workspace)}`);
+		console.log(`  模式:     专用文件访问服务，位于 ${JSON.stringify(workspace)}`);
+		if (noSandbox) console.log(`  (沙盒已禁用)`);
 		return;
 	}
-	console.log(`  Mode:     Database service in ${data === '' ? 'memory' : JSON.stringify(data)}`);
-	console.log(`  Frontend: ${zipPath?frontendVersion:"no"}`);
+	console.log(`  模式:     数据库服务，位于 ${data === '' ? '内存' : JSON.stringify(data)}`);
+	console.log(`  内置前端: ${zipPath?frontendVersion:"无"}`);
 });
+
+const shutdownHooks = [];
 
 // 封装一个优雅退出的函数
 async function gracefulShutdown() {
 	console.log('[shutdown] 正在关闭数据库...');
+	for (let shutdownHook of shutdownHooks) {
+		try {
+			await shutdownHook();
+		} catch (e) {
+			console.error('[shutdown]', e);
+		}
+	}
 	await closeAllConnections();
 	process.exit(0);
 }
+
+globalThis.AiChatAPI.addShutdownHook = (hook) => shutdownHooks.push(hook);
 
 // 监听 Ctrl+C (SIGINT)
 process.on('SIGINT', gracefulShutdown);

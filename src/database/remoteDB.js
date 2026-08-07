@@ -9,8 +9,8 @@ import {prettyError, resolveDBRelativeURL} from "../utils/utils.js";
 import {$store, $update, AS_IS, unconscious} from "unconscious";
 import SimpleModal from "../components/SimpleModal.jsx";
 import {delta} from "unconscious/common/deepEqual.js";
-import {PROTOCOL_VERSION, sortMessages} from "/backend/sync_const.js";
-import {getMessageCache} from "../database.js";
+import {PROTOCOL_VERSION} from "/backend/sync_const.js";
+import {MESSAGES_CACHE} from "../database.js";
 
 let clientId;
 
@@ -185,9 +185,7 @@ const u_messages = batched("messages", true);
 
 export const getMessages = async conversation => {
 	const id = conversation.id;
-	const cachedMessage = await getMessageCache(conversation);
-
-	const metadata = u_getConversation([id, cachedMessage && conversation.time]);
+	const metadata = u_getConversation([id, conversation[MESSAGES_CACHE] && conversation.time]);
 	const messages = u_messages(id);
 
 	return metadata.then(json => {
@@ -196,7 +194,7 @@ export const getMessages = async conversation => {
 		conversation.id = id;
 		return messages.catch(err => {
 			if (err.status !== 304) throw err;
-			return sortMessages([...cachedMessage.values()]);
+			return conversation[MESSAGES_CACHE];
 		});
 	});
 };

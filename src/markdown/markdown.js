@@ -55,12 +55,28 @@ export const renderMarkdownToElement = (container, md, options = {}) => {
 	return container;
 };
 
+const relayoutNodes = el => {
+	let result = '';
+	for (const node of el.childNodes) {
+		if (node.nodeType === Node.TEXT_NODE) {
+			result += node.textContent;
+		} else if (node.nodeType === Node.ELEMENT_NODE) {
+			result += relayoutNodes(node);
+			if (/^(P|DIV|LI|H[1-6]|BLOCKQUOTE|TR|PRE|TABLE)$/.test(node.tagName)) {
+				result += '\n';
+			}
+		}
+	}
+	return result;
+};
+
 /**
  *
  * @param {string} md
+ * @param {boolean} [plaintext]
  * @return {string}
  */
-export const renderMarkdownToString = md => {
+export const renderMarkdownToString = (md, plaintext) => {
 	const root = <div />;
 
 	const renderer = createMarkdownRenderer(root, {
@@ -74,7 +90,7 @@ export const renderMarkdownToString = md => {
 	parser.write(md);
 	parser.end();
 
-	return root.innerHTML;
+	return plaintext ? relayoutNodes(root) : root.innerHTML;
 };
 
 const LANGUAGE_TO_EXT = {

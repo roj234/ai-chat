@@ -1,6 +1,13 @@
-import {BRANCH_MANAGER, config, conversations, messages, selectedConversation} from "./states.js";
+import {config, conversations, messages, selectedConversation} from "./states.js";
 import {showToast} from "./components/Toast.js";
-import {deleteDatabase, getMessages, isIDB, kvListGetValues, kvListSet, updateConversation} from "./database.js";
+import {
+	deleteDatabase,
+	getMessagesCacheFirst,
+	isIDB,
+	kvListGetValues,
+	kvListSet,
+	updateConversation
+} from "./database.js";
 import {downloadFile, prettyError} from "./utils/utils.js";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {ZipReader, ZipWriter} from "unconscious/common/zip-io.js";
@@ -179,10 +186,7 @@ export const duplicateConversation = async () => {
 	showToast('已将当前对话另存为', 'ok');
 };
 
-const cleanMessages = messages => {
-	for (const message of messages) delete message.id;
-	return messages;
-};
+const cleanMessages = messages => messages.map(({id, ...rest}) => rest);
 
 /**
  *
@@ -199,11 +203,7 @@ export const exportConversation = async (type, _conv) => {
 		if (conv && type === 1) {
 			const { id: _a, ready: _b, ...data } = conv;
 
-			let messagePromise = conv[BRANCH_MANAGER]?.messages || unconscious(messages);
-			try {
-				messagePromise = await getMessages(conv);
-			} catch {}
-			data.messages = cleanMessages(messagePromise);
+			data.messages = cleanMessages(await getMessagesCacheFirst(conv));
 
 			const jsonData = await serializeJSON(data, 0, zw);
 			if (zw.fileCount() === 1) {
@@ -229,7 +229,7 @@ export const exportConversation = async (type, _conv) => {
 
 				if (((i+1) & 15) === 0) await sleep();
 
-				callbacks.push(getMessages(conv).then(messages => {
+				callbacks.push(getMessagesCacheFirst(conv, true).then(messages => {
 					data.messages = cleanMessages(messages);
 					return serializeJSON(data, 0, zw).then(text => {
 						successed.value ++;

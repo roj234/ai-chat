@@ -19,7 +19,9 @@ function buildData(messages, logs) {
 
 		const thisStart = m.time;
 		if (prevEnd) {
-			waitingTimeSum += thisStart - prevEnd;
+			const delta = thisStart - prevEnd;
+			// 只统计合理间隔：忽略时间乱序导致的负值和超过1小时的离开
+			if (delta > 0 && delta <= 3600000) waitingTimeSum += delta;
 			prevEnd = 0; // 不计算多条user消息之间吗？
 		}
 
@@ -29,13 +31,18 @@ function buildData(messages, logs) {
 		let thisEnd;
 
 		const dur = m.think?.duration;
-		if (dur) thinkTimeSum += dur;
+		if (dur > 0) thinkTimeSum += dur;
 
 		const resps = m.tool_responses;
-		if (resps) {
-			const calls = m.tool_calls;
+		const calls = m.tool_calls;
+		if (resps && calls) {
 			for (let i = 0; i < calls.length; i++) {
-				const duration = resps[i].duration;
+				const resp = resps[i];
+				if (!resp) continue;
+				// duration 是可选字段，且可能为负/NaN，统一清洗
+				const duration = resp.duration > 0 ? resp.duration : 0;
+				if (resp.time > 0) thisEnd = resp.time + duration;
+
 				const toolName = calls[i].function.name;
 				const a = agg.get(toolName) || { calls: 0, sumMs: 0 };
 				a.calls++; a.sumMs += duration;
@@ -51,34 +58,40 @@ function buildData(messages, logs) {
 					} catch {}
 				}
 				toolTimeSum += duration;
-				thisEnd = resps[i].time + resps[i].duration;
 			}
 		}
 
 		if (!thisEnd) {
 			const bill = logs[idx];
-			if (bill) thisEnd = bill.time + bill.duration;
+			if (bill && bill.time > 0) thisEnd = bill.time + (bill.duration > 0 ? bill.duration : 0);
 		}
+
+		// 没有任何耗时信息时，至少保证时间轴不回退，避免 prevEnd 为 undefined/NaN
+		if (!thisEnd || thisEnd < m.time) thisEnd = m.time;
 
 		prevEnd = thisEnd;
 	}
 
-	const totalTime = (prevEnd - firstTime) / 1000;
-	const runningTime = totalTime - waitingTimeSum / 1000;
+	const totalTime = Math.max(0, prevEnd - firstTime) / 1000;
+	const runningTime = Math.max(0, totalTime - waitingTimeSum / 1000);
 
 	// tokens / cost / cache
 	const bills = logs.filter(Boolean);
 	let inTokens = 0, outTokens = 0, cachedTokens = 0, cost = 0, latMs = 0, latN = 0;
 	const cachePoints = [];
 	for (const b of bills) {
-		inTokens += b.input_tokens;
-		outTokens += b.output_tokens;
-		cachedTokens += b.cached_tokens || 0;
-		if (b.currency === 'CNY') b.cost *= 0.15;
-		cost += b.cost;
+		if (b.input_tokens != null) {
+			inTokens += b.input_tokens;
+			outTokens += b.output_tokens;
+			cachedTokens += b.cached_tokens || 0;
+			// 不要原地修改 log 对象，否则重复渲染会重复打折
+			if (b.cost) cost += b.currency === 'CNY' ? b.cost * 0.15 : b.cost;
+			const denom = b.input_tokens + (b.cached_tokens || 0);
+			cachePoints.push(denom > 0 ? ((b.cached_tokens || 0) / denom) * 100 : 0);
+		} else {
+			cachePoints.push(0);
+		}
 		if (b.latency > 0) { latMs += b.latency; latN++; }
-		const denom = b.input_tokens + (b.cached_tokens || 0);
-		cachePoints.push(denom > 0 ? ((b.cached_tokens || 0) / denom) * 100 : 0);
 	}
 
 	const cacheAvg = cachedTokens ? (cachedTokens / (inTokens + cachedTokens)) * 100 : 0;
@@ -98,8 +111,8 @@ function buildData(messages, logs) {
 		inTokens, outTokens,
 		cache: { avg: cacheAvg, points: cachePoints },
 		cost: cost / 1000000,
-		costPerMin: cost / 1000000 / (runningTime / 60),
-		avgResponseTime: latMs / latN,
+		costPerMin: runningTime > 0 ? cost / 1000000 / (runningTime / 60) : 0,
+		avgResponseTime: latN ? latMs / latN : 0,
 		turns: assistantTurns,
 		tools,
 	};
@@ -136,7 +149,8 @@ async function render() {
 
 	d.breakdown = d.breakdown.filter(b => b.sec).sort((a, b) => b.sec - a.sec);
 	const total = d.breakdown.reduce((a, b) => a + b.sec, 0);
-	const maxTime = Math.max(...d.tools.map(t => t.sumMs));
+	// 所有工具耗时都为 0 时避免 0/0 = NaN 宽度
+	const maxTime = Math.max(1, ...d.tools.map(t => t.sumMs));
 	const cachePoints = downsample(d.cache.points, maxBars);
 
 	const bars = d.breakdown.map((b) => <span style={`width:${(b.sec / total * 100)}%;background:var(--c-${b.key})`}></span>);

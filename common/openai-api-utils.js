@@ -3,9 +3,9 @@ import {debugSymbol} from "unconscious/shared.js";
 /**
  * @param {Error} err
  */
-const networkErrorHandler = err => {
+const networkErrorHandler = (url, err) => {
 	if (err.message === "Failed to fetch")
-		throw ("网络连接失败\n请检查API地址是否正确，连接是否畅通");
+		throw ("网络连接失败\n请检查API地址是否正确，连接是否畅通\n"+url);
 	throw err;
 };
 
@@ -41,7 +41,7 @@ export const jsonFetch = (url, {key = "", ...data} = {}) => fetch(url, {
 		...data.headers
 	},
 })
-.catch(networkErrorHandler)
+.catch(networkErrorHandler.bind(null, url))
 .then(res => {
 	if (!res.ok) {
 		return responseErrorHandler(res).catch(err => {
@@ -78,7 +78,7 @@ export const sseFetch = (url, {key = "", json = true, ...data} = {}, onChunk) =>
 		...data.headers
 	},
 })
-.catch(networkErrorHandler)
+.catch(networkErrorHandler.bind(null, url))
 .then(async res => {
 	if (!res.ok) return responseErrorHandler(res);
 

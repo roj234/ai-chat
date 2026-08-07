@@ -573,7 +573,7 @@ export class Router {
 				if (RESPONSE_USE_MSGPACK_SCHEMA && accept.includes('application/vnd.msgpack') && x_msv === msgpack_schema_version) {
 					encoder = (data) => encodeRawMsg(data, (buf, shared) => {
 						outputStream.write(shared ? Buffer.from(buf) : buf);
-					}, msgpack_schema);
+					}, {schema: msgpack_schema});
 					contentType = 'application/vnd.msgpack';
 				} else {
 					encoder = (data) => outputStream.write(Buffer.from(JSON.stringify(data)));

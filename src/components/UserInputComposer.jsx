@@ -4,11 +4,11 @@ import {
 	ensureActiveConversation,
 	inputText,
 	isMobile,
-	lastScrollDirection,
+	lastScrollDirectionIsUp,
 	messages,
 	selectedConversation
 } from "../states.js";
-import {statusBadge, submitUserChatMessage} from "../api-request.js";
+import {scrollMessagesToBottom, statusBadge, submitUserChatMessage} from "../api-request.js";
 import {blobToContentPart, createAttachmentGallery} from "./InputAttachment.jsx";
 import {CUSTOM_CONTROLS} from "../settings.js";
 import {createSubmitButton} from "./SubmitButton.jsx";
@@ -66,7 +66,7 @@ export const createUserInputComposer = (scroller) => {
 		if (blob) blobToContentPart(blob, 0 === selectedConversation.id, attachments);
 	};
 
-	const element = (<div className="composer" class:hidden={() => isMobile && lastScrollDirection.value}>
+	const element = (<div className="composer" class:hidden={() => isMobile && unconscious(lastScrollDirectionIsUp)}>
 		<div className="logo hide-human">
 					<span style={{
 						display: "flex",
@@ -271,10 +271,11 @@ export const createUserInputComposer = (scroller) => {
 
 		if (noAI) return;
 
+		scrollMessagesToBottom();
+
 		await ensureActiveConversation();
 
 		if (config.reviewMessage && input) return;
-
 		submitUserChatMessage(true);
 	}
 

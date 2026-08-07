@@ -19,6 +19,7 @@ const defaultTitlePrompt = `### Title Requirements
 - Length: 4–20 characters
 - Quality: Specific enough to be **instantly recognizable** in a long conversation list
 - Derivation: Distill the core topic from the conversation, not a generic label
+- If no clear topic (e.g. "Hello"), return \`{"title":""}\`
 
 ### ✅ Examples
 - "AES-CBC 加解密的随机访问性能分析"
@@ -60,6 +61,7 @@ export const SETTINGS = [
 		choices: {
 			"关闭": false,
 			"模型总结": true,
+			"模型总结(及早)": "eager"
 		}
 	},
 	{

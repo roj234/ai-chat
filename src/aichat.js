@@ -7,16 +7,18 @@ import {databaseError, getMessages, initialize, isIDB, listConversations, update
 import {
 	abortCompletion,
 	config,
+	CONFIG_VERSION,
 	conversations,
 	isMobile,
-	lastScrollDirection,
+	lastScrollDirectionIsUp,
 	LOCKED,
 	messages,
 	resetConversation,
 	runningConversations,
 	selectedConversation,
 	state,
-	updateConversationListUI
+	updateConversationListUI,
+	updateConversationResumeState
 } from "./states.js";
 import {submitUserChatMessage} from "./api-request.js";
 import {MessageList} from "./components/MessageList.jsx";
@@ -78,7 +80,7 @@ const createApp = () => {
 		const top = scroller.scrollTop;
 		requestAnimationFrame(() => {
 			if (scroller.scrollTop !== top) {
-				lastScrollDirection.value = side;
+				lastScrollDirectionIsUp.value = side;
 			}
 		});
 	};
@@ -112,7 +114,7 @@ const createApp = () => {
 		</aside>
 		<div ref={scroller} className="chat scroll"
 			 onWheel.noPassive={e => {
-				 lastScrollDirection.value = e.deltaY < 0;
+				 lastScrollDirectionIsUp.value = e.deltaY < 0;
 				 markdownTableScrollHandler(e);
 			 }}
 			 onTouchStart.passive={e => {
@@ -162,6 +164,7 @@ const createApp = () => {
 	 * @return {null|string}
 	 */
 	function onSettingChanged(id, newValue, oldValues) {
+		config[CONFIG_VERSION] = (config[CONFIG_VERSION] || 0) + 1;
 		if (id === 'template') {
 			try {
 				const fn = Function("messages", "return " + (newValue || "messages.map(m => `${m.role}: ${m.content}`).join(\'\\n\\n\')"));
@@ -273,9 +276,9 @@ const createApp = () => {
 					};
 				}
 
-				$watch(conversations, () => {
+				$watch([updateConversationResumeState], () => {
 					const conv = unconscious(selectedConversation);
-					if (conv?.[LOCKED] && conversations[0] === conv && conv.resumeId && !runningConversations.has(conv.id)) {
+					if (conv?.[LOCKED] && conv.resumeId && !runningConversations.has(conv.id)) {
 						submitUserChatMessage();
 					}
 				})
@@ -284,9 +287,17 @@ const createApp = () => {
 			let prevId;
 			$watch(selectedConversation, () => {
 				const conv = unconscious(selectedConversation);
+				const id = conv?.id;
 				app.classList.toggle("_human", !!conv?.noAI);
+
 				if (conv && !conv.ready) {
-					messages.value = [];
+					if (prevId !== id) messages.value = [];
+
+					if (id == null) {
+						conv.ready = true;
+						return
+					}
+
 					hookGetMessages(getMessages(conv)).then(data => {
 						conv.ready = true;
 
@@ -303,7 +314,6 @@ const createApp = () => {
 					});
 				}
 
-				const id = conv?.id;
 				history.replaceState(null, "", id != null ? "#!chat/"+id : "#");
 
 				if (conv?.ready) {

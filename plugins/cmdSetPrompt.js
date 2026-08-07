@@ -7,7 +7,7 @@ import {kvListGet} from "/src/database.js";
 import {showToast} from "/src/components/Toast.js";
 import {$update} from "unconscious";
 
-COMMAND_REGISTRY["setprompt"] = [
+COMMAND_REGISTRY["freezeprompt"] = [
 	async (arg) => {
 		let prompt = config.systemPrompt || defaultSystemPrompt;
 		if (arg[0]) {
@@ -23,5 +23,5 @@ COMMAND_REGISTRY["setprompt"] = [
 		setSystemPrompt(prompt);
 		$update(updateMessageUI);
 	},
-	"将预设的系统提示词固化到当前对话",
+	"将当前系统提示词固化到对话，不再因为变量的变化（如日期、技能等）而导致缓存失效",
 ];

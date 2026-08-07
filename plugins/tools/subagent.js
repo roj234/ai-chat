@@ -1,5 +1,5 @@
-import {getToolParameters, registerToolset, toolScriptRegistry} from "/src/toolset.js";
-import {getMessages, kvListGet, updateConversation} from "/src/database.js";
+import {getAvailableTools, getToolParameters, registerToolset, toolScriptRegistry, toolset} from "/src/toolset.js";
+import {getMessagesCacheFirst, kvListGet, markMessageDirty, updateConversation} from "/src/database.js";
 import {agentLoop} from "/src/api-request.js";
 import {$asyncState, $cleanup, $state, $update, $watch, debugSymbol, unconscious} from "unconscious";
 import {
@@ -14,13 +14,17 @@ import {
 import {fileAccess} from "./fileAccess.js";
 import {compileSchema} from "unconscious/common/json-schema-utils.js";
 import "./subagent.css";
-import {showToast} from "../../src/components/Toast.js";
+import {showToast} from "/src/components/Toast.js";
+import {prettyError} from "/src/utils/utils.js";
+import {DI} from "/src/hooks.js";
 
 const readFile = fileAccess("read");
 
 const INIT_AGENT_SYM = debugSymbol("InitAgent");
 const EVAL_AGENT_SYM = debugSymbol("EvaluateAgent");
 const CONVERSATION_CACHE = debugSymbol("CONVERSATION_CACHE");
+
+const findConversation = response => response[CONVERSATION_CACHE] || (response[CONVERSATION_CACHE] = conversations.find(item => item.id === response.agentId));
 
 /**
  *
@@ -29,7 +33,7 @@ const CONVERSATION_CACHE = debugSymbol("CONVERSATION_CACHE");
  * @param conv
  * @returns {Promise<void>}
  */
-async function createSubAgent(par, response, conv) {
+async function createSubagent(par, response, conv, tools, modules) {
 	/**
 	 * @type {AiChat.Conversation}
 	 */
@@ -40,26 +44,30 @@ async function createSubAgent(par, response, conv) {
 		fs_type: conv.fs_type,
 		fs_base: conv.fs_base,
 		mnt: structuredClone(conv.mnt),
-		// 当前未使用
+		// 有些工具比如SetTimeout判断它是否存在从而进入假设无UI的无头模式
 		owner: conv.id,
 		// 覆盖系统配置
 		overrides: {
 			tools: true,
-			maxToolTurns: 0,
+			maxToolTurns: 150, // a sanity value
 			permittedTools: ['*'],
-			afkState: 2,
+			afkState: 1,
 			sound: false,
+			disableFinishToast: true
 		},
-		allowedTools: new Set(par.tools),
-		activatedModules: new Set(['Subagent/Child'])
+		allowedTools: new Set(),
+		activatedModules: new Set(modules)
 	};
 
 	const modelType = par.model || 'inherit';
 	if (modelType !== 'inherit') {
 		const presetName = "_subagent_"+modelType;
-		const preset = await kvListGet("preset", presetName);
-		if (!preset) showToast("你未配置子代理模型定义【"+presetName+"】，回落到 inherit", "", 30000);
-		else Object.assign(conversation.overrides, preset);
+		try {
+			const preset = await kvListGet("preset", presetName);
+			Object.assign(conversation.overrides, preset);
+		} catch (e) {
+			showToast("你未配置子代理模型定义【"+presetName+"】，回落到 inherit", "", 30000);
+		}
 	}
 
 	let schema;
@@ -94,61 +102,87 @@ You MUST call the \`AgentFinish\` tool to complete your task, providing your fin
 Do NOT stop or return results in any other way — only \`AgentFinish\` signals task completion.
 </structured-output>`;
 
+	let preset = config;
+	try {
+		preset = await kvListGet("preset", "_subagent_prompt");
+	} catch {}
+
+	await toolScriptRegistry['Use'].script({ modules: responseSchemaPath ? ['Subagent/Child'] : [] }, {}, conversation);
+	tools.forEach(t => conversation.allowedTools.add(t));
+	const [tools_, toolPrompt] = await getAvailableTools(conv);
+
+	conversation.overrides.systemPrompt = (preset.systemPrompt + systemPrompt + toolPrompt) || '---\n---';
+
 	/**
 	 * @type {OpenAI.Message[]}
 	 */
-	const initMessages = [];
-	if (systemPrompt) {
-		initMessages.push({
-			role: 'system',
-			content: systemPrompt,
-		});
-	} else {
-		conversation.overrides.systemPrompt = '---\n---';
-	}
-	initMessages.push({
+	const initMessages = [{
 		role: 'user',
 		content: par.userMessage
-	});
+	}];
 
 	await updateConversation(conversation, initMessages);
 	conversations.unshift(conversation);
 	response.agentId = conversation.id;
+	response.time = Date.now();
 	response[CONVERSATION_CACHE] = conversation;
-
-	return updateConversation(conv, unconscious(messages));
 }
+const createSubagentWrapper = async (ctx, par, conv) => {
+	let promise = ctx[INIT_AGENT_SYM];
+	if (promise) return promise;
 
-const findConversation = response => response[CONVERSATION_CACHE] || (response[CONVERSATION_CACHE] = conversations.find(item => item.id === response.agentId));
+	if (!ctx.agentId) {
+		const modules = par.tools.filter(tool => tool.startsWith("MODULE:")).map(t => t.slice(7));
+		const tools = par.tools.filter(tool => !tool.startsWith("MODULE:"));
 
-const subagentLoop = async ctx => {
-	const conversation = findConversation(ctx);
-	const messages_ = await getMessages(conversation);
-	const config_ = unconscious(config);
+		const missing = tools.filter(name => !toolScriptRegistry[name]);
+		if (missing.length) throw 'Invalid tool name: '+missing+" (notice that external tools have namespace and must be called by MODULE:moduleName)";
 
-	let stop = messages_.at(-1).finish_reason;
-	while (stop === 'tool_calls' || stop === undefined || stop === 'interrupt') {
-		$update(updateMessageUI);
-		stop = await agentLoop(conversation, messages_, config_);
+		const missing2 = modules.filter(name => !toolset[name]);
+		if (missing2.length) throw 'Invalid module name: '+missing2;
+
+		return (ctx[INIT_AGENT_SYM] = createSubagent(par, ctx, conv, tools, modules)).finally(() => delete ctx[INIT_AGENT_SYM]);
+	}
+};
+
+const subagentLoop = async conversation => {
+	const messages = await getMessagesCacheFirst(conversation);
+
+	let stop = messages.at(-1).finish_reason;
+	let locked;
+	try {
+		while (stop === 'tool_calls' || stop === undefined || stop === 'interrupt') {
+			if (!locked) {
+				locked = true;
+				DI.lock?.(conversation.id);
+				$update(updateMessageUI);
+			}
+			stop = await agentLoop(conversation, messages);
+		}
+	} finally {
+		if (locked) DI.unlock?.(conversation.id);
 	}
 
 	let content;
 	if (stop === false) {
-		const tool = messages_.at(-2).tool_calls?.find(item => item.function.name === 'AgentFinish');
+		const tool = messages.at(-2).tool_calls?.find(item => item.function.name === 'AgentFinish');
 		if (tool) {
 			content = tool.function.arguments;
-			messages_.pop();
+			messages.pop();
 			return content;
 		}
 	} else {
-		return messages_.at(-1).content;
+		return messages.at(-1).content;
 	}
 };
 const subagentLoopWrapper = ctx => {
-	let promise = ctx[EVAL_AGENT_SYM];
+	const conv = findConversation(ctx);
+	let promise = conv[EVAL_AGENT_SYM];
 	if (promise) return promise;
-	promise = ctx[EVAL_AGENT_SYM] = subagentLoop(ctx);
-	promise.finally(() => delete ctx[EVAL_AGENT_SYM]);
+	promise = conv[EVAL_AGENT_SYM] = subagentLoop(conv);
+	promise.finally(() => {
+		delete conv[EVAL_AGENT_SYM];
+	});
 	return promise;
 };
 
@@ -197,14 +231,17 @@ const CreateSubagent = {
 				type: "array",
 				items: { type: "string" },
 			},
+			/*fileAccess: {
+				enum: ["inherit", "childPath", "disabled"],
+				default: "inherit"
+			},
+			childPath: {
+				type: "string"
+			},*/
 			model: {
 				enum: ["inherit", "fast", "balanced", "precise"],
 				default: "inherit"
 			},
-			/*reasoning_effort: {
-				enum: ["inherit", "low", "medium", "high"],
-				default: "inherit",
-			},*/
 			responseSchemaPath: { type: "string", },
 			async: {
 				type: "boolean",
@@ -214,18 +251,9 @@ const CreateSubagent = {
 		required: ['name', 'userMessage', 'tools'],
 	},
 	async script(par, ctx, conv) {
-		if (ctx[INIT_AGENT_SYM]) await ctx[INIT_AGENT_SYM];
-
-		if (!ctx.agentId) {
-			const missing = par.tools.filter(name => !toolScriptRegistry[name]);
-			if (missing.length) throw 'Invalid tool name: '+missing;
-
-			await (ctx[INIT_AGENT_SYM] = createSubAgent(par, ctx, conv));
-			delete ctx[INIT_AGENT_SYM];
-		}
-
+		await createSubagentWrapper(ctx, par, conv);
 		const loop = subagentLoopWrapper(ctx);
-		if (par.async) return "Agent started, agentId="+ctx.agentId+", time="+new Date().toISOString();
+		if (par.async) return "Agent started, agentId="+ctx.agentId;
 		return ctx.content = await loop;
 	},
 	title(req, ctx) {
@@ -241,33 +269,50 @@ const CreateSubagent = {
 			keys.push(context.content);
 		}
 	},
-	renderer(resp, has_successor, tc) {
-		if (resp.time == null) return;
+	renderer(ctx, has_successor, tc, message) {
+		if (ctx.time == null || ctx.success === false) return;
+		const par = getToolParameters(ctx, tc);
 
-		const evaluate = () => {
+		const evaluate = async () => {
 			$update(updateMessageUI);
 
 			const conv = unconscious(selectedConversation);
 			const msg = unconscious(messages);
 
-			CreateSubagent.script(getToolParameters(resp, tc), resp, conv)
-				.then(() => {
-					resp.success = true;
-					updateConversation(conv, msg);
-				}, () => resp.success = false)
-				.finally(() => $update(updateMessageUI))
-		};
+			if (!ctx.agentId) {
+				await createSubagentWrapper(ctx, par, conv);
+				// fire and forgot
+				markMessageDirty(message);
+				updateConversation(conv, msg);
+			}
 
-		const par = getToolParameters(resp, tc);
+			let promise = subagentLoopWrapper(ctx);
+
+			if (par.async) {
+				ctx.success = true;
+				ctx.content = "Agent started, agentId="+ctx.agentId;
+			} else {
+				try {
+					ctx.content = await promise;
+					ctx.success = true;
+				} catch (e) {
+					ctx.success = false;
+					ctx.content = "Error: "+prettyError(e);
+				}
+				ctx.duration = findConversation(ctx).time - ctx.time;
+			}
+			markMessageDirty(message);
+			$update(updateMessageUI);
+		};
 
 		// 尚未启动：没有 agentId 或 conversation 丢失
 		// 前者应该不可能触发但保留
-		const subagentConv = findConversation(resp);
-		if (!resp.agentId || (!has_successor && !subagentConv)) {
+		const subagentConv = findConversation(ctx);
+		if (!ctx.agentId || (!has_successor && !subagentConv)) {
 			return <div className={`subagent-card`}>
 				<button className="sa-btn paused" onClick={() => {
-					delete resp.agentId;
-					delete resp.content;
+					delete ctx.agentId;
+					delete ctx.content;
 					evaluate();
 				}}>🚀 启动
 				</button>
@@ -280,11 +325,11 @@ const CreateSubagent = {
 		const trigger = $state();
 		const updateStatus = () => $update(trigger);
 		const status = $asyncState(async () => {
-			if (runningConversations.has(resp.agentId)) return [ 'running', '运行中' ];
+			if (runningConversations.has(ctx.agentId)) return [ 'running', '运行中' ];
 
-			const status = await QueryAgentStatus.script(resp);
+			const status = await QueryAgentStatus.script(ctx);
 			if (status === 'no such agent') return [ 'error', '已删除' ];
-			if (status.startsWith('done') && resp.content) return [ 'done', '已完成' ];
+			if (status.startsWith('done') && ctx.content) return [ 'done', '已完成' ];
 			if (status.startsWith('error')) return [ 'error', '错误' ];
 			return [ 'paused', '继续' ];
 		}, trigger);
@@ -299,7 +344,7 @@ const CreateSubagent = {
 			{par.responseSchemaPath && <span title={"结构化输出"}>📐</span>}
 			{subagentConv && <button className={"btn ghost"} onClick={() => {
 				switchToConversation(subagentConv);
-			}}>转到子代理会话 #{resp.agentId}</button>}
+			}}>转到子代理会话 #{ctx.agentId}</button>}
 		</div>;
 
 		// 代理 $cleanup
@@ -326,10 +371,14 @@ const QueryAgentStatus = {
 			},
 			timeout: {
 				type: 'integer',
-				description: "Blocking timeout in milliseconds for agent to finish. Omit to return immediately non-blocking."
+				description: "Blocking timeout in seconds for agent to finish. Omit to return immediately non-blocking."
 			}
 		},
 		required: ['agentId'],
+	},
+	title(tc, ctx) {
+		const par = getToolParameters(ctx, tc);
+		return par.timeout ? "等待子代理 #"+par.agentId+` 完成 (${par.timeout} 秒)` : "查询子代理 #"+par.agentId+" 状态";
 	},
 	async script(par, resp, conv) {
 		const conversation = findConversation(par);
@@ -338,20 +387,19 @@ const QueryAgentStatus = {
 		const timeout = par.timeout;
 		if (timeout) {
 			await Promise.race([
-				new Promise((resolve) => setTimeout(resolve, timeout)),
+				new Promise((resolve) => setTimeout(resolve, timeout * 1000)),
 				subagentLoopWrapper(par)
 			]);
 		}
 
-		const lastUpdate = new Date(conversation.time).toISOString();
+		const lastUpdate = ((Date.now() - conversation.time) / 1000) .toFixed(1)+"s ago";
 
 		if (runningConversations.has(par.agentId)) return 'running, lastUpdate='+lastUpdate;
 
-		const content = subagentLoopWrapper(par).catch(e => {
-			console.info('[AgentLoop]', e);
-		})
+		const content = subagentLoopWrapper(par).catch(e => "Error: "+prettyError(e));
 
-		const lastMessage = (await getMessages(conversation)).at(-1);
+		const messages = await getMessagesCacheFirst(conversation);
+		const lastMessage = messages.at(-1);
 		const finishReason = lastMessage.finish_reason;
 		if (finishReason !== 'stop') {
 			if (finishReason === "error") return 'error, lastUpdate='+lastUpdate;

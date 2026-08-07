@@ -1,7 +1,7 @@
 import {
 	deleteConversation,
 	getKV,
-	getMessages,
+	getMessagesCacheFirst,
 	kvListDel,
 	kvListGet,
 	kvListGetKeys,
@@ -16,24 +16,10 @@ import {NestedMap, NODE_VALUE} from "unconscious/common/NestedMap.js";
 import {serializeJSON} from "/src/utils/marshal.js";
 import {DI_settings} from "/src/hooks.js";
 
-/**
- * 角色名：
- * 种族：
- * 年龄：
- * 性别：
- * 身份/表现/成就：
- * 性格：
- * 外貌/外观：
- * 人物关系：
- * 背景：
- * 其他(如能力等，没有可不填)
- */
-// TODO server 重建数据库也重建一下id
-
 const BLACKLIST_CHARS = new RegExp('[| &=?#{}<>:,]', 'g');
 const SOME = {};
 
-class FakeFile {
+export class VirtualFile {
 	kind = "file";
 	text;
 	constructor(fs, path) {
@@ -65,8 +51,7 @@ class FakeFile {
 		return new File([text], "unknown");
 	}
 }
-
-class FakeDirectory {
+export class VirtualDirectory {
 	kind = "directory";
 	/**
 	 *
@@ -74,7 +59,7 @@ class FakeDirectory {
 	 * @param {string[]} path
 	 * @param children=
 	 */
-	constructor(fs, path, children) {
+	constructor(fs, path = ["."], children) {
 		this.fs = fs;
 		this.path = path;
 		this.children = children || fs.getChildren(path);
@@ -92,7 +77,7 @@ class FakeDirectory {
 			const joinedKey = [...this.path, name];
 			const hook = val.get(NODE_VALUE);
 
-			yield [name, hook?.read ? new FakeFile(hook, joinedKey) : new FakeDirectory(this.fs, joinedKey, val)];
+			yield [name, hook?.read ? new VirtualFile(hook, joinedKey) : new VirtualDirectory(this.fs, joinedKey, val)];
 		}
 	}
 
@@ -101,13 +86,13 @@ class FakeDirectory {
 		const entries = children.get(name);
 		let hook;
 		if (entries?.size && !(hook = entries.get(NODE_VALUE))?.read) {
-			return hook?.handle || new FakeDirectory(this.fs, [...this.path, name], entries);
+			return hook?.handle || new VirtualDirectory(this.fs, [...this.path, name], entries);
 		}
 
 		hook = children.get(NODE_VALUE)?.dir(name, create, this);
 		if (hook) return hook;
 
-		if (create) throw "Creating directory is not supported on current parent";
+		if (create) throw "Creating directory is not supported in current directory";
 		throw 'Not exist or not directory';
 	}
 
@@ -115,13 +100,13 @@ class FakeDirectory {
 		const children = this.children;
 		const handle = children.get(name)?.get(NODE_VALUE);
 		if (handle?.read) {
-			return new FakeFile(handle, [...this.path, name]);
+			return new VirtualFile(handle, [...this.path, name]);
 		}
 
 		const hook = children.get(NODE_VALUE)?.file(name, create, this);
 		if (hook) return hook;
 
-		if (create) throw "Creating file is not supported on current parent";
+		if (create) throw "Creating file is not supported in current directory";
 		throw 'Not exist or not file';
 	}
 
@@ -157,7 +142,7 @@ const checkJson = (name) => {
 	return name.slice(0, -5);
 };
 
-const registry = new NestedMap();
+const CFG_ROOTS = new NestedMap();
 
 const kvTypes = ["memories"];
 const kvsTypes = ["st|char", "st|preset", "st|lorebook"];
@@ -167,11 +152,11 @@ const kvHandler = {
 	write: (type, value) => setKV(type, JSON.parse(value))
 };
 
-registry.set([".", "kv"], {
+CFG_ROOTS.set([".", "kv"], {
 	file(name, create) {
 		const path = checkJson(name);
 		if (kvTypes.includes(path))
-			return new FakeFile(kvHandler, decodeURI(path));
+			return new VirtualFile(kvHandler, decodeURI(path));
 	},
 	*entries() {
 		for (const type of kvTypes) {
@@ -187,13 +172,13 @@ const kvsHandler = {
 for (const type of kvsTypes) {
 	const handler = {
 		file(name, create) {
-			return new FakeFile(kvsHandler, [type, checkJson(name)]);
+			return new VirtualFile(kvsHandler, [type, checkJson(name)]);
 		},
 		/**
 		 *
 		 * @param {string[]} path
 		 * @param {NestedMap<string, Function>} fs
-		 * @returns {Generator<[string, FakeDirectory | FakeFile], void, *>}
+		 * @returns {Generator<[string, VirtualDirectory | VirtualFile], void, *>}
 		 */
 		async *entries(path, fs) {
 			const keys = await kvListGetKeys(type);
@@ -207,14 +192,14 @@ for (const type of kvsTypes) {
 	};
 
 	//registry.set([".", "kvs", type], handler);
-	registry.set([".", "kvs", fileEscape(type)], handler);
+	CFG_ROOTS.set([".", "kvs", fileEscape(type)], handler);
 }
 
 
 
 const convHandler = {
 	async read(convObj) {
-		await getMessages(convObj);
+		await getMessagesCacheFirst(convObj);
 		return serializeJSON(convObj, 2);
 	},
 	async write(convObj, data) {
@@ -228,13 +213,13 @@ const convHandler = {
 /** 为指定对话 id 创建 messages 处理器 */
 const convMessageHandler = {
 	async read([conv, id]) {
-		const msgs = await getMessages(conv);
+		const msgs = await getMessagesCacheFirst(conv);
 		const msg = msgs.find(m => m.id === id);
 		if (!msg) throw (`Message ${id} not found`);
 		return serializeJSON(msg, 2);
 	},
 	async write([conv, id], data) {
-		const msgs = await getMessages(conv);
+		const msgs = await getMessagesCacheFirst(conv);
 		const index = msgs.findIndex(m => m.id === id);
 		if (index < 0) throw (`Message ${id} not found`);
 		msgs[index] = JSON.parse(data);
@@ -243,14 +228,14 @@ const convMessageHandler = {
 }
 
 
-registry.set([".", "conversations", 0, "messages"], {
+CFG_ROOTS.set([".", "conversations", 0, "messages"], {
 	file(name, create, self) {
 		const conv = self.path.at(-2);
-		return new FakeFile(convMessageHandler, [conv, parseInt(checkJson(name), 10)]);
+		return new VirtualFile(convMessageHandler, [conv, parseInt(checkJson(name), 10)]);
 	},
 	async *entries(self) {
 		const conv = self.path.at(-2);
-		for (const message of await getMessages(conv)) {
+		for (const message of await getMessagesCacheFirst(conv)) {
 			yield [message.id+".json", FAKE_FILE_CONSTANT];
 		}
 	},
@@ -258,24 +243,24 @@ registry.set([".", "conversations", 0, "messages"], {
 		const conv = self.path.at(-2);
 		const id = parseInt(checkJson(name), 10);
 
-		const msgs = await getMessages(conv);
+		const msgs = await getMessagesCacheFirst(conv);
 		const index = msgs.findIndex(m => m.id === id);
 		if (index < 0) throw (`Message ${id} not found`);
 		msgs.splice(index, 1);
 		await updateConversation(conv, msgs, 1);
 	}
 });
-registry.set([".", "conversations", 0], {
+CFG_ROOTS.set([".", "conversations", 0], {
 	async file(name, create, self) {
 		if (name === "conversation.json") {
 			const conv = self.path.at(-1);
-			return new FakeFile(convHandler, conv);
+			return new VirtualFile(convHandler, conv);
 		}
 	},
 	dir(name, create, self) {
 		if (name === "messages") {
 			const conv = self.path.at(-1);
-			return new FakeDirectory(registry, [".", "conversations", conv, name], registry.getChildren([".", "conversations", 0, name]));
+			return new VirtualDirectory(CFG_ROOTS, [".", "conversations", conv, name], CFG_ROOTS.getChildren([".", "conversations", 0, name]));
 		}
 	},
 	*entries(self) {
@@ -284,13 +269,13 @@ registry.set([".", "conversations", 0], {
 	}
 });
 
-registry.set([".", "conversations"], {
+CFG_ROOTS.set([".", "conversations"], {
 	dir(name, create) {
 		const id = parseInt(name, 10);
 		if (id === selectedConversation.id) throw "Not allowed: modifying ACTIVE conversation will cause data loss";
 
 		const conv = unconscious(conversations).find(c => c.id === id);
-		if (conv) return new FakeDirectory(registry, [".", "conversations", conv], registry.getChildren([".", "conversations", 0]));
+		if (conv) return new VirtualDirectory(CFG_ROOTS, [".", "conversations", conv], CFG_ROOTS.getChildren([".", "conversations", 0]));
 	},
 	*entries() {
 		for (const {id} of unconscious(conversations)) {
@@ -316,9 +301,9 @@ export const deleteTempDirectory = async() => {
 
 const TEMP_DIRECTORY = {};
 Object.defineProperty(TEMP_DIRECTORY, "handle", { get: getTempDirectory });
-registry.set([".", "tmp"], TEMP_DIRECTORY);
+CFG_ROOTS.set([".", "tmp"], TEMP_DIRECTORY);
 
-registry.set([".", "config.json"], {
+CFG_ROOTS.set([".", "config.json"], {
 	read(name) {
 		const {endpoint, accessToken, db_server, db_pat, ...val} = unconscious(config);
 		return JSON.stringify(val, null, 2);
@@ -334,13 +319,29 @@ registry.set([".", "config.json"], {
 	},
 });
 
-const root = new FakeDirectory(registry, ["."]);
+const root = new VirtualDirectory(CFG_ROOTS);
 
 /**
  * 基于应用配置数据库的虚拟文件系统
  * @param {string} base - 根路径约束（如 "conversations"）
  * @returns {AiChat.FileSystemInstance}
  */
-export async function createVirtualFileSystem(base) {
-	return createWebFileSystem(await resolveDirectory(root, base || ""));
-}
+export const createConfigFileSystem = async base => createWebFileSystem(await resolveDirectory(root, base || ""));
+
+/**
+ *
+ * @type {Record<string, VirtualDirectory>}
+ */
+export const VFS_ROOTS = {
+	"": new VirtualDirectory(new NestedMap()) // 空文件系统
+};
+
+/**
+ * 自定义的虚拟文件系统
+ * @param {string} base - 根文件系统名称
+ * @returns {AiChat.FileSystemInstance}
+ */
+export const createVirtualFileSystem = async base => {
+	if (!VFS_ROOTS[base]) throw new Error("找不到虚拟文件系统实例 "+base);
+	return createWebFileSystem(VFS_ROOTS[base]);
+};

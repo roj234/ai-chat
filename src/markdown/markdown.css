@@ -16,11 +16,11 @@
     justify-content: space-between;
     align-items: center;
     font-size: smaller;
-    padding: 3px var(--spacing-sm);
+    padding: 2px var(--spacing-sm);
     background: #4a5568;
     color: #e2e8f0;
     /*border-bottom: 1px solid #718096;*/
-    border-radius: var(--border-radius-md) var(--border-radius-md) 0 0;
+    /*border-radius: var(--border-radius-md) var(--border-radius-md) 0 0;*/
 }
 code, kbd {
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;

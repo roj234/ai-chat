@@ -34,7 +34,6 @@ export const runSchemaRole = async (role, schema, messages, overrides) => {
 	conv.roleId = role;
 
 	return agentLoop(conv, msgs, {
-		...conf,
 		// 禁止调用工具
 		disableTools: true,
 		...overrides,

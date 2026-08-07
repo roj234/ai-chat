@@ -1,12 +1,12 @@
 import {IndexedDBAccess} from "/src/utils/dbAccess.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
-import {updateOnIntersected} from "/src/utils/utils.js";
+import {prettyError, updateOnIntersected} from "/src/utils/utils.js";
 import {SETTINGS} from "/src/settings.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {config, selectedConversation} from "/src/states.js";
 import {showToast} from "/src/components/Toast.js";
 import {createWebFileSystem, resolveDirectory} from "./WebFileSystem.js";
-import {createVirtualFileSystem} from "./VirtualFileSystem.js";
+import {createConfigFileSystem, createVirtualFileSystem} from "./VirtualFileSystem.js";
 import {ContentPart} from "/src/toolset.js";
 import {jsonFetch} from "/common/openai-api-utils.js";
 import {$state, debugSymbol, unconscious} from "unconscious";
@@ -14,6 +14,7 @@ import {formatSize} from "unconscious/common/Utils.js";
 import {isIDB} from "/src/database.js";
 import {SHA256} from "unconscious/common/SHA256.js";
 import "./fileAccess.css";
+import {normalizePath} from "unconscious/common/path-utils.js";
 
 /** @type {Map<string, {
  * handle: FileSystemDirectoryHandle,
@@ -21,12 +22,14 @@ import "./fileAccess.css";
  }>} */
 const webFileSystemInstances = new Map;
 
-const STORE_NAME = 'folders';
+const LOCAL_STORE_NAME = 'folders';
+const API_STORE_NAME = 'servers';
 const MAX_FOLDERS = 10;
 
-const [transaction, deleteDatabase] = IndexedDBAccess(APP_NAME+":fileAccess", 1, (event) => {
+const [transaction, deleteDatabase] = IndexedDBAccess(APP_NAME+":fileAccess", 2, (event) => {
 	const db = event.target.result;
-	db.createObjectStore(STORE_NAME, { keyPath: 'name' });
+	if (!db.objectStoreNames.contains(LOCAL_STORE_NAME)) db.createObjectStore(LOCAL_STORE_NAME, { keyPath: 'name' });
+	if (!db.objectStoreNames.contains(API_STORE_NAME)) db.createObjectStore(API_STORE_NAME, { keyPath: 'uri' });
 });
 
 /**
@@ -35,45 +38,50 @@ const [transaction, deleteDatabase] = IndexedDBAccess(APP_NAME+":fileAccess", 1,
  */
 const listFolders = () => {
 	return transaction((tx, resolve) => {
-		const request = tx.objectStore(STORE_NAME).getAll();
+		const request = tx.objectStore(LOCAL_STORE_NAME).getAll();
 		request.onsuccess = (event) => resolve(event.target.result.sort((a, b) => b.lastAccessed - a.lastAccessed));
-	}, false, STORE_NAME);
+	}, false, LOCAL_STORE_NAME);
 };
-
-/**
- * @param {string} name
- * @returns {Promise<{name: string, handle: FileSystemDirectoryHandle, lastAccessed: number} | null>}
- */
-const getFolder = name => transaction((tx) => tx.objectStore(STORE_NAME).get(name), false, STORE_NAME);
-
 /**
  * 新增或更新文件夹记录
  * @param {FileSystemDirectoryHandle} handle
  * @param {string} name
  */
 const upsertFolder = (handle, name) => transaction((tx) => {
-	tx.objectStore(STORE_NAME).put({
+	tx.objectStore(LOCAL_STORE_NAME).put({
 		name: name || handle.name,
 		handle,
 		lastAccessed: Date.now(),
 	});
 	listFolders().then(folders => {
-		folders.splice(MAX_FOLDERS).forEach(item => {
-			deleteFolder(item);
-		})
+		folders.splice(MAX_FOLDERS).forEach(item => deleteFolder(item))
 	})
-}, true, STORE_NAME);
-
+}, true, LOCAL_STORE_NAME);
 /**
  * 删除文件夹记录
  * @param {string} name
  */
-const deleteFolder = (name) => transaction((tx) => tx.objectStore(STORE_NAME).delete(name), true, STORE_NAME);
+const deleteFolder = (name) => transaction((tx) => tx.objectStore(LOCAL_STORE_NAME).delete(name), true, LOCAL_STORE_NAME);
+
+/** @returns {Promise<{uri: string, lastAccessed: number}[]>} */
+const listApiServers = () => transaction((tx, resolve) => {
+	const request = tx.objectStore(API_STORE_NAME).getAll();
+	request.onsuccess = event => resolve(event.target.result.sort((a, b) => b.lastAccessed - a.lastAccessed));
+}, false, API_STORE_NAME);
+
+/** @param {string} uri */
+const upsertApiServer = uri => transaction(tx => {
+	tx.objectStore(API_STORE_NAME).put({uri, lastAccessed: Date.now()});
+	listApiServers().then(servers => servers.splice(MAX_FOLDERS).forEach(item => deleteApiServer(item.uri)));
+}, true, API_STORE_NAME);
+
+/** @param {string} uri */
+const deleteApiServer = uri => transaction(tx => tx.objectStore(API_STORE_NAME).delete(uri), true, API_STORE_NAME);
 
 const directoryPickerAvailable = window.showDirectoryPicker;
 
 const FS_OPENING = debugSymbol("FS_OPENING");
-const FS_INSTANCE = debugSymbol("FS_INSTANCE");
+export const FS_INSTANCE = debugSymbol("FS_INSTANCE");
 
 async function initializeWebFileSystem(fs) {
 	if (!fs.fs) {
@@ -97,12 +105,6 @@ async function initializeWebFileSystem(fs) {
 	return fs.fs;
 }
 
-export const getFsApiUrlPat = () => {
-	let [baseUrl, pat] = (import.meta.env.DEV ? config.fs_server || "/api" : config.fs_server).split('@');
-	if (!baseUrl.endsWith('/')) baseUrl += '/';
-	baseUrl += "fs/";
-	return [baseUrl, pat];
-};
 const MSG = "文件系统API响应格式有误。此异常不可重试，无法恢复，请向系统管理员确认 URL 是否配置正确。";
 /**
  *
@@ -126,6 +128,60 @@ const ensureFsAvailability = async (baseUrl, pat) => {
 	if (json.pong !== exceptResult) throw MSG;
 };
 
+const chooseApiServer = async () => {
+	const servers = await listApiServers();
+	return new Promise((resolve, reject) => {
+		let el;
+		const useServer = async uri => {
+			uri = uri.trim();
+			if (!uri) return false;
+
+			const separator = uri.lastIndexOf('@');
+
+			let baseUrl = separator < 0 ? uri : uri.slice(0, separator);
+			const pat = separator < 0 ? undefined : uri.slice(separator + 1);
+			if (!baseUrl.endsWith('/')) baseUrl += '/';
+
+			const server = [baseUrl+"fs/", pat];
+
+			try {
+				await ensureFsAvailability(...server);
+			} catch (e) {
+				showToast(prettyError(e), 'error');
+				return false;
+			}
+
+			upsertApiServer(uri);
+			el?.remove();
+			resolve(server);
+		};
+
+		el = SimpleModal({
+			title: "🐳 缚印·择契",
+			message: (
+				<div className="md">
+					<p>欲借鲸力，先呈<ruby>通行之契<rt>文件系统访问 URI</rt></ruby>。旧契若仍在，叩之即可再用。</p>
+					<div className="agent-popup fs-options">
+						{servers.map(({uri}) => <div className="option">
+							<button className="btn ghost" onClick={() => useServer(uri)}>
+								🐳 {uri}
+								<button className="ri-delete-bin-line" title="删除最近访问项" onClick.stop={({target}) => {
+									deleteApiServer(uri);
+									target.closest("div").remove();
+								}}></button>
+							</button>
+						</div>)}
+					</div>
+				</div>
+			),
+			type: "input",
+			placeholder: "http://localhost:3003/api/@PAT",
+			confirmMessage: "缔结新契",
+			onConfirm: useServer,
+			onCancel: null
+		});
+	});
+};
 
 /**
  * 调用 File Browser Interface (FBI) 选择文件系统实现
@@ -148,39 +204,55 @@ async function callFBI(mountPoint) {
 		}
 	}
 
-	const getFSBase = (showShellWarning) => new Promise(resolve => {
-		SimpleModal({
-			type: "input",
-			title: "📌 定域",
-			message: (
-				<div className={"md"}>
-					<p>既择此道，须划定
-						<ruby>疆界
-							<rt>工作目录</rt>
-						</ruby>
-						。根为 <kbd>/</kbd>，然天道不可直取，当择一<span className="highlight"><ruby>子域<rt>子目录</rt></ruby></span>以安天下。
-					</p>
-					<p>例：<kbd>/my-project-1</kbd>，勿授全根，慎之。</p>
-					<p>此域日后仍可易之，入命<kbd>/fs_reset</kbd> 即可<ruby>改弦更张<rt>重置路径</rt></ruby>。</p>
-					{showShellWarning && <q>⚠️ <ruby>令咒<rt>命令</rt></ruby>可越藩篱，若于异容器中运行服务，则无此隐忧</q>}
-				</div>
-			),
-			value: "/"+(fs_base||''),
-			confirmMessage: "定此域",
-			accent: "primary",
-			onConfirm(value) {
-				resolve(value.startsWith('/') ? value.slice(1) : value);
-			},
-			onCancel: null
+	const getFSBase = async (showShellWarning, fsApi) => {
+		let directories = [];
+		if (fsApi) {
+			try {
+				const entries = await fsApi('list', {
+					path: '.',
+					pattern: '*',
+					json: true,
+					limit: 50,
+					showDir: true
+				});
+				directories = entries.filter(item => item[1] === 'dir').map(item => '/'+item[0]);
+			} catch (e) {
+				console.warn("读取文件系统目录失败", e);
+			}
+		}
+
+		const datalistId = "fsBase-"+crypto.randomUUID();
+		return new Promise(resolve => {
+			SimpleModal({
+				type: "input",
+				title: "📌 定域",
+				message: (
+					<div className={"md"}>
+						<p>既择此道，须划定<ruby>疆界<rt>工作目录</rt></ruby>。根为 <kbd>/</kbd>，然天道不可直取，当择一<span className="highlight"><ruby>子域<rt>子目录</rt></ruby></span>以安天下。</p>
+						<p>例：<kbd>/my-project-1</kbd>，勿授全根，慎之。</p>
+						<p>此域日后仍可易之，入命<kbd>/fsreset</kbd> 即可<ruby>改弦更张<rt>重置路径</rt></ruby>。</p>
+						{showShellWarning && <q>⚠️ <ruby>令咒<rt>命令</rt></ruby>可越藩篱，若于异容器中运行，则无此隐忧</q>}
+					</div>
+				),
+				value: "/"+(fs_base||''),
+				list: datalistId,
+				after: <datalist id={datalistId}>{directories.map(path => <option value={path}/>)}</datalist>,
+				confirmMessage: "定此域",
+				accent: "primary",
+				onConfirm(value) {
+					resolve(normalizePath(value).join('/'));
+				},
+				onCancel: null
+			});
 		});
-	});
+	};
 
 	if (!fs_type) {
 		fs_type = await new Promise((resolve, reject) => {
 			const el = SimpleModal({
 				title: "少年，与 "+(fs_name||"项目根目录")+" 签订契约吧！",
 				message: (
-					<div className={"file-protocols agent-popup"}
+					<div className={"fs-protocols agent-popup"}
 						 onClick.delegate{"button"}={({delegateTarget}) => {
 						el.remove();
 						resolve(delegateTarget.className);
@@ -189,10 +261,10 @@ async function callFBI(mountPoint) {
 							<button className={"db"} title={"数据库后端的文件访问服务"}>🗄️ 典藏</button>
 							<span>典于云端，多端同步如一。<br/>不可行令，记忆、角色等宜归于此。</span>
 						</div>}
-						{config.fs_server && <div>
+						<div>
 							<button className={"api"} title={"专用文件访问服务(见Readme.md)"}>🐳 缚印</button>
 							<span>缚于容器，如囚于笼，可运行万般程序。<br/>务必置于容器之内，方得施展。</span>
-						</div>}
+						</div>
 						{directoryPickerAvailable && <div>
 							<button className={"local"} title={"浏览器的showDirectoryPicker API"}>📁 启门</button>
 							<span>推开现世之扉，直抵本地文件。<br/>浏览器亲自操刀，无有阻隔。</span>
@@ -218,15 +290,14 @@ async function callFBI(mountPoint) {
 		});
 
 		if (fs_type === 'api') {
-			const [baseUrl, pat] = getFsApiUrlPat();
-			await ensureFsAvailability(baseUrl, pat);
-			// TODO  dialog for this
-			//mountPoint.fs_server = [baseUrl, pat];
-			fs_base = await getFSBase(1);
+			const server = await chooseApiServer();
+			mountPoint.fs_server = server;
+			fs_base = await getFSBase(1, remoteFileSystem(...server));
 		}
 		if (fs_type === 'opfs' || fs_type === 'db') {
-			if (fs_type === 'db') await ensureFsAvailability(config.db_server+'fs/', config.db_pat);
-			fs_base = await getFSBase(0);
+			const server = fs_type === 'db' && [config.db_server+'fs/', config.db_pat];
+			if (server) await ensureFsAvailability(...server);
+			fs_base = await getFSBase(0, server && remoteFileSystem(...server));
 		}
 		if (fs_type === 'config') {
 			fs_base = await new Promise((resolve, reject) => {
@@ -279,7 +350,7 @@ async function callFBI(mountPoint) {
 			return remoteFileSystem(config.db_server+'fs/', config.db_pat, fs_base);
 		}
 		case "api": {
-			const [baseUrl, pat] = mountPoint.fs_server || getFsApiUrlPat(config.fs_server);
+			const [baseUrl, pat] = mountPoint.fs_server;
 			return remoteFileSystem(baseUrl, pat, fs_base);
 		}
 		case "local": {
@@ -310,28 +381,7 @@ async function callFBI(mountPoint) {
 								fs
 							});
 							upsertFolder(handle, folderName);
-							if (mountPoint.fs_base !== folderName) {
-								mountPoint.fs_base = folderName;
-
-								SimpleModal({
-									title: "📁 启门·立新约",
-									message: (
-										<div className={"md"}>
-											<p>新门已立，名曰：<q>“{folderName}”</q>。</p>
-											<p>
-												日后每次归返，须<q><ruby>择同一门<rt>选择相同文件夹</rt></ruby></q>，方可再入此间。
-												倘误闯他门，则前尘尽断，无可追忆。
-											</p>
-											<em>
-												——<i>“今之所择为 <b>{folderName}</b>，来日亦当如是。”</i>
-											</em>
-										</div>
-									),
-									confirmMessage: `允`,
-									accent: 'ghost',
-									onCancel: null
-								});
-							}
+							mountPoint.fs_base = folderName;
 							return fs;
 						}).then(resolve).catch(reject).finally(() => el?.remove());
 
@@ -356,11 +406,7 @@ async function callFBI(mountPoint) {
 									曾启之门「<q>{fs_base}</q>」<ruby>虽铭于心，却未寻得实径<rt>浏览器文件系统刷新后失效</rt></ruby>。
 								</blockquote>}
 								{webFileSystemInstances.size && <p>{fs_base ? "若欲改投他门，可叩下方已存之门扉；": "故门仍在，一触即入，旧卷悉陈。"}</p>}
-								<div className={"agent-popup"} style={{
-									display: "flex",
-									"flex-wrap": "wrap",
-									gap: "0.5rem"
-								}}>
+								<div className={"agent-popup fs-options"}>
 									{Array.from(webFileSystemInstances.entries()).map(([name, instance]) => (
 										<div className="option">
 											<button className="btn ghost"
@@ -396,7 +442,8 @@ async function callFBI(mountPoint) {
 			if (fs_base) baseDir = await resolveDirectory(baseDir, fs_base, {create:true});
 			return createWebFileSystem(baseDir);
 		}
-		case "config": return createVirtualFileSystem(fs_base);
+		case "config": return createConfigFileSystem(fs_base);
+		case "vfs": return createVirtualFileSystem(fs_base);
 	}
 }
 
@@ -542,15 +589,6 @@ updateOnIntersected(opfsDialog, updateEstimate);
 export const FILESYSTEM_AUX_PROMPT = debugSymbol("ShellAvailabilityKnown");
 
 SETTINGS.push({
-	id: "fs_server",
-	_tab: "tools",
-	name: "专用文件访问服务",
-	title: "可选, 提供文件访问和命令执行功能\n请在容器中部署",
-	type: "input",
-	pattern: /^(\/|https?:\/\/)/,
-	warning: "请输入合法的API端点",
-	placeholder: "http://localhost:1/api/"
-}, {
 	_tab: "tools",
 	type: "element",
 	element: opfsDialog
@@ -567,15 +605,23 @@ SETTINGS.push({
 	}
 });
 
+/**
+ *
+ * @param {AiChat.Conversation} conv
+ */
+export const resetFileAccessSettings = conv => {
+	delete conv.fs_base;
+	delete conv.fs_type;
+	delete conv.fs_server;
+	delete conv[FS_INSTANCE];
+	delete conv[FILESYSTEM_AUX_PROMPT];
+};
+
 COMMAND_REGISTRY["fsreset"] = [
 	(args) => {
 		const conv = unconscious(selectedConversation);
 		if (!conv) return;
-
-		delete conv.fs_base;
-		delete conv.fs_type;
-		delete conv[FS_INSTANCE];
-		delete conv[FILESYSTEM_AUX_PROMPT];
+		resetFileAccessSettings(conv);
 		showToast("下一次文件操作将要求重新选择");
 	},
 	"重置文件系统选择"

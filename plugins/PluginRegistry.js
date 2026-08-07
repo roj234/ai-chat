@@ -65,6 +65,7 @@ import {createDragSort} from "/common/DragSort.js";
 import {registerSchemaMessageRole} from "/common/ReactiveJSON.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {GetTime} from "./tools/rp_kit/interactive_simulation.js";
+import {markMessageDirty} from "/src/database.js";
 
 // 时间工具
 registerToolset("GetTime", "获取时间", [GetTime], {
@@ -80,6 +81,7 @@ window.AiChatAPI = {
 	registerCommand(name, desc, callback) {
 		COMMAND_REGISTRY[name] = [callback, desc];
 	},
+	markMessageDirty,
 	ContentPart,
 	config,
 	conversation: selectedConversation,
@@ -143,6 +145,11 @@ const pluginDefinitions = [
 		name: "耗时分析",
 		description: "使用 `/actime` 命令查看当前对话的分析",
 		load: () => import("./actime/actime.js")
+	},
+	{
+		name: "微信机器人 (WIP)",
+		description: "开发中",
+		load: () => import("./chatbot/chatbot.js")
 	},
 ];
 

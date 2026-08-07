@@ -1,5 +1,5 @@
 
-.file-protocols {
+.fs-protocols {
     display: flex;
     flex-direction: column;
     gap: 16px;
@@ -57,4 +57,18 @@
 
 .agent-popup button:hover {
     transform: translateY(-1px);
+}
+
+.fs-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+
+    & .option > button {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        overflow-wrap: anywhere;
+    }
 }

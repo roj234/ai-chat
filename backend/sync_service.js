@@ -357,7 +357,7 @@ export function createSyncManager(wss) {
 				case 'message/delete':
 					if (false === resp) return;
 					code = SYNC_MESSAGE_DEL;
-					body = {id: body};
+					body = {id: body, owner: resp};
 					shouldSend = (client) => client.id !== clientId && client.locked.has(resp);
 				break;
 				case 'kv/set':

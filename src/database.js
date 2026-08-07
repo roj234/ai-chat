@@ -1,13 +1,17 @@
-import {debugSymbol} from 'unconscious';
-import {BRANCH_MANAGER, config, LOCKED} from "./states.js";
+import {debugSymbol, unconscious} from 'unconscious';
+import {BRANCH_MANAGER, config, CONFIG_VERSION, LOCKED} from "./states.js";
 import {deepEqual, delta} from "unconscious/common/deepEqual.js";
 import {prettyError} from "./utils/utils.js";
 import * as idb from "./database/indexedDB.js";
 import * as remote from "./database/remoteDB.js";
 import {showToast} from "./components/Toast.js";
 
-export const DB_MESSAGES_DIFF = debugSymbol("DB_MESSAGES_DIFF");
-export const DB_CONVERSATION_DIFF = debugSymbol("DB_CONVERSATION_DIFF");
+export const MESSAGES_SNAPSHOT = debugSymbol("MessagesSnapshot");
+export const CONVERSATION_SNAPSHOT = debugSymbol("ConversationSnapshot");
+export const PENDING_UPDATE = debugSymbol("PendingUpdate");
+export const MESSAGES_CACHE = debugSymbol("Messages");
+const MESSAGE_IS_CLEAN = debugSymbol("Clean");
+
 export const DONE = Promise.resolve();
 
 export const databaseError = err => {
@@ -21,19 +25,79 @@ const db = isIDB ? idb : remote;
 export const {
 	initialize,
 	deleteDatabase,
+
 	/**
 	 * 列出所有会话，按创建时间降序
 	 * @param {number=} lastTimestamp 304 时间戳
 	 * @returns {Promise<Array<{id:number, title:string, time:number}>>}
 	 */
 	listConversations,
-	getKV, setKV,
-	kvListGetValues, kvListSet, kvListDel, kvListGetKeys, kvListGet,
 	searchMessages,
-	uploadBlob, getBlob,
+
+	/**
+	 * 读取KV存储
+	 * @param {string} key
+	 * @param {import("unconscious").Reactive<any>=} callback
+	 * @returns {Promise<any>}
+	 */
+	getKV,
+	/**
+	 * 创建、更新或删除KV存储
+	 * @param {string} key
+	 * @param {Object & Partial<AiChat.IDBKVList>} value
+	 * @returns {Promise<void>}
+	 */
+	setKV,
+
+	/**
+	 * 获取KV列表中的一项
+	 * @param {string} type
+	 * @param {string} name
+	 * @returns {Promise<Object & AiChat.IDBKVList>}
+	 */
+	kvListGet,
+	/**
+	 * 创建或更新KV列表的项目
+	 * @param {Object & AiChat.IDBKVList} value
+	 * @param {string=} type
+	 * @param {string=} name
+	 * @returns {Promise<number>}
+	 */
+	kvListSet,
+	/**
+	 * 删除KV列表一项
+	 * @param {string} type
+	 * @param {string} name
+	 * @returns {Promise<void>}
+	 */
+	kvListDel,
+	/**
+	 * 读取KV列表的keys
+	 * @param {string} type
+	 * @param {import("unconscious").Reactive<AiChat.IDBKVList[]>=} callback
+	 * @returns {Promise<AiChat.IDBKVList[]>}
+	 */
+	kvListGetKeys,
+	/**
+	 * 读取KV列表的所有项
+	 * @param {string | '*'} type
+	 * @returns {Promise<(Object & AiChat.IDBKVList)[]>}
+	 */
+	kvListGetValues,
+
+	uploadBlob,
+	getBlob,
+
+	getBillingLog,
 	listBillingLogs
 } = db;
 
+/**
+ * @param {AiChat.Message} message
+ */
+export const markMessageDirty = (message) => {
+	delete message[MESSAGE_IS_CLEAN];
+};
 
 /**
  * 清除对话的脏标记
@@ -41,48 +105,69 @@ export const {
  * @param {number} id
  * @param {AiChat.Message} message
  */
-export const clearDirtyFlags = (conversation, id, message) => {
+export const clearMessageDirty = (conversation, id, message) => {
 	/** @type {Map<number, AiChat.Message>} */
-	const m = conversation[DB_MESSAGES_DIFF];
+	const m = conversation[MESSAGES_SNAPSHOT];
 	if (message) m.set(id, structuredClone(message));
 	else m.delete(id);
 }
+
+/**
+ * @template {Function} T
+ * @param {T} fn
+ * @return {T}
+ */
+const throttledPromise = (fn) => {
+	const map = new Map();
+	return (arg0) => {
+		let promise = map.get(arg0);
+		if (!promise) {
+			promise = fn(arg0);
+			map.set(arg0, promise);
+			promise.finally(() => map.delete(arg0));
+		}
+		return promise;
+	}
+};
+
+const getMessages_ = throttledPromise(db.getMessages);
+
+/**
+ * 获取一个会话的消息，缓存优先
+ * @param {AiChat.Conversation} conversation 对话
+ * @param {boolean} [noStore] 结果不保存到缓存
+ * @returns {Promise<AiChat.Message[]>}
+ */
+export const getMessagesCacheFirst = async (conversation, noStore) => (conversation[MESSAGES_CACHE] || (noStore ? getMessages_(conversation) : getMessages(conversation)));
 
 /**
  * 获取一个会话的消息
  * @param {AiChat.Conversation} conversation 对话
  * @returns {Promise<AiChat.Message[]>}
  */
-export const getMessages = conversation => (
-	db.getMessages(conversation).then(messages => {
-		/** @type {Map<number, AiChat.Message>} */
-		const m = new Map();
+export const getMessages = throttledPromise(conversation => (
+	getMessages_(conversation).then(messages => {
+		conversation[CONVERSATION_SNAPSHOT] = structuredClone(conversation);
 
-		conversation[DB_CONVERSATION_DIFF] = structuredClone(conversation);
-		conversation[DB_MESSAGES_DIFF] = m;
+		if (messages !== conversation[MESSAGES_CACHE]) {
+			/** @type {Map<number, AiChat.Message>} */
+			const m = new Map();
 
-		for (let message of messages) {
-			delete message.owner;
-			m.set(message.id, structuredClone(message));
+			conversation[MESSAGES_SNAPSHOT] = m;
+			conversation[MESSAGES_CACHE] = messages;
+
+			for (let message of messages) {
+				delete message.owner;
+				m.set(message.id, structuredClone(message));
+				message[MESSAGE_IS_CLEAN] = true;
+			}
 		}
 
 		return messages;
 	})
-);
+));
 
 const DIFF_IGNORE_KEYS = new Set(["id", "ready"]);
-const WAITING = debugSymbol("UPDATE_WAIT")
-
-/**
- * @param {AiChat.Conversation} conversation
- * @returns {Promise<AiChat.Message[]>}
- */
-export const getMessageCache = async (conversation) => {
-	const prevUpdate = conversation[WAITING];
-	if (prevUpdate) await prevUpdate;
-	const cache = conversation[DB_MESSAGES_DIFF];
-	return cache && [...cache.values()];
-}
 
 /**
  * 更新会话
@@ -94,13 +179,13 @@ export const getMessageCache = async (conversation) => {
 export const updateConversation = async (conversation, messages, keepTime) => {
 	if (config.incognito || conversation[LOCKED]) return;
 
-	const prevUpdate = conversation[WAITING];
+	const prevUpdate = conversation[PENDING_UPDATE];
 	if (prevUpdate) await prevUpdate;
 
 	let promises = [];
 	let changed = (diff) => {
 		changed = null;
-		conversation[DB_CONVERSATION_DIFF] = structuredClone(conversation);
+		conversation[CONVERSATION_SNAPSHOT] = structuredClone(conversation);
 		const updateAndThen = db.upsertConversation(diff);
 		promises.push(updateAndThen);
 		return updateAndThen;
@@ -108,7 +193,7 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 
 	// 新对话
 	if (!("id" in conversation)) {
-		conversation[DB_MESSAGES_DIFF] = new Map;
+		conversation[MESSAGES_SNAPSHOT] = new Map;
 		const {ready, ...rest} = conversation;
 		conversation.id = null;
 		const promise = changed(rest).then(id => {
@@ -124,7 +209,7 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 		/**
 		 * @type {Map<number, AiChat.Message>}
 		 */
-		const messagesInDB = conversation[DB_MESSAGES_DIFF];
+		const messagesInDB = conversation[MESSAGES_SNAPSHOT];
 		/**
 		 * @type {Map<number, AiChat.Message>}
 		 */
@@ -140,8 +225,11 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 				const snapshot = messagesInDB.get(id);
 				messagesInDB.delete(id);
 
-				diff = isIDB ? !deepEqual(snapshot, message, DIFF_IGNORE_KEYS) : delta(snapshot, message, DIFF_IGNORE_KEYS);
+				if (!message[MESSAGE_IS_CLEAN]) {
+					diff = isIDB ? !deepEqual(snapshot, message, DIFF_IGNORE_KEYS) : delta(snapshot, message, DIFF_IGNORE_KEYS);
+				}
 				if (!diff) {
+					message[MESSAGE_IS_CLEAN] = true;
 					messagesInMemory.set(id, snapshot);
 					continue;
 				}
@@ -162,16 +250,17 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 				if (message.id > 0) diff.id = message.id;
 				else delete diff.id;
 				diff.owner = conversation.id;
-				const saveTime = message.time;
+
 				const savedState = structuredClone(message);
+				message[MESSAGE_IS_CLEAN] = true;
 
 				return db.upsertMessage(diff).then((id) => {
 					snapshot = savedState;
 					message.id = snapshot.id = id;
-					conversation[DB_MESSAGES_DIFF].set(id, snapshot);
+					conversation[MESSAGES_SNAPSHOT].set(id, snapshot);
 
 					// 消息在RTT内又修改了，重新更新
-					if (message.time !== saveTime) {
+					if (!message[MESSAGE_IS_CLEAN]) {
 						diff = delta(snapshot, message, DIFF_IGNORE_KEYS);
 						if (diff) return save();
 					}
@@ -188,19 +277,19 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 			messagesInDB.forEach((value, id) => promises.push(db.deleteMessage(id, conversation)));
 		}
 
-		conversation[DB_MESSAGES_DIFF] = messagesInMemory;
+		conversation[MESSAGES_SNAPSHOT] = messagesInMemory;
 	}
 
 	let convDiff;
-	if (changed && (convDiff = isIDB ? (!deepEqual(conversation[DB_CONVERSATION_DIFF], conversation, DIFF_IGNORE_KEYS) && conversation) : delta(conversation[DB_CONVERSATION_DIFF], conversation, DIFF_IGNORE_KEYS))) {
+	if (changed && (convDiff = isIDB ? (!deepEqual(conversation[CONVERSATION_SNAPSHOT], conversation, DIFF_IGNORE_KEYS) && conversation) : delta(conversation[CONVERSATION_SNAPSHOT], conversation, DIFF_IGNORE_KEYS))) {
 		convDiff.id = conversation.id;
 		changed(convDiff);
 	}
 
 	const wait = Promise.all(promises).catch(databaseError);
-	conversation[WAITING] = wait;
+	conversation[PENDING_UPDATE] = wait;
 	await wait;
-	delete conversation[WAITING];
+	delete conversation[PENDING_UPDATE];
 };
 
 /**
@@ -223,7 +312,22 @@ export const appendBillingLog = log => {
 	return db.appendBillingLog(log);
 };
 
-export const getBillingLog = messageId => {
-	if (messageId == null) return DONE;
-	return db.getBillingLog(messageId);
-};
+const MERGED_CONFIG = debugSymbol("MergedConfig");
+
+/**
+ *
+ * @param {AiChat.Conversation} conv
+ * @return {Promise<AiChat.LocalPreset>}
+ */
+export const getCombinedPreset = async (conv) => {
+	const globalPreset = unconscious(config);
+	if (!conv.overrides && !conv.preset) return globalPreset;
+
+	let combined = conv[MERGED_CONFIG];
+	if (!combined || combined[CONFIG_VERSION] !== globalPreset[CONFIG_VERSION]) {
+		combined = conv[MERGED_CONFIG] = {...globalPreset};
+		if (conv.preset) Object.assign(combined, await kvListGet('preset', conv.preset));
+		if (conv.overrides) Object.assign(combined, conv.overrides);
+	}
+	return combined;
+}

@@ -1,5 +1,5 @@
 import {jsHide} from "../utils/utils.js";
-import {$state, $watch} from "unconscious";
+import {$state, $watch, unconscious} from "unconscious";
 import {SETTINGS} from "../settings.js";
 
 import "./SettingDialog.css";
@@ -94,7 +94,6 @@ export function SettingDialog(oldUI) {
 				}}</b>
 					<button className="ri-close-line btn ghost" style={"border:none"}
 							onClick={() => {
-								setTransparent(false);
 								jsHide(dialog);
 							}}></button>
 				</div>
@@ -107,10 +106,20 @@ export function SettingDialog(oldUI) {
 		</div>
 	</div>;
 
-	$watch(currentTab, () => {
-		body.replaceChildren(...tabs[currentTab.value].elements);
-		setTransparent(currentTab.value === "appearance");
-	});
+	const refreshTab = () => {
+		const tab = unconscious(currentTab);
+		body.replaceChildren(...tabs[tab].elements);
+		setTransparent(tab === "appearance");
+	};
+
+	$watch(currentTab, refreshTab);
+
+	const tabUpdate = new IntersectionObserver((logs) => {
+		const data = logs.at(-1).isIntersecting;
+		if (!data) setTransparent(false);
+		else refreshTab();
+	}, { threshold : 0 });
+	tabUpdate.observe(dialog);
 
 	dialog.showHide = (pattern, display) => {
 		for (let element of elements) {

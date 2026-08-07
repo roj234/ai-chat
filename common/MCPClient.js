@@ -39,7 +39,7 @@ export class MCPClient {
 		this.options = options;
 	}
 
-	get isOpen() { return this.#connectPromise; }
+	get isOpen() { return this.#serverInfo != null; }
 	get serverInfo() { return this.#serverInfo; }
 	get lastError() { return this.#error; }
 

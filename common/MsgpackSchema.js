@@ -1,12 +1,12 @@
 import {bakeSchema} from "unconscious/common/msgpack.js";
 
-export const msgpack_schema_version = "12";
+export const msgpack_schema_version = "13";
 export const msgpack_schema = [];
 msgpack_schema.push(
 	// generic
 	"id", "title", "time", "owner",
 	"type", "name", "parent",
-	["$", msgpack_schema, ["BlobH", "Map", "Set", "SET", "ARR", "DEL", "STR"]],
+	["$", msgpack_schema, ["BlobH", "Map", "Set", "=", "-", "s", "["]],
 	"hash", "size", "lastModified",
 	"error",
 	"status",

@@ -1,7 +1,8 @@
 import {$state, $update} from "unconscious";
 import {submitUserChatMessage} from "/src/api-request.js";
 import {getToolParameters} from "/src/toolset.js";
-import {messages} from "../../../src/states.js";
+import {LOCKED, messages, selectedConversation} from "/src/states.js";
+import {markMessageDirty} from "/src/database.js";
 
 /**
  * @type {AiChat.FunctionTool<{
@@ -47,7 +48,7 @@ export const SetTimeout = {
 		return `等待 ${par.timeout}s: ` + par.label;
 	},
 
-	script({ timeout, deadline, label }, response)  {
+	script({ timeout, deadline, label }, response, conv)  {
 		let ddl;
 		if (timeout != null) {
 			if (deadline) throw 'Both timeout and deadline are specified';
@@ -61,24 +62,34 @@ export const SetTimeout = {
 
 		response.time = Date.now();
 		response.deadline = ddl;
+
+		if (conv.owner) {
+			return new Promise((resolve) => {
+				setTimeout(() => resolve("timeout"), ddl - response.time);
+			});
+		}
+
 		return ''
 	},
-	keyFunc(keys, response, frozen) {
+	keyFunc(keys, response, frozen, message) {
 		keys.push(frozen);
-		if (frozen && !response.content) {
+		if (frozen && "" === response.content) {
 			const deadline = response.deadline;
 			response.content = `userInput (${deadline - Date.now()}ms remaining)`;
+			markMessageDirty(message);
 		}
 	},
-	renderer(response, has_successor, call) {
+	renderer(response, has_successor, call, message) {
 		if (has_successor) return;
 
 		const args = getToolParameters(response, call);
-		if (null == response.success) {
+		const interactive = !selectedConversation.owner;
+		if (interactive && null == response.success) {
 			response.success = true;
 			response.content = SetTimeout.script(args, response);
-			$update(messages);
-		} else if (!response.success) return;
+			markMessageDirty(message);
+			$update(messages); // save
+		} else if (response.deadline == null) return;
 
 		let start = response.time || Date.now();
 		const deadline = response.deadline;
@@ -87,8 +98,10 @@ export const SetTimeout = {
 		const percent = $state(start < deadline ? 0 : 100);
 
 		const onFinish = () => {
-			if (!response.content) {
+			if (!response.content && !selectedConversation[LOCKED]) {
 				response.content = `timeout`;
+				response.success = true;
+				markMessageDirty(message);
 				submitUserChatMessage(true);
 			}
 		};

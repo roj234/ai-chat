@@ -8,10 +8,11 @@ import {
 	getCurrentTheme,
 	inputText,
 	isLlamaCppBackend,
-	lastScrollDirection,
+	lastScrollDirectionIsUp,
 	LOCKED,
 	MessageRoles,
 	messages,
+	PAGE_TITLE,
 	PROGRESS,
 	runningConversations,
 	selectedConversation,
@@ -24,7 +25,15 @@ import {$stampLock, $state, $update, $watch, AS_IS, debugSymbol, isReactive, unc
 import {showToast} from "./components/Toast.js";
 import failure from "../media/failure.js";
 import complete from "../media/complete.js";
-import {appendBillingLog, DB_MESSAGES_DIFF, isIDB, kvListGet, updateConversation} from "./database.js";
+import {
+	appendBillingLog,
+	getCombinedPreset,
+	isIDB,
+	kvListGet,
+	markMessageDirty,
+	MESSAGES_SNAPSHOT,
+	updateConversation
+} from "./database.js";
 import {BODY_PARAMETERS, defaultCoTPrompt, defaultSystemPrompt, defaultTitlePrompt} from "./settings.js";
 import {createJsonStream} from "/common/StreamJsonSerializer.js";
 import {createAntiSlopSampler} from "./anti-slop-sampler.js";
@@ -34,7 +43,7 @@ import {setConversationTitle} from "./components/ConversationList.jsx";
 import {deepEntries, jsonEval} from "unconscious/common/json-schema-utils.js";
 import {applyDelta, jsonFetch, ORIGINAL_ERROR, sseFetch} from "/common/openai-api-utils.js";
 import {base64DecodeToUint8Array} from "unconscious/common/Base64.js";
-import {DI_messageContainer} from "./hooks.js";
+import {DI, DI_messageContainer} from "./hooks.js";
 import {objectIdentityHash} from "../common/object-hash.js";
 import {encodeObjects} from "./utils/marshal.js";
 import {SHA256} from "unconscious/common/SHA256.js";
@@ -53,31 +62,37 @@ export const updateStatusText = (text, tone = '') => {
 export const submitUserChatMessage = async (loop) => {
 	const conv = unconscious(selectedConversation);
 	const messages_ = $stampLock(messages);
-	const config_ = unconscious(config);
+	DI.lock?.(conv.id);
 
-	let result;
-	do {
-		result = await agentLoop(conv, messages_, config_);
-	} while (result  === 'tool_calls' && loop);
-	return result;
+	try {
+		let result;
+		do {
+			result = await agentLoop(conv, messages_, null, !loop);
+		} while (result === 'tool_calls' && loop);
+		return result;
+	} finally {
+		DI.unlock?.(conv.id);
+	}
 };
 
 /**
  *
  * @param {AiChat.Conversation} conversation
  * @param {import("unconscious").Reactive<AiChat.Message[]>} messages
- * @param {AiChat.Preset & {
+ * @param {AiChat.LocalPreset & {
  *     renderer?: Function
- * }} config
+ * }} [cfg]
+ * @param {boolean} [__skipToolCall]
  * @returns {Promise<false|string>}
  */
-export async function agentLoop(conversation, messages, config) {
+export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 	if (runningConversations.has(conversation.id)) throw new Error("Loop already running");
 
-	const overrides = conversation.overrides;
-	if (overrides) config = { ...config, ...overrides };
+	const convCombined = await getCombinedPreset(conversation);
+	if (cfg) cfg = { ...convCombined, ...cfg };
+	else cfg = convCombined;
 
-	let markdownRenderer = config.afkState === 2 ? (content, container) => container && (container.textContent = content) : createMarkdownStream();
+	let markdownRenderer = cfg.afkState === 2 ? (content, container) => container && (container.textContent = content) : createMarkdownStream();
 	let updateCount = 0;
 	let lastContent;
 	let waitingForContent;
@@ -121,7 +136,7 @@ export async function agentLoop(conversation, messages, config) {
 
 		markdownRenderer(isThinking ? content.think.content : schemaPreprocess(content.content), container, isThinking ? DONT_PARSE_HTML_IN_THINKING : null);
 
-		if (atBottom < 250 && !lastScrollDirection.value) DI_messageContainer.vl.scrollTo(DI_messageContainer.scrollHeight);
+		if (atBottom < 250 && !unconscious(lastScrollDirectionIsUp)) DI_messageContainer.vl.scrollTo(DI_messageContainer.scrollHeight);
 	};
 	const renderer = (type, content) => {
 		if (selectedConversation.id !== conversation.id) return;
@@ -163,8 +178,13 @@ export async function agentLoop(conversation, messages, config) {
 		messages
 	});
 
-	if (config.wakelock) setWakeLock(true);
-	$update(updateConversationListUI);
+	if (!IS_ANDROID_BUILD) document.title = `工作中(${runningConversations.size}) - ${PAGE_TITLE}`;
+
+	if (cfg.wakelock) setWakeLock(true);
+	$update(updateConversationListUI)
+
+	// 在流开始之前检查 LOCKED 状态
+	const writeProtect = conversation[LOCKED];
 	try {
 		// retry via context.retry
 		const result = await new Promise((resolve, reject) => {
@@ -182,7 +202,7 @@ export async function agentLoop(conversation, messages, config) {
 				lastRequest = sendCompletionRequest(
 					conversation,
 					messages,
-					!config.disableTools,
+					!cfg.disableTools,
 					unconscious(abort),
 					renderer,
 					context,
@@ -215,26 +235,28 @@ export async function agentLoop(conversation, messages, config) {
 		const assistantMessage = messages.at(-1);
 
 		// 读锁也应该能看消息
-		const writeProtect = conversation[LOCKED];
 		if (writeProtect) {
-			finishReason = 'interrupt';
+			updateStatusText("");
 			messages.pop();
+			return 'interrupt';
 		}
 
+		const messages_uc = unconscious(messages);
 		const tone = FINISH_REASON_TONE[finishReason];
-		const is_ok = tone != null;
+		const isForeground = selectedConversation.id === conversation.id;
+		let is_ok = tone != null;
 
 		const promises = [];
 		const commitMessage = async () => {
 			if (writeProtect) return;
-			if (promises.length) return Promise.all(promises);
+			if (!promises.length) {
 
 			let needUpdate;
 			const resumeId = conversation.resumeId;
 			if (finishReason !== 'error' || assistantMessage.error?.trim() !== "network error"/* fetch */) {
 				if (resumeId) {
-					promises.push(jsonFetch(resolveDBRelativeURL(config.endpoint)+"/abort/"+resumeId, {
-						key: config.accessToken,
+					promises.push(jsonFetch(resolveDBRelativeURL(cfg.endpoint)+"/abort/"+resumeId, {
+						key: cfg.accessToken,
 						method: 'POST'
 					}).catch(e => {
 						showToast("Abort接口调用失败\n"+e, 'error');
@@ -245,13 +267,14 @@ export async function agentLoop(conversation, messages, config) {
 			} else {
 				if (resumeId) {
 					assistantMessage.error = '连接意外中止\n服务器支持断线重连\n请点击输入框的【继续】按钮';
-					$update(updateMessageUI);
+					if (isForeground) $update(updateMessageUI);
 				}
 			}
 
 			const needLog = result.request_id && (finishReason !== 'error' || result.input_tokens);
 			if (needUpdate || needLog || hasContent(assistantMessage)) {
-				promises.push(updateConversation(conversation, unconscious(messages)));
+				markMessageDirty(assistantMessage);
+				promises.push(updateConversation(conversation, messages_uc));
 
 				if (needLog) {
 					isIDB && await promises.at(-1);
@@ -259,64 +282,66 @@ export async function agentLoop(conversation, messages, config) {
 					promises.push(appendBillingLog(result));
 				}
 			}
+
+			}
+			return Promise.all(promises);
 		};
 
-		const isForeground = selectedConversation.id === conversation.id;
-		const userInterrupt = isForeground && inputText.trim();
+		const hasPendingInput = isForeground && inputText.trim();
+		if (tone === '' && !__skipToolCall && !hasPendingInput && !(cfg.maxToolTurns && !(countAgenticTurns(messages_uc) % cfg.maxToolTurns))) {
+			const timer = setTimeout(commitMessage, 2000);
+			addEventListener("beforeunload", commitMessage);
 
-		if (assistantMessage.tool_calls) {
-			const runToolsGuard = () => {
-				const timer = setTimeout(commitMessage, 2000);
-				addEventListener("beforeunload", commitMessage);
-				const promise = runTools(assistantMessage, conversation);
-				promise.finally(() => {
-					removeEventListener("beforeunload", commitMessage);
-					clearTimeout(timer);
-				});
-				return promise;
-			};
-
-			const skipToolCalls = userInterrupt || !is_ok || (config.maxToolTurns && !(countAgenticTurns(messages) % config.maxToolTurns));
-			if (skipToolCalls || !await runToolsGuard()) {
-				if (skipToolCalls) assistantMessage.tool_responses = assistantMessage.tool_calls.map(tc => ({[TOOL_NAME]: tc.function.name}));
-
-				if (config.sound === "always" || !document.hasFocus())
-					skipToolCalls ? complete() : failure();
-
-				// 如果存在可能需要批准的工具调用
-				finishReason = 'interrupt';
+			try {
+				is_ok = await runTools(assistantMessage, conversation);
+			} finally {
+				removeEventListener("beforeunload", commitMessage);
+				clearTimeout(timer);
 			}
 
-			$update(updateMessageUI);
+			if (!is_ok) finishReason = 'interrupt';
+
+			if (isForeground) $update(updateMessageUI);
+		} else if (assistantMessage.tool_calls) {
+			assistantMessage.tool_responses = assistantMessage.tool_calls.map(tc => ({ [TOOL_NAME]: tc.function.name }));
+			if (isForeground) $update(updateMessageUI);
 		}
 
 		updateStatusText("");
 
 		await commitMessage();
 
-		if (userInterrupt) finishReason = 'userInput';
-		if ('interrupt' !== finishReason) {
+		const generateTitleIfApplicable = async (finishReason, assistantMessage) => {
 			if ('error' !== finishReason) {
 				if (!conversation.title && assistantMessage.content) {
-					generateChatTitle(conversation, messages, config);
+					await generateChatTitle(conversation, messages_uc, config);
 				}
 			}
+		};
 
-			if ('tool_calls' !== finishReason) {
-				if (config.sound) {
-					if (config.sound === "always" || !document.hasFocus())
-						is_ok ? complete() : failure();
-				}
+		const hasPendingInput2 = isForeground && inputText.trim();
+		if (hasPendingInput2) finishReason = 'userInput';
+		if ('tool_calls' !== finishReason) {
+			await generateTitleIfApplicable(finishReason, assistantMessage);
 
-				if (!isForeground && config.afkState < 2)
-					showToast("对话 "+conversation.title+"(#"+conversation.id+") 已结束", tone ?? "error");
+			if (cfg.sound) {
+				if (cfg.sound === "always" || !document.hasFocus())
+					is_ok ? complete() : failure();
 			}
+
+			if (!isForeground && cfg.afkState < 2 && !cfg.disableFinishToast)
+				showToast(`对话 ${conversation.title}(#${conversation.id}) 已结束 (${finishReason})`, tone ?? "error");
+		} else if (cfg.generateTitle === 'eager') {
+			await generateTitleIfApplicable(finishReason, assistantMessage);
 		}
 
 		return finishReason;
 	} finally {
 		runningConversations.delete(conversation.id);
-		if (!runningConversations.size) setWakeLock(false);
+		const runningNow = runningConversations.size;
+		if (!runningNow) setWakeLock(false);
+
+		if (!IS_ANDROID_BUILD) document.title = runningNow ? `工作中(${runningNow}) - ${PAGE_TITLE}` : PAGE_TITLE;
 		$update(updateConversationListUI);
 		abort.value = null;
 	}
@@ -331,7 +356,7 @@ const FINISH_REASON_TONE = {
  * @return {number}
  */
 const countAgenticTurns = messages => {
-	const arr = messages.value;
+	const arr = unconscious(messages);
 	let turns = 0;
 	for (let i = arr.length - 1; i >= 0; i--) {
 		if (arr[i].finish_reason !== "tool_calls") {
@@ -349,17 +374,18 @@ const countAgenticTurns = messages => {
  * @param {Partial<AiChat.TitleModelConfig & AiChat.ModelConfig>} config
  */
 const generateChatTitle = async (conversation, messages, config) => {
-	let s1 = getTextContent(messages[0]).slice(0, 512);
+	let s1 = getTextContent(messages.findLast(k => k.role === 'user') || messages[0]).slice(0, 512);
 
 	const i = s1.indexOf("\n");
 	conversation.title = i >= 0 && i < 30 ? s1.slice(0, i) : s1.slice(0, Math.min(s1.length, 30));
 
-	let m = messages.find((item, i) => i&&item.content);
-	let s2 = m&&getTextContent(m).slice(0, 512);
 	if (config.generateTitle !== true) {
 		setConversationTitle(conversation, conversation.title);
 		return;
 	}
+
+	let m = messages.findLast(k => k.role === 'assistant' && k.content);
+	let s2 = m&&getTextContent(m).slice(0, 512);
 
 	let titleModel = config.titleModel;
 	if (titleModel?.[0] === ":") {
@@ -446,7 +472,7 @@ const hasContent = assistantMessage => assistantMessage.think?.content || assist
 const setMessageCacheState = (conversation, messages, hashes, state) => {
 	const indices = new Map;
 	for (const message of messages) {
-		const container = conversation[DB_MESSAGES_DIFF]?.get(message.id);
+		const container = conversation[MESSAGES_SNAPSHOT]?.get(message.id);
 		if (container) indices.set(container[MESSAGE_HASH], container);
 	}
 
@@ -499,6 +525,7 @@ async function sendCompletionRequest(
 	if (assistantMessage) {
 		delete assistantMessage.error;
 		assistantMessage.finish_reason = '';
+		markMessageDirty(assistantMessage);
 		onProgress?.();
 	} else {
 		if (resumableMessage) messages.pop();
@@ -525,7 +552,7 @@ async function sendCompletionRequest(
 		})
 	}
 
-	if (onProgress) scrollToBottom();
+	if (onProgress && !unconscious(lastScrollDirectionIsUp)) scrollMessagesToBottom();
 
 	if (error) {
 		if (config.sound) failure();
@@ -619,7 +646,12 @@ async function sendCompletionRequest(
 					firstPacketTime = resumable.start;
 				}
 
-				log.time = assistantMessage.time = firstPacketTime;
+				log.time = firstPacketTime;
+
+				// 必须比上一条消息更晚以保证导出-导入不错位
+				const lastMessageTime = messages.at(-2)?.time;
+				assistantMessage.time = lastMessageTime ? Math.max(firstPacketTime, lastMessageTime + 1) : firstPacketTime;
+
 				if ((thinkState = assistantMessage.think) && !assistantMessage.content) {
 					thinkingPrefill = true;
 					thinkState.start = firstPacketTime;
@@ -828,10 +860,10 @@ async function sendCompletionRequest(
 	return log;
 }
 
-const scrollToBottom = () => {
+export const scrollMessagesToBottom = () => {
 	requestAnimationFrame(() => {
 		DI_messageContainer.vl.scrollTo(DI_messageContainer.scrollHeight);
-		lastScrollDirection.value = false;
+		lastScrollDirectionIsUp.value = false;
 	});
 };
 
@@ -911,7 +943,7 @@ async function buildCompletionPayload(
 		}
 
 		if (useRefs) {
-			const container = conversation[DB_MESSAGES_DIFF]?.get(m.id);
+			const container = conversation[MESSAGES_SNAPSHOT]?.get(m.id);
 			let hash = container?.[MESSAGE_HASH];
 			if (!hash) {
 				hash = await objectIdentityHash(m);
@@ -1232,7 +1264,8 @@ export const buildSystemPrompt = async (config, conversation, prompt, toolPrompt
 const extractUsageMetrics = (json, log) => {
 	console.log("usage", json);
 
-	const {provider, usage, timings} = json;
+	let {provider, usage, timings} = json;
+	if (!usage) usage = json.choices?.[0].usage;
 
 	if (provider && log.provider.indexOf('/') < 0) log.provider += "/"+provider;
 

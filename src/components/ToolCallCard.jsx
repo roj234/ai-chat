@@ -1,19 +1,12 @@
 import './ToolCallCard.css';
-import {
-    getToolParameters,
-    getToolUserInteractionLevel,
-    runTools,
-    TOOL_IS_RUNNING,
-    TOOL_NAME,
-    toolScriptRegistry
-} from "../toolset.js";
+import {runTools, TOOL_IS_RUNNING, TOOL_NAME, toolScriptRegistry} from "../toolset.js";
 import {config, messages, selectedConversation} from "../states.js";
 import {$state, $update, $watch, appendChildren, isReactive, unconscious} from "unconscious";
 import {MORPH_CHILD_FUNCTION} from "../utils/utils.js";
 import morphdom from "morphdom";
 import {highlight, highlightJsonLike} from "../markdown/highlight.js";
 import SimpleModal from "./SimpleModal.jsx";
-import {updateConversation} from "../database.js";
+import {markMessageDirty, updateConversation} from "../database.js";
 
 const morph = (input, data) => morphdom(input, `<pre class="args">${highlightJsonLike(data)}</pre>`);
 
@@ -29,7 +22,7 @@ const morph = (input, data) => morphdom(input, `<pre class="args">${highlightJso
 export function ToolCallCard(props) {
     const { tool, message, idx } = props;
 
-    const {name} = tool.function;
+    const name = message.tool_responses?.[idx]?.[TOOL_NAME] || tool.function.name;
     const toolContent = $state();
 
     const initializeHtml = () => {
@@ -50,6 +43,7 @@ export function ToolCallCard(props) {
                         {isReactive(tool) ? null : <button className={"rerun-btn"} onClick={({target}) => {
                             const runOperation = () => {
                                 target.disabled = true;
+                                markMessageDirty(message);
                                 runTools(message, unconscious(selectedConversation), idx, true).then(() => {
                                     $update(messages);
                                 }).finally(() => {
@@ -124,7 +118,6 @@ export function ToolCallCard(props) {
  */
 const morphToolCallCard = ({tool, message, idx}, element) => {
     const conv = unconscious(selectedConversation);
-    const tc = message.tool_calls[idx];
     const resp = message.tool_responses[idx] || {};
     const {success, content, time, [TOOL_NAME]: tool_name} = resp;
 
@@ -133,8 +126,10 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
     const classList = element.classList;
     classList.toggle("tool-error", is_errored);
 
-    let pending = getToolUserInteractionLevel(conv, tool_name, getToolParameters(resp, tc, true)) === 2 && null == time && null == success;
-    classList.toggle("tool-pending", pending);
+    const secure = toolScriptRegistry[tool_name]?.interactive;
+    let pending = tool_name && secure !== true && null == time && null == success;
+    classList.toggle("pending", pending);
+    classList.toggle("secure", !!(pending && secure));
 
     const setAuditState = (target, allowUnsafe) => runTools(message, conv, idx, allowUnsafe).then(() => $update(messages));
 
@@ -142,26 +137,30 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
     if (message.finish_reason && pending && !classList.contains(pend_class_name)) {
         classList.add(pend_class_name);
 
+        const granted = conv.grantedTools?.has(tool_name);
+
         element.open = true;
         element.click();
         element.append(<div className={"tool-body"}>
-            <div className="args-title">敏感操作需要批准</div>
+            <div className="args-title">{secure ? "需要批准敏感操作" : "工具执行已暂停"}</div>
             <div style={"display:flex;gap:8px"}>
                 <button className={"btn warning"} onClick={({target}) => {
                     setAuditState(target, true);
                 }}>
                     允许
+                    <div className={"tooltip"}>仅本次允许</div>
                 </button>
-                <button className={"btn primary"} onClick={({target}) => {
+                {secure && <button className={"btn primary"} disabled={granted} onClick={({target}) => {
                     const grantedTools = conv.grantedTools;
                     if (!grantedTools) conv.grantedTools = new Set([tool_name]);
                     else grantedTools.add(tool_name);
                     updateConversation(conv);
 
                     target.previousElementSibling.click();
-                }} title={"总是允许(仅当前对话)"}>
+                }}>
                     总是允许
-                </button>
+                    <div className={"tooltip"}>{granted ? "已在当前对话中允许该工具" : "当前对话中不再询问"}</div>
+                </button>}
                 <button className={"btn danger"} onClick={({target}) => {
                     setAuditState(target, false);
                 }}>

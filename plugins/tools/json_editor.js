@@ -6,22 +6,11 @@ import {
 	JSON_POINTER_PATTERN,
 	jsonEval,
 	parseJsonPointer,
-	validate
+	SCHEMA_VALUES,
+	validate,
+	validateAndShowError
 } from "unconscious/common/json-schema-utils.js";
 import {parseJson5} from "unconscious/common/Json.js";
-
-const systemPrompt = `<json-edit-policy>
-### RFC 6901 + RFC 6902
-
-- Use \`~0\` and \`~1\` to escape.
-- Trailing \`-\` means append-to-array.
-
-### Rules of thumb
-
-- Rewriting most of the file → **WriteJson**, otherwise **EditJson**.
-- Never use \`/-\` on a non-array.
-- After structural edits, run ValidateJson before considering the task done.
-</json-edit-policy>`;
 
 const readFile = fileAccess("read");
 const writeFile = fileAccess("write");
@@ -42,7 +31,14 @@ Modes:
 		properties: {
 			path: { type: "string" },
 			pointer: { type: "string", },
-			value: { type: "value", },
+			value: {
+				type: "object",
+				properties: {
+					type: { enum: SCHEMA_VALUES },
+					value: { type: "value" }
+				},
+				required: true
+			},
 		},
 		required: ["path", "pointer"]
 	},
@@ -72,6 +68,15 @@ Modes:
 		if (jsonPointer.some(s=>!s))
 			throw "Found empty property key";
 
+		let type;
+		if (value) {
+			type = value.type;
+			value = value.value;
+
+			const err = validateAndShowError(value, {type});
+			if (err) throw err;
+		}
+
 		response.undo = jsonEval(obj, jsonPointer, action, value).undo;
 
 		await writeFile({
@@ -80,7 +85,7 @@ Modes:
 			overwrite: true
 		}, response, global);
 
-		return "Success";
+		return "Successfully edited /"+jsonPointer.map(JSON.stringify).join("/");
 	},
 	title: prefixTitle("编辑JSON")
 };
@@ -90,19 +95,20 @@ Modes:
  */
 const WriteJson = {
 	name: "WriteJson",
-	description: "Write a JSON file, serializing the content with 2-space indentation.",
+	description: "Write a JSON file.",
 	parameters: {
 		type: "object",
 		properties: {
 			path: { type: "string" },
 			content: { description: "Complete JSON object or array that replaces all existing content.", type: ["object", "array"], },
+			indent: { enum: ["", "\t", "  ", "    "], default: "  " },
 			overwrite: { type: "boolean", default: false }
 		},
 		required: ["path", "content"]
 	},
 
-	script({path, content, overwrite}, response, global) {
-		return writeFile({path, content: JSON.stringify(content, null, 2), overwrite}, response, global);
+	script({path, content, indent = 2, overwrite}, response, global) {
+		return writeFile({path, content: JSON.stringify(content, null, indent), overwrite}, response, global);
 	},
 	title: prefixTitle("写入JSON")
 }
@@ -112,7 +118,7 @@ const WriteJson = {
  */
 const ValidateJson = {
 	name: "ValidateJson",
-	description: `Validate a JSON file (data) based on the JSON schema file - after edits, before commits, or debugging.
+	description: `Validate a JSON file (data) based on the JSON schema file.
 Returns "valid" on success, or error messages with node path on failure.`,
 	parameters: {
 		type: "object",
@@ -162,7 +168,7 @@ registerToolset(
 	"JSON mutation and validation.",
 	[EditJson, WriteJson, ValidateJson],
 	{
-		systemPrompt,
+		default: true,
 		depend: ["Files"]
 	}
 );

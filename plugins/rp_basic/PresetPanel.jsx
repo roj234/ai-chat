@@ -159,6 +159,23 @@ function createLorebookList(dirtyHandle) {
 			}
 		},
 		{
+			id: "recursion",
+			name: "连锁",
+			type: "radio",
+			required: true,
+			choices: {
+				"能被连锁激活": true,
+				"不被连锁激活": false,
+				"只被连锁激活": "only",
+				"连锁到此为止": "stop",
+			},
+			title: {
+				"能被连锁激活": "该条目能被其它条目中的关键词激活",
+				"只被连锁激活": "该条目只能被其它条目激活",
+				"连锁到此为止": "该条目不能触发其它条目"
+			}
+		},
+		{
 			id: TRIGGER,
 			name: "触发词",
 			title: "每行一个关键词，不区分大小写，空格将会被删除\n开启「正则」后直接写正则表达式",
@@ -168,9 +185,9 @@ function createLorebookList(dirtyHandle) {
 		{
 			id: "window",
 			name: "窗口",
-			title: "在过去N条消息中搜索匹配并激活条目\n如果设置为50，激活后将永久保持",
+			title: "在过去N条消息中搜索匹配并激活条目\n如果设置为0，激活后将永久保持",
 			type: "number",
-			min: 1,
+			min: 0,
 			max: 50,
 		},
 		{
@@ -204,12 +221,16 @@ function createLorebookList(dirtyHandle) {
 			},
 		},
 	], (k, v, obj, el) => {
+		if (k === 'regex') {
+			if (obj.constant) throw "正则不能和常驻同时开启";
+		}
+
 		if (k === TRIGGER) {
 			if (obj.regex) {
 				try {
 					new RegExp(v);
 				} catch (e) {
-					return e;
+					throw e;
 				}
 				obj.triggers = [v];
 			} else {
@@ -220,10 +241,12 @@ function createLorebookList(dirtyHandle) {
 			const querySelector = el.querySelector("[data-id=\"window\"]");
 			querySelector.previousElementSibling.style.display = v ? "none" : "";
 			querySelector.style.display = v ? "none" : "";
-			el.querySelector("[data-id=\"id\"]").style.display = v ? "none" : "";
+			el.querySelector("[data-id=\"recursion\"]").style.display = v ? "none" : "";
 			if (v) {
+				delete obj.regex;
 				delete obj[TRIGGER];
 				delete obj.recursion;
+				el.sync(false, true);
 			}
 		}
 		if (k === "position") {

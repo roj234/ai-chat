@@ -111,6 +111,10 @@ export function ToolCallEditor(props) {
                         const idx = index();
                         message.tool_calls.splice(idx, 1);
                         message.tool_responses.splice(idx, 1);
+                        if (!message.tool_calls.length) {
+                            delete message.tool_calls;
+                            delete message.tool_responses;
+                        }
                         $update(updateMessageUI);
                     }}>
                         删除
@@ -140,7 +144,7 @@ export function ToolCallEditor(props) {
         });
     };
 
-    const base = <details className={"tool-call tool-pending"} onClick.once={initializeHtml}>
+    const base = <details className={"tool-call pending secure"} onClick.once={initializeHtml}>
         <summary className="tool-header" title={"编辑工具"}>
             <div className="args-title">工具名称</div>
             <div className={"input-warp"}>

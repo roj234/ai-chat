@@ -49,7 +49,7 @@ export function loadUserData(dbPath, userId) {
 			}
 		}
 		if (oldestUser && Date.now() - oldestTime > 5000) {
-			closeConnection(connections.get(oldestUser));
+			closeConnection(oldestUser);
 			usageTimestamps.delete(oldestUser);
 		}
 	}

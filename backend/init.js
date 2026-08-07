@@ -113,17 +113,6 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 
 	router.push(apiPath);
 
-	if (workspacePath) {
-		router.push("fs");
-		await registerFsRoutes(router, workspacePath);
-		router.pop();
-
-		router.pop();
-		return router;
-	}
-
-	registerSSEProxy(router, dataPath);
-
 	for await (const entry of fs.glob("plugins/*/index.js", { cwd: import.meta.dirname, withFileTypes: true })) {
 		if (entry.isFile()) {
 			try {
@@ -135,6 +124,17 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 			}
 		}
 	}
+
+	if (workspacePath) {
+		router.push("fs");
+		await registerFsRoutes(router, workspacePath);
+		router.pop();
+
+		router.pop();
+		return router;
+	}
+
+	registerSSEProxy(router, dataPath);
 
 	router.push('v2/:userId');
 

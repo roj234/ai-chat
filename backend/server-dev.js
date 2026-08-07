@@ -2,6 +2,8 @@ import {createRouter} from "./init.js";
 import {createSyncManager, createSyncValidateMiddleware} from "./sync_service.js";
 import {WebSocketServer} from "ws";
 
+globalThis.AIChatArgs = {}
+
 /**
  * 创建 Vite 插件，将匹配的请求转发给统一的 Router 处理。
  * @returns {import('vite').Plugin}

@@ -3,6 +3,8 @@ import {deepEqual} from "unconscious/common/deepEqual.js";
 import {jsonFetch} from "../common/openai-api-utils.js";
 import {resolveDBRelativeURL} from "./utils/utils.js";
 
+export const PAGE_TITLE = document.title;
+
 /**
  * @type {boolean}
  */
@@ -165,7 +167,7 @@ export const updateModels = force => {
  *
  * @type {import("unconscious").Reactive<boolean>}
  */
-export const lastScrollDirection = $state();
+export const lastScrollDirectionIsUp = $state();
 
 /**
  *
@@ -211,3 +213,6 @@ export const LOCKED = debugSymbol("ConversationLocker");
 
 export const updateConversationListUI = $state();
 export const updateMessageUI = $state();
+export const updateConversationResumeState = $state();
+
+export const CONFIG_VERSION = debugSymbol("ConfigVersion");

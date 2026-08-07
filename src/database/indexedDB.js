@@ -151,7 +151,7 @@ export const searchMessages = keyword => {
 
 /**
  * 读取KV存储
- * @param {IDBValidKey} key
+ * @param {string} key
  * @param {import("unconscious").Reactive<any>=} callback
  * @returns {Promise<any>}
  */
@@ -165,7 +165,7 @@ export const getKV = (key, callback) => {
 
 /**
  * 创建、更新或删除KV存储
- * @param {IDBValidKey} key
+ * @param {string} key
  * @param {Object & Partial<AiChat.IDBKVList>} value
  * @returns {Promise<void>}
  */
@@ -175,15 +175,13 @@ export const setKV = (key, value) => transaction(tx => {
 }, true, 'kv');
 
 /**
- * 读取KV存储列表
- * @param {IDBValidKey} type
+ * @param {string} type
  * @returns {Promise<(Object & AiChat.IDBKVList)[]>}
  */
 export const kvListGetValues = type => transaction(tx => tx.objectStore('kvs').getAll(type === '*' ? null : IDBKeyRange.bound([type], [type, '\uffff'])), false, 'kvs');
 
 /**
- * 读取KV存储列表的key
- * @param {IDBValidKey} type
+ * @param {string} type
  * @param {import("unconscious").Reactive<AiChat.IDBKVList[]>=} callback
  * @returns {Promise<AiChat.IDBKVList[]>}
  */
@@ -207,19 +205,17 @@ export const kvListGetKeys = (type, callback) => transaction((tx, resolve) => {
 }, false, 'kvs');
 
 /**
- * 获取一项
- * @param {IDBValidKey} type
- * @param {IDBValidKey} name
+ * @param {string} type
+ * @param {string} name
  * @returns {Promise<Object & AiChat.IDBKVList>}
  */
 export const kvListGet = (type, name) => transaction(tx => tx.objectStore('kvs').get([type, name]), false, 'kvs');
 
 
 /**
- * 创建、更新或删除KV存储
  * @param {Object & AiChat.IDBKVList} value
- * @param {IDBValidKey=} type
- * @param {IDBValidKey=} name
+ * @param {string=} type
+ * @param {string=} name
  * @returns {Promise<number>}
  */
 export const kvListSet = (value, type, name) => {
@@ -229,7 +225,6 @@ export const kvListSet = (value, type, name) => {
 };
 
 /**
- * 删除KV存储列表
  * @param {string} type
  * @param {string} name
  * @returns {Promise<void>}
@@ -237,11 +232,14 @@ export const kvListSet = (value, type, name) => {
 export const kvListDel = (type, name) => transaction(tx => tx.objectStore('kvs').delete([type, name]), true, 'kvs');
 
 /**
- *
  * @param {AiChat.BillingLog} log
  * @return {Promise<void>}
  */
 export const appendBillingLog = log => transaction(tx => tx.objectStore('logs').add(log), true, 'logs');
+/**
+ * @param {number} messageId
+ * @returns {Promise<AiChat.BillingLog>}
+ */
 export const getBillingLog = messageId => transaction(tx => tx.objectStore('logs').get(messageId), false, 'logs');
 
 export const listBillingLogs = (startTime, endTime) => {

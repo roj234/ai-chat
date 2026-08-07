@@ -199,6 +199,9 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 		body = createLimiter(ctx.req, MAX_BODY_LENGTH);
 		duplex = 'half';
 	}
+	// body 在 refs 路由中稍后会被替换成 ReadableStream。trace 必须保留原始
+	// 请求字符串；否则日志写入和 fetch 会同时消费同一个流，导致流被锁定。
+	const traceBody = SSE_PROXY_TRACE ? body : null;
 
 	let firstChunk;
 	if (blobDir || moderation) {
@@ -245,7 +248,7 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 	function writeTrace(data) {
 		return proxyRequest._append = proxyRequest._append.then(() =>
 			fs.appendFile(proxyRequest._fileName, '\n' + data)
-		);
+		, err => log('写入 trace 失败', err));
 	}
 	function sendChunk(serialized) {
 		if (!ctx.res.closed) ctx.res.write(`data: ${serialized}\n\n`);
@@ -284,9 +287,10 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 				if (SSE_PROXY_TRACE) {
 					const fileName = `${logPath}/${encodeURIComponent(id)}_${now%1000}.jsonl`;
 					fs.mkdir(logPath, {recursive: true})
-						.then(() => fs.appendFile(fileName, body))
+						.then(() => fs.appendFile(fileName, traceBody))
 						.then(() => fs.appendFile(fileName, '\n'))
-						.then(() => fs.appendFile(fileName, response));
+						.then(() => fs.appendFile(fileName, response))
+						.catch(err => log('写入 trace 失败', err));
 				}
 
 				ctx.res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -309,7 +313,9 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 				if (SSE_PROXY_TRACE) {
 					const fileName = `${logPath}/${encodeURIComponent(id)}_${now%1000}.jsonl`;
 					proxyRequest._fileName = fileName;
-					proxyRequest._append = fs.mkdir(logPath, {recursive: true}).then(() => fs.appendFile(fileName, body));
+					proxyRequest._append = fs.mkdir(logPath, {recursive: true})
+						.then(() => fs.appendFile(fileName, traceBody))
+						.catch(err => log('写入 trace 失败', err));
 				}
 
 				ctx.res.writeHead(200, { 'Content-Type': 'text/event-stream' });

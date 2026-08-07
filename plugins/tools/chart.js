@@ -40,19 +40,6 @@ $watch(selectedConversation, () => {
 const CHART = debugSymbol("CHART");
 const OPTIONS = debugSymbol("OPTIONS");
 
-/**
- *
- * @param {string} path
- * @param {Blob|string} blob
- * @returns {Promise<string[][]>}
- */
-async function parseCsvTsv(path, blob) {
-	const csvText = typeof blob === 'string' ? blob : await readAsString(blob);
-	return parseCsv(csvText, {
-		delimiter: path.toLowerCase().endsWith('.tsv') ? '\t' : ','
-	});
-}
-
 registerToolset("Chart", "Create charts and data visualizations from CSV files.", [{
 	name: "Chart",
 	description: "Create Chart.js visualizations from structured numeric data."
@@ -130,7 +117,13 @@ registerToolset("Chart", "Create charts and data visualizations from CSV files."
 			if (!columns) {
 				const blob = path ? await readFile({path}, null, conv) : content;
 				if (blob.size > 65536) throw new Error('File '+ path+' too big (64KB)');
-				const rows = await parseCsvTsv(path, blob);
+
+
+				const csvText = typeof blob === 'string' ? blob : await readAsString(blob);
+				const rows = parseCsv(csvText, {
+					delimiter: delimiter || path.toLowerCase().endsWith('.tsv') ? '\t' : ','
+				});
+
 				const columnCount = rows[0].length;
 				columns = Array.from({ length: columnCount }).map(() => ([]));
 
@@ -208,6 +201,7 @@ registerToolset("Chart", "Create charts and data visualizations from CSV files."
 	},
 	renderer(context, is_frozen) {
 		const state = context[CHART];
+		if (!state) return errorBlock("刷新页面或重新执行", "状态不正确");
 
 		return $computed(() => {
 			if (state.error) return errorBlock(state.error, "图表渲染失败");

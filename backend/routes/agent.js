@@ -4,12 +4,11 @@ import {spawn} from 'node:child_process';
 import {readBOM} from "../../common/chardet.js";
 import iconv from "iconv-lite";
 import {getEnvironmentPrompt} from "../utils/checkEnv.js";
-import {createTextFileEditHelper} from "../../common/fs-common.js";
+import {createTextFileEditHelper, GREP_MAX_COLUMNS} from "../../common/fs-common.js";
 import {IgnoreMatcher} from "../../common/ignore.js";
 import {createReadStream, createWriteStream} from 'node:fs';
 import {pipeline} from "node:stream/promises";
 import {createHash} from 'node:crypto';
-import {normalizePath} from 'unconscious/common/path-utils.js';
 import {formatSize} from "unconscious/common/Utils.js";
 
 /**
@@ -22,7 +21,7 @@ export const pathFilter = (ctx, relPath) => {
 	const root = ctx.fsRoot;
 	const targetPath = path.resolve(root, relPath);
 	// allow path like /tmp/... or C:/tmp/
-	if (!targetPath.startsWith(root) && !/^(?:[a-zA-Z]:)?[\\/]tmp(?:\/|$)/.test(targetPath)) {
+	if (!globalThis.AIChatArgs.noSandbox && !targetPath.startsWith(root) && !/^(?:[a-zA-Z]:)?[\\/]tmp(?:\/|$)/.test(targetPath)) {
 		const err = new Error('Forbidden: Path Traversal');
 		err.statusCode = 403;
 		throw err;
@@ -217,7 +216,75 @@ export async function registerFsRoutes(router, allowExec) {
 	};
 	const sendText = (res, text) => sendRaw(res, 200, 'text/plain', text);
 
-	const hashLine = createTextFileEditHelper({
+	const listFileHandler = async ({
+			path: filePath = '.',
+			pattern,
+			json = false,
+			limit = 500,
+			modifiedSince = 0,
+			showDir = null,
+			showModified = false
+		}, ctx) => {
+		pattern = pattern || '*';
+		// 行为一致，顺便给AI擦屁股
+		if (pattern.startsWith("*.") && !pattern.includes('/')) pattern = "**/"+pattern;
+
+		const safePath = pathFilter(ctx, filePath);
+		const ignored = await getIgnoreMatcher(ctx.fsRoot, safePath);
+
+		let entries;
+		if (pattern !== '*') {
+			if (!(await fs.stat(safePath)).isDirectory()) throw new Error("Is not directory");
+			entries = await fs.glob(pattern, {cwd: safePath, withFileTypes: true});
+		} else {
+			entries = await fs.readdir(safePath, {withFileTypes: true});
+		}
+
+		let prefix = '';
+		let items = 0;
+		let dirPrefix = new Set;
+		let modSince = modifiedSince ? +new Date(modifiedSince) : 0;
+		if (!isFinite(modSince)) throw 'Invalid date';
+
+		const result = [];
+		for await (const entry of entries) {
+			const parentPath = entry.parentPath.slice(safePath.length+1).replaceAll(path.sep, '/');
+			const entryName = pattern !== '*' && parentPath ? parentPath+'/'+entry.name : entry.name;
+			const isDir = entry.isDirectory();
+			if (ignored.test(entryName, isDir) || dirPrefix.has(parentPath)) {
+				if (isDir) dirPrefix.add(entryName);
+				continue;
+			}
+
+			if (items >= limit) {
+				prefix = `[TRUNCATED to ${limit} entries, use a more specific path or pattern]\n`;
+				break;
+			}
+			if (!json) items++;
+
+			if (!isDir) {
+				const fullPath = path.join(entry.parentPath, entry.name);
+				const stats = await fs.stat(fullPath);
+
+				if (stats.mtimeMs > modSince) {
+					const item = [entryName, "file", formatSize(stats.size)];
+					if (showModified || modSince) item.push(stats.mtime.toISOString().slice(0, -5));
+					result.push(item);
+				}
+			} else if (entryName && (showDir != null ? showDir : !modSince)) {
+				// 跳过 '.' 当前目录
+				result.push([entryName, "dir"]);
+			}
+		}
+
+		if (modSince) result.sort((a, b) => b[3].localeCompare(a[3]));
+
+		if (json) return result;
+		return result.length ? prefix+result.map(item => item.join("\t")).join("\n") : "[No result]";
+	}
+
+	const teh = createTextFileEditHelper({
+		list: listFileHandler,
 		async read(path, ctx) {
 			const safePath = pathFilter(ctx, path);
 			const stats = await fs.stat(safePath);
@@ -247,16 +314,16 @@ export async function registerFsRoutes(router, allowExec) {
 	});
 
 	router.post('/read', async (ctx) => {
-		sendText(ctx.res, await hashLine.read(await ctx.readAsObject(), ctx));
+		sendText(ctx.res, await teh.read(await ctx.readAsObject(), ctx));
 	});
 	router.post('/patch', async (ctx) => {
-		sendText(ctx.res, await hashLine.patch(await ctx.readAsObject(), ctx));
+		sendText(ctx.res, await teh.patch(await ctx.readAsObject(), ctx));
 	});
 	router.post('/edit', async (ctx) => {
-		sendText(ctx.res, await hashLine.edit(await ctx.readAsObject(), ctx));
+		sendText(ctx.res, await teh.edit(await ctx.readAsObject(), ctx));
 	});
 	router.post('/write', async (ctx) => {
-		sendText(ctx.res, await hashLine.write(await ctx.readAsObject(), ctx));
+		sendText(ctx.res, await teh.write(await ctx.readAsObject(), ctx));
 	});
 	router.post('/append', async (ctx) => {
 		const { path, content, newline = true } = await ctx.readAsObject();
@@ -301,7 +368,7 @@ export async function registerFsRoutes(router, allowExec) {
 	/**
 	 * @param {AiChatBackend.RouteContext} ctx
 	 */
-	const handler = async (ctx) => {
+	const binaryWriteHandler = async (ctx) => {
 		const filePath = ctx.searchParams.get('path');
 		if (!filePath) return ctx.send(400, { error: 'missing path' });
 		const safePath = await pathFilterWithIgnore(ctx, filePath);
@@ -310,12 +377,12 @@ export async function registerFsRoutes(router, allowExec) {
 		const buffer = await ctx.readAsBuffer();
 		await fs[ctx.url.pathname.endsWith("/appendRaw") ? 'appendFile' : 'writeFile'](safePath, buffer);
 		if (/\.(gitignore|ignore)$/.test(filePath)) matcherCache.delete(ctx.fsRoot);
-		hashLine.del(filePath);        // invalidate text line cache
+		teh.del(filePath);        // invalidate text line cache
 		sendText(ctx.res, "success");
 	};
 
-	router.post('/writeRaw', handler);
-	router.post('/appendRaw', handler);
+	router.post('/writeRaw', binaryWriteHandler);
+	router.post('/appendRaw', binaryWriteHandler);
 
 	// 文件/目录信息
 	router.post('/stat', async (ctx) => {
@@ -330,67 +397,9 @@ ctime: ${new Date(stats.ctimeMs).toISOString()}
 nlink: ${stats.nlink}`);
 	});
 	router.post('/list', async (ctx) => {
-		const {
-			path: filePath = '.',
-			pattern = '*',
-			json = false,
-			limit = 500,
-			modifiedSince = 0,
-			showDir = null,
-			showModified = false
-		} = await ctx.readAsObject();
-		const safePath = pathFilter(ctx, filePath);
-		const ignored = await getIgnoreMatcher(ctx.fsRoot, safePath);
-
-		const entries = pattern !== '*'
-			? await fs.glob(pattern, { cwd: safePath, withFileTypes: true })
-			: await fs.readdir(safePath, { withFileTypes: true });
-
-		let prefix = '';
-		let items = 0;
-		let dirPrefix = new Set;
-		let modSince = modifiedSince ? +new Date(modifiedSince) : 0;
-		if (!isFinite(modSince)) throw 'Invalid date';
-
-		const result = [];
-		for await (const entry of entries) {
-			const parentPath = entry.parentPath.slice(safePath.length+1).replaceAll(path.sep, '/');
-			const entryName = pattern !== '*' && parentPath ? parentPath+'/'+entry.name : entry.name;
-			const isDir = entry.isDirectory();
-			if (ignored.test(entryName, isDir) || dirPrefix.has(parentPath)) {
-				if (isDir) dirPrefix.add(entryName);
-				continue;
-			}
-
-			if (items >= limit) {
-				prefix = `[TRUNCATED to ${limit} entries, use a more specific path or pattern]\n`;
-				break;
-			}
-			if (!json) items++;
-
-			if (!isDir) {
-				const fullPath = path.join(entry.parentPath, entry.name);
-				const stats = await fs.stat(fullPath);
-
-				if (stats.mtimeMs > modSince) {
-					const item = [entryName, "file", formatSize(stats.size)];
-					if (showModified || modSince) item.push(stats.mtime.toISOString().slice(0, -5));
-					result.push(item);
-				}
-			} else if (entryName && (showDir != null ? showDir : !modSince)) {
-				// 跳过 '.' 当前目录
-				result.push([entryName, "dir"]);
-			}
-		}
-
-		if (modSince) result.sort((a, b) => b[3].localeCompare(a[3]));
-
-		if (json) {
-			ctx.send(200, result);
-			return;
-		}
-
-		sendText(ctx.res, result.length ? prefix+result.map(item => item.join("\t")).join("\n") : "[No result]");
+		const obj = await listFileHandler(await ctx.readAsObject(), ctx);
+		if (typeof obj === 'string') sendText(ctx.res, obj);
+		else ctx.send(200, obj);
 	});
 
 	// 基础操作
@@ -417,7 +426,7 @@ nlink: ${stats.nlink}`);
 		if (safePath === ctx.fsRoot) return ctx.send(403, { error: 'Cannot delete root' });
 
 		await fs.rm(safePath, { recursive: true, force: true });
-		hashLine.del(filePath);
+		teh.del(filePath);
 		ctx.send(200, 'Success');
 	});
 
@@ -444,18 +453,21 @@ nlink: ${stats.nlink}`);
 	 * @param {object}   options   - { cwd, timeout(ms), shell(boolean|string), safeCwd(用于落盘) }
 	 * @returns {Promise<{code: number, text: string}>}
 	 */
-	async function executeCommand(command, args, { cwd, timeout, shell = false, dir, noTruncate, async: _async }) {
+	async function executeCommand(command, args, { cwd, timeout, shell = false, dir, noTruncate, async: _async, env, kill }) {
 		const child = spawn(command, args, {
 			cwd,
-			stdio: ['ignore', 'pipe', 'pipe'],
+			stdio: ['pipe', 'pipe', 'pipe'],
 			shell,
-			//detached: detach,
+			env: {
+				...process.env,
+				...env
+			}
 		});
 
 		let head = Buffer.alloc(0), tail = Buffer.alloc(0);
 		let totalBytes = 0;
 
-		let filename = `/command-log-${Date.now()}-${child.pid}.log`;
+		let filename = `/pid-${child.pid}-${Math.random().toString(36).slice(3, 7)}.log`;
 		let file = null;
 
 		/** @param {Buffer} chunk */
@@ -496,10 +508,20 @@ nlink: ${stats.nlink}`);
 				+ decode(tail);
 		};
 
+		const startTime = Date.now();
 		const result = await new Promise((resolve) => {
 			let timer = setTimeout(() => {
 				child.stdout.removeAllListeners('data');
 				child.stderr.removeAllListeners('data');
+
+				if (kill) {
+					killProcess(child);
+					resolve({
+						code: 'TIMEOUT, killed (pid='+child.pid+', logPath='+JSON.stringify(dir + filename)+')',
+						text: getLog(),
+					});
+					return;
+				}
 
 				resolve({
 					code: (_async?'':'TIMEOUT, ')+'Running in background (pid='+child.pid+', logPath='+JSON.stringify(dir + filename)+')',
@@ -541,7 +563,7 @@ nlink: ${stats.nlink}`);
 			});
 		});
 
-		return { code: result.code ?? 0, text: result.text.replaceAll(ANSI_SEQ, "") };
+		return { code: result.code ?? 0, text: result.text.replaceAll(ANSI_SEQ, ""), duration: Date.now() - startTime };
 	}
 
 	/**
@@ -582,36 +604,66 @@ logPath: ${logFile}`
 	} catch {
 		rgPath = 'rg';
 	}
+	let rgUsable = true;
 
 	router.post('/grep', async (ctx) => {
-		const { maxCount, glob, pattern, path, maxColumns } = await ctx.readAsObject();
-		const { code, text } = await executeCommand(rgPath, [
-			"--line-number",
-			"--no-messages",
-			"--heading",
-			"--max-columns", maxColumns,
-			"--color", "never",
-			"--max-count", maxCount,
-			"--type-add",
-			"foo:"+glob,
-			"-tfoo",
-			"--path-separator", "/",
-			"--",
-			pattern,
-			normalizePath(path).join('/') || '.',
-		], {
-			cwd: ctx.fsRoot,
-			noTruncate: true,
-			dir: '.',
-			timeout: 60000,
-			charset: 'utf8'
-		});
+		const body = await ctx.readAsObject();
+		let { glob = "**", } = body;
+		if (glob.startsWith("*.") && !glob.includes('/')) glob = "**/"+glob;
 
-		if (code === -1 && text.includes("ENOENT")) {
-			// TODO backend grep
+		rgNotUsable:
+		if (rgUsable && glob.includes("**")) {
+			const {
+				pattern,
+				path = ".",
+				//glob = "**",
+				context = 0,
+				maxFiles = 50,
+				maxMatchesPerFile = 10,
+			} = body;
+
+			const { code, text } = await executeCommand(rgPath, [
+				//"-i", // --ignore-case
+				"-n", // --line-number
+				//"--no-require-git",
+				"--no-messages",
+				"--heading",
+				"-M", GREP_MAX_COLUMNS,
+				"--max-columns-preview",
+				"--color", "never",
+				"--field-match-separator", "\x1f",
+				//"--field-context-separator", "-",
+				//"--context-separator", "--",
+				"-m", maxMatchesPerFile,
+				"-C", context,
+				"--type-add",
+				"foo:"+glob,
+				"-tfoo",
+				"--path-separator", "/",
+				"--",
+				pattern,
+			], {
+				cwd: pathFilter(ctx, path),
+				noTruncate: true,
+				dir: '.',
+				timeout: 15000,
+				kill: true,
+				charset: 'utf8'
+			});
+
+			//if (code === -1 && text.includes("ENOENT")) {}
+			if (code < 0) {
+				console.log("Failed to execute ripgrep ("+code+")");
+				if (text) console.log(text);
+				//rgUsable = false;
+				break rgNotUsable;
+			}
+
+			const arr = text.split("\n\n");
+			return sendText(ctx.res, (arr.length === 1 ? arr[0] : arr.length < maxFiles ? text : arr.slice(0, maxFiles).join("\n\n")) || '[No match]');
 		}
 
-		sendText(ctx.res, `${typeof code === 'number'?'Exit code '+code:code}\n${text}`);
+		sendText(ctx.res, await teh.grep(body, ctx));
 	});
 
 	if (allowExec) {
@@ -630,21 +682,35 @@ logPath: ${logFile}`
 			return ctx.send(200, { prompt: envPrompt, location: ctx.fsRoot })
 		});
 
+		router.post('/feed', async (ctx) => {
+			const { pid, content } = await ctx.readAsObject();
+			const info = processes.get(pid);
+
+			if (!info) return sendText(ctx.res, `Error: process died or not started by agent.`);
+
+			const { child, logFile, timer } = info;
+			child.stdin.write(content);
+
+			sendText(ctx.res, `Successfully written, read ${logFile} for new output.`);
+		});
+
 		router.post('/spawn', async (ctx) => {
 			const {
 				program, arguments: args, cwd = '',
 				timeout = 10, async = false,
-				noTruncate = false, charset = 'utf8'
+				noTruncate = false, charset = 'utf8',
+				env
 			} = await ctx.readAsObject();
-			const { code, text } = await executeCommand(program, args, {
+			const { code, text, duration } = await executeCommand(program, args, {
 				cwd: await pathFilterWithIgnore(ctx, cwd, true),
 				noTruncate,
 				dir: '.',
 				timeout: timeout * 1000,
 				async,
-				charset
+				charset,
+				env
 			});
-			sendText(ctx.res, `${typeof code === 'number'?'Exit code '+code:code}\n${text}`);
+			sendText(ctx.res, `${typeof code === 'number'?'Exit code '+code:code} (wall time ${(duration/1000).toFixed(1)}s)\n${text}`);
 		});
 
 		router.post('/shell', async (ctx) => {
@@ -652,6 +718,7 @@ logPath: ${logFile}`
 				command, cwd = '', shell = defaultShell,
 				timeout = 10, async = false,
 				charset = 'utf8',
+				env
 			} = await ctx.readAsObject();
 			let args = [];
 
@@ -661,15 +728,17 @@ logPath: ${logFile}`
 				command = bashPath;
 			}
 
-			const { code, text } = await executeCommand(command, args, {
+			let { code, text, duration } = await executeCommand(command, args, {
 				cwd: await pathFilterWithIgnore(ctx, cwd, true),
 				dir: '.',
 				timeout: timeout * 1000,
 				async,
 				shell,
-				charset
+				charset,
+				env
 			});
-			sendText(ctx.res, `${typeof code === 'number'?'Exit code '+code:code}\n${text}`);
+			if (globalThis.AIChatArgs.hideUser) text = text.replaceAll(new RegExp("\\b"+process.env.USERNAME+"\\b", "g"), "user");
+			sendText(ctx.res, `${typeof code === 'number'?'Exit code '+code:code} (wall time ${(duration/1000).toFixed(1)}s)\n${text}`);
 		});
 	}
 }

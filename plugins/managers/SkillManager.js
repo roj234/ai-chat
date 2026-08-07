@@ -16,6 +16,7 @@ import {onLoad} from "/src/hooks.js";
 import {showToast} from "/src/components/Toast.js";
 import {prettyError} from "/src/utils/utils.js";
 import {getKV, setKV} from "/src/database.js";
+import {MCPClient} from "/common/MCPClient.js";
 
 const mcps = $state([]);
 let registeredMcps;
@@ -211,7 +212,15 @@ function openSkillManager(preset, isOpen, close) {
 						const modal = SimpleModal({
 							title: "添加MCP服务器",
 							message: filter,
-							onConfirm() {
+							async onConfirm() {
+								const client = new MCPClient(state.url, {key: state.key});
+								try {
+									await client.connect();
+								} catch (e) {
+									showToast("连接失败:\n"+prettyError(e), 'error');
+									return false;
+								}
+
 								const obj = unconscious(state);
 								for (const key in obj) {
 									if (!obj[key]) delete obj[key];

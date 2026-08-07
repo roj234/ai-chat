@@ -182,7 +182,7 @@ const loadSystemModule = (mod) => {
 // [ func, in, out ]
 const rpcMethods = {
 	read: [ (args) => ({ path: args[0], noTruncate: true }), AS_IS ],
-	write: [ (args) => ({ path: args[0], content: args[1] }) ],
+	write: [ (args) => ({ path: args[0], content: args[1], overwrite: true }) ],
 	append: [ (args) => ({ path: args[0], content: args[1], newline: false }) ],
 	mkdir: [ (args) => ({ path: args[0] }) ],
 	delete: [ (args) => ({ path: args[0] }) ],
@@ -218,8 +218,9 @@ export const RunJS = {
 	name: "RunJS",
 	description: `Execute a JavaScript module (ESM) in sandbox.
 - ES2023+, top-level await, import, import attributes and dynamic import(), no live bindings.
-- Access file system via \`fs/promises\` and \`path\` module and equivalent global object.
-- Not Node.js environment: no require(), no fs.readSync (\`fs/promises\' shim only), no http (use \`fetch\` and other browser APIs).
+- Access file system via \`fs/promises\` and \`path\` module and equivalent global objects.
+- globalThis and module cache are persist, until manual reset, timeout or page reload.
+- Not Node.js environment: no require(), no fs.readSync (\`fs/promises\' shim only), no http (use \`fetch\` and XHR, cannot bypass CORS).
 - After the module evaluated, the sandbox detaches — lingering async tasks will fail, be sure to await all Promises.
 - For Uint8Array, use \`fs.writeFile(path, data, { transfer: true })\` (or appendFile) to transfer the buffer ownership for better performance. The returned promise resolves to a new Uint8Array with the same content; the original buffer becomes invalid.`,
 	parameters: {
@@ -239,7 +240,6 @@ export const RunJS = {
 			},
 			reset: {
 				type: "boolean",
-				description: "Restart sandbox, clear module cache and globalThis. Automatic reset on timeout."
 			},
 			permissions: {
 				type: "array",
@@ -328,7 +328,7 @@ export const RunJS = {
 				noTruncate: true
 			}, response, conv);
 			if (path.endsWith(".cjs")) return promise.then(cjsWrapper);
-			return promise;
+			return promise.catch(e => { throw new Error("Could not fetch module "+path+"\n"+e.message) });
 		}
 
 		// 文件 RPC 处理
@@ -376,7 +376,7 @@ export const RunJS = {
 		let promise;
 		const appendToLogFile = (content, flush) => {
 			buffer += content;
-			if (buffer.length > 65536 || flush) {
+			if (buffer.length > 524288 || flush) {
 				const mybuf = buffer;
 				buffer = '';
 

@@ -143,8 +143,8 @@ const resolveParent = async (rootHandle, filePath, options) => {
 		for (const part of parts) {
 			parent = await parent.getDirectoryHandle(part, options);
 		}
-	} catch {
-		throw ("Parent directory "+parts.join('/')+" not found");
+	} catch (e) {
+		throw typeof e === 'string' ? e : ("Parent directory "+parts.join('/')+" not found");
 	}
 	return [ parent, name ];
 };
@@ -159,8 +159,8 @@ export const resolveDirectory = async (rootHandle, dirPath, options) => {
 		for (const part of parts) {
 			handle = await handle.getDirectoryHandle(part, options);
 		}
-	} catch {
-		throw ("Directory "+parts.join('/')+" not found");
+	} catch (e) {
+		throw typeof e === 'string' ? e : ("Directory "+parts.join('/')+" not found");
 	}
 	return handle;
 };
@@ -169,7 +169,6 @@ export const resolveDirectory = async (rootHandle, dirPath, options) => {
  *
  * @param {FileSystemDirectoryHandle} rootHandle
  * @returns {{
- * 		readImage({path: string}): Promise<Blob>,
  * 		mkdir({path: string}): Promise<string>,
  * 		copy({src: string, dest: string, move?: boolean}): Promise<string>,
  * 		stat({path: string}): Promise<string>,
@@ -315,7 +314,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			await writable.close();
 
 			if (/\.(gitignore|ignore)$/.test(path)) await loadIgnore();
-			hashLine.del(path);          // invalidate text line cache
+			teh.del(path);          // invalidate text line cache
 			return 'Success';
 		},
 
@@ -332,6 +331,8 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			if (!ignored) await loadIgnore();
 
 			pattern = pattern || '*';
+			// 行为一致，顺便给AI擦屁股
+			if (pattern.startsWith("*.") && !pattern.includes('/')) pattern = "**/"+pattern;
 
 			const entries = pattern !== '*'
 				? await glob(pattern, path)
@@ -462,6 +463,8 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 	};
 
 	const fsCommonApi = {
+		list: api.list,
+
 		/**
 		 * @param {string} path
 		 * @returns {Promise<string>}
@@ -494,18 +497,18 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			return file.lastModified;
 		}
 	};
-	const hashLine = createTextFileEditHelper(fsCommonApi);
+	const teh = createTextFileEditHelper(fsCommonApi);
 
 	// ── Binary I/O (bypass line cache) ──
 
 	return {
 		...api,
-		...hashLine,
+		...teh,
 
 		readRaw: ({path}) => resolveFile(path),
 		writeRaw: async ({path, content}) => {
 			await fsCommonApi.write(path, content);
-			hashLine.del(path);
+			teh.del(path);
 		},
 		appendRaw: api.append
 	};

@@ -170,13 +170,11 @@ function createBranchManager(conv, messages) {
 		try {
 			const siblings = parent[CHILDREN];
 			if (siblings) {
-				if (siblings.length <= 2) delete parent[CHILDREN];
-				else {
-					const idx = siblings.indexOf(message);
-					siblings.splice(idx, 1);
-					switchBranch(parent, Math.min(idx, siblings.length-1));
-					return;
-				}
+				const idx = siblings.indexOf(message);
+				siblings.splice(idx, 1);
+				switchBranch(parent, Math.min(idx, siblings.length-1));
+				if (siblings.length <= 1) delete parent[CHILDREN];
+				return;
 			}
 
 			leaf = parent;
@@ -318,23 +316,7 @@ function createBranchManager(conv, messages) {
  * @returns {AiChat.Message[]} 当前分支的消息路径（带有 hook 的数组）
  */
 export function enableBranches(conv, messages) {
-	const msg = unconscious(messages);
-
-	// migration
-	if (msg[0]?.parent === 0) {
-		for (let i = 0; i < msg.length; i++) {
-			const m = msg[i];
-			const oldParent = m.parent;
-			// 注意有隐式的message #0 所以这里+1了
-			if (oldParent === i) {
-				delete m.parent;
-			} else {
-				m.parent = i - oldParent + 1;
-			}
-		}
-	}
-
-	const bm = createBranchManager(conv, msg);
+	const bm = createBranchManager(conv, unconscious(messages));
 	conv[BRANCH_MANAGER] = bm;
 	return bm.getMessages();
 }

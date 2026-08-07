@@ -25,13 +25,15 @@ export const IndexedDBAccess = (dbName, dbVersion, upgrade_callback) => {
 		request.onupgradeneeded = upgrade_callback;
 
 		request.onsuccess = (event) => {
-			const db = event.target.result;
-			// 长期持有连接时建议监听 close
-			db.onversionchange = () => {
-				db.close();
+			const localDb = event.target.result;
+
+			localDb.onversionchange = () => {
+				localDb.close();
 				alert('Database version changed, please reload page.');
 			};
-			resolve(db);
+			localDb.onclose = () => {db = null;};
+
+			resolve(localDb);
 		};
 
 		request.onerror = (event) => {
@@ -51,26 +53,32 @@ export const IndexedDBAccess = (dbName, dbVersion, upgrade_callback) => {
 		const mode = batchWrite ? "readwrite": "readonly";
 		batchQueue = batchStore = batchWrite = 0;
 
-		const results = [];
-		const tx = (db || (db = await openDb())).transaction(stores, mode);
-		tx.onerror = () => {
-			const error = new Error(tx.error?.message);
+		const FAIL = (error) => {
 			for (const el of queue) el[2](error);
-		};
-		tx.oncomplete = () => {
-			for (let i = 0; i < queue.length; i++) {
-				queue[i][1](results[i]);
-			}
 		}
 
-		for (let i = 0; i < queue.length; i++) {
-			const [fn, _resolve] = queue[i];
-			const capturedI = i;
-			// 是的，这就是异步，所以必须在oncomplete里统一resolve，否则第一个resolve的不一定是第一个Promise，可能会导致各种难以调试的bug
-			const resolve = result => results[capturedI] = result;
+		const results = [];
+		try {
+			const tx = (db || (db = await openDb())).transaction(stores, mode);
 
-			const v = fn(tx, resolve);
-			if (v) v.onsuccess = (event) => resolve(event.target.result);
+			tx.onerror = () => FAIL(new Error(tx.error?.message));
+			tx.oncomplete = () => {
+				for (let i = 0; i < queue.length; i++) {
+					queue[i][1](results[i]);
+				}
+			}
+
+			for (let i = 0; i < queue.length; i++) {
+				const [fn, _resolve] = queue[i];
+				const capturedI = i;
+				// 是的，这就是异步，所以必须在oncomplete里统一resolve，否则第一个resolve的不一定是第一个Promise，可能会导致各种难以调试的bug
+				const resolve = result => results[capturedI] = result;
+
+				const v = fn(tx, resolve);
+				if (v) v.onsuccess = (event) => resolve(event.target.result);
+			}
+		} catch (e) {
+			FAIL(e);
 		}
 	};
 
@@ -96,6 +104,7 @@ export const IndexedDBAccess = (dbName, dbVersion, upgrade_callback) => {
 
 	const deleteDatabase = async () => {
 		if (db) db.close();
+		db = null;
 
 		const req = indexedDB.deleteDatabase(dbName);
 		return new Promise((resolve, reject) => {

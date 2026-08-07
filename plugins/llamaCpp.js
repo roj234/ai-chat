@@ -2,13 +2,14 @@ import {config, isLlamaCppBackend, models, setIsLlamaCppBackend, updateModels} f
 import {$asyncState, $cleanup, $computed, $foreach, $state, $unwatch, $update, $watch} from "unconscious";
 import {isLanAddress} from "/common/isLanAddress.js";
 import "./llamaCpp.css";
-import {prettyError, resolveDBRelativeURL, throttled} from "/src/utils/utils.js";
+import {prettyError, resolveDBRelativeURL} from "/src/utils/utils.js";
 import {jsonFetch} from "/common/openai-api-utils.js";
 import {SETTINGS} from "/src/settings.js";
 import {showToast} from "/src/components/Toast.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
 import {updateStatusText} from "/src/api-request.js";
 import {onLoad} from "/src/hooks.js";
+import {throttled} from "/src/utils/pure-utils.js";
 
 const _endpoint = $state({});
 const _stateChanging = $state("");

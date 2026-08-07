@@ -20,7 +20,7 @@ export const
 	SYNC_SEND_TO_OWNER = 17
 ;
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 export const sortMessages = (messages) => messages.sort((a, b) => {
 	const b1 = a.role === "system";

@@ -38,6 +38,9 @@
     & .body {
         color: var(--muted);
         overflow: auto;
+        white-space: pre-wrap;
+        line-height: 1.5;
+        font-size: 16px;
 
         /* For input mode, ensure the body has space for the input */
         &:has(.modal-input) {
@@ -46,9 +49,6 @@
 
         & p {
             margin: 0;
-            line-height: 1.5;
-            font-size: 16px;
-            white-space: pre-wrap;
         }
 
         & > input, & > textarea {

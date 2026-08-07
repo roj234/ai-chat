@@ -5,7 +5,7 @@
 
     & .diff {
         overflow: hidden;
-        max-height: 3lh;
+        max-height: var(--collapsed-height, none);
         transition: max-height 0.2s ease;
     }
 

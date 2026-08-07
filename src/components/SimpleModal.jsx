@@ -7,6 +7,7 @@ import './SimpleModal.css';
  * @param {string} message
  * @param {string} placeholder
  * @param {string} value
+ * @param {string} list datalist 元素的 id
  * @param {'primary' | 'danger' | 'ghost'} accent
  * @param {string} confirmMessage
  * @param {function(string): void = } onConfirm
@@ -19,6 +20,7 @@ const SimpleModal = ({
 		message,
 		placeholder,
 		value,
+		list,
 		accent = 'primary',
 		confirmMessage = '确认',
 		onConfirm,
@@ -28,17 +30,15 @@ const SimpleModal = ({
 	let inputValue = '';
 	const ignoreCancel = onCancel === null;
 
-	const handleClose = () => {
-		if (ignoreCancel || false === onCancel?.(inputValue)) {
+	const handleClose = async () => {
+		if (ignoreCancel || false === await onCancel?.(inputValue)) {
 			return;
 		}
 		element.remove();
 	}
 
-	const handleConfirm = () => {
-		if (false === onConfirm?.(inputValue)) {
-			return;
-		}
+	const handleConfirm = async () => {
+		if (false === await onConfirm?.(inputValue)) return;
 		element.remove();
 	};
 
@@ -63,6 +63,7 @@ const SimpleModal = ({
 					{type === 'input' ? <input className={"text-input"}
 						onChange={(e) => inputValue = e.target.value}
 						placeholder={placeholder}
+						list={list}
 						onKeyDown={(e) => {
 							e.key === "Enter" && handleConfirm();
 						}}
@@ -75,7 +76,7 @@ const SimpleModal = ({
 					{after}
 				</div>
 				<div className="footer">
-					<button className={"btn " + accent} onClick={handleConfirm}>{confirmMessage}</button>
+					<button className={"btn " + accent} onClick={onConfirm ? handleConfirm : handleClose}>{confirmMessage}</button>
 					{onConfirm && !ignoreCancel && <button className="btn ghost" onClick={handleClose}>取消</button>}
 				</div>
 			</div>

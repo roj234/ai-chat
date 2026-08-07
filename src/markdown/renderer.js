@@ -1,10 +1,10 @@
 import * as fastmd from 'fastmd';
-import {once} from "../utils/utils.js";
 
 import 'katex/dist/katex.min.css';
 import {SafeImage} from "../components/SafeImage.jsx";
 import {unconscious} from "unconscious";
 import {highlight} from "./highlight.js";
+import {once} from "../utils/pure-utils.js";
 
 const customCodeRenderer = {};
 /**

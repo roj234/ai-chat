@@ -2,6 +2,7 @@ import {getToolParameters, registerToolset} from "/src/toolset.js";
 import {inputText} from "/src/states.js";
 import {$state, $update, $watch, unconscious} from "unconscious";
 import "./rp_kit/interactive_simulation.css";
+import {markMessageDirty} from "/src/database.js";
 
 /**
  * @type {AiChat.FunctionTool<*>}
@@ -29,12 +30,13 @@ const HumanInput = {
 		return <div className={'rp-choice-label'}>请操作: {par.task}</div>;
 	},
 	script() {},
-	renderer(response, frozen, tc) {
+	renderer(response, frozen, tc, message) {
 		let content = $state(response.content);
 		$watch(content, () => {
 			const value = unconscious(content);
 			response.success = !!value;
 			response.content = value;
+			markMessageDirty(message);
 			$update(inputText);
 		}, false);
 		let ta;

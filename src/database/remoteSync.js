@@ -7,12 +7,13 @@ import {
 	runningConversations,
 	selectedConversation,
 	updateConversationListUI,
+	updateConversationResumeState,
 	updateMessageUI
 } from "../states.js";
 import {decodeObjects, serializeJSON} from "../utils/marshal.js";
 import {showToast} from "../components/Toast.js";
 import {$computed, $state, $update, ONCE_EVENT, unconscious} from "unconscious";
-import {onLoad} from "../hooks.js";
+import {DI, onLoad} from "../hooks.js";
 
 import {
 	SYNC_CONFLICT,
@@ -33,7 +34,7 @@ import {
 	SYNC_RPC,
 	SYNC_UNLOCKED
 } from "/backend/sync_const.js";
-import {clearDirtyFlags, DB_CONVERSATION_DIFF, DB_MESSAGES_DIFF, listConversations} from "../database.js";
+import {clearMessageDirty, CONVERSATION_SNAPSHOT, listConversations, MESSAGES_CACHE} from "../database.js";
 import {deepEqual, patch} from "unconscious/common/deepEqual.js";
 import {decodeMsg} from "unconscious/common/msgpack.js";
 import {msgpack_schema} from "/common/MsgpackSchema.js";
@@ -73,13 +74,14 @@ export const sendToSyncServer = (type, data, rawString) => {
 };
 
 const setWritable = (id) => {
+	if (id != null && setCurrentLocked(0, id)) return;
 	readonlyToast?.();
 	readonlyToast = null;
 	body.remove("_readonly");
-	setCurrentLocked(0, id);
 };
 
 const setReadonly = (id, rpc) => {
+	if (setCurrentLocked(1, id)) return;
 	readonlyToast = showToast(<>
 		<div>
 			<b>只读</b>&nbsp;
@@ -93,17 +95,31 @@ const setReadonly = (id, rpc) => {
 		{rpc?.render(id)}
 	</>, '', -1);
 	body.add("_readonly");
-	setCurrentLocked(1, id);
 };
 
 const setCurrentLocked = (locked, id) => {
 	const id1 = selectedConversation.id;
-	if (id1 == null || (id != null && id1 !== id)) return;
+	if (id1 == null || (id != null && id1 !== id)) return true;
 	selectedConversation[LOCKED] = locked;
 	$update(updateConversationListUI);
 };
 
+const findConversation = (id) => {
+	const conv = unconscious(selectedConversation);
+	return conv?.id !== id ? unconscious(conversations).find(item => item.id === id) : conv;
+};
+
+const checkConcurrentModification = conv => {
+	const convId = conv.id;
+	if (locks.has(convId) && !conv[LOCKED]) {
+		showToast(`合并冲突：其它端修改了对话 #${convId}`, 'error');
+	}
+};
+
 export const initSync = (address, kvRef, kvCache, rpc) => new Promise((resolve, reject) => {
+	DI.lock = lock;
+	DI.unlock = unlock;
+
 	ws = new WebSocket(address);
 	let closeToast;
 
@@ -149,7 +165,7 @@ export const initSync = (address, kvRef, kvCache, rpc) => new Promise((resolve, 
 				if (id != null) selectedConversation.value = arr.find(item => item.id === id);
 				closeToast();
 			}).catch(err => {
-				if (err.status !== 304) html.value = prettyError(err);
+				if (err.status !== 304) html.value = highlightJsonLike(prettyError(err));
 				else closeToast();
 			}).finally(() => {
 				btn.disabled = false;
@@ -218,18 +234,23 @@ export const initSync = (address, kvRef, kvCache, rpc) => new Promise((resolve, 
 			case SYNC_RELEASED: {
 				if (data === selectedConversation.id) {
 					selectedConversation.ready = false;
-					setWritable(data);
 				}
+				setWritable(data);
 			}
 			break;
 			// 消息状态更新
 			case SYNC_MESSAGE:
 			case SYNC_MESSAGE_DEL: {
-				const conv = unconscious(selectedConversation);
-				const bm = conv[BRANCH_MANAGER];
-				const msg = bm?.messages || unconscious(messages);
-
 				const {owner, ...message} = data;
+				const conv = findConversation(owner);
+				if (!conv) return;
+
+				const bm = conv[BRANCH_MANAGER];
+				const msg = bm?.messages || conv[MESSAGES_CACHE];
+				if (!msg) return;
+
+				checkConcurrentModification(conv);
+
 				const isUpdate = type === SYNC_MESSAGE;
 				let nextEnd;
 
@@ -237,31 +258,61 @@ export const initSync = (address, kvRef, kvCache, rpc) => new Promise((resolve, 
 				if (index >= 0) {
 					if (isUpdate) patch(msg[index], message);
 					else msg.splice(index, 1);
-				} else if (isUpdate && conv.id === owner) {
+				} else if (isUpdate) {
 					msg.push(nextEnd = message);
 				}
-				clearDirtyFlags(conv, message.id, isUpdate && message);
-				if (bm) {
-					bm.setLeaf(nextEnd || msg[conv.bm_leaf] || msg.at(-1), true);
-					messages.value = bm.getMessages();
+				clearMessageDirty(conv, message.id, isUpdate && message);
+
+				if (conv === unconscious(selectedConversation)) {
+					if (bm) {
+						bm.setLeaf(nextEnd || msg[conv.bm_leaf] || msg.at(-1), true);
+						messages.value = bm.getMessages();
+					}
+					else $update(updateMessageUI);
 				}
-				else $update(updateMessageUI);
 				break;
 			}
 			// 对话状态更新
 			case SYNC_CONVERSATION:
 			case SYNC_CONVERSATION_DEL: {
-				const index = conversations.findIndex(item => item.id === data.id);
-				if (index >= 0) data = patch(conversations.splice(index, 1)[0], data);
-				const isCurrent = data.id === selectedConversation.id;
-				if (type === SYNC_CONVERSATION) {
-					data[DB_CONVERSATION_DIFF] = structuredClone(data);
-					// 作废消息缓存
-					if (!isCurrent)
-						delete data[DB_MESSAGES_DIFF];
-					conversations.unshift(data);
+				const convId = data.id;
+				const index = conversations.findIndex(item => item.id === convId);
+				let conv, removed, lastTime;
+				if (index >= 0) {
+					conv = conversations[index];
+					lastTime = conv.time;
 				}
-				else if (isCurrent) {
+
+				try {
+					conv = patch(conv, data);
+				} catch {
+					// 有可能失败，因为不一定所有的客户端都拿到了完整的对话对象，可能只有list时的 id time title 三项
+				}
+
+				// 如果时间没变化，就不插到开头（例如只修改标题）
+				if (lastTime !== conv.time || type === SYNC_CONVERSATION_DEL) {
+					if (index >= 0) conversations.splice(index, 1);
+					removed = true;
+				}
+
+				const isCurrentViewing = convId === selectedConversation.id;
+				if (type === SYNC_CONVERSATION) {
+					if (removed) conversations.unshift(conv);
+					else $update(updateConversationListUI);
+
+					$update(updateConversationResumeState);
+
+					checkConcurrentModification(conv);
+					// 清除变更标记
+					if (conv[CONVERSATION_SNAPSHOT]) {
+						conv[CONVERSATION_SNAPSHOT] = structuredClone(conv);
+					}
+					if (!locks.has(convId)) {
+						// 如果没有打开这些消息，那么清除消息缓存
+						delete conv[MESSAGES_CACHE];
+					}
+				}
+				else if (isCurrentViewing) {
 					showToast("当前对话已被其它客户端删除", 'error', 0);
 					resetConversation();
 				}
@@ -316,7 +367,7 @@ const unlock = (id) => {
 	} else {
 		locks.set(id, lockCount - 1);
 	}
-}
+};
 
 onLoad((app) => {
 	body = app.classList;

@@ -16,8 +16,7 @@
             "constant": { "type": "boolean", "default": false },
             "position": {
               "enum": ["worldInfoBefore", "worldInfoAfter", "depth"]
-            },
-            "id": { "type": "string" }
+            }
           },
           "required": [
             "name", "enabled", "comment", "content", "constant", "position"

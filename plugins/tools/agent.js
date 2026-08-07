@@ -1,7 +1,6 @@
-import {getToolParameters, registerToolset} from "/src/toolset.js";
-import {config, inputText, messages, selectedConversation, updateMessageUI} from "/src/states.js";
-import {$state, $update, $watch, unconscious} from "unconscious";
-import {showToast} from "/src/components/Toast.js";
+import {ContentPart, getToolParameters, registerToolset} from "/src/toolset.js";
+import {inputText, messages, selectedConversation, updateMessageUI} from "/src/states.js";
+import {$state, $update, $watch, debugSymbol, unconscious} from "unconscious";
 import {AskUser} from "./rp_kit/AskUser.js";
 import {
 	callFileSystemFunc,
@@ -9,11 +8,11 @@ import {
 	fileAccess,
 	FILESYSTEM_AUX_PROMPT,
 	getFileSystem,
-	getFsApiUrlPat
+	resetFileAccessSettings
 } from "./fileAccess.js";
 import {RunJS, SearchModules} from "./run_js.js";
 import {readAsString} from "/common/chardet.js";
-import {downloadFile} from "/src/utils/utils.js";
+import {downloadFile, prettyError} from "/src/utils/utils.js";
 import {jsonFetch} from "/common/openai-api-utils.js";
 import {ZipWriter} from "unconscious/common/zip-io.js";
 import {InspectImage} from "./inspect_image.js";
@@ -21,23 +20,14 @@ import {SetTimeout} from "./rp_kit/SetTimeout.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {prettyTime} from "unconscious/common/Utils.js";
 import {TextDiff} from "/src/components/TextDiff.jsx";
+import {createAsyncQueue} from "/src/utils/pure-utils.js";
+import {getCombinedPreset, getMessagesCacheFirst, markMessageDirty} from "/src/database.js";
 
 export const prefixTitle = (prefix, key='path') => (req, ctx) => prefix + ' ' + getToolParameters(ctx, req)[key];
-const createAsyncQueue = (concurrency = 6) => {
-	const taskQueue = new Set;
 
-	return [async runTask => {
-		while (taskQueue.size >= concurrency) {
-			await Promise.race(taskQueue);
-		}
+const NEWLY_CREATED_FILES = debugSymbol("WrittenFiles");
 
-		const self = runTask().finally(() => taskQueue.delete(self));
-		taskQueue.add(self);
-	}, () => Promise.all(taskQueue)];
-}
-
-const GREP_MAX_LINE_LENGTH = 180;
-let globFiles, readFile, grepFilesBackendOnly = fileAccess('grep'), statFile;
+let globFiles, readFile = fileAccess("read"), writeFile = fileAccess("write"), statFile;
 //region Filesystem tools
 /** @type {AiChat.FunctionTool} */
 const Glob = {
@@ -57,7 +47,9 @@ const Glob = {
 			path: { type: "string", default: '.' },
 			pattern: { type: "string", default: "*" },
 			limit: { type: "integer", default: 200, minimum: 1, maximum: 1000 },
-			modifiedSince: { type: "string", description: "ISO-8601 timestamp filter" }
+			modifiedSince: { type: "string", description: "ISO-8601 timestamp filter" },
+			//depth: { type: "integer", description: "Optional maximum directory tree depth" },
+			// TODO overwrite skip for written files in current conv
 		}
 	}
 };
@@ -72,7 +64,14 @@ const Read = {
 		"\nExamples:\n" +
 		"\n - Read(offset=-5) for a 10-line file return line 6-10" +
 		"\n - Read(offset=-5, limit=3) for that file return line 6-8",
-	script: readFile = fileAccess("read"),
+	async script(par, resp, conv) {
+		const hasImageCapability = (await getCombinedPreset(conv)).modalities.includes("image");
+		if (hasImageCapability && par.path.match(/\.(png|jpg|jpeg|bmp|webp)$/i)) {
+			const blob = await binaryRead(par, resp, conv);
+			return new ContentPart().image(blob);
+		}
+		return readFile(par, resp, conv);
+	},
 	title: prefixTitle("读取"),
 
 	fix(par) {
@@ -104,7 +103,28 @@ const Read = {
 const Write = {
 	name: "Write",
 	description: "Write a file.",
-	script: fileAccess("write"),
+	async script(par, ctx, conv) {
+		let writtenFiles = conv[NEWLY_CREATED_FILES];
+		if (!writtenFiles) {
+			writtenFiles = conv[NEWLY_CREATED_FILES] = new Set;
+			for (const message of await getMessagesCacheFirst(conv)) {
+				const resp = message.tool_responses;
+				if (resp) {
+					for (let i = 0; i < resp.length; i++) {
+						const k = message.tool_calls[i], v = resp[i];
+						if (v.success && k.function.name === Write.name) {
+							const tp = getToolParameters(v, k, true);
+							if (tp) writtenFiles.add(tp.path);
+						}
+					}
+				}
+			}
+		}
+		if (writtenFiles.has(par.path)) par = { ...par, overwrite: true };
+		const result = await writeFile(par, ctx, conv);
+		writtenFiles.add(par.path);
+		return result;
+	},
 	interactive: false, // 手动指定 interactive 之后 renderer 总是会被调用，而不是必须等到执行结束
 	title: (tc, ctx) => {
 		const toolParameters = getToolParameters(ctx, tc);
@@ -211,9 +231,12 @@ const Patch = {
 	title: prefixTitle("修改"),
 	interactive: false,
 	script(par, ctx, conv) {
+		const changes = parseUnifiedHunk(par.diff);
+		if (!changes.length) throw ("Patch contains no valid hunks");
+
 		return patchHandler({
 			path: par.path,
-			changes: parseUnifiedHunk(par.diff)
+			changes
 		}, ctx, conv);
 	},
 
@@ -410,9 +433,10 @@ b.txt
 	parameters: {
 		type: "object",
 		properties: {
-			pattern: { type: "string", description: "JS regular expression pattern with optional flags", example: "(?flags)re" },
+			pattern: { type: "string", description: "JS regular expression pattern with optional flags", example: "(?iu)System" },
 			path: { type: "string", default: ".", description: "Directory or file" },
 			glob: { type: "string", default: "**" },
+			context: { type: "number", default: 0, description: "Show lines before and after each match." },
 			maxFiles: { type: "integer", default: 50, minimum: 1, maximum: 500 },
 			maxMatchesPerFile: { type: "integer", default: 10, minimum: 1, maximum: 100 },
 		},
@@ -424,93 +448,7 @@ b.txt
 		const p = pattern.length > 30 ? pattern.slice(0, 30) + "…" : pattern;
 		return "搜索 " + (glob !== "**" ? path + "/" + glob : path) + " 中的 " + p;
 	},
-	async script({ pattern, path = ".", glob = "**", maxFiles = 50, maxMatchesPerFile = 10 }, response, conv) {
-		if (conv.fs_type === "api" || conv.fs_type === 'db') {
-			let result = await grepFilesBackendOnly({
-				maxCount: maxMatchesPerFile,
-				maxColumns: GREP_MAX_LINE_LENGTH,
-				glob,
-				pattern,
-				path
-			}, response, conv);
-
-			if (!result.startsWith("Exit code -1")) {
-				result = result.slice(result.indexOf('\n')+1);
-				const arr = result.replaceAll(/^(\d+):/gm, "$1\x1F").split("\n\n");
-				return (arr.length === 1 ? arr[0] : arr.slice(0, maxFiles).map(item => item.slice(path.length+1))/*.slice(0, maxMatchesPerFile)*/.join("\n\n")) || '[No match]';
-			} else {
-				showToast("后端未找到 rg (ripgrep), 可能影响性能", 'error');
-			}
-		}
-
-		// TODO copy to backend
-		let flag = 'iu';
-		const FETCH_PATTERN = /^\(\?([a-z]+)\)/;
-		const exec = FETCH_PATTERN.exec(pattern);
-		if (exec) {
-			flag = exec[1];
-			pattern = pattern.slice(flag.length+3);
-		}
-		const regExp = new RegExp(pattern, flag);
-
-		let results = '';
-		let matchedFiles = 0;
-
-		const [enqueue, waitAll] = createAsyncQueue();
-
-		let listError;
-		let files;
-		try {
-			files = await globFiles({path, pattern: glob, json: true}, response, conv);
-			path += '/';
-		} catch (e) {
-			if (glob !== '**' && glob !== '*' && path !== glob && !path.endsWith("/"+glob)) throw e;
-			listError = e;
-			files = [["", 'file']];
-		}
-
-		for (const [relPath, type] of files) {
-			if (type !== 'file') continue;
-			if (matchedFiles >= maxFiles) break;
-
-			await enqueue(async () => {
-				if (matchedFiles >= maxFiles) return;
-
-				let content;
-				try {
-					content = await readFile({ path: path + relPath, format: "raw", noTruncate: true }, response, conv);
-				} catch {
-					if (listError) throw listError;
-					return;
-				}
-
-				if (matchedFiles >= maxFiles) return;
-				let fileMatches = 0;
-
-				const lines = content.split("\n");
-				let match;
-				for (let i = 0; i < lines.length; i++) {
-					if (regExp.test(lines[i])) {
-						if (!match) {
-							if (results) results += '\n';
-							if (relPath) results += relPath+'\n';
-							match = true;
-							matchedFiles++;
-						}
-
-						let line = lines[i];
-						if (line.length > GREP_MAX_LINE_LENGTH) line = "[Omitted long matching line]"; // 行为统一
-						results += (i+1)+"\x1F"+line+'\n';
-						if (++fileMatches >= maxMatchesPerFile) return;
-					}
-				}
-			})
-		}
-
-		await waitAll();
-
-		return results || '[No match]';
-	},
+	script: fileAccess('grep')
 };
 //endregion
 //region Filesystem management tools
@@ -592,14 +530,16 @@ const LsMount = {
 	title: () => "列出挂载点",
 
 	script(_, resp, conv) {
-		const arr = Object.keys(conv.mnt||{});
-		return "Total "+(arr.length+1)+"\n1: \".\"\n"+arr.map((k, i) => (i+2)+": "+JSON.stringify("~/"+k)).join("\n");
+		const arr = Object.entries(conv.mnt||{});
+		arr.unshift([".", conv]);
+		return "Total "+(arr.length)+"\n"+arr.map(([k, {fs_type, fs_base, fs_name}], i) => JSON.stringify(i ? "~/"+k : k)+" (type="+fs_type+", base="+JSON.stringify(fs_base)+", name="+JSON.stringify(fs_name)+")").join("\n");
 	},
 };
 //endregion
 const fileSystemTools = [Glob, Read, Grep, Stat, AskUser, Edit, Patch, Write, Append, Delete, Mkdir, CopyMove, Mount, LsMount];
 const imageReadTools = [InspectImage];
 const filesystemPrompt = `<file-editing>
+- NEVER use absolute paths starting with \`/\` (e.g. \`/tmp\`, \`/etc/passwd\`).
 - Filesystem root: '.', **MUST** use relative path, NEVER use \`/folder\`.
 - All writing tools like Append and Write, will automatically create parent directories.
 - DO NOT read file to verify edits, tool will return error details if edit failed.
@@ -613,6 +553,7 @@ const KillProgram = {
 	name: "KillProgram",
 	description: "Stop a previous launched program (kill process tree).",
 	script: fileAccess("kill"),
+	title: prefixTitle("杀死进程", "pid"),
 
 	parameters: {
 		type: "object",
@@ -651,6 +592,12 @@ const RunProgram = {
 				type: "string",
 				default: ".",
 			},
+			env: {
+				type: "object",
+				additionalProperties: {
+					type: "string"
+				}
+			},
 			timeout: {
 				type: "integer",
 				default: 10,
@@ -663,6 +610,32 @@ const RunProgram = {
 			}
 		},
 		required: ["explanation", "program", "arguments"]
+	}
+};
+/** @type {AiChat.FunctionTool} */
+const WriteStdin = {
+	name: "WriteStdin",
+	description: "Write text to the stdin of a previously launched program.",
+	script: fileAccess("feed"),
+	title: (req, ctx) => {
+		const toolParameters = getToolParameters(ctx, req);
+		let content = toolParameters.content.trim();
+		let idx = content.indexOf('\n');
+		if (idx > 0 || content.length > 100) {
+			if (idx < 0) idx = 100;
+			content = content.slice(0, idx) + " ...";
+		}
+
+		return "进程 "+toolParameters.pid+" 写入 "+content;
+	},
+
+	parameters: {
+		type: "object",
+		properties: {
+			pid: { type: "number", },
+			content: { type: "string", description: "Include a trailing LF if the program is line-buffered and waits for Enter." },
+		},
+		required: ["pid", "content"]
 	}
 };
 /** @type {AiChat.FunctionTool} */
@@ -685,6 +658,13 @@ const Shell = {
 				type: "string",
 				default: ".",
 			},
+			// not needed for shell
+			/*env: {
+				type: "object",
+				additionalProperties: {
+					type: "string"
+				}
+			},*/
 			timeout: {
 				type: "integer",
 				default: 10,
@@ -700,13 +680,24 @@ const Shell = {
 	}
 };
 //endregion
-const shellTools = [RunProgram, Shell, KillProgram, SetTimeout];
+const shellTools = [RunProgram, Shell, KillProgram, WriteStdin, SetTimeout];
 const shellFallbackTools = [RunJS, SearchModules];
 
 async function shellPrompt(conv) {
 	let shellType = '';
-	const [url, pat] = getFsApiUrlPat();
-	let {prompt, location}  = await jsonFetch(url+'env', { key: pat, });
+	const [url, pat] = conv.fs_server;
+	const base = conv.fs_base;
+	let endpoint = url+'env';
+	if (base) endpoint += '?root='+encodeURIComponent(base);
+
+	let data;
+	try {
+		data = await jsonFetch(endpoint, { key: pat, });
+	} catch (e) {
+		throw `文件访问服务系统提示请求失败\n`+prettyError(e);
+	}
+	let {prompt, location} = data;
+
 	if (prompt.startsWith("os: Windows")) {
 		if (!prompt.includes("bash: No")) {
 			shellType = `emulated bash
@@ -780,7 +771,7 @@ const RequestFile = {
 		}
 	},
 
-	renderer(response, frozen, tc) {
+	renderer(response, frozen, tc, message) {
 		if (frozen) return;
 
 		const data = getToolParameters(response, tc);
@@ -793,6 +784,7 @@ const RequestFile = {
 				path: data.path,
 				content: unconscious(content)
 			};
+			markMessageDirty(message);
 			$update(inputText);
 		}, false);
 
@@ -918,18 +910,12 @@ registerToolset(
 
 			const isVirtualFileSystem = fsType === 'opfs' || fsType === 'config' || fsType === 'db';
 
-			if (null == conv[FILESYSTEM_AUX_PROMPT]) {
-				if (fsType === 'api') {
-					let prompt = '';
-					try {
-						prompt = await shellPrompt(conv);
-					} catch {}
-					conv[FILESYSTEM_AUX_PROMPT] = prompt;
-				}
+			let auxPrompt = conv[FILESYSTEM_AUX_PROMPT] || '';
+			if (!auxPrompt && fsType === 'api') {
+				auxPrompt = conv[FILESYSTEM_AUX_PROMPT] = await shellPrompt(conv);
 			}
-			const auxPrompt = conv[FILESYSTEM_AUX_PROMPT] || '';
 
-			imageReadTools.forEach(config.modalities.includes('image') ? addTools : removeTools);
+			imageReadTools.forEach((await getCombinedPreset(conv)).modalities.includes('image') ? addTools : removeTools);
 
 			const hasShell = fsType === 'api' && auxPrompt;
 			if (hasShell) {
@@ -948,7 +934,8 @@ registerToolset(
 			vfsTools.forEach(isVirtualFileSystem || activatedModules.has("FileTransfer") ? addTools : removeTools);
 
 			return filesystemPrompt + auxPrompt;
-		}
+		},
+		onDeactivated: resetFileAccessSettings
 	}
 );
 registerToolset(
@@ -980,6 +967,7 @@ COMMAND_REGISTRY['fsync'] = [
 		const list = fileAccess('list');
 		const conv = unconscious(selectedConversation);
 		const lastTime = messages.at(-1).time;
+		if (null == lastTime) return;
 		const result = await list({
 			pattern: '**',
 			json: true,
@@ -989,9 +977,9 @@ COMMAND_REGISTRY['fsync'] = [
 		messages.push({
 			role: 'user',
 			time: Date.now(),
-			content: '<remainder>Some files have changed by user:\n```\n'+result.map(([name, type, size, time]) => {
+			content: '<system-remainder>Some files have changed:\n```\n'+result.map(([name, type, size, time]) => {
 				return name+'\t'+prettyTime(+new Date(time));
-			}).join('\n')+'\n```\n</remainder>',
+			}).join('\n')+'\n```\n</system-remainder>',
 			label: "文件系统变更"
 		});
 	},
