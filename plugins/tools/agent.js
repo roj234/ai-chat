@@ -539,8 +539,7 @@ const LsMount = {
 const fileSystemTools = [Glob, Read, Grep, Stat, AskUser, Edit, Patch, Write, Append, Delete, Mkdir, CopyMove, Mount, LsMount];
 const imageReadTools = [InspectImage];
 const filesystemPrompt = `<file-editing>
-- NEVER use absolute paths starting with \`/\` (e.g. \`/tmp\`, \`/etc/passwd\`).
-- Filesystem root: '.', **MUST** use relative path, NEVER use \`/folder\`.
+- NEVER use absolute paths like \`/tmp\`, **ALWAYS** use relative path.
 - All writing tools like Append and Write, will automatically create parent directories.
 - DO NOT read file to verify edits, tool will return error details if edit failed.
 - If a path is URI encoded, keep it, don't decode.
@@ -718,8 +717,10 @@ ${prompt}
 <command-execution>
 ### Running commands
 
-- Relative path is recommended.
-- Always use '/' as path seprator.
+- Relative path (to workspace root) is recommended.
+- Path seprator always '/'.
+- Mountpoints are isolated FS, programs on root (workspace) FS cannot access them, explicitly set 'cwd' inside Mountpoint to run program there, use CopyMove to copy necessary files.
+  - Mountpoint might not support running programs.
 - Shell: ${shellType}
 - Large output (> 20KB) will be automatically redirected to a log file.
 - Prefer a reusable script file (Python, JS, shell, etc.) over repeating commands.
@@ -978,7 +979,7 @@ COMMAND_REGISTRY['fsync'] = [
 			role: 'user',
 			time: Date.now(),
 			content: '<system-remainder>Some files have changed:\n```\n'+result.map(([name, type, size, time]) => {
-				return name+'\t'+prettyTime(+new Date(time));
+				return name+'\t'+prettyTime(Date.parse(time+"+00:00"));
 			}).join('\n')+'\n```\n</system-remainder>',
 			label: "文件系统变更"
 		});

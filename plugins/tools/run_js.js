@@ -219,7 +219,7 @@ export const RunJS = {
 	description: `Execute a JavaScript module (ESM) in sandbox.
 - ES2023+, top-level await, import, import attributes and dynamic import(), no live bindings.
 - Access file system via \`fs/promises\` and \`path\` module and equivalent global objects.
-- globalThis and module cache are persist, until manual reset, timeout or page reload.
+- globalThis and loaded script files are persist, until manual reset, timeout or page reload.
 - Not Node.js environment: no require(), no fs.readSync (\`fs/promises\' shim only), no http (use \`fetch\` and XHR, cannot bypass CORS).
 - After the module evaluated, the sandbox detaches — lingering async tasks will fail, be sure to await all Promises.
 - For Uint8Array, use \`fs.writeFile(path, data, { transfer: true })\` (or appendFile) to transfer the buffer ownership for better performance. The returned promise resolves to a new Uint8Array with the same content; the original buffer becomes invalid.`,

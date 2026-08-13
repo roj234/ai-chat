@@ -1,0 +1,20 @@
+
+.pretty-select.preset-switch {
+	& > .input {
+		gap: 4px;
+		padding: 4px 8px;
+		border-radius: var(--border-radius-lg);
+	}
+	& > .dropdown {
+		bottom: calc(100% + 6px);
+		min-width: 180px;
+		padding: 4px;
+		border-radius: 8px;
+
+		& > li {
+			padding: 6px;
+			border-radius: 6px;
+			cursor: pointer;
+		}
+	}
+}

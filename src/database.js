@@ -7,7 +7,7 @@ import * as remote from "./database/remoteDB.js";
 import {showToast} from "./components/Toast.js";
 
 export const MESSAGES_SNAPSHOT = debugSymbol("MessagesSnapshot");
-export const CONVERSATION_SNAPSHOT = debugSymbol("ConversationSnapshot");
+export const DIFF_SNAPSHOT = debugSymbol("DiffSnapshot");
 export const PENDING_UPDATE = debugSymbol("PendingUpdate");
 export const MESSAGES_CACHE = debugSymbol("Messages");
 const MESSAGE_IS_CLEAN = debugSymbol("Clean");
@@ -147,7 +147,7 @@ export const getMessagesCacheFirst = async (conversation, noStore) => (conversat
  */
 export const getMessages = throttledPromise(conversation => (
 	getMessages_(conversation).then(messages => {
-		conversation[CONVERSATION_SNAPSHOT] = structuredClone(conversation);
+		conversation[DIFF_SNAPSHOT] = structuredClone(conversation);
 
 		if (messages !== conversation[MESSAGES_CACHE]) {
 			/** @type {Map<number, AiChat.Message>} */
@@ -185,7 +185,7 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 	let promises = [];
 	let changed = (diff) => {
 		changed = null;
-		conversation[CONVERSATION_SNAPSHOT] = structuredClone(conversation);
+		conversation[DIFF_SNAPSHOT] = structuredClone(conversation);
 		const updateAndThen = db.upsertConversation(diff);
 		promises.push(updateAndThen);
 		return updateAndThen;
@@ -281,7 +281,7 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 	}
 
 	let convDiff;
-	if (changed && (convDiff = isIDB ? (!deepEqual(conversation[CONVERSATION_SNAPSHOT], conversation, DIFF_IGNORE_KEYS) && conversation) : delta(conversation[CONVERSATION_SNAPSHOT], conversation, DIFF_IGNORE_KEYS))) {
+	if (changed && (convDiff = isIDB ? (!deepEqual(conversation[DIFF_SNAPSHOT], conversation, DIFF_IGNORE_KEYS) && conversation) : delta(conversation[DIFF_SNAPSHOT], conversation, DIFF_IGNORE_KEYS))) {
 		convDiff.id = conversation.id;
 		changed(convDiff);
 	}
@@ -321,13 +321,27 @@ const MERGED_CONFIG = debugSymbol("MergedConfig");
  */
 export const getCombinedPreset = async (conv) => {
 	const globalPreset = unconscious(config);
-	if (!conv.overrides && !conv.preset) return globalPreset;
+	const presets = conv.presets;
+	const overrides = conv.overrides;
+	if (!overrides && !presets) return globalPreset;
 
 	let combined = conv[MERGED_CONFIG];
 	if (!combined || combined[CONFIG_VERSION] !== globalPreset[CONFIG_VERSION]) {
 		combined = conv[MERGED_CONFIG] = {...globalPreset};
-		if (conv.preset) Object.assign(combined, await kvListGet('preset', conv.preset));
-		if (conv.overrides) Object.assign(combined, conv.overrides);
+		if (presets) {
+			if (Array.isArray(presets)) {
+				for (const preset of presets) {
+					Object.assign(combined, await kvListGet('preset', preset));
+				}
+			} else {
+				Object.assign(combined, await kvListGet('preset', presets));
+			}
+		}
+		if (overrides) Object.assign(combined, overrides);
 	}
 	return combined;
+}
+
+export const markCombinedPresetDirty = (conv) => {
+	delete conv[MERGED_CONFIG];
 }

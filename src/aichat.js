@@ -186,9 +186,9 @@ const createApp = () => {
 			toggleSettingUI('prefillPath', !isTextCompletion && config.canPrefill);
 			toggleSettingUI('CoTPrompt', !isTextCompletion && config.reasoning === false);
 		}
-		if (id === 'reasoning') toggleSettingUI('CoTPrompt', newValue === false);
-		if (id === 'generateTitle') toggleSettingUI('title', newValue === true);
-		if (id === 'canPrefill') toggleSettingUI('prefillPath', newValue === true);
+		if (id === 'reasoning') toggleSettingUI('CoTPrompt', !newValue);
+		if (id === 'generateTitle') toggleSettingUI('title', !!newValue);
+		if (id === 'canPrefill') toggleSettingUI('prefillPath', !!newValue);
 		if (id === 'messageTheme') {
 			const el = messagesPanel.querySelector('._vl');
 			el.className = '_vl msg-vl '+newValue;
@@ -447,5 +447,21 @@ addEventListener("load", () => {
 
 		callOnLoadHandler(wrapper, settings, messageContainer);
 		onLoad_(wrapper);
+	}).catch(e => {
+		SimpleModal({
+			title: "系统加载失败",
+			message: prettyError(e),
+			confirmMessage: "禁用所有插件",
+			onCancel() {
+				config.pluginOrder = [];
+				location.reload();
+			}
+		})
 	});
-})
+});
+
+addEventListener("unhandledrejection", e => {
+	e.promise.catch(e => {
+		showToast("未捕获的异常\n"+prettyError(e), 'error', 0);
+	})
+});

@@ -43,8 +43,8 @@ export function registerKVRoutes(batcher) {
 	batcher["kvs/upsert"] = async ({ type, name, ...diff }, {db}) => {
 		if (!type || !name) return { error: 'type and name required' };
 
-		if (diff.$ === 'SET') {
-			diff = diff.val;
+		if (diff.$ === '=') {
+			diff = diff.v;
 		} else {
 			const row = db.prepare('SELECT * FROM kvs WHERE type = ? AND name = ?').get(type, name);
 			if (!row) return { error: `${type} ${JSON.stringify(name)} not found` };

@@ -27,8 +27,8 @@ export function registerMessageRoutes(batcher) {
 	batcher["conversation/upsert"] = async ({ id, ...diff }, ctx) => {
 		const setConversationId = ctx.setVariable("conversationId");
 
-		if (diff.$ === 'SET') {
-			diff = diff.val;
+		if (diff.$ === '=') {
+			diff = diff.v;
 		} else {
 			if (Number.isFinite(id)) {
 				const row = ctx.db.prepare('SELECT title, time, data FROM conversations WHERE id = ?').get(id);
@@ -118,8 +118,8 @@ export function registerMessageRoutes(batcher) {
 		if (!Number.isFinite(owner)) return { error: 'missing owner' };
 
 		let oldThink, oldContent;
-		if (diff.$ === 'SET') {
-			diff = diff.val;
+		if (diff.$ === '=') {
+			diff = diff.v;
 		} else {
 			if (Number.isFinite(id)) {
 				const row = ctx.db.prepare('SELECT time, content, data FROM messages WHERE id = ?').get(id);

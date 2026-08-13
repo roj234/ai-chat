@@ -55,7 +55,7 @@ export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages, pre
 		lastUserMessage = message.content;
 		// 酒馆并没有把最后一条消息去掉
 		chatHistory = jsonMessages;
-		if (config.removeLastUserMessage)
+		if (config.st_removeLastUserMessage)
 			chatHistory = jsonMessages.slice(0, jsonMessages.length-1);
 	} else {
 		chatHistory = jsonMessages;
@@ -101,10 +101,8 @@ export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages, pre
 			content = content.replaceAll(/\{\{(.+?)}}/gs, (_, match) => {
 				if (!match.startsWith("//")) {
 					if (match === "trim") {
-						if (!needTrim) {
-							needTrim = true;
-							return "";
-						}
+						needTrim = true;
+						return "";
 					}
 
 					if (match === "lastUserMessage") return lastUserMessage;
@@ -115,6 +113,10 @@ export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages, pre
 					if (cmd === "getvar") {
 						const vname = match.slice(idx + 2);
 						return variables[vname]?.trim() ?? ("未定义的变量 "+vname+"\n");
+					}
+					if (cmd === "random") {
+						const choices = match.slice(idx + 2).split(",").map(s => s.trim()).filter(String);
+						return choices[0] || '';
 					}
 
 					const idx2 = match.indexOf("::", idx + 2);
@@ -182,7 +184,7 @@ export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages, pre
 };
 
 
-export const createDefaultCtx = char => ({
+export const createSimpleMacroContext = char => ({
 	char: char.char || char.name,
 	user: char.user || config.nickname || DEFAULT_USER_NAME
 });
@@ -192,9 +194,10 @@ export const createDefaultCtx = char => ({
  * @param {AiChat.DnD.MyCharacter} char
  * @param {string} lbBefore
  * @param {string} lbAfter
+ * @param {Object} macro
  * @return {string|OpenAI.Message[]}
  */
-export const makeStory = (char, lbBefore = "", lbAfter = "") => {
+export const makeStory = (char, lbBefore = "", lbAfter = "", macro) => {
 	let story = char.systemPrompt || `Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.`;
 
 	if (lbBefore) story += /*"\n\n"+*/lbBefore;
@@ -207,7 +210,7 @@ export const makeStory = (char, lbBefore = "", lbAfter = "") => {
 	if (lbAfter) story += /*"\n\n"+*/lbAfter;
 	if (char.dialogueExamples?.length) story += "\n\n[Example Chat]\n\n"+char.dialogueExamples.join("\n\n[Example Chat]\n\n");
 
-	return applyMacro(story + `\n\n[Start a new Chat]`, createDefaultCtx(char)).trim();
+	return applyMacro(story + `\n\n[Start a new Chat]`, macro).trim();
 };
 
 /**

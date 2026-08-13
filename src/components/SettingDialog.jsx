@@ -75,15 +75,20 @@ export function SettingDialog(oldUI) {
 	let body;
 	let dialog = <div className="modal-overlay hide" id={"settingDialog"} style={"display:none;z-index:3"}>
 		<div ref={header} className="modal ntp">
-			<div className="sidebar-list scroll">
-				<div className={"_vl"} onClick.delegate{".chat-item"}={({delegateTarget}) => {
-					delegateTarget.parentElement.querySelector(".active").classList.remove("active");
-					delegateTarget.classList.add("active");
-					currentTab.value = delegateTarget.dataset.tab;
-				}}>
-					{Object.entries(tabs).map(([id, {name}]) => {
-						return <div className={"chat-item"+(currentTab.value === id?" active":"")} data-tab={id}><span className="chat-title">{name}</span></div>;
-					})}
+			<div>
+				<PresetDropdown/>
+				<div className="sidebar-list scroll">
+					<div className={"_vl"} onClick.delegate{".chat-item"}={({delegateTarget}) => {
+						delegateTarget.parentElement.querySelector(".active").classList.remove("active");
+						delegateTarget.classList.add("active");
+						currentTab.value = delegateTarget.dataset.tab;
+					}}>
+						{Object.entries(tabs).map(([id, {name}]) => {
+							return <div className={"chat-item" + (currentTab.value === id ? " active" : "")}
+										data-tab={id}>
+								<span className="chat-title">{name}</span></div>;
+						})}
+					</div>
 				</div>
 			</div>
 
@@ -101,7 +106,6 @@ export function SettingDialog(oldUI) {
 					"overflow:auto;" +
 					"scrollbar-gutter:stable;" +
 					"padding-right:6px;"}></div>
-				<div className={"footer"}>{<PresetDropdown/>}</div>
 			</div>
 		</div>
 	</div>;

@@ -50,7 +50,7 @@ export function PresetList({items, selection}) {
 	}
 
 	return <div className="dropdown">
-		<button className="btn ghost">{() => !selection.value ? "跟随当前预设" : "锁定 "+selection.value+" 预设"}</button>
+		<button className="btn ghost">{() => !selection.value ? "跟随本地预设" : "锁定 "+selection.value+" 预设"}</button>
 		<div className="list long" onClick.delegate{"label"}={({delegateTarget}) => {
 			delegateTarget.parentElement.querySelector(".selected")?.classList.remove("selected");
 			delegateTarget.classList.add("selected");

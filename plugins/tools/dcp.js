@@ -239,8 +239,8 @@ It is your responsibility to keep a sharp, high-quality context window.
 		}
 	}
 })
-onConversationLoaded((conv, messages) => {
-	if (conv.activatedModules?.has("ContextCompression")) {
+onConversationLoaded((conv, messages, loadFromCache) => {
+	if (!loadFromCache && conv.activatedModules?.has("ContextCompression")) {
 		messages.unshift({
 			role: ID,
 			id: -1,

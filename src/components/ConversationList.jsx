@@ -7,7 +7,7 @@ import {
 	conversations,
 	isMobile,
 	LOCKED,
-	messages,
+	resetConversation,
 	runningConversations,
 	selectedConversation,
 	switchToConversation,
@@ -172,9 +172,8 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 								deleteConversation(conv);
 							}
 
-							if (selectedConversation.value === conv) {
-								selectedConversation.value = null;
-								messages.value = [];
+							if (unconscious(selectedConversation) === conv) {
+								resetConversation();
 							}
 						}
 					});

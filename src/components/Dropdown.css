@@ -1,34 +1,25 @@
 /* 容器 */
 .pretty-select {
     position: relative;
-    width: 100%;
+    flex-grow: 1;
     user-select: none;
-
-    --border-radius: 0px;
-
-    &.up {
-        border-top: 1px solid var(--border);
-    }
-    &.down {
-        border-bottom: 1px solid var(--border);
-    }
 
     & .input {
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding: 8px 12px;
-        background-color: var(--bg);
+        background-color: var(--chip-bg);
         color: var(--muted);
         font-size: 13px;
         cursor: pointer;
         transition: all 0.2s ease;
-    }
 
-    & .input:hover {
-        color: var(--muted);
-        border-color: var(--chip-hover);
-        background-color: var(--chip-bg);
+        &:hover {
+            color: var(--text);
+            border-color: var(--border);
+            background-color: var(--chip-hover);
+        }
     }
 }
 
@@ -50,32 +41,21 @@
 }
 
 /* 下拉菜单面板 */
+
+.pretty-select.open > ul {display: block;}
+.pretty-select.up > ul {bottom: 100%;}
+.pretty-select.up.open > ul {animation: fadeInUp 0.15s ease-out;}
+.pretty-select.down > ul {top: 100%;}
+.pretty-select.down.open > ul {animation: fadeInDown 0.15s ease-out;}
 .pretty-select > ul {
+    min-width: 180px;
+
     all: unset;
-
-    .up & {
-        bottom: 100%;
-        border-top: 1px solid var(--border);
-
-        .open & {
-            display: block;
-            animation: fadeInUp 0.15s ease-out;
-        }
-    }
-    .down & {
-        top: 100%;
-        border-bottom: 1px solid var(--border);
-
-        .open & {
-            display: block;
-            animation: fadeInDown 0.15s ease-out;
-        }
-    }
+    border: 1px solid var(--chip-hover);
 
     position: absolute;
     left: 0;
-    right: 0;
-    background-color: var(--card);
+    background: var(--card);
     box-shadow: var(--shadow);
     display: none;
     z-index: 1;
@@ -96,6 +76,7 @@
     align-items: center;
 
     &:hover {
+        background: var(--chip-bg);
         color: var(--text) !important;
         border-color: var(--muted);
     }

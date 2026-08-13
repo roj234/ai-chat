@@ -1,6 +1,7 @@
 import {
 	BRANCH_MANAGER,
 	conversations,
+	EVENT_BUS,
 	LOCKED,
 	messages,
 	resetConversation,
@@ -34,7 +35,7 @@ import {
 	SYNC_RPC,
 	SYNC_UNLOCKED
 } from "/backend/sync_const.js";
-import {clearMessageDirty, CONVERSATION_SNAPSHOT, listConversations, MESSAGES_CACHE} from "../database.js";
+import {clearMessageDirty, DIFF_SNAPSHOT, listConversations, MESSAGES_CACHE} from "../database.js";
 import {deepEqual, patch} from "unconscious/common/deepEqual.js";
 import {decodeMsg} from "unconscious/common/msgpack.js";
 import {msgpack_schema} from "/common/MsgpackSchema.js";
@@ -51,7 +52,7 @@ let readonlyToast;
 let ws;
 
 let pendingEvents = [];
-let clientIds;
+let clientCounts;
 
 /**
  *
@@ -116,7 +117,7 @@ const checkConcurrentModification = conv => {
 	}
 };
 
-export const initSync = (address, kvRef, kvCache, rpc) => new Promise((resolve, reject) => {
+export const initSync = (address, rpc) => new Promise((resolve, reject) => {
 	DI.lock = lock;
 	DI.unlock = unlock;
 
@@ -189,12 +190,12 @@ export const initSync = (address, kvRef, kvCache, rpc) => new Promise((resolve, 
 			case SYNC_ERROR:  serverError = data; break;
 			// 状态更新
 			case SYNC_INIT: {
-				let clients, locked, serverIds;
-				[clients, locked, clientId, serverIds] = data;
+				let clients, locked, serverCounts;
+				[clients, locked, clientId, serverCounts] = data;
 
-				if (clientIds && !deepEqual(clientIds, serverIds))
+				if (clientCounts && !deepEqual(clientCounts, serverCounts))
 					location.reload();
-				clientIds = serverIds;
+				clientCounts = serverCounts;
 
 				const set = new Set(locked);
 				unconscious(conversations).forEach(item => item[LOCKED] = set.has(item.id));
@@ -304,8 +305,8 @@ export const initSync = (address, kvRef, kvCache, rpc) => new Promise((resolve, 
 
 					checkConcurrentModification(conv);
 					// 清除变更标记
-					if (conv[CONVERSATION_SNAPSHOT]) {
-						conv[CONVERSATION_SNAPSHOT] = structuredClone(conv);
+					if (conv[DIFF_SNAPSHOT]) {
+						conv[DIFF_SNAPSHOT] = structuredClone(conv);
 					}
 					if (!locks.has(convId)) {
 						// 如果没有打开这些消息，那么清除消息缓存
@@ -319,27 +320,16 @@ export const initSync = (address, kvRef, kvCache, rpc) => new Promise((resolve, 
 			}
 			break;
 			case SYNC_KV: {
-				clientIds[0]++;
+				clientCounts[0]++;
 				const [key, value] = data;
-				const val = kvRef.get(key);
-				if (val) val.value = value;
+				EVENT_BUS.post(['kv', key], value);
 			}
 			break;
 			case SYNC_KVS:
 			case SYNC_KVS_DEL: {
-				clientIds[0]++;
+				clientCounts[0]++;
 				const [kvsType, name] = data;
-				kvCache.delete(kvsType+':'+name);
-
-				const val = kvRef.get(':'+kvsType);
-				if (val) {
-					const idx = unconscious(val).findIndex(item => item.name === name);
-					if (type === SYNC_KVS_DEL) {
-						val.splice(idx, 1);
-					} else if (idx < 0) {
-						val.unshift({name});
-					}
-				}
+				EVENT_BUS.post(['kvs', kvsType, type === SYNC_KVS ? 'set': 'del'], name);
 			}
 			break;
 		}

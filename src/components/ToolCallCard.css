@@ -15,8 +15,8 @@
         padding: 0 10px 10px 10px;
         font-size: 12px;
     }
-    &[open] .tool-header {
-        font-size: inherit;
+    &[open] .tool-header, &.tce[open] .tool-body {
+        font-size: 14px;
     }
 
     & .args-title {
@@ -58,13 +58,13 @@
         }
     }
 
-    &.pending {
-        &.secure {
-            background-color: var(--warning-bg);
-            border: 1px solid var(--warning-border);
-            border-left: 4px solid var(--warning-accent);
-        }
+    &.secure {
+        background-color: var(--warning-bg);
+        border: 1px solid var(--warning-border);
+        border-left: 4px solid var(--warning-accent);
+    }
 
+    &.pending {
         & .rerun-btn, &.pend-expand > :nth-child(3) {
             display: none;
         }

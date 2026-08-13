@@ -1,10 +1,10 @@
 import {showToast} from "./components/Toast.js";
 import {config, messages, resetConversation, selectedConversation} from "./states.js";
-import {updateConversation} from "./database.js";
-import {loadPreset} from "./components/PresetDropdown.jsx";
-import {unconscious} from "unconscious";
+import {kvListGet, markCombinedPresetDirty, updateConversation} from "./database.js";
+import {$update, unconscious} from "unconscious";
 import {tokenize} from "unconscious/common/StringTokenizer.js";
 import {submitUserChatMessage} from "./api-request.js";
+import {setConversationTitle} from "./components/ConversationList.jsx";
 
 /**
  * 指令处理器定义
@@ -14,13 +14,32 @@ import {submitUserChatMessage} from "./api-request.js";
 /** @type {Record<string, CommandHandler>} */
 export const COMMAND_REGISTRY = {
 	preset: [
-		(...names) => {
-			if (!names.length) throw new Error("请指定预设名称");
+		async (names) => {
+			const conversation = unconscious(selectedConversation);
+			if (!conversation) throw new Error("未选中对话");
+
+			let error;
 			for (const name of names) {
-				if (loadPreset(name)) showToast(`已加载预设: ${name}`, 'success');
+				try {
+					await kvListGet("preset", name);
+				} catch (e) {
+					showToast("找不到预设\n"+e, 'error');
+					error = true;
+				}
 			}
+			if (error) return;
+
+			const prev = conversation.presets;
+
+			if (!names.length) delete conversation.presets;
+			else conversation.presets = names.length > 1 ? names : names[0];
+
+			markCombinedPresetDirty(conversation);
+			await updateConversation(conversation);
+			$update(selectedConversation);
+			showToast(`已${names.length?"固化":"清除"}预设, 原值: `+prev);
 		},
-		"加载预设: /preset <name>...",
+		"为当前对话固化或清除预设: /preset <name>...",
 	],
 	new: [
 		() => resetConversation(),
@@ -34,8 +53,7 @@ export const COMMAND_REGISTRY = {
 			const newTitle = args.join(" "); // 支持带空格的标题
 			if (!newTitle) throw new Error("标题不能为空");
 
-			selectedConversation.title = newTitle;
-			await updateConversation(conversation);
+			setConversationTitle(conversation, newTitle);
 			showToast("标题已更新", "success");
 		},
 		"修改对话标题: /title <new_title>",

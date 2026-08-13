@@ -3,7 +3,7 @@ import {config} from "/src/states.js";
 import {provider_presets} from "/media/provider_presets.js";
 import {DI_settings, onLoad} from "/src/hooks.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
-import {jsonEval} from "unconscious/common/json-schema-utils.js";
+import {jsonEval, jsonGet} from "unconscious/common/json-schema-utils.js";
 import {applyDelta, sseFetch} from "/common/openai-api-utils.js";
 import {highlightJsonLike} from "/src/markdown/highlight.js";
 import {AsyncButton} from "/src/components/AsyncButton.jsx";
@@ -60,6 +60,7 @@ const test = async (body, flag, err1) => {
 		let msg = completion.choices[0] || {};
 		msg = msg.delta || msg.message;
 		if (!msg) throw completion;
+		if (typeof flag === 'string') return err1(jsonGet(msg, flag))
 		return flag === 3 ? msg.content : flag === 2 ? msg : msg.tool_calls || msg.content || msg.reasoning || msg.reasoning_content;
 	});
 
@@ -168,15 +169,14 @@ async function checkModelCapability() {
 			try {
 				let content = await test(body, 3);
 				if (content && (content.startsWith(CHECK) || content.trim()[0] === ("\"") || content.endsWith("```"))) {
-					config.canPrefill = true;
+
 					config.prefillPath = k;
-					return '支持';
+					return config.canPrefill = true;
 				}
 			} catch {}
 		}
-		config.canPrefill = false;
 		config.prefillPath = '';
-		return '不支持';
+		return config.canPrefill = false;
 	};
 
 	const get_time_tool = { type: 'function', function: { name: 'get_time', parameters: {
@@ -195,7 +195,7 @@ async function checkModelCapability() {
 			tools: [get_time_tool],
 			//tool_choice: get_time_tool,
 			max_completion_tokens: 50,
-		}),
+		}, '/tool_calls/0/function/name', (fn) => fn === 'get_time'),
 		// audio
 		test({
 			messages: [{
@@ -236,11 +236,11 @@ async function checkModelCapability() {
 			],
 			logprobs: true,
 			top_logprobs: 2
-		}),
+		}, '/logprobs/content/0/id', (fn) => typeof fn === 'number'),
 		// json object
 		test({
 			model: config.model,
-			messages: [{ role: 'user', content: 'What is your name? Use ```json\nresponse\n```.' }],
+			messages: [{ role: 'user', content: 'What is your name? Use ```json\n{ "name": ... }\n```.' }],
 			response_format: { type: 'json_object', },
 			max_completion_tokens: 50,
 		}),
@@ -294,8 +294,7 @@ async function checkModelCapability() {
 
 	const isJson = (text) => {
 		try {
-			JSON.parse(text);
-			return true;
+			return null != JSON.parse(text).name;
 		} catch {
 			return false;
 		}
@@ -319,7 +318,8 @@ async function checkModelCapability() {
 	results.push(reasoning);
 	results.push(reasoningBudget);
 
-	return results.map((item, i) => title[i]+": "+(i===4?config.canPrefill:i>=9?item:((i>=6?isJson(item):item)?"支持":"不支持"))).join('\n');
+	console.log(results);
+	return results.map((item, i) => title[i]+": "+(i>=9?item:((i>=6?isJson(item):item)?"支持":"不支持"))).join('\n');
 }
 
 onLoad(() => {
@@ -374,5 +374,6 @@ onLoad(() => {
 				}
 			});
 		};
+		check();
 	})}>测试API</AsyncButton>);
 })

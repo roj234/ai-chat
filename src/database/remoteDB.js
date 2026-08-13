@@ -1,4 +1,4 @@
-import {config} from "../states.js";
+import {config, EVENT_BUS} from "../states.js";
 import {decodeObjects, encodeObjects, serializeJSON} from "../utils/marshal.js";
 import {initSync} from "./remoteSync.js";
 import {decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
@@ -8,9 +8,10 @@ import {base64Encode} from "unconscious/common/Base64.js";
 import {prettyError, resolveDBRelativeURL} from "../utils/utils.js";
 import {$store, $update, AS_IS, unconscious} from "unconscious";
 import SimpleModal from "../components/SimpleModal.jsx";
-import {delta} from "unconscious/common/deepEqual.js";
+import {delta, patch, rep} from "unconscious/common/deepEqual.js";
 import {PROTOCOL_VERSION} from "/backend/sync_const.js";
-import {MESSAGES_CACHE} from "../database.js";
+import {DIFF_SNAPSHOT, MESSAGES_CACHE} from "../database.js";
+import {LRUCache} from "../../backend/utils/LRUCache.js";
 
 let clientId;
 
@@ -189,8 +190,10 @@ export const getMessages = async conversation => {
 	const messages = u_messages(id);
 
 	return metadata.then(json => {
+		const readyState = conversation.ready;
 		for (const key of Object.keys(conversation)) delete conversation[key];
 		Object.assign(conversation, json);
+		if (readyState != null) conversation.ready = readyState;
 		conversation.id = id;
 		return messages.catch(err => {
 			if (err.status !== 304) throw err;
@@ -230,7 +233,7 @@ export const initialize = (rpcHandler) => {
 	});
 	return batched("sync")().then(async syncServer => {
 		if (syncServer) {
-			clientId = await initSync(resolveDBRelativeURL(syncServer).replace(/^http/, "ws"), kvRef, kvListCache, rpcHandler);
+			clientId = await initSync(resolveDBRelativeURL(syncServer).replace(/^http/, "ws"), rpcHandler);
 		}
 	});
 };
@@ -239,8 +242,6 @@ export const listConversations = batched("conversations");
 
 export const searchMessages = keyword => requestBackend(`search?keyword=${encodeURIComponent(keyword)}`);
 
-const kvRef = new Map;
-
 const u_getKV = batched("kv", true);
 const u_setKV = batched("kv/set");
 const u_deleteKV = batched("kv/delete");
@@ -248,14 +249,14 @@ const u_deleteKV = batched("kv/delete");
 /**
  *
  * @param {string} key
- * @param {import("unconscious").Reactive<*>=} callback
+ * @param {import("unconscious").Reactive<*>=} val
  * @returns {Promise<*>}
  */
-export const getKV = (key, callback) => {
+export const getKV = (key, val) => {
 	let promise = u_getKV(key);
-	if (callback) promise.then(results => {
-		kvRef.set(key, callback);
-		if (results != null) callback.value = results;
+	if (val) promise.then(results => {
+		EVENT_BUS.on(['kv', key], (value) => {val.value = value;});
+		if (results != null) val.value = results;
 	});
 	return promise;
 };
@@ -269,14 +270,22 @@ const u_getKVListKeys = batched("kvs");
 /**
  *
  * @param {string} type
- * @param {import("unconscious").Reactive<AiChat.IDBKVList[]>=} callback
+ * @param {import("unconscious").Reactive<AiChat.IDBKVList[]>=} val
  * @returns {Promise<AiChat.IDBKVList[]>}
  */
-export const kvListGetKeys = (type, callback) => {
+export const kvListGetKeys = (type, val) => {
 	let promise = u_getKVListKeys(type);
-	if (callback) promise.then(results => {
-		kvRef.set(':'+type, callback);
-		callback.value = results;
+	if (val) promise.then(results => {
+		EVENT_BUS.on(['kvs', type], (name, path) => {
+			const idx = unconscious(val).findIndex(item => item.name === name);
+			if (path[2] === 'del') {
+				if (idx >= 0) val.splice(idx, 1);
+			} else if (idx < 0) {
+				val.unshift({name});
+				//val.sort()
+			}
+		});
+		val.value = results;
 	});
 	return promise;
 };
@@ -286,16 +295,11 @@ const u_upsertKVList = batched("kvs/upsert");
 const u_deleteKVList = batched("kvs/delete");
 
 /** @type {Map<string, AiChat.IDBKVList & Object>} */
-const kvListCache = new Map;
-const KV_LIST_CACHE_SIZE = 50;
-const insertToKVListCache = (cacheKey, value) => {
-	if (kvListCache.size >= KV_LIST_CACHE_SIZE) {
-		const firstKey = kvListCache.keys().next().value;
-		kvListCache.delete(firstKey);
-	}
-	kvListCache.set(cacheKey, structuredClone(value));
-};
+const kvsCache = new LRUCache(100);
 
+EVENT_BUS.on(['kvs'], (name, path) => {
+	kvsCache.delete(path[1]+':'+name);
+});
 
 /**
  * @param {string} type
@@ -306,11 +310,14 @@ export const kvListGet = async (type, name) => {
 	if (!name) return;
 
 	const cacheKey = type+":"+name;
-	let val = kvListCache.get(cacheKey);
+	let val = kvsCache.get(cacheKey);
 	if (!val) {
 		val = await u_getKVList([type, name]);
-		delete val.type;
-		if (val) insertToKVListCache(cacheKey, val);
+		if (val) {
+			delete val.type;
+			val[DIFF_SNAPSHOT] = structuredClone(val);
+			kvsCache.set(cacheKey, val);
+		}
 	}
 	return val;
 };
@@ -328,19 +335,31 @@ export const kvListSet = async (value, type, name) => {
 	else name = value.name;
 
 	const cacheKey = type+":"+name;
-	const prev = kvListCache.get(cacheKey);
-	const diff = prev ? delta(prev, value, KVLIST_IGNORE_KEYS) : { $: 'SET', val: value };
 
-	insertToKVListCache(cacheKey, value);
+	const prev = value[DIFF_SNAPSHOT];
+	let diff;
+	if (prev) {
+		const prevName = prev.name;
+		if (prevName !== name) kvsCache.delete(type+":"+prevName);
+
+		diff = delta(prev, value, KVLIST_IGNORE_KEYS);
+		if (!diff) return true;
+		value[DIFF_SNAPSHOT] = patch(prev, structuredClone(diff));
+	} else {
+		diff = rep(value);
+		value[DIFF_SNAPSHOT] = structuredClone(value);
+	}
+
+	kvsCache.set(cacheKey, value);
 
 	return u_upsertKVList({
 		type,
 		name,
 		...diff
-	});
+	}).then(() => EVENT_BUS.post(['kvs', type, 'set'], name));
 };
 
-export const kvListDel = (type, name) => u_deleteKVList([type, name]);
+export const kvListDel = (type, name) => u_deleteKVList([type, name]).then(() => EVENT_BUS.post(['kvs', type, 'del'], name));
 
 export const appendBillingLog = batched("log/insert");
 export const getBillingLog = batched("log");

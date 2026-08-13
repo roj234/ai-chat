@@ -100,7 +100,7 @@ async function initializeWebFileSystem(fs) {
 				return initializeWebFileSystem(fs);
 			}
 		}
-		fs.fs = createWebFileSystem(fs.handle);
+		fs.fs = createWebFileSystem(fs.handle, unconscious(config));
 	}
 	return fs.fs;
 }
@@ -375,7 +375,7 @@ async function callFBI(mountPoint) {
 							const folderName = handle.name;
 							if (!folderName) throw "选择的文件夹没有名称";
 
-							const fs = createWebFileSystem(handle);
+							const fs = createWebFileSystem(handle, unconscious(config));
 							webFileSystemInstances.set(folderName, {
 								handle,
 								fs
@@ -440,7 +440,7 @@ async function callFBI(mountPoint) {
 		case "opfs": {
 			let baseDir = await navigator.storage.getDirectory();
 			if (fs_base) baseDir = await resolveDirectory(baseDir, fs_base, {create:true});
-			return createWebFileSystem(baseDir);
+			return createWebFileSystem(baseDir, {});
 		}
 		case "config": return createConfigFileSystem(fs_base);
 		case "vfs": return createVirtualFileSystem(fs_base);
@@ -491,9 +491,13 @@ export const remoteFileSystem = (baseUrl, pat, fileBase) =>
 			throw "network error";
 		}
 
-		if (!response.ok) throw (await response.text());
-
 		const content = response.headers.get("content-type") || "";
+
+		if (!response.ok) {
+			if (content.includes("application/json")) throw (await response.json()).error;
+			throw (await response.text());
+		}
+
 		if (content.startsWith("image/")) return new ContentPart().image(await response.blob());
 		if (content === "application/octet-stream") return await response.blob();
 		if (content.includes("application/json")) return await response.json();
@@ -540,8 +544,8 @@ export const getFileSystem = async (path, conv) => {
 			return [path1.join('/'), await createFileSystem(mountPoint)];
 		}
 
-		if (path[0] === '/' && (conv.fs_type !== 'api' || !path.startsWith("/tmp/") && path !== '/tmp'))
-			throw `Absolute path ${JSON.stringify(path)} is strictly forbidden, use ${JSON.stringify(path==='/'?'.':path.startsWith("/home/")||path.startsWith("/root/")?'~/path/to/file':path.slice(1))} instead`;
+		if (conv.fs_type !== 'api' && path[0] === '/' && !path.startsWith("/tmp/") && path !== '/tmp')
+			throw `Absolute path ${JSON.stringify(path)} is strictly forbidden, use ${JSON.stringify(path.slice(1))} instead`;
 	}
 	const myfs = await createFileSystem(conv);
 	return [path, myfs];
@@ -602,6 +606,17 @@ SETTINGS.push({
 	choices: {
 		'手动选择': false,
 		'自动映射': true
+	}
+}, {
+	id: "fs_trashCan",
+	_tab: "tools",
+	name: "启用回收站",
+	title: "仅影响前端文件系统（启门），后端由CLI flag控制，其它文件系统不支持。\n回收站在 /.trash 文件夹并按删除时间排序，此文件夹隐藏且只读，你可以命令Agent或手动恢复。\n关闭并不会删除回收站中的文件",
+	type: "radio",
+	required: true,
+	choices: {
+		'禁用': false,
+		'启用': true
 	}
 });
 

@@ -1,6 +1,6 @@
 import {readAsString} from "/common/chardet.js";
 import {createTextFileEditHelper} from "/common/fs-common.js";
-import {IgnoreMatcher} from "/common/ignore.js";
+import {IGNORED_ERROR_MESSAGE, IgnoreMatcher} from "/common/ignore.js";
 import {normalizePath} from "unconscious/common/path-utils.js";
 import {formatSize} from "unconscious/common/Utils.js";
 
@@ -168,6 +168,7 @@ export const resolveDirectory = async (rootHandle, dirPath, options) => {
 /**
  *
  * @param {FileSystemDirectoryHandle} rootHandle
+ * @param {Partial<AiChat.AgentFSPreset>} config
  * @returns {{
  * 		mkdir({path: string}): Promise<string>,
  * 		copy({src: string, dest: string, move?: boolean}): Promise<string>,
@@ -176,7 +177,7 @@ export const resolveDirectory = async (rootHandle, dirPath, options) => {
  * 		list({path: string, glob?: string}): Promise<string>,
  * }}
  */
-export const createWebFileSystem = rootHandle => {
+export const createWebFileSystem = (rootHandle, config) => {
 	/** @type {IgnoreMatcher} */
 	let ignored;
 	const loadIgnore = async () => {
@@ -197,7 +198,7 @@ export const createWebFileSystem = rootHandle => {
 	const checkPath = async (path, isDir) => {
 		if (!ignored) await loadIgnore();
 		const parsedPath = normalizePath(path);
-		if (ignored.test(parsedPath.join('/'), isDir)) throw ('Forbidden: operate ignored path');
+		if (ignored.test(parsedPath.join('/'), isDir)) throw IGNORED_ERROR_MESSAGE;
 	};
 
 	const api = {
@@ -278,7 +279,12 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 		async delete({path}) {
 			await checkPath(path, true);
 			const [ parent, name ] = await resolveParent(rootHandle, path);
-			await parent.removeEntry(name, { recursive: true });
+			if (config.fs_trashCan) {
+				const fileHandle = await parent.getFileHandle(name);
+				await fileHandle.move(await rootHandle.getDirectoryHandle(".trash", CREATE), Date.now()+"_"+name);
+			} else {
+				await parent.removeEntry(name, { recursive: true });
+			}
 			return 'Success';
 		},
 

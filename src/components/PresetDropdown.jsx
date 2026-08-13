@@ -12,9 +12,7 @@ import {cloneNamed} from "../utils/utils.js";
  */
 export const presets = $state([]);
 
-export const reloadPresetList = () => kvListGetKeys("preset", presets);
-onLoad(reloadPresetList);
-
+onLoad(() => kvListGetKeys("preset", presets));
 
 /**
  * @template {Object & AiChat.IDBKVList} T
@@ -76,10 +74,7 @@ const createPreset = (name, categories) => {
 	}
 
 	const clonedObject = cloneNamed(config, keysToClone);
-
-	kvListSet(clonedObject, "preset", name).then(() => {
-		_dropdown.onInserted("preset", name);
-	})
+	kvListSet(clonedObject, "preset", name).then(() => _dropdown.setSelection(name));
 };
 
 SETTINGS.push(
@@ -117,11 +112,10 @@ export const loadPreset = name => {
 
 export function PresetDropdown() {
 	const selectedPreset = $computed(() => config.name);
-	const element = <Dropdown items={presets} selection={selectedPreset} dir={'up'}
+	const element = <Dropdown items={presets} selection={selectedPreset} dir={'down'}
 							  onChanged={(type, index) => {
 		if (type === 'd') {
-			const [key] = presets.splice(index, 1);
-			kvListDel("preset", key.name);
+			kvListDel("preset", presets[index].name);
 		} else {
 			setPreset(index);
 		}

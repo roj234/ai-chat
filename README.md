@@ -150,7 +150,7 @@ llama-server --path ./dist
    - [Chart.js](https://chartjs.org/) 图表 (197KB)
    - [Mermaid](https://mermaid.js.org/) 还是图表 (2.57MB)
 
-## 沙箱模块
+## 前端沙箱模块
 - [PptxGenJS](https://github.com/gitbrent/PptxGenJS) (264KB)
 - [SheetJS(mini)](https://git.sheetjs.com/sheetjs/sheetjs) (273KB)
    - 说真的我有一个几十KB的实现，但不支持样式、公式，基本上只能读写文本

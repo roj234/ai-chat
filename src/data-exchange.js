@@ -12,28 +12,27 @@ import {downloadFile, prettyError} from "./utils/utils.js";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {ZipReader, ZipWriter} from "unconscious/common/zip-io.js";
 import {$computed, $state, $update, unconscious} from "unconscious";
-import {reloadPresetList} from "./components/PresetDropdown.jsx";
 import {decodeObjects, serializeJSON} from "./utils/marshal.js";
 import {SETTINGS} from "./settings.js";
 import {DI_settings} from "./hooks.js";
+import {createJsonParser} from "unconscious/common/Json.js";
 
 const sleep = () => new Promise(resolve => setTimeout(resolve));
 
 /**
  *
- * @param {Partial<AiChat.Conversation> & {messages: AiChat.Message[]}} convData
+ * @param {Partial<AiChat.Conversation>} conv
+ * @param {AiChat.Message[]} messages_
  * @param {boolean=false} batch
  * @return {Promise<AiChat.Conversation>}
  */
-export const importConversationData = async ({messages: messages_, id, ...conv}, batch) => {
+export const importConversationData = async (conv, messages_, batch) => {
+	delete conv.id;
 	if (!Number.isFinite(conv.time)) conv.time = Date.now();
 	if (typeof conv.title !== "string") conv.title = "";
 
 	if (messages_) {
-		messages_.sort((a, b) => {
-			if (a.time && b.time) return a.time - b.time;
-			return 0;
-		}).forEach(message => {
+		messages_.forEach(message => {
 			delete message.id;
 		});
 	}
@@ -51,8 +50,8 @@ export const importConversationData = async ({messages: messages_, id, ...conv},
 const loadBackupZip = async file => {
 	const zipFile = await ZipReader(file);
 
-	const data = await zipFile.getText(APP_NAME);
-	if (data !== '1') {
+	const data = parseInt(await zipFile.getText(APP_NAME));
+	if (data !== 1 && data !== 2) {
 		if (!confirm("导入的文件格式可能有误，是否继续？")) {
 			return;
 		}
@@ -67,7 +66,6 @@ const loadBackupZip = async file => {
 			promises.push(decodeObjects(item, null).then(() => kvListSet(item, item.type)));
 		}
 		await Promise.all(promises);
-		reloadPresetList();
 		showToast('导入了KV列表，可能需要刷新网页');
 	}
 
@@ -86,7 +84,19 @@ const loadBackupZip = async file => {
 				}
 				size += text.length;
 
-				new_convs.push(await importConversationData(await decodeObjects(JSON.parse(text), zipFile), true));
+				const jsonl = parseJSONLine(await file.text());
+				let conv, msg;
+				await decodeObjects(jsonl, zipFile);
+				if (jsonl.length > 1) {
+					conv = jsonl.pop();
+					msg = jsonl;
+				} else {
+					conv = jsonl[0];
+					msg = conv.messages;
+					delete conv.messages;
+				}
+
+				new_convs.push(await importConversationData(conv, msg, true));
 			}).catch(e => {
 				showToast(name+": 导入失败\n"+prettyError(e), 'error');
 			}));
@@ -143,13 +153,19 @@ export const importConversation = async e => {
 				await loadBackupZip(file, e);
 				continue;
 			} else if (file.type === "application/json") {
-				const jsonData = JSON.parse(await file.text());
-				await decodeObjects(jsonData, null);
-				if (typeof jsonData.title === "string" && jsonData.messages?.length) {
-					await importConversationData(jsonData, files.length > 1);
+				const jsonl = parseJSONLine(await file.text());
+				await decodeObjects(jsonl, null);
+				if (jsonl.length > 1 && jsonl.at(-1).id === APP_NAME) {
+					await importConversationData(jsonl.pop(), jsonl, files.length > 1);
 					continue;
 				} else {
-					obj = jsonData;
+					obj = jsonl[0];
+
+					if (typeof obj.title === "string" && obj.messages?.length) {
+						const { messages, ...rest } = obj;
+						await importConversationData(rest, messages, files.length > 1);
+						continue;
+					}
 				}
 			}
 
@@ -178,15 +194,10 @@ export const duplicateConversation = async () => {
 	}
 	conv.title += ' 另存 '+new Date().toISOString();
 
-	await importConversationData({
-		...conv,
-		messages: unconscious(messages).filter(item => item.id >= 0)
-	});
+	await importConversationData(structuredClone(conv), structuredClone(unconscious(messages).filter(item => item.id >= 0)));
 
 	showToast('已将当前对话另存为', 'ok');
 };
-
-const cleanMessages = messages => messages.map(({id, ...rest}) => rest);
 
 /**
  *
@@ -196,23 +207,19 @@ const cleanMessages = messages => messages.map(({id, ...rest}) => rest);
  */
 export const exportConversation = async (type, _conv) => {
 	const zw = ZipWriter();
-	await zw.add(APP_NAME, "1");
+	await zw.add(APP_NAME, "2");
 
 	if (type&1) {
 		const conv = _conv || unconscious(selectedConversation);
 		if (conv && type === 1) {
-			const { id: _a, ready: _b, ...data } = conv;
-
-			data.messages = cleanMessages(await getMessagesCacheFirst(conv));
-
-			const jsonData = await serializeJSON(data, 0, zw);
+			const jsonData = await serializeToJSONLine(conv, zw);
 			if (zw.fileCount() === 1) {
-				downloadFile(new Blob([jsonData], { type: "application/json" }), "json");
+				downloadFile(new File([jsonData], conv.title?conv.title+".json":"", { type: "application/json" }), "json");
 				return;
 			}
 
 			await zw.add("conversations/0.json", jsonData, {
-				lastModified: data.time,
+				lastModified: conv.time,
 				compression: true
 			});
 		} else {
@@ -225,18 +232,13 @@ export const exportConversation = async (type, _conv) => {
 				const conv = conversations1[i];
 				const reversedIndex = conversations1.length - 1 - i;
 
-				const { id: _a, ready: _b, ...data } = conv;
-
 				if (((i+1) & 15) === 0) await sleep();
 
-				callbacks.push(getMessagesCacheFirst(conv, true).then(messages => {
-					data.messages = cleanMessages(messages);
-					return serializeJSON(data, 0, zw).then(text => {
-						successed.value ++;
-						return zw.add(`conversations/${reversedIndex}.json`, text, {
-							lastModified: data.time,
-							compression: true
-						});
+				callbacks.push(serializeToJSONLine(conv, zw).then(text => {
+					successed.value ++;
+					return zw.add(`conversations/${reversedIndex}.json`, text, {
+						lastModified: conv.time,
+						compression: true
 					});
 				}));
 			}
@@ -262,6 +264,41 @@ export const exportConversation = async (type, _conv) => {
 		console.error(e);
 		showToast('导出失败: ' + prettyError(e), 'error');
 	}
+};
+
+
+const cleanMessages = messages => messages.map(({id, ...rest}) => id < 0 ? null : rest).filter(Boolean);
+
+const serializeToJSONLine = async (conv, zw) => {
+	const { id: _a, ready: _b, ...stripped } = conv;
+	stripped.id = APP_NAME;
+	const messages = cleanMessages(await getMessagesCacheFirst(conv));
+
+	let jsonData = await serializeJSON(stripped, 0, zw);
+	for (const message of messages) {
+		jsonData += '\n' + await serializeJSON(message, 0, zw);
+	}
+	return jsonData;
+};
+
+const parseJSONLine = (str) => {
+	let conversation;
+	let messages = [];
+
+	const jp = createJsonParser((path, value, is_partial) => {
+		if (!path.length) {
+			if (!conversation) conversation = value;
+			else messages.push(value);
+		}
+	}, {
+		json5: true,
+		jsonl: true
+	});
+	jp.write(str);
+	jp.end();
+
+	messages.push(conversation);
+	return messages;
 };
 
 SETTINGS.push(

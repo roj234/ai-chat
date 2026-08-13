@@ -4,7 +4,6 @@ import {cloneNamed, getTextContent, prettyError, resolveDBRelativeURL} from "./u
 import {setWakeLock} from "./utils/wakeLock.js";
 import {
 	abortCompletion,
-	config,
 	getCurrentTheme,
 	inputText,
 	isLlamaCppBackend,
@@ -160,10 +159,11 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 	};
 
 	const abort = $state(new AbortController());
+	const isDisplaying = () => selectedConversation.id === conversation.id;
 	/** @type {AiChat.LLMRequestContext} */
-	const context = {};
+	const context = { isDisplaying };
 
-	let oldValue = selectedConversation.id !== conversation.id || null;
+	let oldValue = !isDisplaying() || null;
 	$watch(abort, () => {
 		const newValue = unconscious(abort);
 		// noinspection EqualityComparisonWithCoercionJS
@@ -186,6 +186,18 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 	// 在流开始之前检查 LOCKED 状态
 	const writeProtect = conversation[LOCKED];
 	try {
+		const lastModel = messages.findLast(m => m.model)?.model;
+		if (lastModel && lastModel !== cfg.model && cfg.afkState < 2) {
+			await new Promise((resolve, reject) => {
+				SimpleModal({
+					title: "你是否主动切换了模型？",
+					message: `上次使用的模型：${lastModel}\n当前使用的模型：${cfg.model}`,
+					onConfirm() {resolve();},
+					onCancel() {reject("取消操作");},
+				});
+			});
+		}
+
 		// retry via context.retry
 		const result = await new Promise((resolve, reject) => {
 			let retryCount = 0;
@@ -206,7 +218,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 					unconscious(abort),
 					renderer,
 					context,
-					config
+					cfg
 				).then((result) => {
 					if (currentRetryCount === retryCount) {
 						resolve(result);
@@ -224,7 +236,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 		if (roleId) {
 			try {
-				await MessageRoles[roleId].onCompleted(conversation, messages, config, result);
+				await MessageRoles[roleId].onCompleted(conversation, messages, cfg, result);
 			} catch (e) {
 				showToast(prettyError(e), 'error');
 			}
@@ -243,8 +255,8 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 		const messages_uc = unconscious(messages);
 		const tone = FINISH_REASON_TONE[finishReason];
-		const isForeground = selectedConversation.id === conversation.id;
-		let is_ok = tone != null;
+		const isActive = isDisplaying();
+		let isSuccess = tone != null;
 
 		const promises = [];
 		const commitMessage = async () => {
@@ -267,7 +279,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			} else {
 				if (resumeId) {
 					assistantMessage.error = '连接意外中止\n服务器支持断线重连\n请点击输入框的【继续】按钮';
-					if (isForeground) $update(updateMessageUI);
+					if (isActive) $update(updateMessageUI);
 				}
 			}
 
@@ -287,24 +299,25 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			return Promise.all(promises);
 		};
 
-		const hasPendingInput = isForeground && inputText.trim();
+		const hasPendingInput = isActive && inputText.trim();
 		if (tone === '' && !__skipToolCall && !hasPendingInput && !(cfg.maxToolTurns && !(countAgenticTurns(messages_uc) % cfg.maxToolTurns))) {
 			const timer = setTimeout(commitMessage, 2000);
 			addEventListener("beforeunload", commitMessage);
 
 			try {
-				is_ok = await runTools(assistantMessage, conversation);
+				isSuccess = await runTools(assistantMessage, conversation);
 			} finally {
 				removeEventListener("beforeunload", commitMessage);
 				clearTimeout(timer);
 			}
 
-			if (!is_ok) finishReason = 'interrupt';
-
-			if (isForeground) $update(updateMessageUI);
+			if (!isSuccess) finishReason = 'interrupt';
+			if (isActive) $update(updateMessageUI);
 		} else if (assistantMessage.tool_calls) {
 			assistantMessage.tool_responses = assistantMessage.tool_calls.map(tc => ({ [TOOL_NAME]: tc.function.name }));
-			if (isForeground) $update(updateMessageUI);
+			// 因为走到这个分支我们一定要停，所以是ok时停
+			if (isSuccess) finishReason = 'interrupt';
+			if (isActive) $update(updateMessageUI);
 		}
 
 		updateStatusText("");
@@ -314,22 +327,22 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		const generateTitleIfApplicable = async (finishReason, assistantMessage) => {
 			if ('error' !== finishReason) {
 				if (!conversation.title && assistantMessage.content) {
-					await generateChatTitle(conversation, messages_uc, config);
+					await generateChatTitle(conversation, messages_uc, cfg);
 				}
 			}
 		};
 
-		const hasPendingInput2 = isForeground && inputText.trim();
+		const hasPendingInput2 = isActive && inputText.trim();
 		if (hasPendingInput2) finishReason = 'userInput';
 		if ('tool_calls' !== finishReason) {
 			await generateTitleIfApplicable(finishReason, assistantMessage);
 
 			if (cfg.sound) {
 				if (cfg.sound === "always" || !document.hasFocus())
-					is_ok ? complete() : failure();
+					isSuccess ? complete() : failure();
 			}
 
-			if (!isForeground && cfg.afkState < 2 && !cfg.disableFinishToast)
+			if (!isActive && cfg.afkState < 2 && !cfg.disableFinishToast)
 				showToast(`对话 ${conversation.title}(#${conversation.id}) 已结束 (${finishReason})`, tone ?? "error");
 		} else if (cfg.generateTitle === 'eager') {
 			await generateTitleIfApplicable(finishReason, assistantMessage);
@@ -552,7 +565,7 @@ async function sendCompletionRequest(
 		})
 	}
 
-	if (onProgress && !unconscious(lastScrollDirectionIsUp)) scrollMessagesToBottom();
+	if (onProgress && !unconscious(lastScrollDirectionIsUp) && context.isDisplaying()) scrollMessagesToBottom();
 
 	if (error) {
 		if (config.sound) failure();
@@ -863,7 +876,6 @@ async function sendCompletionRequest(
 export const scrollMessagesToBottom = () => {
 	requestAnimationFrame(() => {
 		DI_messageContainer.vl.scrollTo(DI_messageContainer.scrollHeight);
-		lastScrollDirectionIsUp.value = false;
 	});
 };
 
@@ -1090,7 +1102,7 @@ async function buildCompletionPayload(
 	if (systemBody) Object.assign(body, systemBody);
 
 	for (const callback of callbacks) {
-		callback(messages, json_messages, body, isPrefill);
+		callback(messages, json_messages, body, isPrefill, conversation);
 	}
 
 	block:

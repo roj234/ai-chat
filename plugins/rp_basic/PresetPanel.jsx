@@ -130,6 +130,7 @@ function createLorebookList(dirtyHandle) {
 			id: "name",
 			name: "名称",
 			title: "给这条设定起个好记的名字，同时也是 AI 调用工具时看到的条目名称",
+			required: true,
 			placeholder: "幻想乡",
 			type: "input"
 		},
@@ -143,6 +144,7 @@ function createLorebookList(dirtyHandle) {
 		{
 			id: "content",
 			name: "内容",
+			required: true,
 			placeholder: "幻想乡是人类与妖怪共存的秘境，四季分明，由博丽神社的巫女维持平衡。外界人偶尔会误入。",
 			type: "textbox"
 		},
@@ -193,7 +195,7 @@ function createLorebookList(dirtyHandle) {
 		{
 			id: "position",
 			name: "插入位置",
-			title: "仅字符串匹配模式生效，工具调用会忽略该顺序",
+			title: "仅正则匹配实现生效（被动注入），其它实现由模型主动激活，忽略该设定",
 			type: "radio",
 			required: true,
 			choices: {
@@ -206,7 +208,7 @@ function createLorebookList(dirtyHandle) {
 			id: "depth",
 			name: "深度",
 			type: "number",
-			title: "插入到倒数第N条消息的末尾",
+			title: "插入到倒数第N条[角色]消息的末尾\n先按角色过滤，再按深度过滤\n没有这么多[角色]消息时，插到系统提示的末尾",
 			min: 1,
 			max: 50,
 		},
@@ -360,11 +362,13 @@ export function _PresetEditor(preset, isOpen, close) {
 		{
 			name: "名称(给人看)",
 			id: "name",
+			required: true,
 			type: "input"
 		},
 		{
 			name: "内容(给AI看)",
 			id: "content",
+			required: true,
 			type: "textbox"
 		},
 		{
@@ -392,11 +396,13 @@ export function _PresetEditor(preset, isOpen, close) {
 		{
 			name: "名称",
 			id: "name",
+			required: true,
 			type: "input"
 		},
 		{
 			name: "正则",
 			id: "search",
+			required: true,
 			placeholder: "使用 /search/g 语法指定修饰符",
 			type: "textbox"
 		},
@@ -418,7 +424,7 @@ export function _PresetEditor(preset, isOpen, close) {
 			}
 		},
 		{
-			name: "作用深度范围 (50 为无限远)",
+			name: "作用深度 (50 为无限远)",
 			id: "depth",
 			type: "range",
 			min: 0,
@@ -469,9 +475,35 @@ export function _PresetEditor(preset, isOpen, close) {
 export function _CharacterEditor(char, isOpen, close) {
 	const config = [
 		{
-			name: "名称",
+			name: "显示名称",
+			title: "在数据库和UI中显示的名称，不是卡的自我认知",
+			required: true,
 			id: "name",
 			type: "input"
+		},
+		{
+			name: "角色名字",
+			id: "char",
+			placeholder: "{{char}} 宏的值；缺省取显示名称",
+			type: "input"
+		},
+		{
+			name: "描述",
+			required: true,
+			id: "description",
+			type: "textbox"
+		},
+		{
+			name: "你的名字",
+			id: "user",
+			placeholder: "{{user}} 宏的值；缺省使用全局设置",
+			type: "input"
+		},
+		{
+			name: "自我介绍",
+			id: "userdesc",
+			placeholder: "缺省使用全局设置",
+			type: "textbox"
 		},
 		{
 			name: "作者",
@@ -486,43 +518,20 @@ export function _CharacterEditor(char, isOpen, close) {
 		{
 			name: "前置系统提示",
 			id: "systemPrompt",
-			placeholder: "填写以覆盖默认设置",
-			type: "textbox"
-		},
-		{
-			name: "描述 (*)",
-			id: "description",
+			placeholder: "Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.",
 			type: "textbox"
 		},
 		{
 			name: "性格",
 			id: "personality",
-			placeholder: "旧字段，可以留空",
+			placeholder: "旧字段，建议留空",
 			type: "textbox"
 		},
 		{
 			name: "场景",
 			id: "scenario",
-			placeholder: "旧字段，可以留空",
+			placeholder: "旧字段，建议留空",
 			type: "textbox"
-		},
-		{
-			name: "你的名字",
-			id: "user",
-			placeholder: "填写以覆盖默认设置",
-			type: "input"
-		},
-		{
-			name: "自我介绍",
-			id: "userdesc",
-			placeholder: "填写以覆盖默认设置",
-			type: "textbox"
-		},
-		{
-			name: "角色名字",
-			id: "char",
-			placeholder: "填写以覆盖默认设置",
-			type: "input"
 		}
 	];
 	const charOptions = <Filter choices={char} config={config} showTitle={true} onChange={(k, v, chr) => {

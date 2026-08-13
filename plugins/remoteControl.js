@@ -4,7 +4,7 @@ import {config, conversations, inputText, selectedConversation, switchToConversa
 import {$cleanup, $state, $update, $watch, unconscious} from "unconscious";
 import {showToast} from "/src/components/Toast.js";
 import {DI, onLoad} from "/src/hooks.js";
-import {delta, patch} from "unconscious/common/deepEqual.js";
+import {delta, patch, rep} from "unconscious/common/deepEqual.js";
 import {prettyError} from "/src/utils/utils.js";
 
 // 消息类型常量
@@ -222,7 +222,7 @@ const RMI = {
 		switch (func) {
 			case SUBSCRIBE:
 				subscriptions.add(sender);
-				reply({ $: 'SET', val: immediateState });
+				reply(rep(immediateState));
 				return;
 			case UNSUBSCRIBE:
 				subscriptions.delete(sender);

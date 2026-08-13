@@ -50,8 +50,15 @@ export const renderMarkdownToElement = (container, md, options = {}) => {
 		...mdParserOptions,
 		...options
 	});
-	parser.write(md);
-	parser.end();
+
+	const CHUNK = 10000;
+	const chunkedRender = () => {
+		parser.write(md.slice(0, CHUNK));
+		md = md.slice(CHUNK);
+		if (!md) parser.end();
+		else requestAnimationFrame(chunkedRender);
+	};
+	chunkedRender();
 	return container;
 };
 

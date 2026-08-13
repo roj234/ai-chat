@@ -2,7 +2,9 @@ import {ContentPart, registerToolset} from "/src/toolset.js";
 
 // 预装插件
 // 设置系统提示
-import "./cmdSetPrompt.js";
+//import "./cmdSetPrompt.js";
+// 记住输入框
+import "./persistInputBox.js";
 // Blob ServiceWorker 缓存
 import "./blobCache.js";
 // 对话原始数据编辑
@@ -50,7 +52,7 @@ import "./rpg/example/Translator.js";
 
 // 内联代码的可选插件
 import {registerConfigSync} from "./configSync.js";
-import {registerModelFastSwitch} from "./ModelFastSwitch.js";
+import {registerPresetFastSwitch} from "./PresetFastSwitch.js";
 import {registerMermaidRenderer} from "./mermaid.js";
 import {registerMultimediaGeneration} from "./tools/multimedia_generation.js";
 import {registerRemoteControl} from "./remoteControl.js";
@@ -105,7 +107,7 @@ const pluginDefinitions = [
 		name: "预设快速切换菜单",
 		description: "在输入框左侧添加一个预设切换菜单",
 		defaultEnabled: true,
-		load: registerModelFastSwitch
+		load: registerPresetFastSwitch
 	},
 	{
 		name: "基础角色扮演",

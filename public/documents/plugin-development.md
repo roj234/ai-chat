@@ -20,6 +20,7 @@ window.AiChatAPI = {
 	},
 	ContentPart,
 	config,
+    markMessageDirty,
 	conversation: selectedConversation,
 	messages,
 	conversations
@@ -67,6 +68,8 @@ registerSchemaMessageRole 示例
 我不建议单纯通过 window 上的 API 来调用它，因为它对 Unconscious 的依赖相当多  
 [使用方法](./ReactiveJSON.md)
 
+3.7.0新增：
+修改消息内容后必须调用 markMessageDirty(message) 否则不会保存到数据库！！！
 
 ## 后端插件
 后端插件相对宽松，只需要遵循特定的目录格式 （./plugins/folder/index.js） 并在 index 中导出默认函数就会自动加载。  

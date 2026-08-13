@@ -66,13 +66,33 @@ export function ToolCallEditor(props) {
                 <div className={"args error"} style:display={() => inputState.error ? "" : "none"}>{() => inputState.error}</div>
             </div>
             <div className="tool-body">
-                <div className="args-title">返回值</div>
+                <div className="args-title">返回值 (可编辑, 可置空)<span className={"spacer"}></span>
+                    <button className={"btn rerun-btn"}
+                            disabled={() => !inputState.obj} onClick={({target}) => {
+                        const idx = index();
+
+                        const oldName = fn.name;
+                        const oldArg = fn.arguments;
+                        fn.name = unconscious(toolName);
+                        fn.arguments = JSON.stringify(inputState.obj);
+
+                        target.disabled = true;
+                        target.innerText = "运行中";
+                        runTools(message, unconscious(selectedConversation), idx, true).then(reset).finally(() => {
+                            target.disabled = false;
+                            target.innerText = "运行";
+                            fn.name = oldName;
+                            fn.arguments = oldArg;
+                        });
+                    }}>
+                        运行
+                        <span className={"tooltip"}>{"以当前参数运行工具\n会覆写返回值"}</span>
+                    </button>
+                </div>
                 <JsonEditor value={output}/>
             </div>
             <div className="tool-body">
-                <div className="args-title">小心修改参数</div>
                 <div style={"display:flex;gap:8px"}>
-                    <button className={"btn warning"} onClick={reset}>重置</button>
                     <button className={"btn primary"} ref={saveBtn} onClick={({target}) => {
                         fn.name = unconscious(toolName);
                         fn.arguments = JSON.stringify(inputState.obj);
@@ -83,30 +103,19 @@ export function ToolCallEditor(props) {
                             time: Date.now(),
                             content: outputValue,
                             [TOOL_NAME]: fn.name
-                        } : {};
+                        } : {
+                            [TOOL_NAME]: fn.name
+                        };
 
                         base.open = false;
                     }}>
                         保存
                     </button>
-                    <button className={"btn warning"} title={"以当前参数（无需保存）执行工具"}
-                            disabled={() => !inputState.obj} onClick={({target}) => {
-                        const idx = index();
-
-                        const oldName = fn.name;
-                        const oldArg = fn.arguments;
-                        fn.name = unconscious(toolName);
-                        fn.arguments = JSON.stringify(inputState.obj);
-
-                        target.disabled = true;
-                        runTools(message, unconscious(selectedConversation), idx, true).then(reset).finally(() => {
-                            target.disabled = false;
-                            fn.name = oldName;
-                            fn.arguments = oldArg;
-                        });
-                    }}>
-                        执行
+                    <button className={"btn secondary"} onClick={reset}>
+                        重置
+                        <span className={"tooltip"}>恢复上次保存的值</span>
                     </button>
+                    <span className={"spacer"}></span>
                     <button className={"btn danger"} onClick={() => {
                         const idx = index();
                         message.tool_calls.splice(idx, 1);
@@ -144,7 +153,7 @@ export function ToolCallEditor(props) {
         });
     };
 
-    const base = <details className={"tool-call pending secure"} onClick.once={initializeHtml}>
+    const base = <details className={"tool-call secure tce"} onClick.once={initializeHtml}>
         <summary className="tool-header" title={"编辑工具"}>
             <div className="args-title">工具名称</div>
             <div className={"input-warp"}>

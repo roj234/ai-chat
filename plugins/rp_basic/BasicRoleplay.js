@@ -1,4 +1,13 @@
-import {config, MessageRoles, onConversationLoaded, updateMessageUI} from "/src/states.js";
+import {
+	config,
+	EVENT_BUS,
+	isMobile,
+	MessageRoles,
+	messages,
+	onConversationLoaded,
+	selectedConversation,
+	updateMessageUI
+} from "/src/states.js";
 import {importConversationData, registerDataImportHandler} from "/src/data-exchange.js";
 import {
 	$computed,
@@ -25,7 +34,14 @@ import SimpleModal from "/src/components/SimpleModal.jsx";
 import {_CharacterEditor, _LorebookEditor, _PresetEditor, markDirty} from "./PresetPanel.jsx";
 import {createPanel} from "./CreatePanel.jsx";
 import {convertSTCharacter, convertSTLorebook, convertSTPreset, normalizeCRLF} from "./convert.js";
-import {applyMacro, applyPreset, applyRenderReplace, createDefaultCtx, DEFAULT_USER_NAME, makeStory} from "./prompt.js";
+import {
+	applyMacro,
+	applyPreset,
+	applyRenderReplace,
+	createSimpleMacroContext,
+	DEFAULT_USER_NAME,
+	makeStory
+} from "./prompt.js";
 import {LorebookList, PresetList} from "./TagList.jsx";
 import schema from "./schema.json";
 import {compileSchema, validateAndShowError} from "unconscious/common/json-schema-utils.js";
@@ -37,6 +53,7 @@ import {VirtualDirectory} from "../tools/VirtualFileSystem.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
 import {FS_INSTANCE} from "../tools/fileAccess.js";
 import {createWebFileSystem} from "../tools/WebFileSystem.js";
+import {PROMISE_CATCH} from "/src/utils/pure-utils.js";
 
 compileSchema(schema);
 
@@ -55,16 +72,14 @@ const definition = {
 	]
 };
 
-
-// MyCharacterInstance用到的非序列化属性
-const CTX = debugSymbol("MCI_READY");
+const INST = debugSymbol("CharacterInstance");
 
 //region createSchemaEditColumn
 function showOverwriteConfirm(item, typeStr, callback) {
 	if (item._dirty) {
 		SimpleModal({
 			title: "当前" + typeStr + "已修改",
-			message: "点击确定丢弃修改的内容，或点击返回以保存。",
+			message: "点击确定丢弃修改，或取消并自行保存。",
 			onConfirm: callback
 		})
 	} else {
@@ -81,7 +96,6 @@ const storeOptions = {
 /**
  *
  * @param {string} typeId - ID st|preset
- * @param {Object} template - 新项目模板
  * @param {Function} editorConstructor
  * @return {[
  *     element: import("unconscious").Renderable,
@@ -91,27 +105,27 @@ const storeOptions = {
  *     onImported: function(id: number, name: string): void,
  * ]}
  */
-function createSchemaEditColumn(typeId, template, editorConstructor) {
+function createSchemaEditColumn(typeId, editorConstructor) {
 	/** @type {import("unconscious").Reactive<AiChat.IDBKVList[]>} */
 	const items = $state([]);
 	/** @type {import("unconscious").Reactive<IDBKVList>} */
 	const selectedItem = $store(typeId, undefined, storeOptions);
+	if (typeId !== 'st|preset' && !selectedItem._dirty) selectedItem.value = undefined;
 
 	let {open: _openPanel, close: _closePanel} = createPanel(editorConstructor);
 	const openEditor = () => _openPanel(selectedItem);
 
-	const arr = definition[typeId];
-	const typeStr = arr[0];
+	const typeStr = definition[typeId][0];
 
 	const dropdown = <Dropdown
 		items={items}
-		selection={$computed(() => (selectedItem._dirty || "") + (selectedItem.name || "空白"))}
+		selection={$computed(() => (selectedItem._dirty || "") + (selectedItem.name || ""))}
 		onChanged={(type, index) => {
+			const name = items[index].name;
 			if (type === 'd') {
-				const [key] = items.splice(index, 1);
-				kvListDel(typeId, key.name);
+				kvListDel(typeId, name);
 			} else {
-				showOverwriteConfirm(selectedItem, typeStr, () => kvListGet(typeId, items[index].name).then(value => {
+				showOverwriteConfirm(selectedItem, typeStr, () => kvListGet(typeId, name).then(value => {
 					selectedItem.value = value;
 					delete selectedItem._dirty;
 					$update(selectedItem);
@@ -119,31 +133,70 @@ function createSchemaEditColumn(typeId, template, editorConstructor) {
 				}));
 			}
 		}}/>;
-	const onInserted = dropdown.onInserted;
-
-	arr.push(onInserted);
 
 	const element = <>
 		<div className={"choice-scroll"}>
 			<button className={"btn ghost"} onClick={() => {
+				_closePanel();
 				showOverwriteConfirm(selectedItem, typeStr, () => {
-					selectedItem.value = structuredClone(template);
+					selectedItem.value = undefined;
+					dropdown.setSelection(null);
+					SimpleModal({
+						type: "input",
+						title: "输入新"+typeStr+"的名称",
+						onConfirm(name) {
+							if (!name) return false;
+							selectedItem.value = {name};
+							dropdown.setSelection(name);
+							openEditor();
+						}
+					})
 				});
 			}}>新建
 			</button>
-			<button className={"btn ghost"} onClick={openEditor} disabled={() => !selectedItem.value}>编辑</button>
+			<button className={"btn ghost"} onClick={openEditor}
+					disabled={() => !unconscious(selectedItem)}
+					onContextMenu.prevent={e => {
+						const key = typeId + ":" + selectedItem.name;
+
+						let skipNext;
+						const [updateValue, onClose] = openJsonEditor(key, () => {
+							const { name, type, time, _dirty, ...rest } = unconscious(selectedItem);
+							return JSON.stringify(rest, null, 2);
+						}, (v) => {
+							const obj = JSON.parse(v);
+							obj.name = selectedItem.name;
+							obj.type = selectedItem.type;
+							markDirty(obj);
+							selectedItem.value = obj;
+							skipNext = true;
+						});
+						const syncToEditor = () => {
+							if (skipNext) skipNext = false;
+							else updateValue();
+						};
+
+						$watch(selectedItem, syncToEditor, false);
+						onClose(() => $unwatch(selectedItem, syncToEditor));
+					}}
+			>
+				编辑
+				<span className={"tooltip"}>{isMobile?"长按":"右键单击在独立窗口中"}编辑原始数据</span>
+			</button>
 			<button className={"btn ghost"} disabled={() => !selectedItem._dirty} onClick={() => {
 				SimpleModal({
 					type: "input",
-					title: "输入"+typeStr+"名称以另存问, 留空覆写",
+					title: "输入"+typeStr+"名称 【当前："+selectedItem.name+"】",
+					placeholder: "重命名就在这填新名字，否则直接确认",
 					onConfirm(name) {
-						delete selectedItem._dirty;
-						const oldName = selectedItem.name;
-						if (name && name !== oldName) delete selectedItem.id; // 在数据库里创建新项目
-						else name = oldName;
+						name ||= selectedItem.name;
+						if (!name) return false;
 
-						kvListSet(selectedItem.value, typeId, name).then(() => {
-							onInserted(typeId, name);
+						delete selectedItem._dirty;
+						kvListSet(unconscious(selectedItem), typeId, name).then(() => {
+							dropdown.setSelection(name);
+						}, e => {
+							selectedItem._dirty = '*';
 						});
 					}
 				})
@@ -162,33 +215,8 @@ function createSchemaEditColumn(typeId, template, editorConstructor) {
 					}}>
 				导出
 			</button>
-			{<button className={"btn ghost"} disabled={() => !selectedItem.value} onClick={() => {
-				const key = typeId + ":" + selectedItem.name;
-
-				let skipNext;
-				const [updateValue, onClose] = openJsonEditor(key, () => {
-					const { name, type, time, _dirty, ...rest } = unconscious(selectedItem);
-					return JSON.stringify(rest, null, 2);
-				}, (v) => {
-					const obj = JSON.parse(v);
-					obj.name = selectedItem.name;
-					obj.type = selectedItem.type;
-					markDirty(obj);
-					selectedItem.value = obj;
-					skipNext = true;
-				});
-				const syncToEditor = () => {
-					if (skipNext) skipNext = false;
-					else updateValue();
-				};
-
-				$watch(selectedItem, syncToEditor, false);
-				onClose(() => $unwatch(selectedItem, syncToEditor));
-			}}>编辑原始数据 <i className={"ri-external-link-line"}/>
-			</button>}
+			{dropdown}
 		</div>
-		<br/>
-		{dropdown}
 	</>;
 
 	return [
@@ -200,11 +228,11 @@ function createSchemaEditColumn(typeId, template, editorConstructor) {
 }
 //endregion
 
-const [presetBar, openPresetPanel, presetList, currentPreset] = createSchemaEditColumn("st|preset", {name: "空白"}, _PresetEditor);
-const [charBar, openCharPanel, characterList, currentCharacter] = createSchemaEditColumn("st|char", {name: "新角色"}, _CharacterEditor);
-const [lorebookBar, openLorebookPanel, lorebookList, currentLorebook] = createSchemaEditColumn("st|lorebook", {name: "新的世界"}, _LorebookEditor);
+const [presetBar, openPresetPanel, presetList, currentPreset] = createSchemaEditColumn("st|preset", _PresetEditor);
+const [charBar, openCharPanel, characterList, currentCharacter] = createSchemaEditColumn("st|char", _CharacterEditor);
+const [lorebookBar, openLorebookPanel, lorebookList, currentLorebook] = createSchemaEditColumn("st|lorebook", _LorebookEditor);
 
-charBar[0].append(<button className={"btn ghost"} title={"请先保存再创建故事"} disabled={() => {
+charBar[0].append(<button className={"btn ghost"} disabled={() => {
 	const chr = unconscious(currentCharacter);
 	return !chr?.name || !unconscious(characterList).find(item => item.name === chr.name);
 }} onClick={() => {
@@ -249,12 +277,14 @@ SETTINGS.push(
 	},
 	{
 		name: "预设/补全配置",
+		title: "【当前预设】是一个保存在本地的副本，修改后立即生效！",
 		_tab: "character",
 		type: "element",
 		element: presetBar
 	},
 	{
 		name: "角色",
+		title: "角色和世界书修改后需要保存才能生效！",
 		_tab: "character",
 		type: "element",
 		element: charBar
@@ -274,12 +304,52 @@ SETTINGS.push(
 			"交替对话": 2
 		}
 	},
+	{
+		id: "st_removeLastUserMessage",
+		name: "在chatHistory中移除最后一条用户消息 (酒馆默认：否)",
+		type: "radio",
+		required: true,
+		_tab: "character",
+		choices: {
+			"否": false,
+			"是": true
+		}
+	},
 );
 
 onLoad(() => {
 	kvListGetKeys("st|preset", presetList);
 	kvListGetKeys("st|char", characterList);
 	kvListGetKeys("st|lorebook", lorebookList);
+	EVENT_BUS.on(['kvs', 'st|lorebook'], async (name, event) => {
+		/** @type {AiChat.DnD.MyChatRuntimeData} */
+		const instance = selectedConversation[INST];
+		if (!instance) return;
+
+		const books = instance.lorebooks;
+		for (let i = 0; i < books.length; i++){
+			let book = books[i];
+			if (book?.name === name) {
+				books[i] = event[2] === 'del' ? null : await kvListGet('st|lorebook', name);
+				delete instance.lbCache;
+				$update(updateMessageUI);
+				break;
+			}
+		}
+	});
+	EVENT_BUS.on(['kvs', 'st|char'], async (name, event) => {
+		/** @type {AiChat.DnD.MyChatRuntimeData} */
+		const instance = selectedConversation[INST];
+		if (!instance) return;
+
+		const charname = messages[0].content.name;
+		if (!charname) return;
+
+		if (name === charname) {
+			instance.character = event[2] === 'del' ? null : await kvListGet('st|char', name);
+			$update(updateMessageUI);
+		}
+	});
 })
 
 //region 工具调用世界书 实验性
@@ -314,8 +384,8 @@ registerToolset("ST/Register", "", [FetchLorebook], {hidden: true});
 //endregion
 
 // 对话从数据库加载完成回调
-onConversationLoaded((conv, messages) => {
-	//reset
+onConversationLoaded((conv, messages, loadFromCache) => {
+	//现在仅仅是GC省内存了
 	lorebookToolKey.length = 0;
 	lorebookToolContent = {};
 
@@ -340,10 +410,10 @@ onConversationLoaded((conv, messages) => {
 
 	const promises = [kvListGet("st|char", name).then(item => {
 		readyObj.character = item;
-	})];
+	}, PROMISE_CATCH)];
 	if (presetName) promises.push(kvListGet("st|preset", presetName).then(item => {
 		readyObj.preset = item;
-	}));
+	}, PROMISE_CATCH));
 
 	if (lorebookSize) {
 		for (let i = 0; i < lorebookSize; i++) {
@@ -358,10 +428,10 @@ onConversationLoaded((conv, messages) => {
 	}
 
 	Promise.all(promises).finally(() => {
-		charInstance[CTX] = readyObj;
+		conv[INST] = charInstance[INST] = readyObj;
 		const character = readyObj.character;
 		charInstance.time = character?.time;
-		if (character?.greetings?.length) {
+		if (!loadFromCache && character?.greetings?.length) {
 			messages.splice(1, 0, {
 				id: -1, // 不保存到数据库
 				role: "st|greeting",
@@ -369,10 +439,6 @@ onConversationLoaded((conv, messages) => {
 			});
 		}
 		$update(updateMessageUI);
-		queueMicrotask(() => {
-			// 不再调用renderContent (当然虚拟列表不会让它真的只渲染一次的……)
-			readyObj.stable = true;
-		});
 	})
 });
 
@@ -385,12 +451,11 @@ onConversationLoaded((conv, messages) => {
  * @return {Promise<true>}
  */
 function importObject(typeId, json, imageBlob) {
-	const [typeStr, names, callback] = definition[typeId];
+	const [typeStr, names] = definition[typeId];
 	const cloned = cloneNamed(json, ["name", "time", ...names]);
 	if (imageBlob && !isIDB) cloned.image = imageBlob;
 
 	return kvListSet(cloned, typeId).then(() => {
-		callback(typeId, json.name);
 		showToast(typeStr+" "+json.name+" 导入成功", 'ok');
 		return true;
 	});
@@ -454,19 +519,17 @@ async function createConversation(char) {
 	await importConversationData({
 		title: "[Char] "+char.name,
 		time: Date.now(),
-		messages: [
-			{
-				role: "st|char",
-				content: {
-					id: char.id,
-					name: char.name,
-					// ""为嵌入世界书（若存在）保留
-					lorebookNames: [""],
-					greeting: 0
-				}
+	}, [
+		{
+			role: "st|char",
+			content: {
+				name: char.name,
+				// ""为嵌入世界书（若存在）保留
+				lorebookNames: [""],
+				greeting: 0
 			}
-		]
-	});
+		}
+	]);
 
 	showToast("已创建 "+char.name+" 的新对话", "ok");
 	return true;
@@ -475,9 +538,6 @@ async function createConversation(char) {
 //region UI组件
 MessageRoles["st|char"] = {
 	name: "角色卡",
-	reactive(self) {
-		return !self.key[CTX]?.stable;
-	},
 	/**
 	 *
 	 * @param {AiChat.DnD.MyCharConversation} self
@@ -493,7 +553,10 @@ MessageRoles["st|char"] = {
 				lorebooks,
 				/** @type {AiChat.DnD.MyPreset} */
 				preset = unconscious(currentPreset)
-			} = self[CTX];
+			} = self[INST];
+
+			// 宏环境
+			const macro = createSimpleMacroContext(char);
 
 			//region 插入消息
 			if (char.autoMessages?.length) {
@@ -501,13 +564,13 @@ MessageRoles["st|char"] = {
 					if (!enabled) continue;
 
 					const msg = output[output.length - 1 - depth];
-					if (msg && (depth !== 0 || msg.role === "user")) insertAfter(content, msg);
+					if (msg && (depth !== 0 || msg.role === "user")) insertText("\n\n"+applyMacro(content, macro), msg);
 				}
 			}
 			//endregion
-			let lbBefore = '', lbAfter = '', lbLast = '';
+			let lbBefore = '', lbAfter = '';
 			//region 处理世界书
-			const lorebookCaches = self[CTX].lbAndOtherCache || (self[CTX].lbAndOtherCache = {});
+			const lorebookCaches = self[INST].lbCache || (self[INST].lbCache = {});
 
 			/** @type {AiChat.DnD.MyLorebookPage[]} */
 			let pages = lorebookCaches.pages, constantPages = lorebookCaches.constant;
@@ -527,18 +590,20 @@ MessageRoles["st|char"] = {
 			}
 
 			const insertBook = book => {
-				const content = "\n\n" + book.content;
+				const content = "\n\n"+applyMacro(book.content, macro);
 				if (book.position === "worldInfoBefore") lbBefore += content;
 				else if (book.position === "worldInfoAfter") lbAfter += content;
 				else {
 					let depth = book.depth;
+					// TODO 优化这个循环
 					for (let i = output.length - 1; i >= 0; i--) {
 						const o = output[i];
 						if ((!book.role || o.role === book.role) && !--depth) {
-							o.content += lbLast;
-							break;
+							insertText(content, o);
+							return;
 						}
 					}
+					lbAfter += content;
 				}
 			};
 			constantPages.forEach(insertBook);
@@ -599,11 +664,9 @@ MessageRoles["st|char"] = {
 				const matcher = lorebookCaches.matcher || (lorebookCaches.matcher = new LorebookMatcher(pages));
 				const activeBooks = matcher.match(output);
 				activeBooks.forEach(insertBook);
-				self[CTX].activatedLorebookItems.value = activeBooks.map(k => k.name);
+				self[INST].activatedLorebookItems.value = activeBooks.map(k => k.name);
 			}
 			//endregion
-
-			const macro = createDefaultCtx(char);
 
 			let prefix = '';
 			const hasSystemMessage = output[0].role === "system";
@@ -620,7 +683,7 @@ MessageRoles["st|char"] = {
 				output.length = 0;
 				output.push(...content);
 			} else {
-				const content = prefix + makeStory(char, lbBefore, lbAfter);
+				const content = prefix + makeStory(char, lbBefore, lbAfter, macro);
 				if (hasSystemMessage) {
 					output[0].content = content;
 				} else {
@@ -639,7 +702,7 @@ MessageRoles["st|char"] = {
 	 * @param index
 	 */
 	renderContent(self, chunks, index) {
-		if (!self[CTX]) {
+		if (!self[INST]) {
 			chunks.push({ type: "loading", text: "加载中" });
 			return;
 		}
@@ -653,7 +716,7 @@ MessageRoles["st|char"] = {
 			preset,
 			/** @type {import("unconscious").Reactive<string[]>} */
 			activatedLorebookItems
-		} = self[CTX];
+		} = self[INST];
 
 		if (!char) {
 			chunks.push({
@@ -694,7 +757,7 @@ MessageRoles["st|char"] = {
 			});
 		}
 
-		const defaultSystemPrompt = makeStory(char, "\n\n<worldInfoBefore>", "\n\n<worldInfoAfter>");
+		const defaultSystemPrompt = makeStory(char, "\n\n<worldInfoBefore>", "\n\n<worldInfoAfter>", createSimpleMacroContext(char));
 		chunks.push({
 			type: "think",
 			think: {
@@ -784,10 +847,10 @@ MessageRoles["st|greeting"] = {
 	 * @param output
 	 */
 	compose({content: card}, output) {
-		const char = card[CTX].character;
+		const char = card[INST].character;
 		output.push({
 			role: "assistant",
-			content: applyMacro(char.greetings[card.content.greeting], createDefaultCtx(char))
+			content: applyMacro(char.greetings[card.content.greeting], createSimpleMacroContext(char))
 		});
 	},
 	/**
@@ -796,7 +859,7 @@ MessageRoles["st|greeting"] = {
 	 */
 	renderContent(self, chunks) {
 		const card = self.content;
-		const char = card[CTX].character;
+		const char = card[INST].character;
 		const greetings = char.greetings;
 
 		let index = card.content.greeting;
@@ -805,7 +868,7 @@ MessageRoles["st|greeting"] = {
 		chunks.push({
 			key: self,
 			type: "text",
-			text: applyMacro(greetings[index], createDefaultCtx(char))
+			text: applyMacro(greetings[index], createSimpleMacroContext(char))
 		});
 		if (greetings.length > 1) {
 			chunks.push({
@@ -829,7 +892,7 @@ MessageRoles["assistant"] = {
 	renderContent(message, chunks, index, isEditing, messages, defaultRenderContent) {
 		defaultRenderContent(message, chunks, message.content);
 
-		const isRP = messages[0]?.[CTX];
+		const isRP = messages[0]?.[INST];
 		if (!isRP) return;
 
 		const preset = isRP.preset || unconscious(currentPreset);
@@ -849,17 +912,25 @@ MessageRoles["assistant"] = {
 	}
 };
 
-function insertAfter(text, msg) {
-	const template = "\n\n" + applyMacro(text);
-	if (Array.isArray(msg.content)) {
-		msg.content.push({
-			type: "text",
-			text: template
-		})
+const IS_CLONED = debugSymbol("GeneratedByCharacter");
+const insertText = (text, msg) => {
+	const content = msg.content;
+	if (Array.isArray(content)) {
+		const last = content.at(-1);
+		if (last[IS_CLONED]) {
+			last.text += text;
+		} else {
+			msg.content = [...content, {
+				type: "text",
+				text: text,
+				[IS_CLONED]: true
+			}];
+		}
 	} else {
-		msg.content += template;
+		msg.content += text;
 	}
-}
+};
+
 
 /**
  *
@@ -871,18 +942,15 @@ const StoryConfigPanel = self => {
 	const selectedPreset = $state(self.content.presetName);
 
 	const update = () => {
-		self[CTX].stable = false;
-		//delete self[CTX].lorebookPages;
-		delete self[CTX].lbAndOtherCache;
+		delete self[INST].lbCache;
 		$update(updateMessageUI);
-		queueMicrotask(() => self[CTX].stable = true);
 	};
 
 	$watch(selectedPreset, () => {
 		const name = selectedPreset.value;
 		kvListGet("st|preset", name).then(item => {
 			self.content.presetName = name;
-			self[CTX].preset = item;
+			self[INST].preset = item;
 			update();
 		});
 	}, false);
@@ -890,7 +958,7 @@ const StoryConfigPanel = self => {
 	$watch(selectedLorebooks, () => {
 		const nameArr = selectedLorebooks.value;
 		const valueArr = Array(nameArr.length);
-		self[CTX].lorebooks.value = valueArr;
+		self[INST].lorebooks.value = valueArr;
 
 		const promises = [];
 
@@ -907,7 +975,6 @@ const StoryConfigPanel = self => {
 	return <div className={"rp_tags"}>
 		<LorebookList items={lorebookList} selection={selectedLorebooks} />
 		<PresetList items={presetList} selection={selectedPreset} />
-		<button className={"btn ghost"} onClick={update}>清除缓存<span className={"tooltip"}>修改世界书或预设之后清除内部缓存</span></button>
 	</div>;
 };
 
@@ -916,7 +983,7 @@ const StoryConfigPanel = self => {
  * @return {JSX.Element}
  */
 const _LorebookPage = item => {
-	let {name, enabled, comment, content, regex, constant, recursion, triggers, window, position, id, depth} = item;
+	let {name, enabled, comment, content, regex, constant, recursion, triggers, window, position, depth} = item;
 	const attributes = [];
 	if (!enabled) attributes.push("禁用");
 	if (constant) attributes.push("常驻");
@@ -935,10 +1002,10 @@ const _LorebookPage = item => {
 					</span>
 				</div>
 				<code className={"hljs"}>
-					ID：{id}<br/>
+					名称：{name}<br/>
 					属性：{attributes.join(" ")}<br/>
 					位置：{position}<br/>
-					触发词：<ul style={"margin:0"}>{triggers.map(s => <li>{s}</li>)}</ul>
+					{constant ? null : <>触发词：<ul style={"margin:0"}>{triggers.map(s => <li>{s}</li>)}</ul></>}
 					{comment}
 				</code>
 			</pre>

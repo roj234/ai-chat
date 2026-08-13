@@ -49,6 +49,26 @@ import {ToolCallEditor} from "./ToolCallEditor.jsx";
 const CURRENT_EDITING = debugSymbol("CURRENT_EDITING");
 const isEditing = message => (selectedConversation[CURRENT_EDITING] === message);
 
+/**
+ *
+ * @param {File} blob
+ * @param {string} className
+ * @return {JSX.Element}
+ */
+const createBlobDisplay = (blob, className) => {
+	const deleted = blob.size <= 0;
+	return <div className={"text-attachment"+(deleted ? " deleted" : "")}>
+		<div className="attach-header">
+			<i className={className}></i>
+			<span className="ellipsis">{blob.name || "文件"}</span>
+			{!deleted && <span className="attach-meta ellipsis">{formatSize(blob.size)}, {blob.type}</span>}
+		</div>
+		<button className="btn" disabled={deleted}
+				onClick={() => downloadFile(blob)}>
+			<i className="ri-download-line"></i> 下载
+		</button>
+	</div>
+};
 
 // region AiChat.ResponseContentPart[] 的生成和渲染函数
 /**
@@ -76,23 +96,14 @@ const chunkRenderer = m => {
 			case "loading":
 				return loadingBlock(<my-loading text={item.text} />, item.progress);
 			case "input_audio": {
-				return <AudioPlayer src={item.input_audio.data} />
+				const src = item.input_audio.data;
+				if (src.size < 0) return createBlobDisplay(src, "ri-file-music-line");
+				return <AudioPlayer src={src} />
 			}
 			case "text": {
 				const {text} = item;
 				if (typeof text !== "string") {
-					const deleted = text.size <= 0;
-					return <div className={"text-attachment"+(deleted ? " deleted" : "")}>
-						<div className="attach-header">
-							<i className="ri-file-text-line"></i>
-							<span className="ellipsis">{text.name || "文本文件"}</span>
-							{!deleted && <span className="attach-meta ellipsis">{formatSize(text.size)}, {text.type}</span>}
-						</div>
-						<button className="btn" disabled={deleted}
-								onClick={() => downloadFile(text)}>
-							<i className="ri-download-line"></i> 下载
-						</button>
-					</div>
+					return createBlobDisplay(text, "ri-file-text-line");
 				}
 				if (isEditing(m.key)) {
 					return <EditWidget value={text} onChange={value => {

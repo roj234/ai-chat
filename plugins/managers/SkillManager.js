@@ -160,7 +160,6 @@ function openSkillManager(preset, isOpen, close) {
 								pattern(name) {
 									if (!/^[a-zA-Z0-9_-]+$/.test(name)) return "名称只能包含大小写字母数字斜杠下划线";
 									if (mcps.find(mcp => mcp.name === name)) return "名称与现有MCP/工具集重复";
-									return [name];
 								},
 								required: true
 							},

@@ -11,6 +11,8 @@ export const createAsyncQueue = (concurrency = 6) => {
 	}, () => Promise.all(taskQueue)];
 }
 
+export const PROMISE_CATCH = () => {};
+
 /**
  * 节流函数，保证最终一定会以最新的参数调用一次
  * @template {Function} T

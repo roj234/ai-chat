@@ -40,8 +40,8 @@ declare namespace AiChat {
         mnt?: Record<string, Mount>;
 
         /** 覆盖全局配置，高于 config 优先级 */
-        preset?: string;
-        /** 覆盖全局配置，高于 preset 优先级 */
+        presets?: string | string[];
+        /** 覆盖全局配置，高于 presets 优先级 */
         overrides?: Partial<LocalPreset>;
     }
 
@@ -176,6 +176,11 @@ declare namespace AiChat {
         wakelock: 0 | 1,
     }
 
+    type AgentFSPreset = {
+        fs_trashCan: boolean;
+        fs_autoMount: boolean;
+    }
+
     type ManualOverridePreset = {
         disableTools?: boolean;
     }
@@ -201,7 +206,7 @@ declare namespace AiChat {
         checkUpdate: 0 | 1,
     }
 
-    type LocalPreset = ModelConfig & SamplingConfig & PromptConfig & TitleModelConfig & MiscPreset & ManualOverridePreset;
+    type LocalPreset = ModelConfig & SamplingConfig & PromptConfig & TitleModelConfig & MiscPreset & ManualOverridePreset & AgentFSPreset;
     type Preset = LocalPreset & GlobalPreset;
 
     type BillingLog = {
@@ -558,7 +563,7 @@ declare namespace AiChat {
             onCompleted?(conversation: Conversation, messages: Message[], preset: Preset, result: BillingLog): void | Promise<void>;
         }
 
-        type MessageComposedCallback = (messages: Message[], output: OpenAI.Message[], body: Record<string, any>, is_prefill: boolean) => void;
+        type MessageComposedCallback = (messages: Message[], output: OpenAI.Message[], body: Record<string, any>, is_prefill: boolean, conversation: Conversation) => void;
 
         type MyCharacter = IDBKVList & {
             type: "st|char",
@@ -648,12 +653,16 @@ declare namespace AiChat {
                 activatedLorebookItems: Set<string>;
             };
 
-            [_instances]: {
-                character: MyCharacter,
-                lorebooks: MyLorebook[],
-                preset?: MyPreset
-            }
+            [_instances]: MyChatRuntimeData
         }
+
+        type MyChatRuntimeData = {
+            character: MyCharacter,
+            lorebooks: MyLorebook[],
+            preset?: MyPreset
+            stable?: boolean
+        }
+
         interface MyGreeting extends BaseMessage {
             role: "st|greeting";
             content: MyCharConversation;

@@ -5,7 +5,7 @@ import {readBOM} from "../../common/chardet.js";
 import iconv from "iconv-lite";
 import {getEnvironmentPrompt} from "../utils/checkEnv.js";
 import {createTextFileEditHelper, GREP_MAX_COLUMNS} from "../../common/fs-common.js";
-import {IgnoreMatcher} from "../../common/ignore.js";
+import {IGNORED_ERROR_MESSAGE, IgnoreMatcher} from "../../common/ignore.js";
 import {createReadStream, createWriteStream} from 'node:fs';
 import {pipeline} from "node:stream/promises";
 import {createHash} from 'node:crypto';
@@ -22,7 +22,7 @@ export const pathFilter = (ctx, relPath) => {
 	const targetPath = path.resolve(root, relPath);
 	// allow path like /tmp/... or C:/tmp/
 	if (!globalThis.AIChatArgs.noSandbox && !targetPath.startsWith(root) && !/^(?:[a-zA-Z]:)?[\\/]tmp(?:\/|$)/.test(targetPath)) {
-		const err = new Error('Forbidden: Path Traversal');
+		const err = new Error('Path Traversal');
 		err.statusCode = 403;
 		throw err;
 	}
@@ -36,7 +36,7 @@ async function pathFilterWithIgnore(ctx, relPath, isDir) {
 	const processedRelPath = targetPath.slice(root.length+1).replaceAll(path.sep, '/');
 	const ignore = await getIgnoreMatcher(root, targetPath);
 	if (ignore.test(processedRelPath, isDir)) {
-		const err = new Error('Forbidden: operate ignored path');
+		const err = new Error(IGNORED_ERROR_MESSAGE);
 		err.statusCode = 403;
 		throw err;
 	}
@@ -297,7 +297,7 @@ export async function registerFsRoutes(router, allowExec) {
 			const safePath = await pathFilterWithIgnore(ctx, path1);
 			await fs.mkdir(path.dirname(safePath), { recursive: true });
 			await fs.writeFile(safePath, data, 'utf-8');
-			if (/\.(gitignore|ignore)$/.test(path)) matcherCache.delete(ctx.fsRoot);
+			if (/\.(gitignore|ignore)$/.test(safePath)) matcherCache.delete(ctx.fsRoot);
 		},
 		async mtime(path, ctx) {
 			const safePath = pathFilter(ctx, path);
@@ -625,7 +625,7 @@ logPath: ${logFile}`
 			const { code, text } = await executeCommand(rgPath, [
 				//"-i", // --ignore-case
 				"-n", // --line-number
-				//"--no-require-git",
+				"--no-require-git",
 				"--no-messages",
 				"--heading",
 				"-M", GREP_MAX_COLUMNS,
@@ -636,9 +636,7 @@ logPath: ${logFile}`
 				//"--context-separator", "--",
 				"-m", maxMatchesPerFile,
 				"-C", context,
-				"--type-add",
-				"foo:"+glob,
-				"-tfoo",
+				"-g", glob,
 				"--path-separator", "/",
 				"--",
 				pattern,

@@ -1,4 +1,6 @@
 
+export const IGNORED_ERROR_MESSAGE = 'This path is readonly and hidden from Glob/Grep by .ignore/.gitignore rules.';
+
 /**
  * 转换gitignore模式为正则表达式
  * @param {string} pattern
@@ -64,7 +66,7 @@ const compilePattern = pattern => {
 };
 
 export class IgnoreMatcher {
-	rules = [[],[],[],[]];
+	rules = [["(?:^|/)\\.git/"],["^.trash\\b"],[],[]];
 
 	/**
 	 * @param {string} content
@@ -103,9 +105,6 @@ export class IgnoreMatcher {
 	 * @returns {boolean}
 	 */
 	test(relPath, isDir) {
-		//if (/\/\./.test(relPath)) return true;
-		if (/(?:^|\/)\.git\/?/.test(relPath)) return true;
-
 		const [regexp, regexpDirOnly, regexpNegative, regexpDirOnlyNegative] = this.rules;
 
 		if (regexpNegative?.test(relPath)) return false;

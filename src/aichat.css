@@ -12,8 +12,8 @@
     --muted: oklch(0.713 0.024 260.709);
     --accent: oklch(0.658 0.182 260.738);
     --accent-2: oklch(0.857 0.111 180.99);
-    --chip-bg: oklch(1 0 89.876 / 0.06);
-    --chip-hover: oklch(1 0 89.876 / 0.12);
+    --chip-bg: rgba(255,255,255,0.06);
+    --chip-hover: rgba(255,255,255,0.12);
     --chip-active: oklch(0.557 0.244 264.934 / 0.1);
     --chip-active-border: oklch(0.652 0.184 266.25);
     --focus: oklch(0.756 0.126 256.573);
@@ -106,7 +106,8 @@
         --text: #111827;
         --text-lighter: #4b5563;
         --muted: #6b7280;
-        --chip-bg: #eeeeee;
+        --chip-bg: rgba(0,0,0,0.06);
+        --chip-hover: rgba(0,0,0,0.12);
         --chip-active: rgba(72, 143, 253, 0.3);
         --chip-active-border: #93c5fd;
         --focus: #60a5fa;

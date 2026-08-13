@@ -2,8 +2,11 @@ import {$asyncState, $computed, $state, $store, $watch, debugSymbol, unconscious
 import {deepEqual} from "unconscious/common/deepEqual.js";
 import {jsonFetch} from "../common/openai-api-utils.js";
 import {resolveDBRelativeURL} from "./utils/utils.js";
+import {EventBus} from "./utils/EventBus.js";
 
 export const PAGE_TITLE = document.title;
+
+export const EVENT_BUS = new EventBus();
 
 /**
  * @type {boolean}
@@ -36,8 +39,7 @@ export const MessageCopyHandler = debugSymbol("MessageCopy");
 export const MessageRoles = {};
 export const EditableMessageRoles = new Set(["system", "user", "assistant"]);
 
-// 虽然记住是挺好的，但是自动同步功能会导致每一个页面的输入框内容都相同，有些离谱
-export const inputText = $state("");//$store("inputText", "", {persist: true, ser: AS_IS, deser: AS_IS});
+export const inputText = $state("");
 
 
 /**
@@ -72,9 +74,16 @@ export const messages = $state([]);
  */
 export const selectedConversation = $state(null);
 
+const CACHED_FLAG = debugSymbol("MessageIsCached");
 const conversationLoadedCallbacks = [];
 const conversationBeforeunloadCallbacks = [];
+/**
+ * @param {function(AiChat.Conversation, AiChat.Message[], boolean): void} callback
+ */
 export const onConversationLoaded = callback => conversationLoadedCallbacks.push(callback);
+/**
+ * @param {function(AiChat.Conversation): void} callback
+ */
 export const onConversationBeforeunload = callback => conversationBeforeunloadCallbacks.push(callback);
 
 let prevConversation;
@@ -84,7 +93,9 @@ $watch(selectedConversation, () => {
 		if (conv.id !== prevConversation?.id) {
 			prevConversation = conv;
 			const msg = unconscious(messages);
-			for (const cb of conversationLoadedCallbacks) cb(conv, msg);
+			const flg = msg[CACHED_FLAG];
+			for (const cb of conversationLoadedCallbacks) cb(conv, msg, flg);
+			msg[CACHED_FLAG] = true;
 		}
 	} else if (prevConversation) {
 		for (const cb of conversationBeforeunloadCallbacks) cb(prevConversation);

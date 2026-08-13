@@ -127,7 +127,7 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
     classList.toggle("tool-error", is_errored);
 
     const secure = toolScriptRegistry[tool_name]?.interactive;
-    let pending = tool_name && secure !== true && null == time && null == success;
+    let pending = tool_name && secure !== true && !resp[TOOL_IS_RUNNING] && null == success;
     classList.toggle("pending", pending);
     classList.toggle("secure", !!(pending && secure));
 
@@ -144,13 +144,13 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
         element.append(<div className={"tool-body"}>
             <div className="args-title">{secure ? "需要批准敏感操作" : "工具执行已暂停"}</div>
             <div style={"display:flex;gap:8px"}>
-                <button className={"btn warning"} onClick={({target}) => {
+                <button className={"btn primary"} onClick={({target}) => {
                     setAuditState(target, true);
                 }}>
                     允许
                     <div className={"tooltip"}>仅本次允许</div>
                 </button>
-                {secure && <button className={"btn primary"} disabled={granted} onClick={({target}) => {
+                {secure && <button className={"btn warning"} disabled={granted} onClick={({target}) => {
                     const grantedTools = conv.grantedTools;
                     if (!grantedTools) conv.grantedTools = new Set([tool_name]);
                     else grantedTools.add(tool_name);

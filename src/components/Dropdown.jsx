@@ -19,9 +19,15 @@ let instances = new Set;
  */
 export function Dropdown({items, selection, onChanged, dir = 'down'}) {
 	const updateHighlight_ = i => {
-		options.querySelector(".selected")?.classList.remove("selected");
-		options.children[i]?.classList.add("selected");
+		options.querySelectorAll(".selected").forEach(e => e.classList.remove("selected"));
 		main.classList.remove("open");
+
+		if (typeof i !== 'number') {
+			i = items.findIndex(value => value.name === i);
+			if (i < 0) return;
+		}
+
+		options.children[i]?.classList.add("selected");
 	};
 
 	let options;
@@ -54,16 +60,6 @@ export function Dropdown({items, selection, onChanged, dir = 'down'}) {
 	</div>;
 
 	main.setSelection = updateHighlight_;
-	main.onInserted = (type, name) => {
-		let index = items.findIndex(value => value.name === name);
-		if (index < 0) {
-			items.unshift({
-				type,
-				name,
-			});
-		}
-		updateHighlight_(index);
-	};
 
 	instances.add(main);
 	$cleanup(main, () => instances.delete(main));
