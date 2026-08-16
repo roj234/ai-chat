@@ -51,7 +51,7 @@ const createPreset = (name, categories) => {
 		SimpleModal({
 			type: 'input',
 			title: "保存为新预设",
-			placeholder: '给你的配置起个名字...',
+			placeholder: '给配置起个新名字... 留空以覆盖',
 			message: <>
 				<span style="font-size:smaller">勾选需要保存在预设中的设置项。应用预设时，仅更新已选项，其余设置保持不变。</span>
 				<div style={"margin-bottom:8px;text-align:center"}><SettingList items={Object.values(presetKeys)} selection={selection}/></div>

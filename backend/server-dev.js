@@ -1,6 +1,6 @@
 import {createRouter} from "./init.js";
-import {createSyncManager, createSyncValidateMiddleware} from "./sync_service.js";
-import {WebSocketServer} from "ws";
+import {createSyncManager, createSyncValidateMiddleware} from "./syncServer.js";
+import {WebSocketServer} from "unconscious/common/ws2/src/index.js";
 
 globalThis.AIChatArgs = {}
 

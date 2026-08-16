@@ -6,7 +6,7 @@ import {
 	deserializeRow
 } from "../utils/compression.js";
 import {patch} from "unconscious/common/deepEqual.js";
-import {sortMessages} from "../sync_const.js";
+import {sortMessages} from "../sync.js";
 
 /**
  * @param {Record<string, function(body: any, ctx: Partial<AiChatBackend.RouteContext>): any>} batcher

@@ -90,7 +90,7 @@ assistant: , how are you today.
 
 - [x] 点击上传
 - [x] 拖拽
-- [ ] 粘贴 (Ctrl+V)
+- [x] 粘贴 (Ctrl+V)
 - [x] 录音
 
 ## 设置面板

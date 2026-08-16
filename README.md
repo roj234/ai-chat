@@ -17,8 +17,7 @@
 - **功能没有边界**：你可以在RP会话中调用MCP，在Coding Task中进行对话分支，以及各种工具
   - 产品用途不应决定能力上限，它们生来可以组合，应该组合，将会组合。
   - 尽管有的组合可能不尽如人意，*但它可以。*
-- **前端 2.4MB**，后端加依赖约 650 KB
-  - 前端 = 1MB 核心代码 + 可选模块（包含 mermaid 图和办公用的 pdf, docx, xlsx, pptx 读写）
+- **前端 2MB**，后端加依赖约 600 KB
 - **只需要浏览器**：Chrome (or WebView) 118+，提供有限的 Firefox 支持。
 - **不需要 Docker，不需要编译，不需要 node_modules 和数据库服务**
   - 哪怕连后端都不想要，你的敌人也只有 CORS
@@ -136,6 +135,11 @@ llama-server --path ./dist
 - [streaming-markdown](https://github.com/Roj234/streaming-markdown) — 流式 Markdown 解析器 + KaTeX
 - [Remix Icon](https://github.com/Remix-Design/remixicon)
 - [Modern Normalize](https://github.com/sindresorhus/modern-normalize)
+
+### 后端
+- iconv-lite
+- remove-markdown
+- 没有 ws，因为我自己做了一个，mask 函数的性能是 ws 的 JS 实现的 1000%
 
 浏览器需求：Chrome 118+  
 在 118-124 上测试  

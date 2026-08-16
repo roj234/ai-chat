@@ -69,15 +69,4 @@
             display: none;
         }
     }
-
-    & .warning {
-        background: transparent;
-        border: 1px solid var(--warning-accent);
-        color: var(--warning-accent);
-        cursor: pointer;
-
-        &:hover {
-            background: rgba(245, 158, 11, 0.3);
-        }
-    }
 }

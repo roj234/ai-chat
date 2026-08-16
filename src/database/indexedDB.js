@@ -1,5 +1,5 @@
 import {getTextContent} from "../utils/utils.js";
-import {sortMessages} from "/backend/sync_const.js";
+import {sortMessages} from "/backend/sync.js";
 import {IndexedDBAccess} from "../utils/dbAccess.js";
 
 const [transaction, deleteDatabase] = IndexedDBAccess('AiChat', 9, (event) => {

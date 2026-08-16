@@ -206,6 +206,15 @@ button[class^="ri-"] {
     font-size: 1rem;
 }
 
+/* 省电模式 */
+body.no-motion {
+    *,
+    *::before,
+    *::after {
+        animation: none !important;
+    }
+}
+
 /* 布局 */
 .app {
     height: 100vh;
@@ -271,6 +280,16 @@ button[class^="ri-"] {
 .danger {background-color: var(--error-block-border);}
 .danger:disabled {background-color: var(--error-bg);}
 .danger:not(:disabled):hover {background-color: var(--error); color: var(--text-on-accent);}
+.warning {
+    background: transparent;
+    border: 1px solid var(--warning-accent);
+    color: var(--warning-accent);
+    cursor: pointer;
+
+    &:hover {
+        background: rgba(245, 158, 11, 0.3);
+    }
+}
 .btn:disabled { opacity: 0.6; cursor: not-allowed !important; }
 
 
@@ -310,12 +329,12 @@ button[class^="ri-"] {
     justify-content: space-between;
 }
 
-._readonly {
-    & .composer, & .btn-line button:not([data-action='copy']) {
+body._locked {
+    & .query:not(.rc), & .btn-line button:not([data-action='copy']) {
         display: none;
     }
 }
-._human .hide-human {
+body._fileUI .hide-human {
     display: none !important;
 }
 
@@ -637,6 +656,7 @@ button[class^="ri-"] {
     justify-content: space-between;
     border-bottom: 1px solid var(--border);
     backdrop-filter: blur(5px);
+    z-index: 1;
 
     & > div {
         display: flex;

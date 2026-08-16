@@ -106,7 +106,7 @@ const chunkRenderer = m => {
 					return createBlobDisplay(text, "ri-file-text-line");
 				}
 				if (isEditing(m.key)) {
-					return <EditWidget value={text} onChange={value => {
+					return <EditWidget value={text} placeholder={"消息正文 content"} onChange={value => {
 						const message = m.key;
 						if (!Array.isArray(message.content)) {
 							message.content = value;
@@ -138,7 +138,7 @@ const chunkRenderer = m => {
 				const logData = $state("加载中");
 
 				return (<div className="stats" onMouseEnter.once={() => {
-					Promise.all(messages.slice(m.index, m.end_index).map(m => getBillingLog(m.id))).then((logs) => {
+					Promise.all(messages.slice(m.index, m.end_index).map(m => m.log||getBillingLog(m.id))).then((logs) => {
 						let totalInput = 0;
 						let totalCacheRead = 0;
 						let totalOutput = 0;

@@ -17,7 +17,7 @@ const button_state_map = {
  * @param {function(Event): void} onSend
  * @return {JSX.Element}
  */
-export const createSubmitButton = (attachments, onSend) => {
+export const createSendButton = (attachments, onSend) => {
 	const sendBtn = <button onClick={onSend} />;
 
 	/** @param {number} state */

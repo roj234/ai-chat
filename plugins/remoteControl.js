@@ -1,11 +1,12 @@
-import {sendToSyncServer} from "/src/database/remoteSync.js";
-import {SYNC_RPC, SYNC_SEND_TO_OWNER} from "/backend/sync_const.js";
-import {config, conversations, inputText, selectedConversation, switchToConversation} from "/src/states.js";
-import {$cleanup, $state, $update, $watch, unconscious} from "unconscious";
+import {sendToSyncServer} from "/src/database/syncClient.js";
+import {SYNC_RPC, SYNC_SEND_TO_OWNER} from "/backend/sync.js";
+import {config, conversations, inputText, isMobile, selectedConversation, switchToConversation} from "/src/states.js";
+import {$state, $update, $watch, unconscious} from "unconscious";
 import {showToast} from "/src/components/Toast.js";
 import {DI, onLoad} from "/src/hooks.js";
 import {delta, patch, rep} from "unconscious/common/deepEqual.js";
 import {prettyError} from "/src/utils/utils.js";
+import {VirtualList} from "unconscious/common/VirtualList.js";
 
 // 消息类型常量
 const NO_SUCH_CLIENT = -1;
@@ -66,6 +67,9 @@ const onStateUpdated = () => {
 
 // ---------- 控制端（客户端） ----------
 
+/** @type {HTMLElement} */
+let composer;
+
 /** @type {import("unconscious").Reactive<RPCState>} */
 const clientState = $state();
 
@@ -98,65 +102,85 @@ const RMI = {
 	 * @param {number} id - 被控对话的 conversationId
 	 */
 	render(id) {
-		clientState.value = { title: "请稍候" };
+		clientState.value = {};
 
-		const pendingRPC = $state(true);
+		const rpcBusy = $state(true);
 		const serialRPC = (...args) => {
-			pendingRPC.value = true;
-			const promise = RPC(...args);
+			rpcBusy.value = true;
+			const promise = RPC(id, ...args);
 			promise.catch(err => {
 				showToast("函数调用失败:\n" + prettyError(err), 'error', 0);
-			}).finally(() => pendingRPC.value = false);
+			}).finally(() => rpcBusy.value = false);
 			return promise;
 		}
 
-		RPC(id, SUBSCRIBE).then(onReceiveStateUpdate, () => div.remove()).finally(() => pendingRPC.value = false);
+		const fakeInputBox = <textarea
+			placeholder="有事尽管问我"
+			disabled={rpcBusy} value={() => clientState.text}
+			onInput={() => {
+				sendToSyncServer(SYNC_SEND_TO_OWNER, [id, [INPUT, 0, delta(clientState.text, fakeInputBox.value)]]);
+			}}
+			onKeyDown={(e) => {
+				if (isMobile) return;
+				if (e.key === 'Enter' && !e.shiftKey) {
+					e.preventDefault();
+					e.stopImmediatePropagation();
+					fakeSendButton.click();
+				}
+			}}
+		/>;
+		const fakeSendButton = <button
+			disabled={() => clientState.disabled != null || unconscious(rpcBusy)}
+			title={() => clientState.title}
+			className={() => clientState.class}
+			onClick={() => serialRPC(SUBMIT)}
+		/>;
 
-		const div = (<div>
-			<div className="filter-row">
-				<div className="filter-label">远程控制</div>
-				<div className="input-warp">
-						<textarea className="text-input" placeholder="草泥马，不是这样写的"
-							disabled={pendingRPC} value={() => clientState.text}
-							onInput={({target}) => {
-								sendToSyncServer(SYNC_SEND_TO_OWNER, [id, [INPUT, 0, delta(clientState.text, target.value)]]);
-							}}
-						></textarea>
-				</div>
-			</div>
-			<div className="filter-row">
-				<div className="choice-scroll">
-					<div className={"spacer"}></div>
-					<button
-						disabled={() => unconscious(pendingRPC) || clientState.disabled != null}
-						title={() => clientState.title}
-						className={() => clientState.class}
-						onClick={() => serialRPC(id, SUBMIT)}
-					>
-						{() => clientState.title}
-					</button>
-				</div>
-			</div>
-			<div className="filter-row">
-				<div className="filter-label">切换到对话</div>
-				<div className="input-warp">
-					<input className="text-input" type="number" placeholder="对话ID"
-						disabled={pendingRPC} value={() => clientState.convId}
-						onChange={({target}) => {
-							if (!target.value) return;
-							serialRPC(id, SWITCH_TO, target.valueAsNumber);
-						}}
-					/>
-				</div>
-			</div>
-		</div>);
-
-		// 清理时取消订阅
-		$cleanup(div, () => {
-			sendToSyncServer(SYNC_SEND_TO_OWNER, [id, [UNSUBSCRIBE]]);
+		const vl = new VirtualList({
+			data: unconscious(conversations).filter(conv => conv.id > 0),
+			renderer: data => <li
+				className={"ellipsis" + (data === unconscious(selectedConversation) ? " selected" : "")}
+				_conv={data} title={data.title}>{data.title || "#" + data.id}</li>
 		});
 
-		return div;
+		const changeConversation = <div className="pretty-select preset-switch up">
+			<div className="input" onClick.stop={() => changeConversation.classList.toggle("open")}>切换远程会话<span
+				className="arrow-icon ri-arrow-down-s-line"></span></div>
+			<ul className="dropdown" style={"width:250px"} onClick.delegate{"li"}={e => {
+				if (unconscious(rpcBusy)) return;
+				const conv = e.delegateTarget._conv;
+				serialRPC(SWITCH_TO, conv.id).then(() => switchToConversation(conv));
+			}}>
+				{vl.dom}
+			</ul>
+		</div>;
+		vl.attach(changeConversation.querySelector(".dropdown"));
+
+		const fakeQuery = <div className="query rc">
+			{fakeInputBox}
+			<div className="controls">
+				<div>{changeConversation}</div>
+				<div className="spacer"></div>
+				{fakeSendButton}
+			</div>
+		</div>;
+
+		let fail;
+		RPC(id, SUBSCRIBE).then(diff => {
+			onReceiveStateUpdate(diff);
+			rpcBusy.value = false;
+			composer.append(fakeQuery);
+		}, () => {
+			fail = true;
+			showToast("远端未启用远程控制", "error");
+		});
+
+		// 清理时取消订阅
+		return () => {
+			if (fail) return;
+			sendToSyncServer(SYNC_SEND_TO_OWNER, [id, [UNSUBSCRIBE]]);
+			fakeQuery.remove();
+		};
 	},
 
 	/**
@@ -253,14 +277,16 @@ const RMI = {
 export const registerRemoteControl = () => {
 	DI.RMI = RMI;
 	onLoad((app) => {
-		sendBtn = app.querySelector(".composer .controls > button");
+		sendBtn = DI.sendButton;
+		composer = sendBtn.closest(".composer");
 
+		// server
 		new MutationObserver((mutations) => {
 			for (const mutation of mutations) {
 				immediateState[mutation.attributeName] = sendBtn.getAttribute(mutation.attributeName);
 			}
 			onStateUpdated();
-		}).observe(sendBtn, { attributes: true, });
+		}).observe(sendBtn, {attributes: true,});
 
 		$watch(inputText, () => {
 			immediateState.text = unconscious(inputText);

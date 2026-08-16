@@ -67,21 +67,18 @@ export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages, pre
 
 		content = applyMacro(content, ctx);
 		if (attr === "marker") {
-			if (content === "dialogueExamples") {
-				if (ctx.dialogueExamples?.length)
-					messages.push({
-						role: "system",
-						content: "\n\n[Example Chat]\n\n"+ctx.dialogueExamples.join("\n\n[Example Chat]\n\n"),
-						[IS_SYSTEM]: true
-					});
-				continue;
-			}
 			if (content === "chatHistory") {
 				messages.push(...chatHistory);
 				continue;
 			}
 
-			const cnt = applyMacro(ctx[content] || '', ctx).trim();
+			let raw = ctx[content] || '';
+			if (content === "dialogueExamples" && ctx.dialogueExamples?.length)
+				raw = EXAMPLE_CHAT_LABEL + ctx.dialogueExamples.join(EXAMPLE_CHAT_LABEL);
+			if (content === "lastUserMessage")
+				raw = lastUserMessage;
+
+			const cnt = applyMacro(raw, ctx).trim();
 			if (cnt) {
 				if (currentMessage) {
 					if (currentMessage.role !== role)
@@ -157,16 +154,19 @@ export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages, pre
 		messages.shift();
 	}
 
-	const offset = message[0]?.role === "system" ? 0 : 1;
-	for (let i = 0; i < messages.length; i++){
-		const item = messages[i];
-		if (item.role === "system" && i) {
-			item.role = "user";
-		}
+	const pp = config.st_postProcess;
+	if (pp) {
+		const offset = message[0]?.role === "system" ? 0 : 1;
+		for (let i = 0; i < messages.length; i++) {
+			const item = messages[i];
+			if (item.role === "system" && i) {
+				item.role = "user";
+			}
 
-		if (config.st_postProcess) {
-			if (!offset && !i) continue;
-			item.role = (i + offset) % 2 ? "assistant" : "user";
+			if (pp === 2) {
+				if (!offset && !i) continue;
+				item.role = (i + offset) % 2 ? "assistant" : "user";
+			}
 		}
 	}
 
@@ -184,33 +184,43 @@ export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages, pre
 };
 
 
+// dialogueExamples and chatHistory are specially handled in applyPreset().
 export const createSimpleMacroContext = char => ({
+	//...char,
 	char: char.char || char.name,
-	user: char.user || config.nickname || DEFAULT_USER_NAME
+	user: char.user || config.nickname || DEFAULT_USER_NAME,
+	personaDescription: char.personaDescription || config.st_userdesc,
+	description: char.description,
+	personality: char.personality,
+	scenario: char.scenario,
+	systemPrompt: char.systemPrompt,
 });
+
+export const DEFAULT_SYSTEM_PROMPT = `Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.`;
+const EXAMPLE_CHAT_LABEL = "\n\n[Example Chat]\n\n";
+const START_CHAT_LABEL = `\n\n[Start a new Chat]`;
 
 /**
  * 按照酒馆的命名，这叫故事字符串
- * @param {AiChat.DnD.MyCharacter} char
- * @param {string} lbBefore
- * @param {string} lbAfter
- * @param {Object} macro
+ * @param {AiChat.DnD.MyCharacter & Record<string, string>} char
+ * @param {string} worldInfoBefore
+ * @param {string} worldInfoAfter
  * @return {string|OpenAI.Message[]}
  */
-export const makeStory = (char, lbBefore = "", lbAfter = "", macro) => {
-	let story = char.systemPrompt || `Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.`;
+export const makeStory = (char, worldInfoBefore = "", worldInfoAfter = "") => {
+	let story = char.systemPrompt || DEFAULT_SYSTEM_PROMPT;
 
-	if (lbBefore) story += /*"\n\n"+*/lbBefore;
-	const stUserdesc = char.userdesc || config.st_userdesc;
-	if (stUserdesc) story += "\n\n"+stUserdesc;
+	if (worldInfoBefore) story += worldInfoBefore;
+	let tmp;
+	if ((tmp = char.personaDescription || config.st_userdesc)) story += "\n\n"+tmp;
 	//story += "\n\n"+char.name+":";
-	if (char.description) story += "\n\n"+char.description;
-	if (char.personality) story += "\n\n"+char.personality;
-	if (char.scenario) story += "\n\n"+char.scenario;
-	if (lbAfter) story += /*"\n\n"+*/lbAfter;
-	if (char.dialogueExamples?.length) story += "\n\n[Example Chat]\n\n"+char.dialogueExamples.join("\n\n[Example Chat]\n\n");
+	if ((tmp = char.description)) story += "\n\n"+tmp;
+	if ((tmp = char.personality)) story += "\n\n"+tmp;
+	if ((tmp = char.scenario)) story += "\n\n"+tmp;
+	if (worldInfoAfter) story += worldInfoAfter;
+	if (char.dialogueExamples?.length) story += EXAMPLE_CHAT_LABEL+char.dialogueExamples.join(EXAMPLE_CHAT_LABEL);
 
-	return applyMacro(story + `\n\n[Start a new Chat]`, macro).trim();
+	return applyMacro(story + START_CHAT_LABEL, char).trim();
 };
 
 /**

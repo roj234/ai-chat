@@ -1,7 +1,7 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import {VectorDB} from "../rag/VectorDB.js";
-import {LRUCache} from "../utils/LRUCache.js";
+import {LRUCache} from "../../common/LRUCache.js";
 import {SEMANTIC_SEARCH_EMBEDDING_SIZE} from "../config.js";
 import {pathFilter} from "./agent.js";
 
@@ -29,7 +29,7 @@ export function registerVectorDBRoutes(router, dataPath) {
 		const key = ctx.fsRoot+'\0'+dbName;
 		let db = dbCache.get(key);
 		if (!db) {
-			const filePath = pathFilter(ctx, `vectors/${dbName}.db`);
+			const filePath = pathFilter(`vectors/${dbName}.db`, ctx);
 			await fs.mkdir(path.dirname(filePath), { recursive: true });
 			db = new VectorDB(filePath, dimension ?? SEMANTIC_SEARCH_EMBEDDING_SIZE);
 			dbCache.set(key, db, 0);
@@ -169,7 +169,7 @@ export function registerVectorDBRoutes(router, dataPath) {
 
 		const db = dbCache.get(ctx.fsRoot+'\0'+dbName);
 		if (!db) {
-			const filePath = pathFilter(ctx.fsRoot, `vectors/${dbName}.db`);
+			const filePath = pathFilter(`vectors/${dbName}.db`, ctx.fsRoot);
 			let fileSize = 0;
 			try {
 				fileSize = (await fs.stat(filePath)).size;
@@ -209,7 +209,7 @@ export function registerVectorDBRoutes(router, dataPath) {
 		}
 
 		// 删除文件
-		const filePath = pathFilter(ctx.fsRoot, `vectors/${dbName}.db`);
+		const filePath = pathFilter(`vectors/${dbName}.db`, ctx.fsRoot);
 		try {
 			await fs.unlink(filePath);
 		} catch (e) {

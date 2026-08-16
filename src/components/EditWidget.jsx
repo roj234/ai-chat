@@ -1,6 +1,6 @@
 import "./EditWidget.css";
 
-export const EditWidget = ({value, onChange}) => {
+export const EditWidget = ({value, placeholder, onChange}) => {
 	const updateHeight = () => {
 		input.style.height = '0';
 		//border 2px
@@ -11,6 +11,7 @@ export const EditWidget = ({value, onChange}) => {
 							onChange={() => {
 								onChange(input.value);
 							}}
+							placeholder={placeholder}
 							value={value}
 	/>;
 

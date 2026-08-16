@@ -7,7 +7,7 @@ import "./PresetFastSwitch.css";
 export const registerPresetFastSwitch = () => {
 	const main = <div className={"pretty-select preset-switch up"} title={"快速选择预设"} style={"width: auto; max-width: 200px"} style:display={() => selectedConversation.presets ? 'none': ''}>
 		<div className="input" onClick.stop={() => main.classList.toggle("open")}>
-			<span>{() => config.name ?? "default"}</span>
+			{() => config.name ?? "default"}
 			<span className={"arrow-icon ri-arrow-down-s-line"}></span>
 		</div>
 

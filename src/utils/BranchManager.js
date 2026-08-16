@@ -316,8 +316,7 @@ function createBranchManager(conv, messages) {
  * @returns {AiChat.Message[]} 当前分支的消息路径（带有 hook 的数组）
  */
 export function enableBranches(conv, messages) {
-	const bm = createBranchManager(conv, unconscious(messages));
-	conv[BRANCH_MANAGER] = bm;
+	const bm = conv[BRANCH_MANAGER] || (conv[BRANCH_MANAGER] = createBranchManager(conv, unconscious(messages)));
 	return bm.getMessages();
 }
 

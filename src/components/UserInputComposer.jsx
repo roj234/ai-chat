@@ -11,7 +11,7 @@ import {
 import {scrollMessagesToBottom, statusBadge, submitUserChatMessage} from "../api-request.js";
 import {blobToContentPart, createAttachmentGallery} from "./InputAttachment.jsx";
 import {CUSTOM_CONTROLS} from "../settings.js";
-import {createSubmitButton} from "./SubmitButton.jsx";
+import {createSendButton} from "./SendButton.jsx";
 import {bind} from "../utils/utils.js";
 import {$computed, $state, $watch, unconscious} from "unconscious";
 import {handleCommand} from "../commands.js";
@@ -19,6 +19,7 @@ import SimpleModal from "./SimpleModal.jsx";
 import {getBlob} from "../database.js";
 import {webviewUploadImage} from "/vendor/jsBridge.js";
 import {Recorder} from "/plugins/voiceInput/Recorder.jsx";
+import {DI} from "../hooks.js";
 
 export const createUserInputComposer = (scroller) => {
 	/** @type {import("unconscious").Reactive<OpenAI.ContentPart[]>} */
@@ -60,7 +61,7 @@ export const createUserInputComposer = (scroller) => {
 	 */
 	let userInput,
 		backToBottomBtn,
-		sendButton = createSubmitButton(attachments, onSend);
+		sendButton = DI.sendButton = createSendButton(attachments, onSend);
 
 	const blobCallback = blob => {
 		if (blob) blobToContentPart(blob, 0 === selectedConversation.id, attachments);
@@ -88,7 +89,7 @@ export const createUserInputComposer = (scroller) => {
 		</div>
 		<div className="query">
 			<h1 className={"drag"}>松开上传</h1>
-			<textarea placeholder="今天有什么能帮到你？" id="userInput" ref={userInput}
+			<textarea placeholder="有事尽管问我" id="userInput" ref={userInput}
 					  onInput={() => {
 						  // Auto resize when typing
 						  userInput.style.height = '';
@@ -142,9 +143,7 @@ export const createUserInputComposer = (scroller) => {
 	const dropZone = element.lastElementChild;
 	dropZone.addEventListener('dragenter', () => dropZone.classList.add('drag-over'));
 	dropZone.addEventListener('dragover', () => dropZone.classList.add('drag-over'));
-	dropZone.addEventListener('dragleave', (e) => {
-		if (e.target === dropZone) dropZone.classList.remove('drag-over');
-	});
+	dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
 	dropZone.addEventListener('drop', (e) => {
 		e.preventDefault();
 		dropZone.classList.remove('drag-over');
@@ -159,6 +158,29 @@ export const createUserInputComposer = (scroller) => {
 
 	// 这可以用框架语法，但IDE很生气
 	bind(userInput, inputText);
+
+	userInput.addEventListener("paste", (event) => {
+		const clipboardItems = event.clipboardData?.items;
+		if (!clipboardItems) return;
+
+		const files = [];
+
+		for (const item of clipboardItems) {
+			if (item.kind === 'file') {
+				const file = item.getAsFile();
+				if (file) files.push(file);
+			}
+		}
+
+		if (files.length) {
+			event.preventDefault();
+
+			const isFileTransferWindow = selectedConversation.id === 0;
+			for (const file of files) {
+				blobToContentPart(file, isFileTransferWindow, attachments, true);
+			}
+		}
+	});
 
 	async function onSend() {
 		if (await handleCommand(inputText, userInput)) return;

@@ -3,6 +3,7 @@ import {createTextFileEditHelper} from "/common/fs-common.js";
 import {IGNORED_ERROR_MESSAGE, IgnoreMatcher} from "/common/ignore.js";
 import {normalizePath} from "unconscious/common/path-utils.js";
 import {formatSize} from "unconscious/common/Utils.js";
+import {AS_IS} from "unconscious";
 
 // ────────────────────────────────── Glob‑to‑Regex (ported from Globs.java) ──────────────────────────
 
@@ -470,7 +471,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 
 	const fsCommonApi = {
 		list: api.list,
-
+		absPath: AS_IS,
 		/**
 		 * @param {string} path
 		 * @returns {Promise<string>}

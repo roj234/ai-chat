@@ -34,19 +34,21 @@ import {
 	SYNC_RESOLVE,
 	SYNC_RPC,
 	SYNC_UNLOCKED
-} from "/backend/sync_const.js";
+} from "/backend/sync.js";
 import {clearMessageDirty, DIFF_SNAPSHOT, listConversations, MESSAGES_CACHE} from "../database.js";
 import {deepEqual, patch} from "unconscious/common/deepEqual.js";
 import {decodeMsg} from "unconscious/common/msgpack.js";
 import {msgpack_schema} from "/common/MsgpackSchema.js";
 import {highlightJsonLike} from "../markdown/highlight.js";
 import {prettyError} from "../utils/utils.js";
-import {initialize} from "./remoteDB.js";
+import {initialize, serializeMsgpack, serverAcceptMsgpack} from "./remoteDB.js";
+import {enableBranches} from "../utils/BranchManager.js";
 
 let body;
 
 /** @type {function} */
-let readonlyToast;
+let lockedToast;
+let lockedToastOwner;
 
 /** @type {WebSocket} */
 let ws;
@@ -58,47 +60,48 @@ let clientCounts;
  *
  * @param {number} type
  * @param {any} data
- * @param {boolean} [rawString]
  */
-export const sendToSyncServer = (type, data, rawString) => {
-	if (type === SYNC_MESSAGE && !readerCount.get(selectedConversation.id)) return;
-
-	if (ws?.readyState === WebSocket.OPEN) {
-		if (typeof data === 'object') {
-			serializeJSON(data).then(text => sendToSyncServer(type, text, true));
+export const sendToSyncServer = (type, data) => {
+	(serverAcceptMsgpack ? serializeMsgpack : serializeJSON)([type, data]).then(text => {
+		if (ws?.readyState === WebSocket.OPEN) {
+			ws.send(text);
 		} else {
-			ws.send("["+type+","+(typeof data !== 'string' || rawString ? data : JSON.stringify(data))+"]");
+			pendingEvents.push(text);
 		}
-	} else {
-		pendingEvents.push([type, data, rawString]);
-	}
+	});
 };
 
-const setWritable = (id) => {
-	if (id != null && setCurrentLocked(0, id)) return;
-	readonlyToast?.();
-	readonlyToast = null;
-	body.remove("_readonly");
+const hideReadonlyUI = (id) => {
+	if (id != null && lockedToastOwner !== id) return;
+	lockedToast?.();
+	lockedToast = null;
+	lockedToastOwner = null;
+	body.remove("_locked");
 };
 
-const setReadonly = (id, rpc) => {
-	if (setCurrentLocked(1, id)) return;
-	readonlyToast = showToast(<>
-		<div>
-			<b>只读</b>&nbsp;
-			<button className={"btn danger"} style={"position:relative"} onClick={() => {
-				sendToSyncServer(SYNC_RESOLVE, id);
-				setWritable(id);
-			}}>获取编辑权限
-				<div className={"tooltip"}>对话被其它客户端打开<br/>解锁可能导致数据丢失</div>
-			</button>
-		</div>
-		{rpc?.render(id)}
-	</>, '', -1);
-	body.add("_readonly");
+const showReadonlyUI = (id) => {
+	if (lockedToastOwner === id) return;
+	if (lockedToast) hideReadonlyUI();
+
+	lockedToastOwner = id;
+
+	const div = <button className={"ri-arrow-left-right-line warning"} style={"margin-left:8px"} onClick={() => {
+		sendToSyncServer(SYNC_RESOLVE, id);
+	}}>只读
+		<div className={"tooltip down"}>{"对话被其它客户端打开\n接管控制权可能导致未保存的数据丢失"}</div>
+	</button>;
+
+	DI.title.append(div);
+	const closer = () => div.remove();
+
+	const cb = DI.RMI?.render(id);
+	if (cb) lockedToast = () => (closer(), cb());
+	else lockedToast = closer;
+
+	body.add("_locked");
 };
 
-const setCurrentLocked = (locked, id) => {
+const setLockStatus = (id, locked) => {
 	const id1 = selectedConversation.id;
 	if (id1 == null || (id != null && id1 !== id)) return true;
 	selectedConversation[LOCKED] = locked;
@@ -117,7 +120,8 @@ const checkConcurrentModification = conv => {
 	}
 };
 
-export const initSync = (address, rpc) => new Promise((resolve, reject) => {
+export const initSync = (address) => new Promise((resolve, reject) => {
+	const RMI = DI.RMI;
 	DI.lock = lock;
 	DI.unlock = unlock;
 
@@ -131,7 +135,7 @@ export const initSync = (address, rpc) => new Promise((resolve, reject) => {
 
 	ws.binaryType = 'arraybuffer';
 	ws.onopen = () => {
-		for (const arr of pendingEvents) sendToSyncServer(...arr);
+		for (const bin of pendingEvents) ws.send(bin);
 		pendingEvents = [];
 
 		heartbeat = setInterval(() => {
@@ -142,13 +146,15 @@ export const initSync = (address, rpc) => new Promise((resolve, reject) => {
 	};
 	ws.onclose = () => {
 		reject();
-		rpc?.close();
+		RMI?.close();
+		lockedToast?.();
+		lockedToast = null;
 		stateListener = null;
 
 		const lastSuccessful = heartbeat != null;
 		if (lastSuccessful) {
 			clearInterval(heartbeat);
-			for (let key of locks.keys()) pendingEvents.push([SYNC_LOCKED, key]);
+			for (let key of locks.keys()) pendingEvents.push(`[${SYNC_LOCKED},${key}]`);
 		}
 
 		let lastTimestamp = 0;
@@ -186,8 +192,8 @@ export const initSync = (address, rpc) => new Promise((resolve, reject) => {
 		let [type, data] = typeof buf === 'string' ? JSON.parse(buf) : decodeMsg(new DataView(buf), { schema: msgpack_schema });
 		data = await decodeObjects(data);
 		switch (type) {
-			case SYNC_RPC: rpc?.handle(data); break;
-			case SYNC_ERROR:  serverError = data; break;
+			case SYNC_RPC: RMI?.handle(data); break;
+			case SYNC_ERROR: serverError = data; break;
 			// 状态更新
 			case SYNC_INIT: {
 				let clients, locked, serverCounts;
@@ -200,10 +206,10 @@ export const initSync = (address, rpc) => new Promise((resolve, reject) => {
 				const set = new Set(locked);
 				unconscious(conversations).forEach(item => item[LOCKED] = set.has(item.id));
 				$update(updateConversationListUI);
-				showToast("同步服务已连接 ("+clients.length+")", "ok");
+				showToast("同步服务已连接 (+"+clients.length+")", "ok");
 
-				rpc?.open(clients, clientId);
-				stateListener = rpc?.state;
+				RMI?.open(clients, clientId);
+				stateListener = RMI?.state;
 				resolve(clientId);
 			}
 			break;
@@ -214,7 +220,7 @@ export const initSync = (address, rpc) => new Promise((resolve, reject) => {
 			break;
 			case SYNC_LOCKED:
 			case SYNC_UNLOCKED: {
-				const conv = unconscious(conversations).find(item => item.id === data);
+				const conv = findConversation(data);
 				if (conv) {
 					conv[LOCKED] = type === SYNC_LOCKED;
 					$update(updateConversationListUI);
@@ -222,21 +228,20 @@ export const initSync = (address, rpc) => new Promise((resolve, reject) => {
 			}
 			break;
 			// 独占锁和冲突处理
-			case SYNC_CONFLICT: {
-				setReadonly(data, rpc);
-			}
-			break;
+			case SYNC_CONFLICT:
 			case SYNC_RESOLVE: {
-				if (selectedConversation.id === data) {
-					setReadonly(data, rpc);
+				setLockStatus(data, true);
+				if (data === selectedConversation.id) {
+					showReadonlyUI(data, RMI);
 				}
 			}
 			break;
 			case SYNC_RELEASED: {
+				setLockStatus(data, false);
 				if (data === selectedConversation.id) {
 					selectedConversation.ready = false;
 				}
-				setWritable(data);
+				hideReadonlyUI(data);
 			}
 			break;
 			// 消息状态更新
@@ -247,7 +252,9 @@ export const initSync = (address, rpc) => new Promise((resolve, reject) => {
 				if (!conv) return;
 
 				const bm = conv[BRANCH_MANAGER];
-				const msg = bm?.messages || conv[MESSAGES_CACHE];
+				let msg = bm?.messages || conv[MESSAGES_CACHE];
+				const isCurrent = conv === unconscious(selectedConversation);
+				if (!msg && isCurrent) msg = unconscious(messages);
 				if (!msg) return;
 
 				checkConcurrentModification(conv);
@@ -264,7 +271,7 @@ export const initSync = (address, rpc) => new Promise((resolve, reject) => {
 				}
 				clearMessageDirty(conv, message.id, isUpdate && message);
 
-				if (conv === unconscious(selectedConversation)) {
+				if (isCurrent) {
 					if (bm) {
 						bm.setLeaf(nextEnd || msg[conv.bm_leaf] || msg.at(-1), true);
 						messages.value = bm.getMessages();
@@ -278,9 +285,10 @@ export const initSync = (address, rpc) => new Promise((resolve, reject) => {
 			case SYNC_CONVERSATION_DEL: {
 				const convId = data.id;
 				const index = conversations.findIndex(item => item.id === convId);
-				let conv, removed, lastTime;
+				let conv, removed, lastTime, lastLeaf;
 				if (index >= 0) {
 					conv = conversations[index];
+					lastLeaf = conv.bm_leaf;
 					lastTime = conv.time;
 				}
 
@@ -296,7 +304,7 @@ export const initSync = (address, rpc) => new Promise((resolve, reject) => {
 					removed = true;
 				}
 
-				const isCurrentViewing = convId === selectedConversation.id;
+				const isCurrent = convId === selectedConversation.id;
 				if (type === SYNC_CONVERSATION) {
 					if (removed) conversations.unshift(conv);
 					else $update(updateConversationListUI);
@@ -308,12 +316,27 @@ export const initSync = (address, rpc) => new Promise((resolve, reject) => {
 					if (conv[DIFF_SNAPSHOT]) {
 						conv[DIFF_SNAPSHOT] = structuredClone(conv);
 					}
+
+
+					const msgs = conv[MESSAGES_CACHE];
+					if (msgs) {
+						if (conv.bm_leaf != null && !conv[BRANCH_MANAGER]) {
+							const newMsgs = enableBranches(conv, msgs);
+							if (unconscious(messages) === msgs) messages.value = newMsgs;
+						} else if (isCurrent && lastLeaf !== conv.bm_leaf) {
+							const bm = conv[BRANCH_MANAGER];
+							bm.setLeaf(msgs[conv.bm_leaf] || msgs.at(-1), true);
+							messages.value = bm.getMessages();
+						}
+					}
+
 					if (!locks.has(convId)) {
 						// 如果没有打开这些消息，那么清除消息缓存
 						delete conv[MESSAGES_CACHE];
+						delete conv[BRANCH_MANAGER];
 					}
 				}
-				else if (isCurrentViewing) {
+				else if (isCurrent) {
 					showToast("当前对话已被其它客户端删除", 'error', 0);
 					resetConversation();
 				}
@@ -382,10 +405,13 @@ onLoad((app) => {
 		const convId = conv?.id;
 		if (oldValue !== convId) {
 			if (oldValue != null) {
-				setWritable();
+				hideReadonlyUI();
 				unlock(oldValue);
 			}
-			if (conv) lock(convId);
+			if (conv) {
+				if (conv[LOCKED]) showReadonlyUI(convId);
+				lock(convId);
+			}
 		}
 		return convId;
 	});

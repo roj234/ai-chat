@@ -298,15 +298,18 @@ SETTINGS.push(
 	{
 		id: "st_postProcess",
 		name: "提示词后处理",
+		title: "现代LLM后端的普遍规范: 系统提示只能在开头，末尾至多一条助手消息。\n角色对话的提示构造完全由预设控制，有问题请修改预设\n靠后处理兜底可能产生怪异行为",
 		type: "radio",
 		_tab: "character",
 		choices: {
+			"单系统消息": 1,
 			"交替对话": 2
 		}
 	},
 	{
 		id: "st_removeLastUserMessage",
-		name: "在chatHistory中移除最后一条用户消息 (酒馆默认：否)",
+		name: "从 chatHistory 中移除最后一条用户消息 (酒馆默认：否)",
+		title: "使用 {{lastUserMessage}} 引用最后一条用户消息",
 		type: "radio",
 		required: true,
 		_tab: "character",
@@ -568,7 +571,7 @@ MessageRoles["st|char"] = {
 				}
 			}
 			//endregion
-			let lbBefore = '', lbAfter = '';
+			let worldInfoBefore = '', worldInfoAfter = '';
 			//region 处理世界书
 			const lorebookCaches = self[INST].lbCache || (self[INST].lbCache = {});
 
@@ -591,8 +594,8 @@ MessageRoles["st|char"] = {
 
 			const insertBook = book => {
 				const content = "\n\n"+applyMacro(book.content, macro);
-				if (book.position === "worldInfoBefore") lbBefore += content;
-				else if (book.position === "worldInfoAfter") lbAfter += content;
+				if (book.position === "worldInfoBefore") worldInfoBefore += content;
+				else if (book.position === "worldInfoAfter") worldInfoAfter += content;
 				else {
 					let depth = book.depth;
 					// TODO 优化这个循环
@@ -603,7 +606,7 @@ MessageRoles["st|char"] = {
 							return;
 						}
 					}
-					lbAfter += content;
+					worldInfoAfter += content;
 				}
 			};
 			constantPages.forEach(insertBook);
@@ -637,7 +640,7 @@ MessageRoles["st|char"] = {
 						[FS_INSTANCE]: createWebFileSystem(new VirtualDirectory(map))
 					};
 
-					lbBefore += "\n\n<lorebook>\nLorebook 在文件夹 `~/lorebook/` 中\n使用Read、Grep、Glob工具读取你的知识</lorebook>";
+					worldInfoBefore += "\n\n<lorebook>\nLorebook 在文件夹 `~/lorebook/` 中\n使用Read、Grep、Glob工具读取你的知识</lorebook>";
 				} else {
 					if (!allowedTools) conv.allowedTools = new Set([FetchLorebook.name]);
 					else allowedTools.add(FetchLorebook.name);
@@ -657,7 +660,7 @@ MessageRoles["st|char"] = {
 						}
 					}
 
-					lbBefore += "\n\n<lorebook>\nLorebook 名称与关键词：\n"+keywords.join("\n")+"\n</lorebook>";
+					worldInfoBefore += "\n\n<lorebook>\nLorebook 名称与关键词：\n"+keywords.join("\n")+"\n</lorebook>";
 				}
 			} else {
 				/** @type {LorebookMatcher} */
@@ -673,17 +676,14 @@ MessageRoles["st|char"] = {
 			if (hasSystemMessage) prefix = applyMacro(output[0].content, macro)+"\n\n";
 
 			if (preset?.prompts?.length) {
-				const content = applyPreset(preset, {
-					...macro,
-					personaDescription: char.userdesc || config.st_userdesc,
-					worldInfoBefore: lbBefore,
-					worldInfoAfter: lbAfter
-				}, output, prefill);
+				macro.worldInfoBefore = worldInfoBefore;
+				macro.worldInfoAfter = worldInfoAfter;
 
+				const content = applyPreset(preset, macro, output, prefill);
 				output.length = 0;
 				output.push(...content);
 			} else {
-				const content = prefix + makeStory(char, lbBefore, lbAfter, macro);
+				const content = prefix + makeStory(macro, worldInfoBefore, worldInfoAfter);
 				if (hasSystemMessage) {
 					output[0].content = content;
 				} else {

@@ -4,6 +4,7 @@ import SimpleModal from "/src/components/SimpleModal.jsx";
 import {VirtualList} from "unconscious/common/VirtualList.js";
 import Filter from "unconscious/common/components/Filter.jsx";
 import {highlightJsonLike} from "/src/markdown/highlight.js";
+import {DEFAULT_SYSTEM_PROMPT} from "./prompt.js";
 
 const EXPANDED = debugSymbol("EXPANDED");
 const SORT = debugSymbol("SORT");
@@ -368,6 +369,7 @@ export function _PresetEditor(preset, isOpen, close) {
 		{
 			name: "内容(给AI看)",
 			id: "content",
+			placeholder: "类型为【宏】时，在此填写宏的名称，如 {{chatHistory}}",
 			required: true,
 			type: "textbox"
 		},
@@ -387,7 +389,7 @@ export function _PresetEditor(preset, isOpen, close) {
 			id: "attr",
 			type: "radio",
 			choices: {
-				"占位符": 'marker',
+				"宏": 'marker',
 				"置顶": 'first'
 			}
 		}
@@ -484,25 +486,26 @@ export function _CharacterEditor(char, isOpen, close) {
 		{
 			name: "角色名字",
 			id: "char",
-			placeholder: "{{char}} 宏的值；缺省取显示名称",
+			placeholder: "宏：{{char}}；缺省取显示名称",
 			type: "input"
 		},
 		{
 			name: "描述",
 			required: true,
 			id: "description",
+			placeholder: "宏：{{description}}",
 			type: "textbox"
 		},
 		{
 			name: "你的名字",
 			id: "user",
-			placeholder: "{{user}} 宏的值；缺省使用全局设置",
+			placeholder: "宏：{{user}}；缺省使用全局设置",
 			type: "input"
 		},
 		{
 			name: "自我介绍",
-			id: "userdesc",
-			placeholder: "缺省使用全局设置",
+			id: "personaDescription",
+			placeholder: "宏：{{personaDescription}}；缺省使用全局设置",
 			type: "textbox"
 		},
 		{
@@ -518,19 +521,19 @@ export function _CharacterEditor(char, isOpen, close) {
 		{
 			name: "前置系统提示",
 			id: "systemPrompt",
-			placeholder: "Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.",
+			placeholder: DEFAULT_SYSTEM_PROMPT,
 			type: "textbox"
 		},
 		{
 			name: "性格",
 			id: "personality",
-			placeholder: "旧字段，建议留空",
+			placeholder: "宏：{{personality}}；旧字段，建议留空",
 			type: "textbox"
 		},
 		{
 			name: "场景",
 			id: "scenario",
-			placeholder: "旧字段，建议留空",
+			placeholder: "宏：{{scenario}}；旧字段，建议留空",
 			type: "textbox"
 		}
 	];

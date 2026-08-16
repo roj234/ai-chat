@@ -1,6 +1,6 @@
 import {config, EVENT_BUS} from "../states.js";
 import {decodeObjects, encodeObjects, serializeJSON} from "../utils/marshal.js";
-import {initSync} from "./remoteSync.js";
+import {initSync} from "./syncClient.js";
 import {decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
 import {msgpack_schema, msgpack_schema_version} from "/common/MsgpackSchema.js";
 import {SHA256} from "unconscious/common/SHA256.js";
@@ -9,9 +9,9 @@ import {prettyError, resolveDBRelativeURL} from "../utils/utils.js";
 import {$store, $update, AS_IS, unconscious} from "unconscious";
 import SimpleModal from "../components/SimpleModal.jsx";
 import {delta, patch, rep} from "unconscious/common/deepEqual.js";
-import {PROTOCOL_VERSION} from "/backend/sync_const.js";
+import {PROTOCOL_VERSION} from "/backend/sync.js";
 import {DIFF_SNAPSHOT, MESSAGES_CACHE} from "../database.js";
-import {LRUCache} from "../../backend/utils/LRUCache.js";
+import {LRUCache} from "/common/LRUCache.js";
 
 let clientId;
 
@@ -24,7 +24,7 @@ const messageQueue = $store("mq", [], { persist: true, deep: false,
 	}
 });
 
-const serializeMsgpack = async (obj) => {
+export const serializeMsgpack = async (obj) => {
 	const mapping = new Map;
 	await encodeObjects(obj, mapping);
 	return encodeMsg(obj, msgpack_schema, mapping.size ? (value) => mapping.get(value) ?? value : null);
@@ -33,7 +33,7 @@ const serializeMsgpack = async (obj) => {
 /** @type {string} */
 let dbUrl = config.db_server;
 /** @type {boolean} */
-let serverAcceptMsgpack;
+export let serverAcceptMsgpack;
 
 export const requestBackend = async (path, {body, method} = {}) => {
 	if (!dbUrl.endsWith('/')) config.db_server = dbUrl += '/';
@@ -221,7 +221,7 @@ const showIncompatibleDialog = backendVersion => {
 	});
 };
 
-export const initialize = (rpcHandler) => {
+export const initialize = () => {
 	batched("version")().catch(err => {
 		if (err.startsWith?.("unknown")) return ['Legacy'];
 		throw err;
@@ -233,7 +233,7 @@ export const initialize = (rpcHandler) => {
 	});
 	return batched("sync")().then(async syncServer => {
 		if (syncServer) {
-			clientId = await initSync(resolveDBRelativeURL(syncServer).replace(/^http/, "ws"), rpcHandler);
+			clientId = await initSync(resolveDBRelativeURL(syncServer).replace(/^http/, "ws"));
 		}
 	});
 };

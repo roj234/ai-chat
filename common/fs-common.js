@@ -1,4 +1,5 @@
 import {createAsyncQueue} from "../src/utils/pure-utils.js";
+import {LRUCache} from "./LRUCache.js";
 
 export const GREP_MAX_COLUMNS = 180;
 
@@ -6,23 +7,29 @@ export const GREP_MAX_COLUMNS = 180;
  *
  * @param {{
  *     list: Function,
+ *     absPath: function(string, any): string,
  *     read: (function(string, any): Promise<string>),
  *     write: (function(string, string, any): Promise<void>),
  *     mtime: (function(string, any): Promise<number>)
  * }} fs
  */
 export function createTextFileEditHelper(fs) {
-	const cache = new Map();  // filePath -> WeakRef<lines array>
+	/**
+	 * @type {Map<string, string[]>}
+	 */
+	const cache = new LRUCache(200);
 
 	const readLines = async (path, ctx) => {
-		let cached = cache.get(path)?.deref();
-		const mtime = await fs.mtime(path, ctx);
-		if (cached && mtime <= cached.mtime) return cached;
+		const absPath = fs.absPath(path, ctx);
 
-		const str = await fs.read(path, ctx);
+		let cached = cache.get(absPath);
+		const mtime = await fs.mtime(absPath, ctx);
+		if (cached && Math.abs(mtime - cached.mtime) < 500) return cached;
+
+		const str = await fs.read(absPath, ctx);
 		const lines = str.split(/\r?\n/);
 		lines.mtime = mtime;
-		cache.set(path, new WeakRef(lines));
+		cache.set(absPath, lines);
 		return lines;
 	};
 
@@ -253,8 +260,9 @@ Add more unchanged context and/or correct indentation for this hunk so it identi
 		newLines.push(...lines.slice(lastIndex));
 
 		newLines.mtime = Date.now();
-		await fs.write(path, newLines.join('\n'), ctx);
-		cache.set(path, new WeakRef(newLines));
+		const absPath = fs.absPath(path, ctx);
+		await fs.write(absPath, newLines.join('\n'), ctx);
+		cache.set(absPath, newLines);
 
 		const delta = newLines.length - lines.length;
 		return msg+`
@@ -363,25 +371,27 @@ Changed lines: ${prefixLines}-${prefixLines + Math.max(0, replaceLines - 1)}`;
 			lines.slice(actualEnd).join("\n")
 		].filter(Boolean).join("\n");
 
-		await fs.write(path, newContent, ctx);
-		cache.delete(path);
+		const absPath = fs.absPath(path, ctx);
+		await fs.write(absPath, newContent, ctx);
+		cache.delete(absPath);
 
 		return msg+`
 Lines: ${lines.length} → ${lines.length + delta} (${delta > 0 ? '+': ''}${delta})`;
 	};
 
 	const write = async ({ path, content, overwrite }, ctx) => {
+		const absPath = fs.absPath(path, ctx);
 		check:
 		if (!overwrite) {
 			try {
-				await fs.mtime(path, ctx);
+				await fs.mtime(absPath, ctx);
 			} catch {
 				break check;
 			}
 			throw 'File already exist';
 		}
-		await fs.write(path, content, ctx);
-		cache.set(path, new WeakRef(content.split('\n')));
+		await fs.write(absPath, content, ctx);
+		cache.set(absPath, content.split('\n'));
 		return 'Success';
 	};
 
@@ -425,7 +435,7 @@ Lines: ${lines.length} → ${lines.length + delta} (${delta > 0 ? '+': ''}${delt
 				let content;
 				try {
 					// TODO 这里可以缓存，但是可能搜索的文件多内存压力大
-					content = await fs.read(path + relPath, ctx);
+					content = await fs.read(fs.absPath(path + relPath, ctx), ctx);
 				} catch {
 					if (listError) throw listError;
 					return;

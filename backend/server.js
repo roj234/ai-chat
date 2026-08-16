@@ -4,12 +4,12 @@ import fs from 'node:fs/promises';
 import {watch} from 'node:fs';
 import {parseArgs} from 'node:util';
 import {createRouter} from './init.js';
-import {createSyncManager, createSyncValidateMiddleware} from "./sync_service.js";
-import {WebSocketServer} from "ws";
+import {createSyncManager, createSyncValidateMiddleware} from "./syncServer.js";
+import {WebSocketServer} from "unconscious/common/ws2/src/index.js";
 import {INTERACTIVE_LOGIN, PAT_SERVER_SALT, reload, SERVER_BASE_ADDR, WEBSOCKET_SYNC_ENABLE} from "./config.js";
 import {createZipRouter} from "./utils/zipRouter.js";
 import {closeAllConnections} from "./utils/UserManager.js";
-import {PROTOCOL_VERSION} from "./sync_const.js";
+import {PROTOCOL_VERSION} from "./sync.js";
 import {ZipReader} from "unconscious/common/zip-io.js";
 import {hookLogger} from "./utils/logger.js";
 import path from "node:path";
@@ -126,7 +126,8 @@ if (WEBSOCKET_SYNC_ENABLE) {
 		server,
 		path: "/api/sync",
 		maxPayload: 4096,
-		verifyClient: createSyncValidateMiddleware(DATA_PATH)
+		verifyClient: createSyncValidateMiddleware(DATA_PATH),
+		perMessageDeflate: true
 	});
 	router.sync = createSyncManager(wss);
 }

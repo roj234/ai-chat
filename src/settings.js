@@ -45,6 +45,7 @@ export const CUSTOM_CONTROLS = <>
 		<div className="tooltip">深度思考：先思考后回答，解决复杂问题</div>
 	</button>
 	<button className="ri-robot-2-line chip"
+			style:display={() => config.modalities?.includes("tool") ? "" : "none"}
 			class:active={() => selectedConversation.activatedModules?.size}
 	>
 		<div className="tooltip">智能体：让AI使用工具</div>

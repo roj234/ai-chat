@@ -4,6 +4,7 @@ import {cloneNamed, getTextContent, prettyError, resolveDBRelativeURL} from "./u
 import {setWakeLock} from "./utils/wakeLock.js";
 import {
 	abortCompletion,
+	config,
 	getCurrentTheme,
 	inputText,
 	isLlamaCppBackend,
@@ -284,6 +285,10 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			}
 
 			const needLog = result.request_id && (finishReason !== 'error' || result.input_tokens);
+			if (config.incognito) {
+				assistantMessage.log = result;
+			} else
+
 			if (needUpdate || needLog || hasContent(assistantMessage)) {
 				markMessageDirty(assistantMessage);
 				promises.push(updateConversation(conversation, messages_uc));
@@ -625,7 +630,7 @@ async function sendCompletionRequest(
 				}
 
 				const {predicted_per_second, predicted_n} = json.timings;
-				updateStatusText("生成中, "+predicted_n+" Tokens, "+predicted_per_second.toFixed(2)+"TPS");
+				if (predicted_n) updateStatusText("生成中, "+predicted_n+" Tokens, "+predicted_per_second.toFixed(2)+"TPS");
 			}
 
 			const res = json.resumable;

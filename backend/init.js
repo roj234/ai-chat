@@ -22,7 +22,7 @@ import {
 } from "./config.js";
 
 import {loadUserData} from "./utils/UserManager.js";
-import {PROTOCOL_VERSION} from "./sync_const.js";
+import {PROTOCOL_VERSION} from "./sync.js";
 import {checkPAT, generatePAT} from "./utils/PAT.js";
 import {registerPairingRoutes} from "./routes/pairing.js";
 

@@ -13,11 +13,11 @@ import {formatSize} from "unconscious/common/Utils.js";
 
 /**
  * 路径校验
- * @param {RouteContext} ctx
  * @param {string} relPath
+ * @param {RouteContext} ctx
  * @return {string}
  */
-export const pathFilter = (ctx, relPath) => {
+export const pathFilter = (relPath, ctx) => {
 	const root = ctx.fsRoot;
 	const targetPath = path.resolve(root, relPath);
 	// allow path like /tmp/... or C:/tmp/
@@ -30,7 +30,7 @@ export const pathFilter = (ctx, relPath) => {
 };
 
 async function pathFilterWithIgnore(ctx, relPath, isDir) {
-	const targetPath = pathFilter(ctx, relPath);
+	const targetPath = pathFilter(relPath, ctx);
 
 	const root = ctx.fsRoot;
 	const processedRelPath = targetPath.slice(root.length+1).replaceAll(path.sep, '/');
@@ -229,7 +229,7 @@ export async function registerFsRoutes(router, allowExec) {
 		// 行为一致，顺便给AI擦屁股
 		if (pattern.startsWith("*.") && !pattern.includes('/')) pattern = "**/"+pattern;
 
-		const safePath = pathFilter(ctx, filePath);
+		const safePath = pathFilter(filePath, ctx);
 		const ignored = await getIgnoreMatcher(ctx.fsRoot, safePath);
 
 		let entries;
@@ -285,13 +285,13 @@ export async function registerFsRoutes(router, allowExec) {
 
 	const teh = createTextFileEditHelper({
 		list: listFileHandler,
+		absPath: pathFilter,
 		async read(path, ctx) {
-			const safePath = pathFilter(ctx, path);
-			const stats = await fs.stat(safePath);
+			const stats = await fs.stat(path);
 			if (stats.size > 10485760) {
 				return ctx.send(400, { error: `File too large (${stats.size} bytes)` });
 			}
-			return readAsString(await fs.readFile(safePath));
+			return readAsString(await fs.readFile(path));
 		},
 		async write(path1, data, ctx) {
 			const safePath = await pathFilterWithIgnore(ctx, path1);
@@ -299,10 +299,8 @@ export async function registerFsRoutes(router, allowExec) {
 			await fs.writeFile(safePath, data, 'utf-8');
 			if (/\.(gitignore|ignore)$/.test(safePath)) matcherCache.delete(ctx.fsRoot);
 		},
-		async mtime(path, ctx) {
-			const safePath = pathFilter(ctx, path);
-			const stats = await fs.stat(safePath);
-			return stats.mtimeMs;
+		async mtime(path) {
+			return (await fs.stat(path)).mtimeMs;
 		}
 	});
 
@@ -352,7 +350,7 @@ export async function registerFsRoutes(router, allowExec) {
 
 	router.post('/readRaw', async (ctx) => {
 		const { path: filePath } = await ctx.readAsObject();
-		const safePath = pathFilter(ctx, filePath);
+		const safePath = pathFilter(filePath, ctx);
 		const stats = await fs.stat(safePath);
 		if (stats.size > 10485760) {
 			return ctx.send(400, { error: `File too large (${stats.size} bytes)` });
@@ -377,7 +375,7 @@ export async function registerFsRoutes(router, allowExec) {
 		const buffer = await ctx.readAsBuffer();
 		await fs[ctx.url.pathname.endsWith("/appendRaw") ? 'appendFile' : 'writeFile'](safePath, buffer);
 		if (/\.(gitignore|ignore)$/.test(filePath)) matcherCache.delete(ctx.fsRoot);
-		teh.del(filePath);        // invalidate text line cache
+		teh.del(safePath);
 		sendText(ctx.res, "success");
 	};
 
@@ -387,7 +385,7 @@ export async function registerFsRoutes(router, allowExec) {
 	// 文件/目录信息
 	router.post('/stat', async (ctx) => {
 		const { path: filePath } = await ctx.readAsObject();
-		const stats = await fs.stat(pathFilter(ctx, filePath));
+		const stats = await fs.stat(pathFilter(filePath, ctx));
 		ctx.send(200, `type: ${stats.isDirectory() ? "dir" : "file"}
 mode: ${modeToString(stats.mode)}
 size: ${stats.size}
@@ -410,7 +408,7 @@ nlink: ${stats.nlink}`);
 	});
 	router.post('/copy', async (ctx) => {
 		const { src, dest, move } = await ctx.readAsObject();
-		const safeSrc = await (move ? pathFilterWithIgnore(ctx, src, true) : pathFilter(ctx, src));
+		const safeSrc = await (move ? pathFilterWithIgnore(ctx, src, true) : pathFilter(src, ctx));
 		const safeDest = await pathFilterWithIgnore(ctx, dest, true);
 		if (move) {
 			await fs.mkdir(path.dirname(safeDest), { recursive: true });
@@ -426,7 +424,7 @@ nlink: ${stats.nlink}`);
 		if (safePath === ctx.fsRoot) return ctx.send(403, { error: 'Cannot delete root' });
 
 		await fs.rm(safePath, { recursive: true, force: true });
-		teh.del(filePath);
+		teh.del(safePath);
 		ctx.send(200, 'Success');
 	});
 
@@ -641,7 +639,7 @@ logPath: ${logFile}`
 				"--",
 				pattern,
 			], {
-				cwd: pathFilter(ctx, path),
+				cwd: pathFilter(path, ctx),
 				noTruncate: true,
 				dir: '.',
 				timeout: 15000,

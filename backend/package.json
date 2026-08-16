@@ -1,11 +1,10 @@
 {
 	"name": "ai-chat-backend",
 	"private": true,
-	"version": "3.3.0",
+	"version": "3.4.0",
 	"type": "module",
 	"dependencies": {
-		"ws": "^8.20.0",
 		"remove-markdown": "0.6.3",
-		"iconv-lite": "0.7.2"
+		"iconv-lite": "^1.0.0-alpha"
 	}
 }

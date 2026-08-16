@@ -17,7 +17,7 @@ import {
 	SYNC_RPC,
 	SYNC_SEND_TO_OWNER,
 	SYNC_UNLOCKED
-} from "./sync_const.js";
+} from "./sync.js";
 import {ALLOW_USER_NAMES, INTERACTIVE_LOGIN, RESPONSE_USE_MSGPACK_SCHEMA, RESTRICT_USER_CREATION} from "./config.js";
 import {checkPAT} from "./utils/PAT.js";
 import {loadUserData} from "./utils/UserManager.js";
@@ -59,6 +59,14 @@ export const createSyncValidateMiddleware = (DATA_PATH) => /**
 }
 
 /**
+ * @typedef {
+ *     locked: Map<number, boolean>,
+ *     ws: WebSocket,
+ *     id: string
+ * } Client
+ */
+
+/**
  *
  * @param {WebSocketServer} wss
  * @return {AiChatBackend.SyncManager}
@@ -67,19 +75,22 @@ export function createSyncManager(wss) {
 	const encode = RESPONSE_USE_MSGPACK_SCHEMA ? (data) => encodeMsg(data, msgpack_schema) : JSON.stringify;
 
 	/**
-	 *
-	 * @type {Map<string, [Set<{
-	 *     locked: Map<number, boolean>,
-	 *     ws: WebSocket,
-	 *     id: string
-	 * }>, number[]]>}
+	 * @type {Map<string, [Set<Client>, number[], number]>}
 	 */
 	const users = new Map;
 
 	wss.on('connection', (ws, req) => {
+		/** @type {Set<Client>} */
+		let clients;
+		/** @type {number[]} */
+		let counters;
+
 		/** @type {string} */
 		const userId = req._userId;
-		const clientId = Math.random().toString(36).slice(2);
+		let perUserState = users.get(userId);
+		if (!perUserState) users.set(userId, perUserState = [clients = new Set(), counters = [0], 0]);
+		else [clients, counters] = perUserState;
+		const clientId = ++perUserState[2];
 
 		/** @type {Map<number, boolean>} */
 		const myLocked = new Map;
@@ -88,10 +99,6 @@ export function createSyncManager(wss) {
 			ws,
 			id: clientId
 		};
-
-		let [clients, counters] = users.get(userId) || [];
-		if (!clients) users.set(userId, [clients = new Set([self]), counters = [0]]);
-		else clients.add(self);
 
 		{
 			let locked = new Set;
@@ -111,8 +118,10 @@ export function createSyncManager(wss) {
 			]));
 		}
 
+		clients.add(self);
+
 		ws.on('error', (err) => {
-			console.error('连接错误:', err.message);
+			console.error('WS连接错误:', err.message);
 		});
 
 		ws.on('close', () => {
@@ -273,6 +282,8 @@ export function createSyncManager(wss) {
 							if (owner) owner.locked.set(data, false);
 							// 升级为写锁
 							myLocked.set(data, true);
+
+							ws.send(encode([SYNC_RELEASED, data]));
 						}
 					break;
 					case SYNC_LOCKED: {
@@ -334,7 +345,7 @@ export function createSyncManager(wss) {
 		 * @param resp
 		 */
 		onBatch(ctx, func, body, resp) {
-			const clientId = ctx.req.headers['x-ci'];
+			const clientId = parseInt(ctx.req.headers['x-ci']);
 			let shouldSend = (client) => client.id !== clientId;
 
 			let code;

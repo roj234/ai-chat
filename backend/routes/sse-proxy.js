@@ -13,7 +13,7 @@ import {openAsBlob} from "node:fs";
 import path from "node:path";
 import {Transform} from 'node:stream';
 import {createSocks5Agent} from "../utils/socks5-agent.js";
-import {LRUCache} from "../utils/LRUCache.js";
+import {LRUCache} from "../../common/LRUCache.js";
 import {createJsonStream} from "../../common/StreamJsonSerializer.js";
 import {deepEntries} from "unconscious/common/json-schema-utils.js";
 import {isLanAddress} from "../../common/isLanAddress.js";

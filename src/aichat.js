@@ -90,7 +90,7 @@ const createApp = () => {
 		<header className={"header"} class:closed={() => !unconscious(selectedConversation)}>
 			<div className="bar">
 				<button className="ri-menu-line btn ghost" title="展开侧边栏" onClick={toggleSidebar}></button>
-				<TitleEditor/>
+				<TitleEditor ref={DI.title} />
 				<button className="ri-add-line btn ghost" title="开启新对话" onClick={resetConversation}></button>
 			</div>
 		</header>
@@ -183,6 +183,9 @@ const createApp = () => {
 			toggleSettingUI('template', isTextCompletion);
 			toggleSettingUI('reasoning', !isTextCompletion);
 			toggleSettingUI('canPrefill', !isTextCompletion);
+			toggleSettingUI('forceThink', !isTextCompletion);
+			toggleSettingUI('modalities', !isTextCompletion);
+			toggleSettingUI('jsonSupport', !isTextCompletion);
 			toggleSettingUI('prefillPath', !isTextCompletion && config.canPrefill);
 			toggleSettingUI('CoTPrompt', !isTextCompletion && config.reasoning === false);
 		}
@@ -255,7 +258,7 @@ const createApp = () => {
 
 			if (!isIDB) {
 				// 只有远程数据库存在这个函数
-				const wsConnected = initialize(DI.RMI);
+				const wsConnected = initialize();
 
 				// batch 优化 对话和消息放在同一个响应里
 				if (id != null) {
@@ -288,7 +291,7 @@ const createApp = () => {
 			$watch(selectedConversation, () => {
 				const conv = unconscious(selectedConversation);
 				const id = conv?.id;
-				app.classList.toggle("_human", !!conv?.noAI);
+				app.classList.toggle("_fileUI", !!conv?.noAI);
 
 				if (conv && !conv.ready) {
 					if (prevId !== id) messages.value = [];
@@ -302,7 +305,6 @@ const createApp = () => {
 						conv.ready = true;
 
 						if (unconscious(selectedConversation) === conv) {
-							dontUpdateNextTime = conv;
 							$update(selectedConversation);
 							messages.value = conv.bm_leaf ? enableBranches(conv, data) : data;
 							scroller.scrollToBottom();
@@ -338,25 +340,17 @@ const createApp = () => {
 			});
 
 			// autosave
-			let dontUpdateNextTime;
 			$watch(messages, () => {
-				const skip = dontUpdateNextTime;
-				dontUpdateNextTime = null;
-
 				if (selectedConversation.ready) {
 					const conv = unconscious(selectedConversation);
-					if (conv === skip) return;
-
 					if (unconscious(abortCompletion)) return;
 
+					const time = conv.time;
 					const promise = updateConversation(conv, unconscious(messages));
-					if (conv.id == null) {
-						dontUpdateNextTime = conv;
-						promise.then(() => $update(selectedConversation));
-					}
-
-					// move to front if needed
-					$update(updateConversationListUI);
+					// insert new record
+					if (conv.id == null) promise.then(() => $update(selectedConversation));
+					// move to front
+					if (time !== conv.time) $update(updateConversationListUI);
 				}
 
 				backToBottomBtnShowHide();

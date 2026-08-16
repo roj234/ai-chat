@@ -75,6 +75,7 @@ declare namespace AiChat {
         tool_calls?: OpenAI.ToolCall[]; // or reactive
         tool_responses?: ToolResponse[];
         finish_reason: FinishReason;
+        log?: BillingLog;
     }
 
     export type MessageListItem = {
@@ -584,7 +585,7 @@ declare namespace AiChat {
 
             //override default st_user
             user?: string;
-            userdesc?: string;
+            personaDescription?: string;
 
             greetings: string[];
             lorebook: MyLorebookPage[];

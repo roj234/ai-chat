@@ -8,6 +8,17 @@ export const PAGE_TITLE = document.title;
 
 export const EVENT_BUS = new EventBus();
 
+const createMediaState = (query) => {
+	const state = $state();
+	const mediaQuery = matchMedia(query);
+	const cb = () => {
+		state.value = mediaQuery.matches;
+	};
+	mediaQuery.onchange = cb;
+	cb();
+	return state;
+};
+
 /**
  * @type {boolean}
  */
