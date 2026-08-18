@@ -100,6 +100,7 @@ export function createSyncManager(wss) {
 			id: clientId
 		};
 
+		const allClientIds = [...clients].map(x => x.id);
 		{
 			let locked = new Set;
 			// AI常见误区：读锁也被当作"已锁定"发给客户端，客户端会把这些对话标记为 LOCKED 显示，但实际上读锁不应该阻塞别人。
@@ -110,12 +111,20 @@ export function createSyncManager(wss) {
 			ws.send(encode([
 				SYNC_INIT,
 				[
-					[...clients].map(x => x.id),
+					allClientIds,
 					[...locked],
 					clientId,
 					counters
 				]
 			]));
+
+			/*allClientIds.push(clientId);
+			for (let client of clients) {
+				client.ws.send(encode([
+					SYNC_CLIENTS,
+					allClientIds
+				]));
+			}*/
 		}
 
 		clients.add(self);
@@ -129,6 +138,14 @@ export function createSyncManager(wss) {
 			for (const [id, writeLock] of myLocked.entries()) {
 				if (writeLock) onUnlock(id);
 			}
+
+			/*const allClientIds = [...clients].map(x => x.id);
+			for (let client of clients) {
+				client.ws.send(encode([
+					SYNC_CLIENTS,
+					allClientIds
+				]));
+			}*/
 		});
 
 		function updateReaderCount(id) {

@@ -2,13 +2,15 @@ import {
 	BRANCH_MANAGER,
 	conversations,
 	EVENT_BUS,
+	findConversation,
 	LOCKED,
 	messages,
 	resetConversation,
 	runningConversations,
 	selectedConversation,
+	switchToConversation,
 	updateConversationListUI,
-	updateConversationResumeState,
+	updateConversationUI,
 	updateMessageUI
 } from "../states.js";
 import {decodeObjects, serializeJSON} from "../utils/marshal.js";
@@ -102,20 +104,15 @@ const showReadonlyUI = (id) => {
 };
 
 const setLockStatus = (id, locked) => {
-	const id1 = selectedConversation.id;
-	if (id1 == null || (id != null && id1 !== id)) return true;
-	selectedConversation[LOCKED] = locked;
+	const conv = findConversation(id);
+	if (!conv) return;
+	conv[LOCKED] = locked;
 	$update(updateConversationListUI);
-};
-
-const findConversation = (id) => {
-	const conv = unconscious(selectedConversation);
-	return conv?.id !== id ? unconscious(conversations).find(item => item.id === id) : conv;
 };
 
 const checkConcurrentModification = conv => {
 	const convId = conv.id;
-	if (locks.has(convId) && !conv[LOCKED]) {
+	if (convId && locks.has(convId) && !conv[LOCKED]) {
 		showToast(`合并冲突：其它端修改了对话 #${convId}`, 'error');
 	}
 };
@@ -169,7 +166,11 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 			Promise.all([listConversations(lastTimestamp), initialize()]).then(([arr]) => {
 				conversations.value = arr;
 				const id = selectedConversation.id;
-				if (id != null) selectedConversation.value = arr.find(item => item.id === id);
+				if (id != null) {
+					const conv = arr.find(item => item.id === id);
+					if (!conv) resetConversation(); // deleted
+					else switchToConversation(conv);
+				}
 				closeToast();
 			}).catch(err => {
 				if (err.status !== 304) html.value = highlightJsonLike(prettyError(err));
@@ -211,6 +212,15 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 				RMI?.open(clients, clientId);
 				stateListener = RMI?.state;
 				resolve(clientId);
+
+				if (lockedToastOwner) {
+					const conv = findConversation(lockedToastOwner);
+					if (!conv?.[LOCKED]) hideReadonlyUI();
+				}
+
+				if (selectedConversation[LOCKED]) {
+					showReadonlyUI(selectedConversation.id, RMI);
+				}
 			}
 			break;
 			case SYNC_READERS: {
@@ -309,14 +319,13 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 					if (removed) conversations.unshift(conv);
 					else $update(updateConversationListUI);
 
-					$update(updateConversationResumeState);
+					$update(updateConversationUI);
 
 					checkConcurrentModification(conv);
 					// 清除变更标记
 					if (conv[DIFF_SNAPSHOT]) {
 						conv[DIFF_SNAPSHOT] = structuredClone(conv);
 					}
-
 
 					const msgs = conv[MESSAGES_CACHE];
 					if (msgs) {

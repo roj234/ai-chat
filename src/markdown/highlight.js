@@ -170,7 +170,7 @@ export const highlight = (code, language, node, is_finished) => {
 				vl.resize();
 				last = vl.dom.lastElementChild;
 			}
-			if (last.lastElementChild !== staging)
+			if (last && last.lastElementChild !== staging)
 				last.append(staging);
 		};
 

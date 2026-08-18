@@ -63,7 +63,7 @@ export const SetTimeout = {
 		response.time = Date.now();
 		response.deadline = ddl;
 
-		if (conv.owner) {
+		if (conv?.owner) {
 			return new Promise((resolve) => {
 				setTimeout(() => resolve("timeout"), ddl - response.time);
 			});

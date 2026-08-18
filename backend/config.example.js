@@ -119,12 +119,17 @@ export const ENABLE_FILE_TRANSFER = true;
  * 3. 若未匹配，则尝试使用 'default' 配置。
  * 4. 若 'default' 未定义 authorization，则执行 BYOK (Bring Your Own Key) 模式。
  * 5. 无匹配项且无 default 时返回 403。
+ *
+ * @type {Record<string, AiChatBackend.SSEProxyTarget>}
  */
 export const SSE_PROXY_BACKEND = {
 	"some-internal-key": {
 		url: 'https://api.openai.com/v1/chat/completions',
 		authorization: 'sk-xxxxxx',
-		log: true // 是否记录该通道的日志 (需开启 SSE_PROXY_TRACE)
+		headers: {
+			"User-Agent": "opencode/1.2.3"
+		},
+		trace: true // 是否记录该通道的日志 (需开启 SSE_PROXY_TRACE)
 	},
 
 	default: {
@@ -177,8 +182,8 @@ export const SSE_PROXY_MODERATION = (url, apiKey, ctx) => {
 /** 是否开启黑箱调试：记录所有请求响应到 data/logs 目录 */
 export const SSE_PROXY_TRACE = false;
 
-/** 会话恢复超时时间 (毫秒)：默认 15 分钟 */
-export const SSE_RESUME_TIMEOUT = 1000 * 60 * 15;
+/** 会话恢复超时时间 (毫秒)：默认 120 分钟 */
+export const SSE_RESUME_TIMEOUT = 1000 * 60 * 120;
 
 /** 消息引用（msg_ref）文本缓存 TTL (毫秒)：默认 24 小时 */
 export const SSE_REF_TTL = 1000 * 60 * 60 * 24;
@@ -190,6 +195,24 @@ export const SSE_REF_CACHE_SIZE = 1000;
 // ==========================================
 // 5. 计费与价格映射 (Billing)
 // ==========================================
+
+function isLiangWenFeng() {
+	const beijingHour = (new Date().getUTCHours() + 8) % 24;
+	return (beijingHour >= 9 && beijingHour < 12) ||
+		(beijingHour >= 14 && beijingHour < 18);
+}
+
+// 价格表：每百万 token 价格（元）
+const RATES = {
+	"deepseek-v4-flash": {
+		peak: [3.0, 9.0, 0.10],
+		idle: [1.5, 4.5, 0.05]
+	},
+	"deepseek-v4-pro": {
+		peak: [9.0, 27.0, 0.30],
+		idle: [4.5, 13.5, 0.15]
+	}
+};
 
 /**
  * 日志钩子，可以在这里做一些计费和别名相关的操作，这个函数只影响日志记录
@@ -214,11 +237,8 @@ export const LOG_HOOK = (log) => {
 		};
 
 		// 每百万 Token 价格
-		if (log.model === "deepseek-v4-pro") {
-			price(3, 6, 0.025);
-		}
-		if (log.model === "deepseek-v4-flash") {
-			price(1.5, 3, 0.0125);
+		if (log.model === "deepseek-v4-pro" || log.model === "deepseek-v4-flash") {
+			price(...RATES[log.model][isLiangWenFeng() ? "peak":"idle"]);
 		}
 		if (log.model === "gpt-5.6-sol") {
 			price(5, 30, 0.5, 'USD');

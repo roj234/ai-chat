@@ -7,6 +7,8 @@ import {DI, onLoad} from "/src/hooks.js";
 import {delta, patch, rep} from "unconscious/common/deepEqual.js";
 import {prettyError} from "/src/utils/utils.js";
 import {VirtualList} from "unconscious/common/VirtualList.js";
+import {SETTINGS} from "../src/settings.js";
+import {ContextRing} from "../src/components/SendButton.jsx";
 
 // 消息类型常量
 const NO_SUCH_CLIENT = -1;
@@ -161,7 +163,7 @@ const RMI = {
 			<div className="controls">
 				<div>{changeConversation}</div>
 				<div className="spacer"></div>
-				{fakeSendButton}
+				{ContextRing(fakeSendButton)}
 			</div>
 		</div>;
 
@@ -223,7 +225,7 @@ const RMI = {
 				return;
 			}
 			if (func === NO_SUCH_LOCK_OWNER) {
-				showToast(`找不到该对话的写入锁持有者`, 'error');
+				console.warn(`找不到该对话的写入锁持有者`, payload);
 				return;
 			}
 			return;
@@ -238,7 +240,7 @@ const RMI = {
 		const reply = (response) => rpcId && sendToSyncServer(SYNC_RPC, [sender, [RPC_CALLBACK, rpcId, response]]);
 
 		// 被控端
-		if (config.afkState < 2) {
+		if (!config.remoteControl) {
 			reply({ error: "未启用远程控制" });
 			return;
 		}
@@ -275,6 +277,18 @@ const RMI = {
 };
 
 export const registerRemoteControl = () => {
+	SETTINGS.push({
+		id: "remoteControl",
+		//_tab: "tools",
+		name: "远程操作",
+		type: "radio",
+		required: true,
+		choices: {
+			"拒绝": false,
+			"允许": true,
+		},
+	});
+
 	DI.RMI = RMI;
 	onLoad((app) => {
 		sendBtn = DI.sendButton;

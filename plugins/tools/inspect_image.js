@@ -1,5 +1,7 @@
-import {ContentPart} from "/src/toolset.js";
+import {ContentPart, prefixTitle} from "/src/toolset.js";
 import {fileAccess} from "./fileAccess.js";
+import {getCombinedPreset} from "/src/database.js";
+import {compressImage} from "/common/imate.js";
 
 const readImage = fileAccess("readRaw");
 
@@ -31,40 +33,41 @@ export const InspectImage = {
 		},
 		required: ['path']
 	},
+	title: prefixTitle("读图"),
 
 	async script({ path, bbox, label }, resp, conv) {
 		const isImage = path.match(/\.(png|jpg|jpeg|bmp|webp)$/i);
 		if (!isImage) throw 'Unsupported format. Convert to PNG, JPG, BMP, or WebP using tools.';
 
-		const blob = await readImage({path}, resp, conv);
+		let blob = await readImage({path}, resp, conv);
+		const cfg = await getCombinedPreset(conv);
 
-		if (!bbox) {
-			if (label) throw '"bbox" parameter is missing';
-			return new ContentPart().image(blob);
+		if (bbox) {
+			const imgBitmap = await createImageBitmap(blob);
+
+			let [x1, y1, x2, y2] = bbox;
+			x1 = Math.round(x1 / 1000 * imgBitmap.width);
+			y1 = Math.round(y1 / 1000 * imgBitmap.height);
+			x2 = Math.round(x2 / 1000 * imgBitmap.width);
+			y2 = Math.round(y2 / 1000 * imgBitmap.height);
+
+			const width = x2 - x1;
+			const height = y2 - y1;
+
+			const canvas = new OffscreenCanvas(width, height);
+			const ctx = canvas.getContext('2d');
+
+			ctx.drawImage(
+				imgBitmap,
+				x1, y1, width, height,
+				0, 0, width, height
+			);
+
+			imgBitmap.close();
+
+			blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
 		}
 
-		const imgBitmap = await createImageBitmap(blob);
-
-		let [x1, y1, x2, y2] = bbox;
-		x1 = Math.round(x1 / 1000 * imgBitmap.width);
-		y1 = Math.round(y1 / 1000 * imgBitmap.height);
-		x2 = Math.round(x2 / 1000 * imgBitmap.width);
-		y2 = Math.round(y2 / 1000 * imgBitmap.height);
-
-		const width = x2 - x1;
-		const height = y2 - y1;
-
-		const canvas = new OffscreenCanvas(width, height);
-		const ctx = canvas.getContext('2d');
-
-		ctx.drawImage(
-			imgBitmap,
-			x1, y1, width, height,
-			0, 0, width, height
-		);
-
-		// Blob 对象会保存在后端数据库，也许优化？
-		const croppedBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
-		return new ContentPart().image(croppedBlob);
+		return new ContentPart().image(await compressImage(blob, cfg));
 	}
 };

@@ -5,6 +5,7 @@ import {setWakeLock} from "./utils/wakeLock.js";
 import {
 	abortCompletion,
 	config,
+	EVENT_BUS,
 	getCurrentTheme,
 	inputText,
 	isLlamaCppBackend,
@@ -18,6 +19,7 @@ import {
 	selectedConversation,
 	state,
 	updateConversationListUI,
+	updateConversationUI,
 	updateMessageUI
 } from "./states.js";
 import {getAvailableTools, parseFrontmatter, PLACEHOLDERS, runTools, TOOL_NAME, toolScriptRegistry} from "./toolset.js";
@@ -27,6 +29,7 @@ import failure from "../media/failure.js";
 import complete from "../media/complete.js";
 import {
 	appendBillingLog,
+	DONE,
 	getCombinedPreset,
 	isIDB,
 	kvListGet,
@@ -75,6 +78,8 @@ export const submitUserChatMessage = async (loop) => {
 	}
 };
 
+const RETRY_COUNT = debugSymbol("RetryCount");
+
 /**
  *
  * @param {AiChat.Conversation} conversation
@@ -94,22 +99,24 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 	let markdownRenderer = cfg.afkState === 2 ? (content, container) => container && (container.textContent = content) : createMarkdownStream();
 	let updateCount = 0;
-	let lastContent;
-	let waitingForContent;
+	let lastMessage;
+	let _waitingFor;
 
 	const roleId = conversation.roleId;
 	const schemaPreprocess = roleId ? s => "```"+roleId+"\n"+s : AS_IS;
 
-	const render = (content, force) => {
-		lastContent = content;
+	const render = (message, force) => {
+		lastMessage = message;
 
-		const isThinking = isReactive(content.think);
+		const isThinking = isReactive(message.think);
+		const textContent = (isThinking ? message.think : message).content;
 		const container = findStreamingContainer(isThinking);
 		if (!container) {
-			waitingForContent = isThinking;
+			if (!textContent) return;
+			_waitingFor = isThinking;
 			return true;
 		}
-		waitingForContent = 0;
+		_waitingFor = 0;
 
 		if (!force) {
 			const details = container.closest("details:not([open])");
@@ -117,7 +124,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 				if (!details.classList.contains("m")) {
 					details.classList.add("m");
 					// only update when open
-					details.addEventListener("click", () => render(content));
+					details.addEventListener("click", () => render(message));
 				}
 				return;
 			}
@@ -127,33 +134,33 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			requestAnimationFrame(() => {
 				const wasUpdatedAfterCheckpoint = updateCount > 1;
 				updateCount = 0;
-				if (wasUpdatedAfterCheckpoint) render(content);
+				if (wasUpdatedAfterCheckpoint) render(message);
 			});
 			updateCount++;
 		}
 
 		const atBottom = DI_messageContainer.scrollHeight - DI_messageContainer.clientHeight - DI_messageContainer.scrollTop;
 
-		markdownRenderer(isThinking ? content.think.content : schemaPreprocess(content.content), container, isThinking ? DONT_PARSE_HTML_IN_THINKING : null);
+		markdownRenderer(isThinking ? textContent : schemaPreprocess(textContent), container, isThinking ? DONT_PARSE_HTML_IN_THINKING : null);
 
 		if (atBottom < 250 && !unconscious(lastScrollDirectionIsUp)) DI_messageContainer.vl.scrollTo(DI_messageContainer.scrollHeight);
 	};
-	const renderer = (type, content) => {
+	const renderer = (type, message) => {
 		if (selectedConversation.id !== conversation.id) return;
 
 		switch (type) {
 			case MARKDOWN_APPEND:
 				// noinspection UnnecessaryLocalVariableJS
-				const flag = waitingForContent;
-				if (render(content) && waitingForContent !== flag) break;
+				const flag = _waitingFor;
+				if (render(message) && _waitingFor !== flag) break;
 			return;
 			case MARKDOWN_END: {
-				if (lastContent) {
+				if (lastMessage) {
 					updateCount = 0;
-					render(lastContent, true);
+					render(lastMessage, true);
 					markdownRenderer();
 				}
-				if (null === content?.finish_reason) return;
+				if (null === message?.finish_reason) return;
 			}
 		}
 		$update(updateMessageUI);
@@ -178,27 +185,16 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		abort,
 		messages
 	});
+	EVENT_BUS.post(['loopBegin'], conversation);
 
 	if (!IS_ANDROID_BUILD) document.title = `工作中(${runningConversations.size}) - ${PAGE_TITLE}`;
 
 	if (cfg.wakelock) setWakeLock(true);
-	$update(updateConversationListUI)
+	$update(updateConversationListUI);
 
 	// 在流开始之前检查 LOCKED 状态
 	const writeProtect = conversation[LOCKED];
 	try {
-		const lastModel = messages.findLast(m => m.model)?.model;
-		if (lastModel && lastModel !== cfg.model && cfg.afkState < 2) {
-			await new Promise((resolve, reject) => {
-				SimpleModal({
-					title: "你是否主动切换了模型？",
-					message: `上次使用的模型：${lastModel}\n当前使用的模型：${cfg.model}`,
-					onConfirm() {resolve();},
-					onCancel() {reject("取消操作");},
-				});
-			});
-		}
-
 		// retry via context.retry
 		const result = await new Promise((resolve, reject) => {
 			let retryCount = 0;
@@ -256,17 +252,15 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 		const messages_uc = unconscious(messages);
 		const tone = FINISH_REASON_TONE[finishReason];
-		const isActive = isDisplaying();
 		let isSuccess = tone != null;
 
 		const promises = [];
-		const commitMessage = async () => {
-			if (writeProtect) return;
-			if (!promises.length) {
+		const commitMessage = () => {
+			if (promises.length) return;
 
 			let needUpdate;
 			const resumeId = conversation.resumeId;
-			if (finishReason !== 'error' || assistantMessage.error?.trim() !== "network error"/* fetch */) {
+			if (finishReason !== 'error' || assistantMessage.error?.trim().endsWith("network error")/* fetch */) {
 				if (resumeId) {
 					promises.push(jsonFetch(resolveDBRelativeURL(cfg.endpoint)+"/abort/"+resumeId, {
 						key: cfg.accessToken,
@@ -280,7 +274,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			} else {
 				if (resumeId) {
 					assistantMessage.error = '连接意外中止\n服务器支持断线重连\n请点击输入框的【继续】按钮';
-					if (isActive) $update(updateMessageUI);
+					if (isDisplaying()) $update(updateMessageUI);
 				}
 			}
 
@@ -289,45 +283,65 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 				assistantMessage.log = result;
 			} else
 
-			if (needUpdate || needLog || hasContent(assistantMessage)) {
+			if (needUpdate || needLog || isContentfulMessage(assistantMessage)) {
 				markMessageDirty(assistantMessage);
 				promises.push(updateConversation(conversation, messages_uc));
 
 				if (needLog) {
-					isIDB && await promises.at(-1);
-					if (assistantMessage.id >= 0) result.id = assistantMessage.id;
-					promises.push(appendBillingLog(result));
+					promises.push((isIDB ? promises.at(-1) : DONE).then(() => {
+						if (assistantMessage.id >= 0) result.id = assistantMessage.id;
+						return appendBillingLog(result);
+					}));
 				}
 			}
-
-			}
-			return Promise.all(promises);
 		};
 
-		const hasPendingInput = isActive && inputText.trim();
+		const retryCount = conversation[RETRY_COUNT] || 0;
+		delete conversation[RETRY_COUNT];
+
+		const hasPendingInput = isDisplaying() && inputText.trim();
+		const tc = assistantMessage.tool_calls;
 		if (tone === '' && !__skipToolCall && !hasPendingInput && !(cfg.maxToolTurns && !(countAgenticTurns(messages_uc) % cfg.maxToolTurns))) {
 			const timer = setTimeout(commitMessage, 2000);
 			addEventListener("beforeunload", commitMessage);
 
+			let flags;
 			try {
-				isSuccess = await runTools(assistantMessage, conversation);
+				flags = await runTools(assistantMessage, conversation);
 			} finally {
 				removeEventListener("beforeunload", commitMessage);
 				clearTimeout(timer);
 			}
 
-			if (!isSuccess) finishReason = 'interrupt';
-			if (isActive) $update(updateMessageUI);
-		} else if (assistantMessage.tool_calls) {
-			assistantMessage.tool_responses = assistantMessage.tool_calls.map(tc => ({ [TOOL_NAME]: tc.function.name }));
+			if (flags) {
+				if (!cfg.afkState || (flags&1)) {
+					isSuccess = false;
+					finishReason = 'interrupt';
+				} else if (retryCount < cfg.toolRetryLimit) {
+					conversation[RETRY_COUNT] = retryCount + 1;
+					messages.pop();
+				}
+			}
+
+			if (isDisplaying()) $update(updateMessageUI);
+		} else if (tc) {
+			assistantMessage.tool_responses = tc.map(tc => ({ [TOOL_NAME]: tc.function.name }));
 			// 因为走到这个分支我们一定要停，所以是ok时停
 			if (isSuccess) finishReason = 'interrupt';
-			if (isActive) $update(updateMessageUI);
+			if (isDisplaying()) $update(updateMessageUI);
 		}
 
 		updateStatusText("");
 
-		await commitMessage();
+		const commitedDueToToolTimeout = promises.length;
+
+		commitMessage();
+		await Promise.all(promises);
+
+		if (commitedDueToToolTimeout) {
+			markMessageDirty(assistantMessage);
+			await updateConversation(conversation, messages_uc);
+		}
 
 		const generateTitleIfApplicable = async (finishReason, assistantMessage) => {
 			if ('error' !== finishReason) {
@@ -337,7 +351,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			}
 		};
 
-		const hasPendingInput2 = isActive && inputText.trim();
+		const hasPendingInput2 = isDisplaying() && inputText.trim();
 		if (hasPendingInput2) finishReason = 'userInput';
 		if ('tool_calls' !== finishReason) {
 			await generateTitleIfApplicable(finishReason, assistantMessage);
@@ -347,14 +361,19 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 					isSuccess ? complete() : failure();
 			}
 
-			if (!isActive && cfg.afkState < 2 && !cfg.disableFinishToast)
+			if (!isDisplaying() && cfg.afkState < 2 && !cfg.disableFinishToast)
 				showToast(`对话 ${conversation.title}(#${conversation.id}) 已结束 (${finishReason})`, tone ?? "error");
 		} else if (cfg.generateTitle === 'eager') {
 			await generateTitleIfApplicable(finishReason, assistantMessage);
 		}
 
+		// context usage
+		if (isDisplaying()) $update(updateConversationUI);
+
+		if (abort.signal.aborted) return false;
 		return finishReason;
 	} finally {
+		EVENT_BUS.post(['loopEnd'], conversation);
 		runningConversations.delete(conversation.id);
 		const runningNow = runningConversations.size;
 		if (!runningNow) setWakeLock(false);
@@ -377,9 +396,7 @@ const countAgenticTurns = messages => {
 	const arr = unconscious(messages);
 	let turns = 0;
 	for (let i = arr.length - 1; i >= 0; i--) {
-		if (arr[i].finish_reason !== "tool_calls") {
-			break;
-		}
+		if (!arr[i].tool_calls) break;
 		turns++;
 	}
 	return turns;
@@ -485,7 +502,12 @@ export const findStreamingContainer = think => {
 	}
 };
 
-const hasContent = assistantMessage => assistantMessage.think?.content || assistantMessage.content || assistantMessage.tool_calls?.length;
+/**
+ *
+ * @param {AiChat.AssistantMessage} assistantMessage
+ * @return {boolean}
+ */
+export const isContentfulMessage = assistantMessage => assistantMessage.think?.content || assistantMessage.content || assistantMessage.tool_calls?.length;
 
 const setMessageCacheState = (conversation, messages, hashes, state) => {
 	const indices = new Map;
@@ -582,7 +604,7 @@ async function sendCompletionRequest(
 	/** @type {string} */
 	let finishReason;
 	/** @type {number} */
-	let firstPacketTime;
+	let firstPacketTime, localTimeDelta = 0;
 	/** @type {Partial<AiChat.BillingLog>} */
 	const log = { provider: (config.provider || new URL(resolveDBRelativeURL(config.endpoint)).host) };
 
@@ -590,6 +612,7 @@ async function sendCompletionRequest(
 
 	let manualCoTCloseTag;
 	let thinkingPrefill;
+	let contentPrefill;
 	let thinkState;
 
 	const endThinking = () => {
@@ -661,6 +684,8 @@ async function sendCompletionRequest(
 						delete conversation.resumeId;
 					}
 
+					localTimeDelta = resumable.now - firstPacketTime;
+					//console.log("time diff to server", localTimeDelta);
 					firstPacketTime = resumable.start;
 				}
 
@@ -670,7 +695,8 @@ async function sendCompletionRequest(
 				const lastMessageTime = messages.at(-2)?.time;
 				assistantMessage.time = lastMessageTime ? Math.max(firstPacketTime, lastMessageTime + 1) : firstPacketTime;
 
-				if ((thinkState = assistantMessage.think) && !assistantMessage.content) {
+				contentPrefill = !!assistantMessage.content;
+				if ((thinkState = assistantMessage.think) && !contentPrefill) {
 					thinkingPrefill = true;
 					thinkState.start = firstPacketTime;
 					const format = thinkState.format;
@@ -682,14 +708,12 @@ async function sendCompletionRequest(
 				}
 			}
 
-			const [
-				/** @type {OpenAI.ChatChoice | OpenAI.TextChoice} */
-				chunk
-			] = json.choices;
+			/** @type {OpenAI.ChatChoice | OpenAI.TextChoice} */
+			const chunk = json.choices?.[0];
 
 			if (!finishReason) finishReason = chunk?.finish_reason;
 			if (finishReason) {
-				log.duration = Date.now() - firstPacketTime;
+				log.duration = Date.now() + localTimeDelta - firstPacketTime;
 				const currentContext = extractUsageMetrics(json, log);
 				if (Number.isFinite(currentContext)) conversation.contextUsage = currentContext;
 				else delete conversation.contextUsage;
@@ -754,7 +778,16 @@ async function sendCompletionRequest(
 				throw "retry";
 			}
 
-			let content = assistantMessage.content + (text || "");
+			let content = assistantMessage.content;
+			if (text) {
+				if (contentPrefill) {
+					const isPrefillResponse = text.startsWith(content);
+					if (isPrefillResponse) { content = text; text = ""; }
+					contentPrefill = false;
+				}
+				content += text;
+			}
+
 			if (config.reasoning === false && !manualCoTCloseTag && (manualCoTCloseTag = /^\s*<(thinking|think|thought|reasoning)>/i.exec(content))) {
 				reasoning_text = content.slice(manualCoTCloseTag[0].length);
 				manualCoTCloseTag = manualCoTCloseTag[1];
@@ -786,13 +819,16 @@ async function sendCompletionRequest(
 					}
 					assistantMessage.think = thinkState;
 				} else {
-					if (thinkingPrefill) {
-						const isPrefillResponse = reasoning_text.startsWith(thinkState.content);
-						if (isPrefillResponse) reasoning_text = reasoning_text.slice(thinkState.content.length);
-						thinkingPrefill = false;
-					}
-
 					if (isReactive(thinkState)) {
+						if (thinkingPrefill) {
+							const isPrefillResponse = reasoning_text.startsWith(thinkState.content);
+							if (isPrefillResponse) {
+								thinkState.content = reasoning_text;
+								reasoning_text = "";
+							}
+							thinkingPrefill = false;
+						}
+
 						thinkState.content += reasoning_text;
 					} else {
 						console.warn("未预料的思考块", thinkState);
@@ -835,7 +871,7 @@ async function sendCompletionRequest(
 
 			// TTFT
 			if (null == log.latency && (content || thinkState || assistantMessage.tool_calls)) {
-				log.latency = (resumable?.ft||Date.now()) - firstPacketTime;
+				log.latency = (resumable?.ft||(Date.now()+localTimeDelta)) - firstPacketTime;
 			}
 		});
 
@@ -857,7 +893,7 @@ async function sendCompletionRequest(
 				finishReason = 'error';
 
 				// 服务端resume session过期后，保留数据库中缓存的内容（这样至少还能用 /continue）
-				if (resumableMessage && !hasContent(assistantMessage)) {
+				if (resumableMessage && !isContentfulMessage(assistantMessage)) {
 					assistantMessage = messages[messages.length-1] = resumableMessage;
 				}
 
@@ -931,6 +967,18 @@ async function buildCompletionPayload(
 	/** @type {boolean} */
 	let isPrefill;
 	if (assistantMessage) {
+		const lastModel = assistantMessage.model;
+		if (lastModel && lastModel !== config.model && config.afkState < 2) {
+			await new Promise((resolve, reject) => {
+				SimpleModal({
+					title: "你是否主动切换了模型？",
+					message: `上次使用的模型：${lastModel}\n当前使用的模型：${config.model}`,
+					onConfirm() {resolve();},
+					onCancel() {reject("取消操作");},
+				});
+			});
+		}
+
 		const finishReason = assistantMessage.finish_reason;
 		if (!allowPrefillFinishReasons.includes(finishReason)) assistantMessage = null;
 		else if (finishReason === 'error' || !canPrefill) {
@@ -1045,7 +1093,7 @@ async function buildCompletionPayload(
 	} else {
 		body.messages = json_messages;
 
-		if (config.modalities.includes("tool") && conversation.activatedModules?.size) {
+		if (config.modalities.includes("tool") && (conversation.activatedModules?.size || conversation.allowedTools?.size)) {
 			let tools;
 			[tools, toolPrompt] = await getAvailableTools(conversation);
 			if (tools.length) body.tools = tools;

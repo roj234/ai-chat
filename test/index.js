@@ -69,6 +69,7 @@ const testRunner = {
 				this.results.failed++;
 				const errorMsg = syncError instanceof Error ? syncError.message : String(syncError);
 				this.results.errors.push(`测试 ${name}: 抛出异常: ${errorMsg}`);
+				console.error(syncError);
 			}
 
 			// 实时更新 UI，让用户看到进度

@@ -66,12 +66,15 @@ export function blobToContentPart(file, isFileTransferWindow, attachments, force
 	}
 }
 
+/** 从文件名提取扩展名 */
+const extOf = (name = "") => name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : "txt";
+
 /**
  *
  * @param {import('unconscious').Reactive<OpenAI.ContentPart[]>} attachments
  * @return {JSX.Element}
  */
-export const createAttachmentGallery = (attachments) => {
+export const AttachmentGallery = (attachments) => {
 	return <div className="attachments" onClick.delegate{".attachment button"}={(e) => {
 		const element = e.target.closest('.attachment');
 		const index = indexInParent(element);
@@ -79,40 +82,48 @@ export const createAttachmentGallery = (attachments) => {
 		element.remove();
 	}}>{
 		$foreach(attachments, (att) => {
-			const DeleteBtn = <button className="delete ri-close-line"/>;
+			const DeleteBtn = <button className="delete ri-close-line" title="移除"/>;
 
 			switch (att.type) {
-				case "image_url":
+				case "image_url": {
+					const file = att.image_url.url;
+					const src = typeof file === 'string' ? file : file.toUrl();
 					return (
-						<div className="attachment image-part">
-							<img
-								src={typeof att.image_url.url === 'string' ? att.image_url.url : att.image_url.url.toUrl()}
-								alt="预览"/>
+						<div className="attachment image-part" title={file.name || '图片附件'}>
+							<img src={src} alt="预览"/>
 							{DeleteBtn}
 						</div>
 					);
+				}
 
-				case "text":
+				case "text": {
+					const file = att.text;
 					return (
-						<div className="attachment text-part" style={"--format: \"TXT\""}>
-							<div className="text-preview">
-								{att.text.name + "\n"+formatSize(att.text.size)}
+						<div className="attachment text-part" title={file.name}>
+							<div className="attachment-icon"><i className="ri-file-text-line"/></div>
+							<span className="format-badge">{extOf(file.name)}</span>
+							<div className="attachment-meta">
+								<span className="file-name">{file.name}</span>
+								<span className="file-size">{formatSize(file.size)}</span>
 							</div>
 							{DeleteBtn}
 						</div>
 					);
+				}
 
-				case "input_audio":
+				case "input_audio": {
 					const inputAudio = att.input_audio;
 					return (
-						<div className="attachment audio-part" style={`--format: "${inputAudio.format}"`}>
-							<div className="ri-volume-up-fill"></div>
-							<div className="text-preview">
-								{inputAudio.data.name + "\n" + formatSize(inputAudio.data.size)}
+						<div className="attachment audio-part" title={inputAudio.data.name}>
+							<div className="attachment-icon"><i className="ri-music-2-line"/></div>
+							<div className="attachment-meta">
+								<span className="file-name">{inputAudio.data.name}</span>
+								<span className="file-size">{formatSize(inputAudio.data.size)}</span>
 							</div>
 							{DeleteBtn}
 						</div>
 					);
+				}
 			}
 		})
 	}</div>;

@@ -8,12 +8,7 @@ import {getToolParameters, runTools} from "/src/toolset.js";
 import {formatSize} from "unconscious/common/Utils.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
 
-let worker;
-let workerPermissions;
-const stopWorker = (m) => {
-	worker?.destroy(m);
-	worker = null;
-};
+const sandboxInstances = new Map;
 
 export const JS_MODULES = {
 	'json5': {
@@ -42,10 +37,10 @@ export {
     end(): any;
   },
   parseJson5(str: string): any,
-}`
+}`,
+		k: "json"
 	},
 	'base64': {
-		path: "builtin",
 		description: `Ultrafast Streaming Base64 Encoder/Decoder
 export {
   createBase64Encoder(urlSafe = false, bufferCapacity = 1024): { 
@@ -59,7 +54,8 @@ export {
   base64Encode(input: Uint8Array | string (utf-8), urlSafe = false, bufferCapacity = 1024): string,
   base64DecodeToUint8Array = (input: Uint8Array | string, bufferCapacity = 4096): Uint8Array,
   base64DecodeToString(input: Uint8Array | string, charset = 'utf-8', bufferCapacity = 4096): string
-}`
+}`,
+		k: "base64"
 	},
 	'SHA256': {
 		path: "assets/sandbox/SHA256.mjs",
@@ -70,7 +66,8 @@ export class SHA256 {
     /** alias of digest('hex') */
     toString(): string;
     static hash(data: string | Uint8Array, format?: 'hex' | 'arraybuffer' = 'arraybuffer'): string | ArrayBuffer;
-}}`
+}}`,
+		k: "sha hash"
 	},
 	'text-diff': {
 		path: "assets/diff.js",
@@ -82,7 +79,8 @@ export {
     newIndex: number | null,
     text: string
   }[]
-}`
+}`,
+		k: "diff"
 	},
 	'xml-parser': {
 		path: "assets/sandbox/xml-parser.min.mjs",
@@ -100,6 +98,7 @@ export {
     },
     options?: {
       decodeEntities?: boolean = true;
+      html?: boolean = false;
     }
   ): {
     write(chunk: string): void;
@@ -108,6 +107,7 @@ export {
   parseXmlToTree(str: string, options?: {
     // XML Entities
     decodeEntities?: boolean = true;
+    html?: boolean = false;
     includeComments?: boolean = false;
     // \`<?...?>\` processing-instruction
     includePI?: boolean = false;
@@ -118,69 +118,89 @@ export {
   type XmlTextNode = { type: 'text' | 'comment' | 'cdata', content: string; };
   type XmlPI = { type: 'pi', target: string, data: string; };
   type XmlNode = XmlElement | XmlTextNode | XmlPI;
-\`\`\``
+\`\`\``,
+		k: "xml html"
 	},
 	jszip: {
 		path: "assets/sandbox/jszip-shim.min.mjs",
-		description: "Ultrafast JSZip v3 shim (30x faster)\nexport default JSZip;\nexport { crc32(data: Uint8Array): number }"
+		description: "Ultrafast JSZip v3 shim (30x faster)\nexport default JSZip;\nexport { crc32(data: Uint8Array): number }",
+		k: "archive zip compress decompress"
 	},
 	mathjs: {
 		url: 'https://unpkg.com/mathjs@15.1.0/lib/browser/math.js',
 		path: "assets/sandbox/math.js",
-		description: "v15.1.0\nexport default math;"
+		description: "v15.1.0\nexport default math;",
+		k: "math compute matrix vector imagine formula"
 	},
 	papaparse: {
 		path: "assets/sandbox/papaparse.min.js",
-		description: "v5.0.2"
+		description: "v5.0.2",
+		k: "office csv"
 	},
 	dayjs: {
 		alias: ['dayjs/locale/zh-cn', 'dayjs/plugin/isLeapYear'],
 		url: 'https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js',
 		path: "assets/sandbox/dayjs.min.js",
 		description: "v1.x\n- builtins: locale/zh-cn, plugin/isLeapYear (DO NOT IMPORT, THEY ARE ALREADY USABLE)",
-		//umd: true
+		k: "date time"
 	},
 	xlsx: {
 		path: "assets/sandbox/xlsx.mini.min.js",
-		description: "v0.20.3 (mini, SheetJS)\nexport default XLSX;\n- XLSX.write 类型可用: [array: ArrayBuffer, buffer: Uint8Array, base64, binary]"
+		description: "v0.20.3 (mini, SheetJS)\nexport default XLSX;\n- XLSX.write 类型可用: [array: ArrayBuffer, buffer: Uint8Array, base64, binary]",
+		k: "office table excel xlsx"
 	},
 	'pdf-lib': {
 		url: 'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js',
-		path: "assets/sandbox/pdf-lib.min.js",
+		path: "assets/sandbox/pdf-lib.min.cjs",
 		description: "v1.17.1\nexport { PDFDocument, rgb, StandardFonts, ... }\n- 无法渲染中文，需要自行提供中文字体",
-		umd: true
+		k: "office print pdf"
 	},
 	docx: {
 		path: "assets/sandbox/docx.min.mjs",
-		description: "v9.7.1\nexport { Document, Paragraph, Table, ... }"
+		description: "v9.7.1\nexport { Document, Paragraph, Table, ... }",
+		k: "office document docx wps"
 	},
 	lamejs: {
 		url: 'https://unpkg.com/lamejs@1.2.1/lame.min.js',
 		path: "assets/lame.min.mjs",
-		description: "v1.2.1\nexport { Mp3Encoder, WavHeader }"
+		description: "v1.2.1\nexport { Mp3Encoder, WavHeader }",
+		k: "lame audio encode mp3"
 	},
 	pptxgenjs: {
 		url: 'https://cdn.jsdelivr.net/gh/gitbrent/pptxgenjs/dist/pptxgen.min.js',
 		path: "assets/sandbox/pptxgen.min.mjs",
-		description: "v4.0.1\nexport default pptxgen;\n- 用 addSlide() 而非 addNewSlide()\n- outputType 用 \"arraybuffer\" 或 \"uint8array\"，不能用 \"nodebuffer\"\n- 用 ChartType 而非 Charts"
+		description: "v4.0.1\nexport default pptxgen;\n- 用 addSlide() 而非 addNewSlide()\n- outputType 用 \"arraybuffer\" 或 \"uint8array\"，不能用 \"nodebuffer\"\n- 用 ChartType 而非 Charts",
+		k: "office powerpoint pptx"
 	},
+
+	CompressionStream: {
+		description: "builtin DecompressionStream, mode: ['gzip' | 'deflate' | 'deflate-raw']",
+		k: "decompress archive deflate gzip"
+	},
+	OffscreenCanvas: {
+		description: "builtin FontFace createImageBitmap getContext()",
+		k: "jpg jpeg png bmp image"
+	},
+	"crypto.subtle": {
+		description: " builtin",
+		k: "hash uuid encrypt decrypt cipher sha md5"
+	}
 };
 const aliases = new Set(Object.values(JS_MODULES).map(k => k.alias).filter(Boolean).flat());
 const loadSystemModule = (mod) => {
-	const promise = fetch(mod.path || mod.url, {
+	return fetch(mod.path || mod.url, {
 		referrerPolicy: 'no-referrer',
 	}).then(res => {
 		const content = res.headers.get('content-type');
-		if (!res.ok) throw new Error('Failed to fetch module '+mod.path+': HTTP '+res.status);
-		if (!content?.includes("javascript")) throw new Error('Failed to fetch module '+mod.path+': illegal content-type '+content);
+		if (!res.ok) throw new Error('Failed to fetch module ' + mod.path + ': HTTP ' + res.status);
+		if (!content?.includes("javascript")) throw new Error('Failed to fetch module ' + mod.path + ': illegal content-type ' + content);
 		return res.text();
 	});
-	if (mod.umd) return promise.then(cjsWrapper);
-	return promise;
 }
 
 // [ func, in, out ]
 const rpcMethods = {
+	open: [ (args) => ({ path: args[0], create: args[1] }), AS_IS ],
 	read: [ (args) => ({ path: args[0], noTruncate: true }), AS_IS ],
 	write: [ (args) => ({ path: args[0], content: args[1], overwrite: true }) ],
 	append: [ (args) => ({ path: args[0], content: args[1], newline: false }) ],
@@ -209,8 +229,6 @@ const appendFn = fileAccess("append");
 const MAX_OUTPUT_LENGTH = 20000;
 const HALF = MAX_OUTPUT_LENGTH / 2;
 
-const cjsWrapper = text => `const module = {exports};` + text + "\n;Object.assign(exports,module.exports)";
-
 /**
  * @type {AiChat.FunctionTool}
  */
@@ -218,10 +236,11 @@ export const RunJS = {
 	name: "RunJS",
 	description: `Execute a JavaScript module (ESM) in sandbox.
 - ES2023+, top-level await, import, import attributes and dynamic import(), no live bindings.
-- Access file system via \`fs/promises\` and \`path\` module and equivalent global objects.
-- globalThis and loaded script files are persist, until manual reset, timeout or page reload.
-- Not Node.js environment: no require(), no fs.readSync (\`fs/promises\' shim only), no http (use \`fetch\` and XHR, cannot bypass CORS).
-- After the module evaluated, the sandbox detaches — lingering async tasks will fail, be sure to await all Promises.
+- Supports CommonJS. extension must be \`.cjs\`.
+- Node.js shim: Buffer, fs, path, process, fetch.
+- Not real Node.js: no require(), Only three modules: \`fs/promises\`, \`path\`, \`url\`.
+- After the module evaluated, the sandbox detaches — await Promises before return or they will fail.
+- Permissions: "network" for fetch, "eval" for Function, wasm and http/data import().
 - For Uint8Array, use \`fs.writeFile(path, data, { transfer: true })\` (or appendFile) to transfer the buffer ownership for better performance. The returned promise resolves to a new Uint8Array with the same content; the original buffer becomes invalid.`,
 	parameters: {
 		type: "object",
@@ -234,17 +253,26 @@ export const RunJS = {
 				type: "string",
 				description: "Inline code (deprecated). Mutually exclusive with `path`.",
 			},
-			this: {
+			env: {
 				type: "object",
-				description: "Top-level this. Must be JSON-serializable. Use this to pass data (as arguments) so you don't need to edit JS files repeatedly."
+				description: "\"process.env\", use this to pass data globally."
 			},
-			reset: {
+			argv: {
+				type: "array",
+				description: "\"process.argv\" (from index 2), use this to pass data so you don't need to edit JS files repeatedly.",
+				items: {
+					type: "string"
+				}
+			},
+			persist: {
 				type: "boolean",
+				default: false,
+				description: "Make best effort (not guaranteed) to reuse loaded modules between multiple calls."
 			},
 			permissions: {
 				type: "array",
 				items: {
-					enum: ['network']
+					enum: ['network', 'eval']
 				}
 			},
 			timeout: {
@@ -263,7 +291,7 @@ export const RunJS = {
 		return label;
 	},
 
-	async script({code, path, this: context, timeout = 10, permissions, reset }, response, conv) {
+	async script({code, path, env, argv, timeout = 10, permissions, persist }, response, conv) {
 		if (null == code) {
 			if (null == path) throw 'Neither path nor code is specified';
 			code = await readFile({
@@ -275,20 +303,40 @@ export const RunJS = {
 			if (path != null) throw 'Both path and code are specified';
 		}
 
-		if (reset || !worker || !deepEqual(workerPermissions, permissions || [])) {
-			stopWorker();
+		const id = conv.id;
+		const obj = sandboxInstances.get(id) || {};
+		let {worker, workerPermissions, destroyTimeout} = obj;
+
+		clearTimeout(destroyTimeout);
+		const stopWorker = (m) => {
+			worker.destroy(m);
+			sandboxInstances.delete(id);
+		};
+
+		if (!worker || !deepEqual(workerPermissions, permissions || [])) {
+			worker?.destroy();
+
 			const hostModules = new Map;
 			hostModules.set('@tools', {});
 
 			const handlers = { hostModules };
-			worker = createSandbox(handlers, permissions?.includes('network') ? ['fs', 'net'] : ['fs'], { hostModules, name: "RunJS" });
+			const realPermissions = ['fs'];
+			if (permissions?.includes('network')) realPermissions.push('net');
+			if (permissions?.includes('eval')) realPermissions.push('eval');
+
+			worker = createSandbox(handlers,  realPermissions, { hostModules, name: "RunJS" });
 			worker.handlers = handlers;
 			workerPermissions = permissions || [];
+
+			obj.workerPermissions = workerPermissions;
+			obj.worker = worker;
+
+			sandboxInstances.set(id, obj);
 		}
 
-		// 它的存在不直接告知模型
+		// 它的存在不直接告知模型 (PTC)
 		const hostModules = worker.handlers.hostModules;
-		hostModules.set('@tools', new Proxy({}, {
+		hostModules.set('tools', new Proxy({}, {
 			get(target, key) {
 				const exist = conv.allowedTools.has(key);
 				if (!exist) return;
@@ -311,7 +359,7 @@ export const RunJS = {
 			}
 		}))
 
-		const timer = setTimeout(() => stopWorker("Error: Timeout or deadlock"), timeout * 1000);
+		const timer = setTimeout(() => stopWorker("Error: Timeout"), timeout * 1000);
 
 		worker.handlers.load = (path, systemModule) => {
 			if (systemModule) {
@@ -327,7 +375,6 @@ export const RunJS = {
 				path,
 				noTruncate: true
 			}, response, conv);
-			if (path.endsWith(".cjs")) return promise.then(cjsWrapper);
 			return promise.catch(e => { throw new Error("Could not fetch module "+path+"\n"+e.message) });
 		}
 
@@ -392,14 +439,19 @@ export const RunJS = {
 
 		let err = '';
 		try {
-			await worker.initialize();
+			const reset = !persist;
+			await worker.initialize(reset);
 			await worker.execute(
 				path,
 				code,
-				context
+				env,
+				argv
 			);
+
+			obj.destroyTimeout = setTimeout(stopWorker, 600000);
 		} catch (e) {
 			err = prettyError(e);
+			stopWorker();
 		} finally {
 			clearTimeout(timer);
 			if (logFile) appendToLogFile('', true);
@@ -450,16 +502,14 @@ export const SearchModules = {
 		const kws = keywords.toLowerCase().split(' ');
 		const keys = [];
 		const entries = Object.entries(JS_MODULES);
-		for (const [key, { description }] of entries) {
-			if (!kws.length || kws.some(filter => key.includes(filter) || description.includes(filter))) {
+		for (const [key, { k, description }] of entries) {
+			if (!kws.length || kws.some(filter => key.includes(filter) || k.includes(filter))) {
 				keys.push(key+": "+description);
 				if (keys.length >= limit) break;
 			}
 		}
 
-		if (!keys.length) return `No module found.
----
-Note: OffscreenCanvas, crypto.subtle and other DedicatedWorkerGlobalScope objects may be used.`
+		if (!keys.length) return `No module found.`
 
 		return `Found ${keys.length} modules.
 ---

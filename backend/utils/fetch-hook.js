@@ -214,10 +214,7 @@ async function _fetch(input, {
 	return response;
 }
 
-export const hookFetch = () => {
-	const origFetch = globalThis.fetch;
-	globalThis.fetch = _fetch;
-	return origFetch;
-}
+const origFetch = globalThis.fetch;
+globalThis.fetch = _fetch;
 
-export { _fetch as fetch };
+export { _fetch as fetch, origFetch };

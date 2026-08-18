@@ -17,14 +17,8 @@ export const
 	SYNC_KVS = 14,
 	SYNC_KVS_DEL = 15,
 	SYNC_RPC = 16,
-	SYNC_SEND_TO_OWNER = 17
+	SYNC_SEND_TO_OWNER = 17,
+	SYNC_CLIENTS = 18
 ;
 
 export const PROTOCOL_VERSION = 5;
-
-export const sortMessages = (messages) => messages.sort((a, b) => {
-	const b1 = a.role === "system";
-	const b2 = b.role === "system";
-	if (b1 !== b2) return b2 - b1;
-	return a.id - b.id;
-});

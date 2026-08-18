@@ -1,4 +1,5 @@
 import {debugSymbol} from "unconscious/shared.js";
+import {webviewFetch} from "/vendor/jsBridge.js";
 
 /**
  * @param {Error} err
@@ -10,6 +11,7 @@ const networkErrorHandler = (url, err) => {
 };
 
 export const ORIGINAL_ERROR = debugSymbol("OriginalError");
+const FETCH = IS_ANDROID_BUILD ? webviewFetch : fetch;
 
 async function responseErrorHandler(res) {
 	const func = res.headers.get('content-type')?.startsWith('application/json') ? 'json' : 'text';
@@ -31,7 +33,7 @@ async function responseErrorHandler(res) {
  * @param {RequestInit} data
  * @return {Promise<*>}
  */
-export const jsonFetch = (url, {key = "", ...data} = {}) => fetch(url, {
+export const jsonFetch = (url, {key = "", ...data} = {}) => FETCH(url, {
 	method: data.body ? "POST" : "GET",
 	referrerPolicy: 'no-referrer',
 	...data,
@@ -68,7 +70,7 @@ const makeHeaders = (data, key) => {
  * @param {function(OpenAI.Response, string): void} onChunk
  * @return {Promise<Response>}
  */
-export const sseFetch = (url, {key = "", json = true, ...data} = {}, onChunk) => fetch(url, {
+export const sseFetch = (url, {key = "", json = true, ...data} = {}, onChunk) => FETCH(url, {
 	method: "POST",
 	referrerPolicy: 'no-referrer',
 	...data,
@@ -110,8 +112,11 @@ export const sseFetch = (url, {key = "", json = true, ...data} = {}, onChunk) =>
 				else if (line.startsWith('data: ')) {
 					const data = line.slice(6);
 					if (data === '[DONE]') return;
+					if (!data) continue;
 
 					const obj = json ? JSON.parse(data) : data;
+					if (null == obj) continue;
+
 					let error = obj.error;
 					try {
 						onChunk(obj, event);

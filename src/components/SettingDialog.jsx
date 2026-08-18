@@ -75,8 +75,8 @@ export function SettingDialog(oldUI) {
 	let body;
 	let dialog = <div className="modal-overlay hide" id={"settingDialog"} style={"display:none;z-index:3"}>
 		<div ref={header} className="modal ntp">
-			<div>
-				<PresetDropdown/>
+			<div style={"display:flex;flex-direction:column"}>
+				<div><PresetDropdown/></div>
 				<div className="sidebar-list scroll">
 					<div className={"_vl"} onClick.delegate{".chat-item"}={({delegateTarget}) => {
 						delegateTarget.parentElement.querySelector(".active").classList.remove("active");

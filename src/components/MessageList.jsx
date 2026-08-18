@@ -15,7 +15,7 @@ import {
 	selectedConversation,
 	updateMessageUI
 } from "../states.js";
-import {submitUserChatMessage} from "../api-request.js";
+import {isContentfulMessage, submitUserChatMessage} from "../api-request.js";
 import {
 	copyButtonAnimation,
 	downloadFile,
@@ -26,7 +26,7 @@ import {
 	prettyError
 } from "../utils/utils.js";
 import "./MessageList.css";
-import {toolScriptRegistry, undoToolCalls} from "../toolset.js";
+import {getToolParameters, toolScriptRegistry, undoToolCalls} from "../toolset.js";
 import {getBillingLog, markMessageDirty} from "../database.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
 import {
@@ -101,22 +101,35 @@ const chunkRenderer = m => {
 				return <AudioPlayer src={src} />
 			}
 			case "text": {
-				const {text} = item;
+				let text = item.text;
 				if (typeof text !== "string") {
+					if (!text) return <div className={"md"}><em>没有数据</em></div>;
 					return createBlobDisplay(text, "ri-file-text-line");
 				}
+
+				ineditable:
 				if (isEditing(m.key)) {
-					return <EditWidget value={text} placeholder={"消息正文 content"} onChange={value => {
-						const message = m.key;
-						if (!Array.isArray(message.content)) {
-							message.content = value;
+					let assistantKey = item.key;
+					if (assistantKey) {
+						if (Array.isArray(assistantKey)) {
+							text = assistantKey[0].content[assistantKey[1]].text;
+						} else if (typeof assistantKey.content === 'string') {
+							text = assistantKey.content;
 						} else {
-							message.content[item.key].text = value;
+							break ineditable;
+						}
+					}
+
+					return <EditWidget value={text} placeholder={"消息正文 content"} onChange={value => {
+						if (Array.isArray(assistantKey)) {
+							assistantKey[0].content[assistantKey[1]].text = value;
+						} else {
+							assistantKey.content = value;
 						}
 					}} />;
-				} else {
-					return config.afkState === 2 ? <div className={"md"} style={"white-space:pre-line"}>{text}</div> : renderMarkdownToElement(<div className="md"/>, text);
 				}
+
+				return config.afkState === 2 ? <div className={"md"} style={"white-space:pre-line"}>{text}</div> : renderMarkdownToElement(<div className="md"/>, text);
 			}
 			case "images":
 				return <div className="gallery">{item.images.map(part => {
@@ -185,6 +198,8 @@ const chunkRenderer = m => {
 							totalOutput / totalTime,
 							logs.findLast(Boolean)?.finish_reason
 						];
+					}, (err) => {
+						logData.value = "错误："+prettyError(err)
 					});
 				}} style={"--height:"+(30 + (m.end_index-m.index)*64)+"px"}>
 					<i className="ri-information-line"></i>
@@ -220,6 +235,9 @@ const chunkRenderer = m => {
 			case "branch":
 				return (
 					<div className="branch-selector" onClick.delegate{'button'}={({delegateTarget}) => {
+						// TODO 到时候隐藏按钮
+						if (unconscious(abortCompletion)) return;
+
 						const branchIndex = item.current + parseInt(delegateTarget.dataset.step);
 						if (item.callback) item.callback(branchIndex);
 						else setBranchIndex(m.key, branchIndex);
@@ -258,7 +276,7 @@ const defaultRenderContent = (message, chunks, content) => {
 				}
 				chunks.push({
 					...chunk,
-					key: i
+					key: [message, i]
 				});
 			}
 		}
@@ -316,10 +334,10 @@ const chunkGather = (message, chunks, index, messages) => {
 			const name = tool.function.name;
 			const fn = toolScriptRegistry[name];
 			const response = message.tool_responses?.[j];
-			if (fn?.renderer && response && (null != fn.interactive || response.time)) {
+			if (fn?.renderer && response && (null != fn.interactive || response.time) && getToolParameters(response, tool, true)) {
 				chunks.push({
 					type: "tool_ui",
-					name: name,
+					name,
 					idx: index,
 					response,
 					tool
@@ -505,6 +523,8 @@ function updateButtons(m, container) {
 	}
 }
 
+const BRANCH_TEMP_ID = -3;
+
 const buttonHandler = (e) => {
 	const btn = e.target.closest(".btn-line button[data-action]");
 	if (!btn) return;
@@ -550,7 +570,9 @@ const buttonHandler = (e) => {
 				submitUserChatMessage();
 			};
 
-			let mode = self.end_index !== msgArr.length ? true : (null != selectedConversation.bm_leaf || config.model !== message.model || config.branchRegen);
+			let mode = self.end_index !== msgArr.length ? true
+				: isContentfulMessage(message) ? (null != selectedConversation.bm_leaf || config.model !== message.model || config.branchRegen)
+					: false;
 			if (null == mode) {
 				SimpleModal({
 					title: "询问",
@@ -618,7 +640,7 @@ const buttonHandler = (e) => {
 
 			const clonedMessages = [...messages];
 			const clonedMessage = cloneMessage(message);
-			clonedMessage.id = -3;
+			clonedMessage.id = BRANCH_TEMP_ID;
 			clonedMessage[PINNED] = true;
 			selectedConversation[CURRENT_EDITING] = clonedMessages[self.index] = clonedMessage;
 			messages.value = clonedMessages;
@@ -645,7 +667,7 @@ const buttonHandler = (e) => {
 			self[PINNED] = false;
 			vl.setItem(vl.findIndex(self), self);
 
-			if (message.id === -3) {
+			if (message.id === BRANCH_TEMP_ID) {
 				delete message.id;
 				// cloned message
 				copyBranchAt(message);
@@ -691,7 +713,7 @@ let vl;
 
 function getBranchChunk(message, chunks) {
 	const [branchIndex, branchCount] = getBranchIndexCount(message);
-	if (branchCount > 1) {
+	if (branchCount > 1 && message.id !== BRANCH_TEMP_ID) {
 		chunks.push({
 			type: "branch",
 			current: branchIndex,
@@ -740,7 +762,7 @@ const combinedMessages = $computed((oldMessages) => {
 		if (message.role === "assistant") {
 			if (config.combineToolCalls) {
 				for (; i < arr.length; i++) {
-					if (message.finish_reason !== "tool_calls" || isEditing(arr[i]) || arr[i].role !== "assistant") break;
+					if (!message.tool_calls || isEditing(arr[i]) || arr[i].role !== "assistant") break;
 					message = arr[i];
 					chunkGather(message, chunks, i, arr);
 				}
@@ -837,16 +859,22 @@ export function MessageList() {
 		const div = <div onMouseEnter={callback} onTouchStart.passive={callback} className={`msg ${role} ${config.messageTheme||''}`} _identity={m}>
 			<div className={"role"}>
 				{isEditing(m.key) && isAI && roleSelection.includes(m.role) ? <select onChange={e => {
-					const role = m.role = m.key.role = e.target.selectedOptions[0].value;
-					m.content = (role==='assistant'?$state:unconscious)(m.content);
+					const realMessage = m.key;
+					const role = m.role = realMessage.role = e.target.selectedOptions[0].value;
+					const isAssistant = role==='assistant';
+					if (!isAssistant) {
+						delete realMessage.think;
+						delete realMessage.tool_calls;
+						delete realMessage.tool_responses;
+					}
 					vl.setItem(vl.findIndex(m), m);
 					$update(updateMessageUI);
 				}}>
 					{roleSelection.map(name =>
 						<option selected={m.role === name} value={name}>{name}</option>)
 					}
-				</select> : <b>{roleName(m)}</b>}
-				<span className='time'>{formatDate('Y-m-d H:i:s', time??null)}</span>
+				</select> : <b className={"stroke"}>{roleName(m)}</b>}
+				<span className='time stroke'>{formatDate('Y-m-d H:i:s', time??null)}</span>
 				<span className='spacer'></span>
 			</div>
 			{isMobile ? null : buttonDiv}
@@ -893,6 +921,7 @@ export function MessageList() {
 			requestAnimationFrame(() => {
 				vl._visible = true;
 				vl.scrollToBottom();
+				vl.render();
 			});
 		};
 		wrapper.vl = vl;

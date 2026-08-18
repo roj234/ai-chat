@@ -1,6 +1,6 @@
 import {bakeSchema} from "unconscious/common/msgpack.js";
 
-export const msgpack_schema_version = "13";
+export const msgpack_schema_version = "14";
 export const msgpack_schema = [];
 msgpack_schema.push(
 	// generic
@@ -13,7 +13,16 @@ msgpack_schema.push(
 
 	// conversation
 	"activatedModules", "allowedTools", "grantedTools",
-	"bm_leaf", "resumeId",
+	"bm_leaf",
+	"resumeId", "roleId", "contextUsage",
+	// FileSystem
+	["mnt", msgpack_schema],
+	"fs_type", "fs_base", "fs_server", "fs_builtin", "fs_events",
+	// subagent
+	"presets", "overrides",
+	"sa_notify", "sa_async",
+	// inject message
+	["pendingMessages", msgpack_schema],
 
 	// messages
 	["role", null, ["system", "user", "assistant"]],
@@ -53,6 +62,7 @@ msgpack_schema.push(
 	["tool_responses",
 		["time", "content", "success", "duration"]
 	],
+	"label",
 
 	// logs
 	"preset_id", "request_id", "provider",

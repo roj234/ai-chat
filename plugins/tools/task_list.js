@@ -16,17 +16,18 @@ const TaskCreate = {
 			description: { type: 'string' },
 			status: {
 				type: 'string',
-				enum: ['pending', 'in_progress'],
+				enum: ['pending', 'in_progress', 'completed'],
+				default: 'pending'
 			},
 		},
 		required: ['title', 'description', 'status'],
 	},
 	script(par, resp, conv) {
 		const tasks = conv.tasks || (conv.tasks = []);
-		const nextTaskId = tasks.push({...par});
+		const nextTaskId = tasks.push({...par, status: par.statue ?? 'pending'});
 		resp.id = nextTaskId;
 		updateConversationState(conv, "TaskList:tasks");
-		return "Task created, id="+nextTaskId;
+		return "Task #"+nextTaskId+" created.";
 	},
 	title(req, ctx) {
 		const par = getToolParameters(ctx, req);
@@ -153,7 +154,7 @@ onConversationLoaded((conv) => {
 							<div className="progressFill"
 								 style:reactive={{width: () => `${(done_r / total_r) * 100}%`}}/>
 						</div>
-						<span className="progressText">{done_r}/{total_r}/{failed_r}</span>
+						<span className="progressText">{done_r}/{total_r}</span>
 						<button className="collapse" onClick={() => {
 							taskDiv.classList.toggle("collapsed");
 						}}>▼
@@ -172,13 +173,9 @@ onConversationLoaded((conv) => {
 							</div>
 						), JSON.stringify)}
 					</div>
-					<div className={"header footer"}>
-						<span className="title">上下文</span>
-						<div className="progressBar">
-							<div className="progressFill"
-								 style:reactive={{width: contextUsagePct}}/>
-						</div>
-						<span className="progressText" title={contextUsage}>{contextUsagePct}</span>
+					<div className="footer">
+						<span>成功 {success_r}</span>
+						<span>失败 {failed_r}</span>
 					</div>
 				</div>
 			);

@@ -8,12 +8,16 @@ import {viteFontMinify} from 'unconscious/vite/font-minify.js';
 import {minifyJsString} from 'unconscious/vite/minJs.js';
 
 import packageInfo from "./package.json";
+import serverPackageInfo from './backend/package.json' with {type: 'json'};
 
 import fs from 'node:fs';
 import path from "node:path";
+import {rollup} from 'rollup';
+import {defineConfig} from 'vite';
+import {nodeResolve} from 'unconscious/vite/build-backend.js';
 
 const VITE_TRICK_CONFIG = path.resolve(__dirname, 'backend/config.js');
-const VITE_TRICK_SERVER = path.resolve(__dirname, 'backend/server-dev.js');
+const SERVER_BUNDLE = path.resolve(__dirname, 'node_modules/.vite/.aichat-dev-server.mjs');
 
 if (!fs.existsSync(VITE_TRICK_CONFIG)) {
     fs.copyFileSync(path.resolve(__dirname, 'backend/config.example.js'), VITE_TRICK_CONFIG);
@@ -35,7 +39,35 @@ const LOADING_TEMPLATE = fs.readFileSync('./loading.html', 'utf-8').match(/<!--S
     .replaceAll(" {", "{");
 
 //https://cn.vite.dev/
-export default {
+export default defineConfig(async ({mode}) => {
+    if (mode === 'development') {
+        const bundle = await rollup({
+            input: 'backend/server-dev.js',
+            external: [
+                'bufferutil',
+                ...Object.keys(packageInfo.dependencies || {}),
+                ...Object.keys(serverPackageInfo.dependencies || {}),
+            ],
+            plugins: [
+                nodeResolve({basePath: __dirname}),
+                {
+                    name: 'fix-import-meta-dirname',
+                    transform(code, id) {
+                        code = code.replaceAll("IS_ANDROID_BUILD", "false");
+                        if (code.includes('import.meta.dirname')) {
+                            code = code.replace(/import\.meta\.dirname/g, JSON.stringify(path.dirname(id)));
+                        }
+                        return {
+                            code,
+                            map: null
+                        };
+                    }
+                }
+            ],
+        });
+        await bundle.write({file: SERVER_BUNDLE, format: 'esm'});
+    }return {
+
     define: {
         APP_NAME: JSON.stringify(packageInfo.name),
         APP_VERSION: JSON.stringify(packageInfo.version),
@@ -56,12 +88,13 @@ export default {
                 /^btn-/,
                 'closed',
                 'lang',
+                'locked', // presetFastSwitch
                 'my/storyTurn'
             ]
         }),
         minifyJsString(),
         viteFontMinify(),
-        (await import("file://"+VITE_TRICK_SERVER)).serverDevPlugin(),
+        ...(mode === 'production' ? [] : [(await import("file://"+SERVER_BUNDLE)).serverDevPlugin()]),
         {
             name: 'inject-build-time',
             transformIndexHtml(html) {
@@ -147,4 +180,4 @@ export default {
             },
         }
     }
-};
+}});

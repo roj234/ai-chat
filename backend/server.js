@@ -1,3 +1,5 @@
+import "./utils/log-hook.js";
+import "./utils/fetch-hook.js";
 import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs/promises';
@@ -11,9 +13,7 @@ import {createZipRouter} from "./utils/zipRouter.js";
 import {closeAllConnections} from "./utils/UserManager.js";
 import {PROTOCOL_VERSION} from "./sync.js";
 import {ZipReader} from "unconscious/common/zip-io.js";
-import {hookLogger} from "./utils/logger.js";
 import path from "node:path";
-import {hookFetch} from "./utils/fetch-hook.js";
 
 const options = {
 	addr: { type: 'string', short: 'a', default: '127.0.0.1' },
@@ -49,9 +49,6 @@ if (cert) {
 	serverType = http;
 	serverOptions = {}
 }
-
-hookLogger();
-const _originalFetch = hookFetch();
 
 async function fileWatcher(path, callback, uiName) {
 	let retries = 0;

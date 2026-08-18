@@ -7,6 +7,7 @@ import {jsonEval, jsonGet} from "unconscious/common/json-schema-utils.js";
 import {applyDelta, sseFetch} from "/common/openai-api-utils.js";
 import {highlightJsonLike} from "/src/markdown/highlight.js";
 import {AsyncButton} from "/src/components/AsyncButton.jsx";
+import {renderMarkdownToElement} from "/src/markdown/markdown.js";
 
 const EMPTY_WAV = `UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=`;
 const EMPTY_BMP = `Qk06AAAAAAAAADYAAAAoAAAAAQAAAAEAAAABABgAAAAAAAQAAAATCwAAEwsAAAAAAAAAAAAA/wAAAA==`;
@@ -36,12 +37,15 @@ let streamFlag;
 const test = async (body, flag, err1) => {
 	body.model = config.model;
 	if (streamFlag) body.stream = true;
-	if (!body.max_completion_tokens) body.max_completion_tokens = streamFlag ? 16 : 1;
+	if (!body.max_completion_tokens) body.max_completion_tokens = 16;
 
 	if (flag !== 2) {
 		const [reasoningPath, reasoningEnabledValue = 'true', reasoningDisabledValue = 'false'] = (config.reasoningPath||"reasoning/enabled").split(",");
 		jsonEval(body, reasoningPath, "set", JSON.parse(flag === 3 ? reasoningEnabledValue : reasoningDisabledValue));
 	}
+
+	const additionalBody = config.additionalBody;
+	if (additionalBody) Object.assign(body, additionalBody);
 
 	let completion;
 	let p = sseFetch(resolveDBRelativeURL(config.endpoint)+(config.mode === "chat" ? '/chat/completions' : '/completions'), {
@@ -57,10 +61,12 @@ const test = async (body, flag, err1) => {
 			Object.assign(completion, rest);
 		}
 	}).then(() => {
-		let msg = completion.choices[0] || {};
+		let msg = completion?.choices?.[0];
+		if (!msg) throw completion ? JSON.stringify(completion) : "Null Response";
+
+		if (typeof flag === 'string') return err1(jsonGet(msg, flag))
 		msg = msg.delta || msg.message;
 		if (!msg) throw completion;
-		if (typeof flag === 'string') return err1(jsonGet(msg, flag))
 		return flag === 3 ? msg.content : flag === 2 ? msg : msg.tool_calls || msg.content || msg.reasoning || msg.reasoning_content;
 	});
 
@@ -112,7 +118,7 @@ async function checkModelCapability() {
 	const hello = () => {return{
 		messages: [{role: "user", content: "Hi"}]
 	}};
-	const isThinking = (json) => Object.keys(json).filter(key => json[key]).toString().includes("reason");
+	const isThinking = (json) => Object.keys(json).filter(key => json[key]).toString().includes("reason") || json.content.startsWith("<think>");
 
 	let json = await test(hello(), 2);
 	let reasoning = '支持';
@@ -143,8 +149,7 @@ async function checkModelCapability() {
 		config.reasoningEffortPath = '';
 		for (const [v, k] of reason_budget_keys) {
 			const body = {
-				messages: [{role: "user", content: "Compute 375*293"}],
-				max_completion_tokens: 16
+				messages: [{role: "user", content: "Compute 375*293"}]
 			}
 			Object.assign(body, v);
 			json = await test(body, 3);
@@ -167,9 +172,8 @@ async function checkModelCapability() {
 				max_completion_tokens: 32
 			}
 			try {
-				let content = await test(body, 3);
+				let content = await test(body);
 				if (content && (content.startsWith(CHECK) || content.trim()[0] === ("\"") || content.endsWith("```"))) {
-
 					config.prefillPath = k;
 					return config.canPrefill = true;
 				}
@@ -195,7 +199,7 @@ async function checkModelCapability() {
 			tools: [get_time_tool],
 			//tool_choice: get_time_tool,
 			max_completion_tokens: 50,
-		}, '/tool_calls/0/function/name', (fn) => fn === 'get_time'),
+		}, 'message/tool_calls/0/function/name', (fn) => fn === 'get_time'),
 		// audio
 		test({
 			messages: [{
@@ -236,7 +240,7 @@ async function checkModelCapability() {
 			],
 			logprobs: true,
 			top_logprobs: 2
-		}, '/logprobs/content/0/id', (fn) => typeof fn === 'number'),
+		}, '/logprobs/content/0/logprob', (fn) => typeof fn === 'number'),
 		// json object
 		test({
 			model: config.model,
@@ -292,9 +296,9 @@ async function checkModelCapability() {
 		}),
 	]);
 
-	const isJson = (text) => {
+	const isJson = (text, n) => {
 		try {
-			return null != JSON.parse(text).name;
+			return null != JSON.parse(text)[n];
 		} catch {
 			return false;
 		}
@@ -308,10 +312,10 @@ async function checkModelCapability() {
 	if (results[3]) modalities.push("video");
 	config.modalities = modalities;
 
-	if (isJson(results[8])) config.jsonSupport = 3;
-	else if (isJson(results[7])) config.jsonSupport = 2;
-	else if (isJson(results[6])) config.jsonSupport = 1;
-	else config.jsonSupport = 0;
+	config.jsonSupport = 0;
+	if ((results[6] = isJson(results[6], 'name'))) config.jsonSupport = 1;
+	if ((results[7] = isJson(results[7], 'my_name_is'))) config.jsonSupport = 2;
+	if ((results[8] = isJson(results[8], 'next_field'))) config.jsonSupport = 3;
 
 	DI_settings.sync();
 
@@ -319,7 +323,7 @@ async function checkModelCapability() {
 	results.push(reasoningBudget);
 
 	console.log(results);
-	return results.map((item, i) => title[i]+": "+(i>=9?item:((i>=6?isJson(item):item)?"支持":"不支持"))).join('\n');
+	return results.map((item, i) => title[i]+": "+(i>=9?item:(item?"支持":"不支持"))).join('\n');
 }
 
 onLoad(() => {
@@ -333,12 +337,18 @@ onLoad(() => {
 				prompt: "Hi",
 			} : {
 				messages: [{role: "user", content: "Hi"}],
-			}, 1).then(() => {
+			}, 2).then((msg) => {
 				if (isLegacyCompletionMode) return resolve();
+
+				const {content, ...rest} = msg;
 
 				SimpleModal({
 					title: "连接成功",
-					message: "点击确认测试模型能力并自动配置软件\n潜在花费：输入 300-3000 token (根据模型能力), 输出 ~300 token",
+					message: <>响应：
+						{renderMarkdownToElement(<div className={"md"} />, content)}
+						<div dangerouslySetInnerHTML={highlightJsonLike(rest)} />
+						{`点击确认测试模型能力并自动配置软件
+潜在花费：输入 300-3000 token (根据模型能力), 输出 ~300 token`}</>,
 					onConfirm() {
 						checkModelCapability().then((res) => {
 							SimpleModal({
@@ -375,5 +385,5 @@ onLoad(() => {
 			});
 		};
 		check();
-	})}>测试API</AsyncButton>);
+	})}>测试</AsyncButton>);
 })

@@ -27,12 +27,22 @@
 			justify-content: center;
 
 			background-color: var(--bg);
+			overflow: hidden;
+			z-index: 10;
+			user-select: none;
+		}
+
+		/* 背景网格走 GPU 合成，避免每帧全屏重绘 */
+		#loading::before {
+			content: "";
+			position: absolute;
+			inset: -40px;
+			z-index: -1;
 			background-image:
 					linear-gradient(rgba(0, 240, 255, 0.04) 1px, transparent 1px),
 					linear-gradient(90deg, rgba(0, 240, 255, 0.04) 1px, transparent 1px);
 			background-size: 40px 40px;
 			animation: gridMove 4s linear infinite;
-			z-index: 99;
 		}
 
 		.box {
@@ -125,7 +135,6 @@
 			animation: crtShutdown 0.5s cubic-bezier(0.25, 0, 0.55, 1) forwards;
 			pointer-events: none;
 		}
-
 		@keyframes crtShutdown {
 			50% {
 				transform: scaleY(0.015) scaleX(1);
@@ -141,9 +150,16 @@
 		}
 
 		@media (prefers-reduced-motion: no-preference) {
+			#loading .cursor {
+				animation: blink 1.1s steps(1) infinite;
+			}
+
+			@keyframes blink {
+				50% { opacity: 0; }
+			}
+
 			@keyframes gridMove {
-				0% {  background-position: 0 0, 0 0; }
-				100% { background-position: 0 40px, 40px 0; }
+				to { transform: translate(40px, 40px); }
 			}
 
 			@keyframes hexDash {
@@ -202,7 +218,7 @@
             <script>
 				t.innerHTML = t.innerHTML.replaceAll("启用 JavaScript 以继续", document.startViewTransition ? "系统加载中" : "你的浏览器版本过低 (&lt; Chrome 111)<br/>我们不对因此导致的任何问题负责");
             </script>
-            <div class="sub">SYSTEM LOADING</div>
+            <div class="sub">SYSTEM LOADING<span class="cursor">▮</span></div>
         </div>
     </div>
 </div>

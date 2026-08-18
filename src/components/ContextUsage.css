@@ -1,0 +1,29 @@
+
+.ring {
+	width: 30px;
+	height: 30px;
+
+	display: flex;
+	justify-content: center;
+	align-items: center;
+
+	& svg {
+		position: absolute;
+		transform: rotate(-90deg);
+		pointer-events: none;
+	}
+
+	& .track {
+		fill: none;
+		stroke: var(--chip-bg);
+		stroke-width: 2px;
+	}
+
+	& .bar {
+		fill: none;
+		stroke: var(--text);
+		stroke-width: 2px;
+		/* 关键：用 dasharray + dashoffset 画进度，并加过渡 */
+		transition: stroke-dashoffset 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+	}
+}

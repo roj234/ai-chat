@@ -1,7 +1,7 @@
 import './ConversationList.css';
 import {VirtualList} from 'unconscious/common/VirtualList.js';
 import {formatDate} from 'unconscious/common/Utils.js';
-import {$state, $update, $watch, $watchWithCleanup, ONCE_EVENT, unconscious} from 'unconscious';
+import {$state, $update, $watch, $watchWithCleanup, debugSymbol, ONCE_EVENT, unconscious} from 'unconscious';
 import {deleteConversation, getKV, setKV, updateConversation} from "../database.js";
 import {
 	conversations,
@@ -38,6 +38,7 @@ const hoverMenu = <div className={"dropdown"} style={"position:fixed"}>
 		<label data-action={"edit"}>编辑标题</label>
 		<label data-action={"export"}>导出</label>
 		<label data-action={"pin"}>{() => PINNED_ITEMS.has(unconscious(hoverConversationIndex)) ? "取消置顶" : "置顶"}</label>
+		<label data-action={"multi"}>多选</label>
 		{() => unconscious(hoverConversationIndex) ? <label data-action={"delete"}>删除</label> : null}
 	</div>
 </div>;
@@ -108,6 +109,8 @@ export const setConversationTitle = (conv, title, skipSync) => {
 	if (!skipSync) updateConversation(conv);
 };
 
+const SELECTED = debugSymbol("SelectedInConversationList");
+
 /**
  * 渲染对话列表，按时间分组，支持选择、编辑标题、删除。
  * @param {Object} props
@@ -116,6 +119,41 @@ export const setConversationTitle = (conv, title, skipSync) => {
  */
 export const ConversationList = (/*{ conversations, selectedConversation, messages }*/) => {
 	let skipNext;
+	let inSelectionMode = 0;
+
+	const prependMultiselectControl = () => {
+		groupAndConvArr.unshift(<div className={"multiselect-bar"}>
+			<button className={"btn ghost"} onClick={e => {
+				conversations.forEach(item => item[SELECTED] ^= 1);
+				vl.dom.replaceChildren();
+				vl.render();
+			}}>反选
+			</button>
+			<button className={"btn danger"} onClick={e => {
+				const ids = conversations.filter(item => item[SELECTED]);
+				SimpleModal({
+					title: "确认删除选中的 " + ids.length + " 条对话？",
+					accent: "danger",
+					onConfirm() {
+						if (selectedConversation[SELECTED]) resetConversation();
+						return Promise.all(ids.map(deleteConversation)).then(() => {
+							conversations.value = conversations.value.filter(item => !item[SELECTED]);
+						});
+					}
+				})
+			}}>删除
+			</button>
+			<button className={"btn ghost"} onClick={e => {
+				inSelectionMode = 0;
+				groupAndConvArr.shift();
+				conversations.forEach(item => { delete item[SELECTED]; })
+				vl.dom.replaceChildren();
+				vl.render();
+			}}>退出
+			</button>
+		</div>);
+	};
+
 
 	const eventHandler = e => {
 		const target = e.target;
@@ -128,6 +166,12 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 		let test = target.closest('label');
 		if (test) {
 			switch (test.dataset.action) {
+				case "multi":
+					inSelectionMode = 1;
+					prependMultiselectControl();
+					vl.dom.replaceChildren();
+					vl.render();
+					return;
 				case "pin":
 					if (!PINNED_ITEMS.delete(conv.id)) {
 						PINNED_ITEMS.add(conv.id);
@@ -216,16 +260,21 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 
 			const btn = conv.id === 0 ? <button className="ri-folder-transfer-fill" title={"文件传输助手"}/> : <button className={"edit-btn ri-menu-line"} title={"菜单"} />;
 			btn.addEventListener(isMobile ? 'click' : 'mouseover', mouseHandler);
+			const running = runningConversations.has(conv.id);
 
+			// 多选删除 删除未使用的文件
 			return <div
 				_conv={conv}
 				className={`chat-item${unconscious(selectedConversation) === conv ? ' active' : ''}`}
 				title={conv.title+" (#"+conv.id+")\n"+formatDate("Y-m-d H:i:s", conv.time)}
 			>
-				{runningConversations.has(conv.id) && <span className={"spinner"} />}
+				{(!running && inSelectionMode) && <input type={"checkbox"} checked={conv[SELECTED]} onClick.stop={e => {
+					conv[SELECTED] = e.target.checked;
+				}}/>}
+				{running && <span className={"spinner"} />}
 				{conv[LOCKED] && <span className="ri-lock-line" title={"其它端正在编辑"} />}
 				<span className="chat-title">{conv.title || '无标题'}</span>
-				{btn}
+				{inSelectionMode ? null : btn}
 			</div>;
 		}
 	});
@@ -249,16 +298,22 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 	$watchWithCleanup(conversations, () => {
 		groupAndConvArr.length = 0;
 
+		if (inSelectionMode) prependMultiselectControl();
+
 		const groups = groupConversations();
 		for (let i = 0; i < 5; i++) {
 			const val = groups.get(i);
 			if (val) {
-				groupAndConvArr.push(<div className="chat-group"><div>{GROUP_LABELS[i]}</div></div>, ...val);
+				groupAndConvArr.push(<div className="chat-group">
+					<div>{GROUP_LABELS[i]}</div>
+				</div>, ...val);
 				groups.delete(i);
 			}
 		}
 		for (const [k, v] of [...groups].sort(([ka], [kb]) => ka - kb)) {
-			groupAndConvArr.push(<div className="chat-group"><div>{k}</div></div>, ...v);
+			groupAndConvArr.push(<div className="chat-group">
+				<div>{k}</div>
+			</div>, ...v);
 		}
 		vl.render();
 	}, false);

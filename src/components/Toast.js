@@ -1,9 +1,6 @@
 import './Toast.css';
-import {onLoad} from "../hooks.js";
 
-const container = <div className="toasts" />;
-
-onLoad((app) => app.append(container));
+let container;
 
 /**
  *
@@ -12,6 +9,8 @@ onLoad((app) => app.append(container));
  * @param {number} timeout
  */
 export const showToast = (message, type, timeout = 5000) => {
+	if (!container) document.body.append(container = <div className="toasts" />);
+
 	const closeToast = () => {
 		clearTimeout(timer);
 		elm.classList.add("closing");

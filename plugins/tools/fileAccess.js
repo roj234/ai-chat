@@ -3,15 +3,15 @@ import SimpleModal from "/src/components/SimpleModal.jsx";
 import {prettyError, updateOnIntersected} from "/src/utils/utils.js";
 import {SETTINGS} from "/src/settings.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
-import {config, selectedConversation} from "/src/states.js";
+import {config, EVENT_BUS, selectedConversation} from "/src/states.js";
 import {showToast} from "/src/components/Toast.js";
 import {createWebFileSystem, resolveDirectory} from "./WebFileSystem.js";
 import {createConfigFileSystem, createVirtualFileSystem} from "./VirtualFileSystem.js";
-import {ContentPart} from "/src/toolset.js";
+import {ContentPart, getToolParameters} from "/src/toolset.js";
 import {jsonFetch} from "/common/openai-api-utils.js";
 import {$state, debugSymbol, unconscious} from "unconscious";
 import {formatSize} from "unconscious/common/Utils.js";
-import {isIDB} from "/src/database.js";
+import {getMessagesCacheFirst, isIDB} from "/src/database.js";
 import {SHA256} from "unconscious/common/SHA256.js";
 import "./fileAccess.css";
 import {normalizePath} from "unconscious/common/path-utils.js";
@@ -31,6 +31,45 @@ const [transaction, deleteDatabase] = IndexedDBAccess(APP_NAME+":fileAccess", 2,
 	if (!db.objectStoreNames.contains(LOCAL_STORE_NAME)) db.createObjectStore(LOCAL_STORE_NAME, { keyPath: 'name' });
 	if (!db.objectStoreNames.contains(API_STORE_NAME)) db.createObjectStore(API_STORE_NAME, { keyPath: 'uri' });
 });
+
+
+const NEWLY_CREATED_FILES = debugSymbol("WrittenFiles");
+
+export const MarkAsChangeable = new Set(['Read', 'Write', 'Edit', 'Patch']);
+
+/**
+ * @param {AiChat.Conversation} conv
+ * @param {string} [path]
+ * @return {Promise<*>}
+ */
+export async function getChangeableFiles(conv, path) {
+	let files = conv[NEWLY_CREATED_FILES];
+	if (!files) {
+		if (path) return;
+
+		files = conv[NEWLY_CREATED_FILES] = new Set;
+		for (const message of await getMessagesCacheFirst(conv)) {
+			const resp = message.tool_responses;
+			if (resp) {
+				for (let i = 0; i < resp.length; i++) {
+					const k = message.tool_calls[i], v = resp[i];
+					if (v.success && MarkAsChangeable.has(k.function.name)) {
+						const tp = getToolParameters(v, k, true);
+						if (tp) files.add(tp.path);
+					}
+				}
+			}
+		}
+	} else if (path) {
+		files.add(path);
+	}
+	return files;
+}
+
+EVENT_BUS.on(['conversation', 'branch'], (e) => {
+	const conv = e[0];
+	delete conv[NEWLY_CREATED_FILES];
+})
 
 /**
  *
@@ -81,7 +120,7 @@ const deleteApiServer = uri => transaction(tx => tx.objectStore(API_STORE_NAME).
 const directoryPickerAvailable = window.showDirectoryPicker;
 
 const FS_OPENING = debugSymbol("FS_OPENING");
-export const FS_INSTANCE = debugSymbol("FS_INSTANCE");
+export const FS_INSTANCE = debugSymbol("FileSystem");
 
 async function initializeWebFileSystem(fs) {
 	if (!fs.fs) {
@@ -105,7 +144,7 @@ async function initializeWebFileSystem(fs) {
 	return fs.fs;
 }
 
-const MSG = "文件系统API响应格式有误。此异常不可重试，无法恢复，请向系统管理员确认 URL 是否配置正确。";
+const MSG = "文件服务响应异常，你无法自行解决，请向管理员确认 URL 是否配置正确。";
 /**
  *
  * @param {string} baseUrl
@@ -250,7 +289,7 @@ async function callFBI(mountPoint) {
 	if (!fs_type) {
 		fs_type = await new Promise((resolve, reject) => {
 			const el = SimpleModal({
-				title: "少年，与 "+(fs_name||"项目根目录")+" 签订契约吧！",
+				title: mountPoint.fs_label || ("少年，与 "+(fs_name||"项目根目录")+" 签订契约吧！"),
 				message: (
 					<div className={"fs-protocols agent-popup"}
 						 onClick.delegate{"button"}={({delegateTarget}) => {
@@ -347,10 +386,12 @@ async function callFBI(mountPoint) {
 
 	switch (fs_type) {
 		case "db": {
+			await ensureFsAvailability(config.db_server+'fs/', config.db_pat);
 			return remoteFileSystem(config.db_server+'fs/', config.db_pat, fs_base);
 		}
 		case "api": {
 			const [baseUrl, pat] = mountPoint.fs_server;
+			await ensureFsAvailability(baseUrl, pat);
 			return remoteFileSystem(baseUrl, pat, fs_base);
 		}
 		case "local": {
@@ -488,12 +529,16 @@ export const remoteFileSystem = (baseUrl, pat, fileBase) =>
 				body,
 			});
 		} catch (e) {
-			throw "network error";
+			throw "FileService dead";
 		}
 
 		const content = response.headers.get("content-type") || "";
 
 		if (!response.ok) {
+			if (response.status === 404) {
+				throw `${func} is not implemented in this VFS`;
+			}
+
 			if (content.includes("application/json")) throw (await response.json()).error;
 			throw (await response.text());
 		}
@@ -524,7 +569,7 @@ export const callFileSystemFunc = (fs, func, parameters, conv) => {
 	if (typeof fs === 'function') return fs(func, parameters, conv);
 
 	const handler = fs[func];
-	if (!handler) throw `[Unrecoverable error: ${func} is not implemented in current filesystem]`;
+	if (!handler) throw `${func} is not implemented in this VFS`;
 	return handler(parameters);
 };
 
@@ -537,11 +582,10 @@ export const callFileSystemFunc = (fs, func, parameters, conv) => {
 export const getFileSystem = async (path, conv) => {
 	if (path) {
 		if (path.startsWith("~/")) {
-			const path1 = path.slice(2).split("/");
-			const mountPoint = conv.mnt?.[path1.shift()];
+			let end = path.indexOf('/', 2);
+			const mountPoint = conv.mnt?.[path.slice(2, end < 0 ? path.length : end)];
 			if (!mountPoint) throw `mount point ${path} not found`;
-
-			return [path1.join('/'), await createFileSystem(mountPoint)];
+			return [end < 0 ? "" :path.slice(end+1), await createFileSystem(mountPoint)];
 		}
 
 		if (conv.fs_type !== 'api' && path[0] === '/' && !path.startsWith("/tmp/") && path !== '/tmp')
@@ -604,8 +648,8 @@ SETTINGS.push({
 	type: "radio",
 	required: true,
 	choices: {
+		'自动映射': true,
 		'手动选择': false,
-		'自动映射': true
 	}
 }, {
 	id: "fs_trashCan",
@@ -615,8 +659,8 @@ SETTINGS.push({
 	type: "radio",
 	required: true,
 	choices: {
+		'启用': true,
 		'禁用': false,
-		'启用': true
 	}
 });
 

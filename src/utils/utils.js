@@ -12,9 +12,11 @@ export const resolveDBRelativeURL = (url) => {
 			return url;
 		}
 
-		const backendBase = new URL(config.db_server, document.baseURI).toString();
-		const baseDir = backendBase.split('/').slice(0, -3).join('/') + '/';
-		url = new URL(url.slice(1), baseDir).toString();
+		try {
+			const backendBase = new URL(config.db_server, document.baseURI).toString();
+			const baseDir = backendBase.split('/').slice(0, -3).join('/') + '/';
+			url = new URL(url.slice(1), baseDir).toString();
+		} catch {}
 	}
 	if (url.endsWith("/")) url = url.slice(0, -1);
 	return url;
@@ -97,7 +99,7 @@ export const prettyError = error => {
 			}
 			return line;
 		});
-	return (error.message||error.name)+"\n"+(stackTrace.join("\n"));
+	return (error.name?error.name+": ":"")+(error.message||"")+"\n"+(stackTrace.join("\n"));
 };
 
 const TIMER = /* #__PURE__ */ Symbol();
@@ -224,3 +226,5 @@ export const cloneNamed = (obj, names) => {
 	}
 	return result;
 };
+
+export const requestIdleCallback = window.requestIdleCallback || window.setTimeout;

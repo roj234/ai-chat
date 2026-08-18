@@ -6,7 +6,6 @@ import {
 	deserializeRow
 } from "../utils/compression.js";
 import {patch} from "unconscious/common/deepEqual.js";
-import {sortMessages} from "../sync.js";
 
 /**
  * @param {Record<string, function(body: any, ctx: Partial<AiChatBackend.RouteContext>): any>} batcher
@@ -109,7 +108,7 @@ export function registerMessageRoutes(batcher) {
 
 		/** @type {AiChat.Message[]} */
 		const messages = ctx.db.prepare('SELECT id, content, time, data FROM messages WHERE owner = ? ORDER BY id').all(id);
-		return sortMessages(messages.map(deserializeMessage));
+		return messages.map(deserializeMessage);
 	}
 
 	// 创建或更新消息

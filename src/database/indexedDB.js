@@ -1,6 +1,6 @@
 import {getTextContent} from "../utils/utils.js";
-import {sortMessages} from "/backend/sync.js";
 import {IndexedDBAccess} from "../utils/dbAccess.js";
+import {EVENT_BUS} from "../states.js";
 
 const [transaction, deleteDatabase] = IndexedDBAccess('AiChat', 9, (event) => {
 	const db = event.target.result;
@@ -47,9 +47,7 @@ export {deleteDatabase};
  */
 export const getMessages = conversation => transaction((tx, resolve) => {
 	const request = tx.objectStore('messages').index('owner').getAll(conversation.id);
-	request.onsuccess = (event) => {
-		resolve(sortMessages(event.target.result));
-	}
+	request.onsuccess = (event) => resolve(event.target.result);
 }, false, 'messages');
 
 /**
@@ -172,7 +170,7 @@ export const getKV = (key, callback) => {
 export const setKV = (key, value) => transaction(tx => {
 	const store = tx.objectStore('kv');
 	return value === undefined ? store.delete(key) : store.put(value, key);
-}, true, 'kv');
+}, true, 'kv').then(() => EVENT_BUS.post(['kv', key], value));
 
 /**
  * @param {string} type
@@ -216,12 +214,12 @@ export const kvListGet = (type, name) => transaction(tx => tx.objectStore('kvs')
  * @param {Object & AiChat.IDBKVList} value
  * @param {string=} type
  * @param {string=} name
- * @returns {Promise<number>}
+ * @returns {Promise<void>}
  */
 export const kvListSet = (value, type, name) => {
 	if (type) value.type = type;
 	if (name) value.name = name;
-	return transaction(tx => tx.objectStore('kvs').put(value), true, 'kvs');
+	return transaction(tx => tx.objectStore('kvs').put(value), true, 'kvs').then(() => EVENT_BUS.post(['kvs', type, 'set'], name));
 };
 
 /**
@@ -229,7 +227,7 @@ export const kvListSet = (value, type, name) => {
  * @param {string} name
  * @returns {Promise<void>}
  */
-export const kvListDel = (type, name) => transaction(tx => tx.objectStore('kvs').delete([type, name]), true, 'kvs');
+export const kvListDel = (type, name) => transaction(tx => tx.objectStore('kvs').delete([type, name]), true, 'kvs').then(() => EVENT_BUS.post(['kvs', type, 'del'], name));
 
 /**
  * @param {AiChat.BillingLog} log

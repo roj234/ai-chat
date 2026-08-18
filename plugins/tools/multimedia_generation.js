@@ -9,7 +9,10 @@ import {jsonFetch} from "/common/openai-api-utils.js";
 import "./multimedia_generation.css";
 import {DI_settings, onLoad} from "/src/hooks.js";
 import {parseJson5} from "unconscious/common/Json.js";
-import {compressImage, limitMaxSide} from "/src/utils/pure-utils.js";
+
+import {compressImage, limitMaxSide} from "/common/imate.js";
+import {getCombinedPreset} from "../../src/database.js";
+import {fileAccess} from "./fileAccess.js";
 
 /**
  * 将 ComfyUI 流程模板发送至服务器并获取生成的图像 Blob
@@ -121,6 +124,8 @@ const calculateResolution = (ratioStr, mpKey) => {
 	return limitMaxSide(width, height, 2048);
 };
 
+const binaryWrite = fileAccess("writeRaw");
+
 /**
  * @type {AiChat.FunctionTool}
  */
@@ -132,9 +137,8 @@ const Draw = {
 		properties: {
 			prompt: {
 				type: "string",
-				minLength: 250,
 				//example: "Young Chinese woman in red Hanfu, intricate embroidery. Impeccable makeup, red floral forehead pattern. Elaborate high bun, golden phoenix headdress, red flowers, beads. Holds round folding fan with lady, trees, bird. Neon lightning-bolt lamp (⚡️), bright yellow glow, above extended left palm. Soft-lit outdoor night background, silhouetted tiered pagoda (西安大雁塔), blurred colorful distant lights.",
-				description: "高度详细的自然语言提示词，包含主体、环境、构图、光影及艺术风格等。",
+				description: "高度详细的自然语言提示词，包含主体、环境、构图、光影及艺术风格等。建议至少250字",
 				//example: "a fantasy creature girl with draconic features, standing in a mystical forest at twilight. her body is partially translucent with iridescent scales in shades of violet and gold, glowing faintly with bioluminescent patterns. long, flowing hair made of woven vines and glowing moss, eyes with vertical pupils glowing crimson. wearing a cloak woven from shadow and starlight, with a belt of enchanted gemstones. the environment features towering trees with glowing mushrooms, a moonlit sky with auroras, and a stream of liquid light. the lighting is soft and ethereal, with ambient glow from magical flora and fauna. the scene is detailed with textures of organic materials, glowing textures, and surreal elements. \"Mystic Guardian\" written in glowing runes on a floating stone tablet above her, positioned at the center of the frame, using a font with intricate, flowing characters",
 			},
 			aspectRatio: {
@@ -152,7 +156,7 @@ const Draw = {
 		required: ["prompt", "aspectRatio", "longEdge"]
 	},
 
-	script: ({ prompt, negativePrompt, aspectRatio, longEdge }, context) => {
+	script: ({ prompt, negativePrompt, aspectRatio, longEdge }, context, conv) => {
 		const [width, height] = calculateResolution(aspectRatio, longEdge);
 
 		context.prompt = prompt;
@@ -171,8 +175,27 @@ const Draw = {
 			complete();
 			context.images = images;
 
-			const result = new ContentPart().text("Image generated");
-			if (config.modalities.includes("image")) result.image(await compressImage(images[0], {maxSide: 1024}));
+			let basePath = ".generated/"+Math.random().toString(36).slice(3, 10);
+			const result = new ContentPart();
+
+			if (images.length > 1) {
+				await Promise.all(images.map((blob, i) => binaryWrite({
+					path: basePath+i+".png",
+					content: blob
+				}, context, conv)));
+				result.text("All "+images.length+" images saved to directory `"+basePath+"/`");
+			} else {
+				basePath += ".png";
+				const blob = images[0];
+				await binaryWrite({
+					path: basePath,
+					content: blob
+				}, context, conv);
+				result.text("Image saved to `"+basePath+"`");
+				const cfg = await getCombinedPreset(conv);
+				if (cfg.modalities.includes("image")) result.image(await compressImage(blob, cfg));
+			}
+
 			return result;
 		});
 	},
@@ -412,21 +435,35 @@ sampler_name cfg_scale steps
 		"Generate image, audio and speech from text instructions.",
 		[Draw, ListVoices, DesignVoice, Say],
 		{
-			onActivated() {
-				const tools = [];
+			systemPrompt(conv) {
+				let fsType = conv.fs_type;
+				const allowedTools = conv.allowedTools;
+				const activatedModules = conv.activatedModules;
+				const addTools = tool => allowedTools.add(tool.name);
+				const removeTools = tool => allowedTools.delete(tool.name);
 
-				if (config.mg_img_api) {
-					tools.push(Draw);
-					/*if (config.mg_img_api.endsWith("/prompt")) {
-						tools.push(Sing);
-					}*/
+				let prompt = '';
+
+				const hasImageGen = config.mg_img_api;
+				const imageGenTools = [Draw];
+				if (hasImageGen) {
+					imageGenTools.forEach(addTools);
+				} else {
+					imageGenTools.forEach(removeTools);
+					prompt += "Image generation API was not configured by user yet.\n";
 				}
 
-				if (config.mg_tts_api)
-					tools.push(ListVoices, DesignVoice, Say);
+				const hasVoiceGen = config.mg_tts_api;
+				const voiceGenTools = [ListVoices, DesignVoice, Say];
+				if (hasVoiceGen) {
+					voiceGenTools.forEach(addTools);
+				} else {
+					voiceGenTools.forEach(removeTools);
+					prompt += "TTS API was not configured by user yet.\n";
+				}
 
-				return tools;
-			}
+				return prompt && ("<AIGC-info>\n"+prompt+"</AIGC-info>");
+			},
 		});
 
 	onLoad(() => {

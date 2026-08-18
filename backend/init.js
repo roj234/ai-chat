@@ -224,6 +224,11 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 
 	if (INTERACTIVE_LOGIN) {
 		registerPairingRoutes(router);
+	} else {
+		router.post('/login', (ctx) => {
+			ctx.res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+			ctx.res.end(`data: {"skip":1}\n\ndata: [DONE]\n\n`);
+		});
 	}
 
 	registerMessageRoutes(batchTypes);

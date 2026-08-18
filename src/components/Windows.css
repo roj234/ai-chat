@@ -1,0 +1,208 @@
+
+:root {
+    --taskbar-height: 30px;
+    --taskbar: 0;
+}
+
+body.taskbar-open { --taskbar: 1; }
+
+.chat, .sidebar, .toasts {
+    bottom: calc(var(--taskbar-height) * var(--taskbar));
+    transition: bottom 0.25s ease;
+}
+
+.taskbar {
+    z-index: 2;
+
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: var(--taskbar-height);
+
+    display: flex;
+    background-color: var(--panel);
+
+    user-select: none;
+    transition: transform 0.25s ease;
+    /* 无窗口时滑出隐藏 */
+    transform: translateY(calc(var(--taskbar-height) * (1 - var(--taskbar))));
+
+    & .item {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+        padding: 4px;
+        border: 1px solid transparent;
+        color: var(--muted);
+
+        &:hover {
+            background-color: var(--chip-bg);
+            color: var(--text);
+        }
+
+        &.active {
+            background-color: var(--chip-active);
+            border-color: var(--chip-active-border);
+            color: var(--text);
+        }
+
+        &.minimized {
+            opacity: 0.55;
+        }
+
+        gap: 2px;
+    }
+
+    & .icon {}
+
+    & .label {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 13px;
+    }
+
+    & .ri-close-line {
+        position: absolute;
+        right: 4px;
+        padding: 0;
+        transition: color 0.15s, background-color 0.15s;
+        backdrop-filter: blur(2px);
+
+        &:hover {
+            color: var(--error);
+            background: var(--error-bg);
+        }
+    }
+
+    & :not(.item:hover) .ri-close-line { display: none; }
+}
+
+.window {
+    position: fixed;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--panel-2);
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+    animation: winOpen 0.18s ease-out forwards;
+
+    &.closing {
+        animation: winClose 0.1s ease-in forwards;
+        pointer-events: none;
+    }
+
+    &.dragging, &.resizing {
+        transition: none;
+    }
+
+    &.maximized {
+        inset: 0 !important;
+        width: 100vw !important;
+        height: calc(100vh - var(--taskbar-height)) !important;
+
+        & .win-resize { display: none; }
+    }
+
+    &.minimized {
+        opacity: 0;
+        transform: translateY(24px) scale(0.92);
+        pointer-events: none;
+        visibility: hidden;
+    }
+
+    &.dragging .win-header { cursor: grabbing; }
+
+    /* —— 正文 —— */
+    & .win-body {
+        min-height: 0;
+        overflow: auto;
+    }
+
+    /* —— 右下角缩放手柄 —— */
+    & .win-resize {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        width: 16px;
+        height: 16px;
+        z-index: 1;
+        cursor: nwse-resize;
+
+        &::after {
+            content: '';
+            position: absolute;
+            right: 3px;
+            bottom: 3px;
+            width: 7px;
+            height: 7px;
+            border-right: 2px solid var(--muted);
+            border-bottom: 2px solid var(--muted);
+            opacity: 0.45;
+            transition: opacity 0.15s;
+        }
+
+        &:hover::after { opacity: 1; }
+    }
+}
+
+@keyframes winOpen {
+    from { opacity: 0; transform: scale(0.96); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes winClose {
+    to { opacity: 0; transform: scale(0.96); }
+}
+
+.window .win-header {
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 6px;
+    flex: 0 0 auto;
+    background-color: var(--panel);
+    border-bottom: 1px solid var(--border);
+
+    & > * {
+        padding: 6px 0;
+    }
+
+    & .icon {
+        display: flex;
+        align-items: center;
+        color: var(--accent);
+        font-size: 16px;
+        flex: 0 0 auto;
+    }
+
+    & .title {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text);
+        font-size: 14px;
+        font-weight: 600;
+        cursor: grab;
+    }
+
+    & .controls {
+        display: flex;
+        gap: 2px;
+
+        & button {
+            padding: 3px;
+        }
+
+        & .ri-close-line:hover {
+            background-color: var(--error);
+            color: var(--text-on-accent, #fff);
+        }
+    }
+}

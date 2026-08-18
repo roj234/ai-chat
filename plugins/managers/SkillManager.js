@@ -21,7 +21,11 @@ import {MCPClient} from "/common/MCPClient.js";
 const mcps = $state([]);
 let registeredMcps;
 
-PLACEHOLDERS["mdfmt"] = `- Use \`language:label\` in the code fence to set a display label and download filename.`;
+PLACEHOLDERS["mdfmt"] = `- Use "language:filename" to specify both language and filename in Code Fence.
+  Example:
+  \`\`\`python:main.py
+  print("hello")
+  \`\`\``;
 
 const refreshTools = $computed(() => !selectedConversation.ready);
 const currentTools = $computed(() => {

@@ -31,7 +31,7 @@ export async function checkUpdate(force) {
 	const canCheck = time > (updateInfo.retryAfter || 0) && time - lastCheckTime > 4000000;
 
 	let info = updateInfo.info;
-	if (!canCheck) return info;
+	if (!canCheck && updateInfo.version !== BUILD_NUMBER) return info;
 
 	const url = `https://api.github.com/repos/roj234/ai-chat/releases/latest`;
 	const response = await fetch(url, { headers: {
@@ -73,6 +73,7 @@ export async function checkUpdate(force) {
 	};
 
 	updateInfo.value = {
+		version: BUILD_NUMBER,
 		time,
 		info
 	}

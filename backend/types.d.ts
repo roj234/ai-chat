@@ -59,4 +59,12 @@ namespace AiChatBackend {
     type SyncManager = {
         onBatch(ctx: RouteContext, func: string, body: *): void;
     }
+
+    type SSEProxyTarget = {
+        url: string,
+        authorization: string,
+        proxy?: string,
+        headers?: import("node:http").OutgoingHttpHeaders,
+        trace?: boolean | 'packet'
+    }
 }

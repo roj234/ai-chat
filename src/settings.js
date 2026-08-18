@@ -238,7 +238,7 @@ export const SETTINGS = [
 		name: "自定义请求体",
 		title: "以 JSON 格式添加额外请求体参数，将覆盖任何内置设置。",
 		type: "textbox",
-		placeholder: "{\n  \"chat_template_kwargs\": {},\n}",
+		placeholder: "{\n  \"stream_options\": { \"include_usage\": true },\n}",
 		pattern(value) {
 			let data = parseJson5(value);
 			if (!isPureObject(data)) return "必须是JSON对象";
@@ -592,7 +592,7 @@ export const SETTINGS = [
 	{
 		id: "maxToolTurns",
 		_tab: "tools",
-		name: "模型自主调用工具的最长轮数",
+		name: "模型自主调用工具的最长轮数 0 为全自动",
 		type: "number",
 		min: 0,
 		max: 30,
@@ -611,8 +611,19 @@ export const SETTINGS = [
 			"无人值守": 2
 		},
 		title: {
-			"无人值守": '省电 (禁用 markdown 解析)\n允许远程操作 (连接同步服务)\n实验性'
+			"无人值守": '省电 (1 + 禁用 markdown 解析)'
 		}
+	},
+	{
+		id: "toolRetryLimit",
+		_tab: "tools",
+		name: "工具调用重试次数 (实验性)",
+		type: "number",
+		min: 0,
+		max: 5,
+		step: 1,
+		default: 1,
+		title: "向模型发送工具错误前，先简单重试几次。建议0(不使用)或1"
 	},
 	{
 		id: "permittedTools",
@@ -636,6 +647,30 @@ export const SETTINGS = [
 		},
 		load: (obj) => obj && obj.join(" ")
 	},
+	{
+		id: "imageLongLimit",
+		_tab: "tools",
+		_group: "model",
+		name: "图像长边限制 (px)",
+		type: "number",
+		min: 0,
+		max: 4096,
+		step: 256,
+		default: 2048,
+		title: "限制向模型发送的图像的长边（按比例缩小），0禁用。跟随模型配置"
+	},
+	{
+		id: "imageSizeLimit",
+		_tab: "tools",
+		_group: "model",
+		name: "图像大小限制 (MiB)",
+		type: "number",
+		min: 0,
+		max: 10,
+		step: 0.1,
+		default: 0.5,
+		title: "限制向模型发送的图像的数据大小（降低质量），0禁用。跟随模型"
+	},
 	// logs
 	{
 		id: "provider",
@@ -643,7 +678,7 @@ export const SETTINGS = [
 		type: "input",
 		_tab: ["model", "data"],
 		placeholder: "猫娘中转站",
-		title: "仅用于数据统计, 留空使用API域名",
+		title: "仅用于数据统计, 留空使用API域名。跟随模型",
 		_group: "model"
 	},
 	{
@@ -707,7 +742,7 @@ if (isMobile) {
 		});
 		onLoad(() => {
 			$watch($computed(() => config.userAgent), () => {
-				webviewSetUserAgent(config.userAgent || userAgent);
+				webviewSetUserAgent(config.userAgent);
 			});
 		});
 		SETTINGS.push({

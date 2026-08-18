@@ -310,6 +310,17 @@ body.no-motion {
     top: 0;
 }
 
+:root[data-theme='dark'] {
+    .stroke {
+        position: relative;
+        text-shadow:
+                -1px -1px 0 var(--panel-2),
+                1px -1px 0 var(--panel-2),
+                -1px  1px 0 var(--panel-2),
+                1px  1px 0 var(--panel-2);
+    }
+}
+
 .ellipsis {
     overflow: hidden;
     white-space: nowrap;
@@ -318,6 +329,7 @@ body.no-motion {
 
 /* 主聊天布局 - 响应式 */
 .chat {
+    position: relative;
     display: flex;
     justify-content: center;
     height: 100%;
@@ -567,78 +579,159 @@ body._fileUI .hide-human {
     color: #dcfce7; background: #064e3b; border: 1px solid #10b981;
 }
 
+/* ===== 输入框附件预览 ===== */
 .attachments {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 0.5rem;
-    padding: 0.75rem;
+    padding: 0 0.75rem 0.5rem;
 
     &:empty { display: none; }
 }
 
 .attachment {
+    --icon-size: 34px;
     position: relative;
-    min-width: 60px;
-    max-width: 120px;
-    height: 80px;
-    border-radius: var(--border-radius-md);
-    box-shadow: var(--shadow);
-    transition: var(--transition);
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    max-width: 220px;
+    height: calc(var(--icon-size) + 12px);
+    padding: 0 0.65rem 0 5px;
     background: var(--chip-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--border-radius-md);
+    box-shadow: 0 1px 3px oklch(0 0 0 / 0.25);
+    transition: var(--transition);
 
     &:hover {
-        transform: scale(1.05);
+        z-index: 1;
+        background: var(--chip-hover);
+        border-color: var(--chip-active-border);
         box-shadow: var(--shadow);
-    }
+        transform: translateY(-2px);
 
-    & img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-    }
-
-    &::before {
-        content: var(--format);
-        position: absolute;
-        bottom: 4px;
-        right: 4px;
-        font-weight: bold;
-        font-size: 10px;
-        color: var(--muted);
-    }
-
-    /* 文本预览样式 */
-    &.text-part {
-        padding: 8px;
-        font-size: 12px;
-        width: 64px;
-
-        & .text-preview {
-            overflow: hidden;
-            text-overflow: ellipsis;
-            height: 100%;
+        & > .delete {
+            opacity: 1;
+            transform: scale(1);
         }
     }
 
-    & .delete {
+    /* 类型图标磁贴 */
+    & .attachment-icon {
+        display: grid;
+        place-items: center;
+        flex-shrink: 0;
+        width: var(--icon-size);
+        height: var(--icon-size);
+        border-radius: var(--border-radius-sm);
+        background: var(--chip-active);
+        color: var(--accent);
+        font-size: 18px;
+    }
+
+    /* 扩展名徽标（悬浮在图标磁贴下缘） */
+    & .format-badge {
         position: absolute;
-        top: -0.5rem;
-        right: -0.5rem;
-        width: 18px;
-        height: 18px;
-        background: var(--error);
-        border-radius: 50%;
-        font-size: 16px;
+        left: 22px;
+        bottom: 3px;
+        transform: translateX(-50%);
+        max-width: 40px;
+        padding: 0 4px;
+        border-radius: 3px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        color: var(--text-lighter);
+        font-size: 8px;
+        font-weight: 700;
+        line-height: 12px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        overflow: hidden;
+        pointer-events: none;
+    }
+
+    /* 文件名 + 大小 两行元信息 */
+    & .attachment-meta {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        min-width: 0;
+        line-height: 1.35;
+
+        & .file-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: var(--font-size-xs);
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        & .file-size {
+            font-size: 10px;
+            color: var(--muted);
+        }
+    }
+
+    /* 图片附件：紧凑方形缩略图 */
+    &.image-part {
+        gap: 0;
+        height: auto;
+        max-width: none;
+        padding: 0;
+        border-radius: var(--border-radius-sm);
+
+        & img {
+            display: block;
+            width: 52px;
+            height: 52px;
+            object-fit: cover;
+            border-radius: var(--border-radius-sm);
+            padding: 1px;
+        }
+    }
+
+    /* 音频附件：绿色调区分 */
+    &.audio-part .attachment-icon {
+        color: var(--ok);
+    }
+
+    /* 删除按钮：悬浮浮现 */
+    & > .delete {
+        position: absolute;
+        top: -6px;
+        right: -6px;
+        z-index: 2;
         display: flex;
         align-items: center;
         justify-content: center;
+        width: 17px;
+        height: 17px;
+        border-radius: 50%;
+        background: var(--error);
+        color: #fff;
+        font-size: 13px;
+        cursor: pointer;
+        opacity: 0;
+        transform: scale(0.5);
         transition: var(--transition);
         box-shadow: var(--shadow);
 
         &:hover {
             background: var(--delete-hover);
-            transform: scale(1.1);
+            transform: scale(1.15);
         }
+    }
+}
+
+/* 触屏设备：始终显示删除按钮 */
+@media (hover: none) {
+    .attachment > .delete {
+        opacity: 1;
+        transform: scale(1);
     }
 }
 
@@ -696,7 +789,7 @@ body._fileUI .hide-human {
     cursor: ew-resize;
 }
 
-@media screen and (min-width: 768px) {
+@media (min-width: 768px) {
     .header.closed {
         position: absolute;
     }
@@ -763,7 +856,7 @@ body._fileUI .hide-human {
     }
 }
 
-@media screen and (max-width: 768px) {
+@media (max-width: 768px) {
     ::-webkit-scrollbar { width: 6px; }
 
     .panel {
@@ -797,6 +890,7 @@ body._fileUI .hide-human {
     .header.closed {
         position: fixed;
         top: -10vh;
+        z-index: 1;
 
         & > div > :first-child {
             position: fixed;
@@ -851,12 +945,21 @@ body._fileUI .hide-human {
     }
 }
 
+.chat.print {
+    height: auto;
+    overflow: visible;
+}
+
 @media print {
     body {
         background: none !important;
     }
-    .sidebar, .composer, button, .stats {
+    .bar button, .btn, .sidebar, .composer, .stats, .toasts, .btn-line, .branch-selector, ::-webkit-scrollbar {
         display: none !important;
+    }
+    .msg {
+        padding-bottom: 0;
+        margin: 0 8px;
     }
     .sticky {
         position: initial;

@@ -15,17 +15,17 @@ const afterUpload = (hash) => {
 	}
 };
 
-const decodeDollar = async (v, zr) => {
+const decodeDollar = (v, zr) => {
 	const v1 = v.v;
 	switch (v.$) {
 		case "Blob": {
-			if (zr) {
-				const buf = await zr.get("blobs/"+v.index);
-				if (buf) return new File([buf], v.name, v);
-			}
-			throw "找不到引用的 Blob 对象";
+			return (zr ? zr.get("blobs/"+v.index) : Promise.resolve()).then(buf =>  {
+					if (buf) return new File([buf], v.name, v);
+					throw "找不到引用的 Blob 对象 #"+v.index;
+				}
+			);
 		}
-		case "BlobH":return await getBlob(v);
+		case "BlobH":return getBlob(v);
 		case "Map":return new Map(v1);
 		case "Set":return new Set(v1);
 		case "Date":return new Date(v1);
@@ -46,9 +46,18 @@ const decodeDollar = async (v, zr) => {
  */
 export const decodeObjects = async (input, zr) => {
 	if (input?.$) return decodeDollar(input, zr);
+	const promises = [];
 	for (const [val, own, key] of deepEntries(input)) {
-		if (val?.$) own[key] = await decodeDollar(val, zr);
+		if (val?.$) {
+			const p = decodeDollar(val, zr);
+			if (p instanceof Promise) {
+				promises.push(p.then(v => own[key] = v));
+			} else {
+				own[key] = p;
+			}
+		}
 	}
+	await Promise.all(promises);
 	return input;
 };
 

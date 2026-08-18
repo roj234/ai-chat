@@ -9,7 +9,7 @@ import {
 	selectedConversation
 } from "../states.js";
 import {scrollMessagesToBottom, statusBadge, submitUserChatMessage} from "../api-request.js";
-import {blobToContentPart, createAttachmentGallery} from "./InputAttachment.jsx";
+import {AttachmentGallery, blobToContentPart} from "./AttachmentGallery.jsx";
 import {CUSTOM_CONTROLS} from "../settings.js";
 import {createSendButton} from "./SendButton.jsx";
 import {bind} from "../utils/utils.js";
@@ -19,7 +19,6 @@ import SimpleModal from "./SimpleModal.jsx";
 import {getBlob} from "../database.js";
 import {webviewUploadImage} from "/vendor/jsBridge.js";
 import {Recorder} from "/plugins/voiceInput/Recorder.jsx";
-import {DI} from "../hooks.js";
 
 export const createUserInputComposer = (scroller) => {
 	/** @type {import("unconscious").Reactive<OpenAI.ContentPart[]>} */
@@ -61,7 +60,7 @@ export const createUserInputComposer = (scroller) => {
 	 */
 	let userInput,
 		backToBottomBtn,
-		sendButton = DI.sendButton = createSendButton(attachments, onSend);
+		sendButton = createSendButton(attachments, onSend);
 
 	const blobCallback = blob => {
 		if (blob) blobToContentPart(blob, 0 === selectedConversation.id, attachments);
@@ -69,16 +68,13 @@ export const createUserInputComposer = (scroller) => {
 
 	const element = (<div className="composer" class:hidden={() => isMobile && unconscious(lastScrollDirectionIsUp)}>
 		<div className="logo hide-human">
-					<span style={{
-						display: "flex",
-						alignItems: "flex-end",
-					}}
-						  dangerouslySetInnerHTML={() => config.name || "<span class='ri-ai' style='font-size:40px'></span>Chat"}></span>
-
 			<span style={{
-				height: "80px",
-				color: "var(--accent)"
-			}} className="ri-chat-smile-ai-fill"></span>
+				display: "flex",
+				alignItems: "flex-end",
+			}}>
+				{() => config.name || <span><span className='ri-ai' style='font-size:40px'></span>Chat</span>}
+				<div className={"tooltip"}>{() => config.model}</div>
+			</span>
 		</div>
 		<div className={"f-controls"}>
 			{statusBadge}
@@ -103,7 +99,7 @@ export const createUserInputComposer = (scroller) => {
 						  }
 					  }}
 			></textarea>
-			{createAttachmentGallery(attachments)}
+			{AttachmentGallery(attachments)}
 			<div className="controls">
 				<div className="controls hide-human">{CUSTOM_CONTROLS}</div>
 				<div className="spacer"></div>

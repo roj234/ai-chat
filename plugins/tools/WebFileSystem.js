@@ -3,7 +3,7 @@ import {createTextFileEditHelper} from "/common/fs-common.js";
 import {IGNORED_ERROR_MESSAGE, IgnoreMatcher} from "/common/ignore.js";
 import {normalizePath} from "unconscious/common/path-utils.js";
 import {formatSize} from "unconscious/common/Utils.js";
-import {AS_IS} from "unconscious";
+import {AS_IS, UTF8_TEXT_ENCODER} from "unconscious";
 
 // ────────────────────────────────── Glob‑to‑Regex (ported from Globs.java) ──────────────────────────
 
@@ -132,9 +132,27 @@ function globToRegexPattern(globPattern) {
 // ────────────────────────────────── FileSystem Helpers ──────────────────────────────────
 
 export const CREATE = { create: true };
+/**
+ * @template T
+ * @param {Promise<T>} promise
+ * @return {Promise<T>}
+ */
+const EAT = promise => promise.catch(() => {});
+const FILE_TOO_BIG = "InvalidStateError";
+const toArrayBuffer = data => (typeof data === "string" ? UTF8_TEXT_ENCODER.encode(data) : data).buffer;
+const prependLF = data => {
+	if (typeof data === 'string') return '\n' + data;
+	const newBuffer = new Uint8Array(data.length + 1);
+	data[0] = 0x0a;
+	newBuffer.set(data, 1);
+	return data;
+};
 
 /**
  * Resolve parent directory handle and entry name from a full path (relative to root).
+ * @param {FileSystemDirectoryHandle} rootHandle
+ * @param {string} filePath
+ * @param {{ create: true }} [options]
  */
 const resolveParent = async (rootHandle, filePath, options) => {
 	const parts = normalizePath(filePath);
@@ -152,6 +170,9 @@ const resolveParent = async (rootHandle, filePath, options) => {
 
 /**
  * Resolve a directory handle from a path.
+ * @param {FileSystemDirectoryHandle} rootHandle
+ * @param {string} dirPath
+ * @param {{ create: true }} [options]
  */
 export const resolveDirectory = async (rootHandle, dirPath, options) => {
 	const parts = normalizePath(dirPath);
@@ -202,6 +223,36 @@ export const createWebFileSystem = (rootHandle, config) => {
 		if (ignored.test(parsedPath.join('/'), isDir)) throw IGNORED_ERROR_MESSAGE;
 	};
 
+	/**
+	 *
+	 * @param {FileSystemDirectoryHandle | FileSystemFileHandle} handle
+	 * @param {FileSystemDirectoryHandle} destDir
+	 * @param {string} destName
+	 * @param {boolean} move
+	 * @return {Promise<void>}
+	 */
+	async function copyEntry(handle, destDir, destName, move) {
+		if (handle.kind === 'file') {
+			if (move && typeof handle.move === 'function') {
+				// destParent already resolved with MKDIRS, no need for manual mkdirs
+				await handle.move(destDir, destName);
+			} else {
+				const file = await handle.getFile();
+				const newHandle = await destDir.getFileHandle(destName, CREATE);
+				const writable = await newHandle.createWritable();
+				await writable.write(file);
+				await writable.close();
+			}
+		} else {
+			const newDir = await destDir.getDirectoryHandle(destName, CREATE);
+			const promises = [];
+			for await (const [childName, childHandle] of handle.entries()) {
+				promises.push(copyEntry(childHandle, newDir, childName, move));
+			}
+			await Promise.all(promises);
+		}
+	}
+
 	const api = {
 		async mkdir({path}) {
 			await checkPath(path, true);
@@ -219,35 +270,8 @@ export const createWebFileSystem = (rootHandle, config) => {
 			try { srcHandle = await srcParent.getFileHandle(srcName); }
 			catch { srcHandle = await srcParent.getDirectoryHandle(srcName); }
 
-			async function copyEntry(handle, destDir, destName) {
-				if (handle.kind === 'file') {
-					const file = await handle.getFile();
-					const newHandle = await destDir.getFileHandle(destName, CREATE);
-					const writable = await newHandle.createWritable();
-					await writable.write(file);
-					await writable.close();
-				} else {
-					const newDir = await destDir.getDirectoryHandle(destName, CREATE);
-					const promises = [];
-					for await (const [childName, childHandle] of handle.entries()) {
-						promises.push(copyEntry(childHandle, newDir, childName));
-					}
-					await Promise.all(promises);
-				}
-			}
-
-			if (move) {
-				if (typeof srcHandle.move === 'function') {
-					// destParent already resolved with MKDIRS, no need for manual mkdirs
-					await srcHandle.move(destParent, destName);
-				} else {
-					// fallback: copy + delete
-					await copyEntry(srcHandle, destParent, destName);
-					await srcParent.removeEntry(srcName, { recursive: true });
-				}
-			} else {
-				await copyEntry(srcHandle, destParent, destName);
-			}
+			await copyEntry(srcHandle, destParent, destName, move);
+			if (move) await EAT(srcParent.removeEntry(srcName, { recursive: true }));
 
 			return 'Success';
 		},
@@ -281,8 +305,17 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			await checkPath(path, true);
 			const [ parent, name ] = await resolveParent(rootHandle, path);
 			if (config.fs_trashCan) {
-				const fileHandle = await parent.getFileHandle(name);
-				await fileHandle.move(await rootHandle.getDirectoryHandle(".trash", CREATE), Date.now()+"_"+name);
+				let handle;
+				let isDir;
+				try {
+					handle = await parent.getFileHandle(name);
+				} catch (e) {
+					handle = await parent.getDirectoryHandle(name);
+					isDir = true;
+				}
+
+				await copyEntry(handle, await rootHandle.getDirectoryHandle(".trash", CREATE), Date.now()+"_"+name, true);
+				await EAT(parent.removeEntry(name, { recursive: true }));
 			} else {
 				await parent.removeEntry(name, { recursive: true });
 			}
@@ -301,24 +334,53 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			await checkPath(path);
 			const [parentHandle, name] = await resolveParent(rootHandle, path, CREATE);
 			const fileHandle = await parentHandle.getFileHandle(name, CREATE);
+			if (fileHandle.createSyncAccessHandle) {
+				const raf = await fileHandle.createSyncAccessHandle();
+				const size = raf.getSize();
 
-			const file = await fileHandle.getFile();
-			const size = file.size;
-			let needNewline;
+				try {
+					if (newline && size > 0) {
+						const offset = size - 1;
+						const lastByte = new Uint8Array(1);
+						raf.read(lastByte.buffer, {at: offset});
+						const needNewline = lastByte[0] !== 0x0a;
+						if (needNewline) content = prependLF(content);
+					}
 
-			if (newline) {
-				// Check whether existing content ends with \n
-				if (size > 0) {
-					const offset = size - 1;
-					const lastByte = new Uint8Array((await file.slice(offset, offset + 1).arrayBuffer()))[0];
-					needNewline = lastByte !== 0x0a;
+					raf.write(toArrayBuffer(content), { at: size });
+				} finally {
+					raf.close();
+				}
+			} else {
+				for (;;) {
+					const file = await fileHandle.getFile();
+					const size = file.size;
+
+					// Check whether existing content ends with \n
+					if (newline && size > 0) {
+						const offset = size - 1;
+						const lastByte = new Uint8Array((await file.slice(offset, offset + 1).arrayBuffer()))[0];
+						const needNewline = lastByte !== 0x0a;
+						if (needNewline) content = prependLF(content);
+					}
+
+					const writable = await fileHandle.createWritable({ keepExistingData: true });
+					await writable.seek(size);
+					await writable.write(content);
+
+					try {
+						await writable.close();
+						break;
+					} catch (e) {
+						if (e.name === FILE_TOO_BIG) {
+							const data = new Blob([file, content]);
+							content = new Uint8Array(await data.arrayBuffer());
+							await parentHandle.removeEntry(name);
+							await parentHandle.getFileHandle(name, CREATE);
+						}
+					}
 				}
 			}
-
-			const writable = await fileHandle.createWritable({ keepExistingData: true });
-			await writable.seek(size);
-			await writable.write(needNewline ? '\n' + content : content);
-			await writable.close();
 
 			if (/\.(gitignore|ignore)$/.test(path)) await loadIgnore();
 			teh.del(path);          // invalidate text line cache
@@ -356,7 +418,8 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 				const displayPath = relDir ? relDir + '/' + name : name;
 				const isDir = handle.kind === 'directory';
 
-				if (ignored.test(displayPath, isDir)) continue;
+				const ignore = ignored.test(displayPath, isDir);
+				if (ignore === 'file') continue;
 
 				if (items >= limit) {
 					prefix = `[TRUNCATED to ${limit} entries, use a more specific path or pattern]\n`;
@@ -372,7 +435,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 						result.push(item);
 					}
 				} else if ((showDir != null ? showDir : !modSince)) {
-					result.push([displayPath, "dir"]);
+					result.push([displayPath, ignore === 'dir' ? "dir (descents skipped)" : "dir"]);
 				}
 			}
 
@@ -449,7 +512,11 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 				const entryPath = relDir ? relDir + '/' + name : name;
 				const isDir = handle.kind === 'directory';
 
-				if (ignored.test(entryPath, isDir)) continue;
+				const ignore = ignored.test(entryPath, isDir);
+				if (ignore) {
+					if (ignore === 'dir') yield [name, handle, relDir];
+					continue;
+				}
 
 				yield [name, handle, relDir];
 				if (isDir) {
@@ -483,12 +550,35 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 		/**
 		 * @param {string} path
 		 * @param {string|Uint8Array} data
+		 * @param [_ctx]
+		 * @param {1} [_overwrite]
 		 * @returns {Promise<void>}
 		 */
-		async write(path, data) {
+		async write(path, data, _ctx, _overwrite) {
 			await checkPath(path);
 			const [ parent, name ] = await resolveParent(rootHandle, path, CREATE);
-			const fileHandle = await parent.getFileHandle(name, CREATE);
+
+			let fileHandle;
+			try {
+				fileHandle = await parent.getFileHandle(name);
+			} catch {}
+
+			if (fileHandle) {
+				try {
+					if (_overwrite && config.fs_trashCan) {
+						await copyEntry(fileHandle, await rootHandle.getDirectoryHandle(".trash", CREATE), Date.now()+"_"+name, true);
+					} else {
+						await parent.removeEntry(name);
+					}
+				} catch (e) {
+					if (e.name === FILE_TOO_BIG) {
+						throw "Failed to write file, permission denied.";
+					}
+					throw e;
+				}
+			}
+
+			fileHandle = await parent.getFileHandle(name, CREATE);
 			const writable = await fileHandle.createWritable();
 			await writable.write(data);
 			await writable.close();
@@ -512,9 +602,14 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 		...api,
 		...teh,
 
+		open: async ({ path, create }) => {
+			const [parent, name] = await resolveParent(rootHandle, path);
+			if (!name) throw "Root is not file";
+			return parent.getFileHandle(name, create ? CREATE : undefined);
+		},
 		readRaw: ({path}) => resolveFile(path),
 		writeRaw: async ({path, content}) => {
-			await fsCommonApi.write(path, content);
+			await fsCommonApi.write(path, content, null, 1);
 			teh.del(path);
 		},
 		appendRaw: api.append

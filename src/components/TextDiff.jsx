@@ -1,5 +1,5 @@
 import {$computed, unconscious} from "unconscious";
-import {textDiff} from "/common/text-diff.js";
+import {textDiff} from "unconscious/common/text-diff.js";
 import "./TextDiff.css";
 import {VirtualList} from "unconscious/common/VirtualList.js";
 import {selectableVirtualListMixin} from "unconscious/common/selectableVirtualListMixin.js";

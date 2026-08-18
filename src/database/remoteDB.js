@@ -5,13 +5,14 @@ import {decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
 import {msgpack_schema, msgpack_schema_version} from "/common/MsgpackSchema.js";
 import {SHA256} from "unconscious/common/SHA256.js";
 import {base64Encode} from "unconscious/common/Base64.js";
-import {prettyError, resolveDBRelativeURL} from "../utils/utils.js";
-import {$store, $update, AS_IS, unconscious} from "unconscious";
+import {prettyError, requestIdleCallback, resolveDBRelativeURL} from "../utils/utils.js";
+import {$store, $update, AS_IS, debugSymbol, unconscious} from "unconscious";
 import SimpleModal from "../components/SimpleModal.jsx";
 import {delta, patch, rep} from "unconscious/common/deepEqual.js";
 import {PROTOCOL_VERSION} from "/backend/sync.js";
 import {DIFF_SNAPSHOT, MESSAGES_CACHE} from "../database.js";
 import {LRUCache} from "/common/LRUCache.js";
+import {sleep} from "../utils/pure-utils.js";
 
 let clientId;
 
@@ -260,7 +261,7 @@ export const getKV = (key, val) => {
 	});
 	return promise;
 };
-export const setKV = (key, value) => value === undefined ? u_deleteKV(key) : u_setKV([key, value]);
+export const setKV = (key, value) => value === undefined ? u_deleteKV(key) : u_setKV([key, value]).then(() => EVENT_BUS.post(['kv', key], value));
 
 // values这个接口主要是给备份(导出)用的
 export const kvListGetValues = batched("kvs/values", true);
@@ -328,7 +329,7 @@ const KVLIST_IGNORE_KEYS = new Set(["name", "type"]);
  * @param {Object} value
  * @param {string} type
  * @param {string=} name
- * @return {Promise<*>}
+ * @return {Promise<void>}
  */
 export const kvListSet = async (value, type, name) => {
 	if (name) value.name = name;
@@ -387,6 +388,7 @@ export const blobHash = async blob => {
 
 		const reader = blob.stream().getReader();
 		while (true) {
+			await sleep(0);
 			const {done, value} = await reader.read();
 			if (done) break;
 			hasher.update(value);
@@ -398,13 +400,13 @@ export const blobHash = async blob => {
 	return base64Encode(new Uint8Array(arrayBuffer), true);
 };
 
-const BLOB = Symbol();
+const BLOB = debugSymbol("BlobValue");
 
-function _FakeBlob(obj) {this.$='BlobH';Object.assign(this, obj);}
+function _FakeBlob(hash,obj) {this.$='BlobH';this.hash=hash;Object.assign(this, obj);}
 _FakeBlob.prototype = {
 	constructor: File,
 	toUrl() {return dbUrl+`blob/`+this.hash;},
-	async blob() {return this[BLOB] || (this[BLOB] = await (await fetch(this.toUrl(), { cache: 'force-cache', integrity: 'sha256-'+this.hash })).blob());},
+	async blob() {return this[BLOB] || (this[BLOB] = await (await fetch(this.toUrl(), { cache: 'force-cache', integrity: 'sha256-'+this.hash }).catch(() => {throw new Error("附件 "+(this.name||this.hash)+" 丢失或损坏")})).blob());},
 	async toDataURL() {return (await this.blob()).toDataURL();},
 	async arrayBuffer() {return (await this.blob()).arrayBuffer();},
 	async bytes() {return (await this.blob()).bytes();},
@@ -462,5 +464,5 @@ export const getBlob = async ({hash, name}) => {
 		}
 	});
 	if (name) serverData.name = name;
-	return new _FakeBlob({ hash, ...serverData });
+	return new _FakeBlob(hash, serverData);
 };

@@ -17,4 +17,12 @@
 			cursor: pointer;
 		}
 	}
+
+	& .ri-lock-line {
+		color: var(--muted);
+
+		&.locked {
+			color: var(--text);
+		}
+	}
 }

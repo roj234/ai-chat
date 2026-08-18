@@ -55,7 +55,9 @@
 
     /* 折叠态 */
     &.collapsed {
-        & .body { display: none; }
+        & .body,
+        & .footer { display: none; }
+
         & .collapse { rotate: 90deg; }
     }
 

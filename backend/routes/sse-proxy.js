@@ -103,7 +103,10 @@ async function processMessageRefs(messages, blobDir) {
 		if (val?.$ === 'BlobH') {
 			const hash = val.hash;
 			const filePath = path.join(blobDir, hash.slice(0, 2).toLowerCase(), hash);
-			tasks.push(openAsBlob(filePath).then((blob) => own[key] = blob));
+
+			tasks.push(fs.access(filePath).then(() => openAsBlob(filePath).then((blob) => own[key] = blob), e => {
+				throw new Error("附件 "+(val.name || hash)+" 丢失或损坏");
+			}));
 		}
 	}
 	await Promise.all(tasks);
@@ -117,22 +120,16 @@ function checkToken(ctx) {
 	authorization = authorization.slice(7);
 
 	let url, proxy;
-	let backend = SSE_PROXY_BACKEND[authorization];
-	if (backend) {
-		url = backend.url;
-		proxy = backend.proxy;
-		authorization = backend.authorization;
-	} else {
-		backend = SSE_PROXY_BACKEND['default'];
-		if (!backend) return ctx.send(403, { error: 'unknown key' });
-
-		url = backend.url;
-		proxy = backend.proxy;
-		if (backend.authorization) authorization = backend.authorization;
+	let target = SSE_PROXY_BACKEND[authorization] || SSE_PROXY_BACKEND['default'];
+	if (!target?.url) return ctx.send(403, { error: 'unknown key' });
+	if (!target.authorization) {
+		target = {
+			...target,
+			authorization
+		}
 	}
 
-	if (!url) return ctx.send(403, { error: 'unknown key' });
-	return [url, authorization, proxy];
+	return target;
 }
 
 /**
@@ -170,6 +167,14 @@ function createLimiter(source, maxLength) {
 	return limited;
 }
 
+const ONCE_KEYS = [
+	'id',
+	'object',
+	'model',
+	'system_fingerprint',
+	//'created'
+];
+
 /**
  *
  * @param {string} logPath
@@ -181,7 +186,7 @@ function createLimiter(source, maxLength) {
 async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 	let result = checkToken(ctx);
 	if (!result) return;
-	let [baseUrl, authorization, proxyUrl] = result;
+	let {url: baseUrl, authorization, proxy: proxyUrl, headers, trace} = result;
 	if (!baseUrl.endsWith("/")) baseUrl += '/';
 
 	const moderation = SSE_PROXY_MODERATION(baseUrl, authorization, ctx);
@@ -193,7 +198,8 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 	const MAX_BODY_LENGTH = 20971520;
 	let body;
 	let duplex;
-	if (SSE_PROXY_TRACE || blobDir || moderation) {
+	const needTrace = SSE_PROXY_TRACE && trace;
+	if (needTrace || blobDir || moderation) {
 		body = await ctx.readAsString(MAX_BODY_LENGTH);
 	} else {
 		body = createLimiter(ctx.req, MAX_BODY_LENGTH);
@@ -201,7 +207,7 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 	}
 	// body 在 refs 路由中稍后会被替换成 ReadableStream。trace 必须保留原始
 	// 请求字符串；否则日志写入和 fetch 会同时消费同一个流，导致流被锁定。
-	const traceBody = SSE_PROXY_TRACE ? body : null;
+	const traceBody = needTrace ? body : null;
 
 	let firstChunk;
 	if (blobDir || moderation) {
@@ -240,6 +246,7 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 		}
 
 		body = createJsonStream(obj);
+		//duplex = 'half';
 	}
 
 	let completion = {};
@@ -253,7 +260,7 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 	function sendChunk(serialized) {
 		if (!ctx.res.closed) ctx.res.write(`data: ${serialized}\n\n`);
 		// log every chunk
-		if (SSE_PROXY_TRACE === 'packet') writeTrace(serialized);
+		if (needTrace === 'packet') writeTrace(serialized);
 		proxyRequest.event.emit('data', serialized);
 	}
 
@@ -263,7 +270,7 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 
 	try {
 		const optionalParams = baseUrl+apiPath;
-		if (SSE_PROXY_TRACE) log('请求发送', optionalParams);
+		if (needTrace) log('请求发送', optionalParams);
 
 		ctx.res.on('close', () => {
 			if (!proxyRequest) abort.abort();
@@ -272,6 +279,7 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 		await sseFetch(optionalParams, {
 			body,
 			duplex,
+			headers,
 			signal: abort.signal,
 			agent: getProxyAgent(proxyUrl),
 			key: authorization
@@ -284,7 +292,7 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 				const response = JSON.stringify(chunk);
 
 				// non-stream response
-				if (SSE_PROXY_TRACE) {
+				if (needTrace) {
 					const fileName = `${logPath}/${encodeURIComponent(id)}_${now%1000}.jsonl`;
 					fs.mkdir(logPath, {recursive: true})
 						.then(() => fs.appendFile(fileName, traceBody))
@@ -310,7 +318,7 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 					isFinished: false
 				});
 
-				if (SSE_PROXY_TRACE) {
+				if (needTrace) {
 					const fileName = `${logPath}/${encodeURIComponent(id)}_${now%1000}.jsonl`;
 					proxyRequest._fileName = fileName;
 					proxyRequest._append = fs.mkdir(logPath, {recursive: true})
@@ -339,6 +347,11 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 						resumable.now = resumable.ft = now;
 						chunk.resumable = resumable;
 					}
+
+					if (delta.reasoning && delta.reasoning === delta.reasoning_content) {
+						delete delta.reasoning;
+					}
+
 					if (null == resumable.re && delta.content) {
 						resumable.now = resumable.re = now;
 						chunk.resumable = resumable;
@@ -350,8 +363,16 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 			} else {
 				completion.text = (completion.text || "") + text;
 			}
-			Object.assign(completion, rest);
 
+			for (let [val, own, key] of deepEntries(chunk)) {
+				if (val === null || val === '' || (typeof val === 'object' && !Object.keys(val).length))
+					delete own[key];
+			}
+			for (const key of ONCE_KEYS) {
+				if (completion[key]) delete chunk[key];
+			}
+
+			Object.assign(completion, rest);
 			sendChunk(JSON.stringify(chunk));
 		});
 	} catch (err) {
@@ -394,7 +415,7 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 				activeRequests.delete(proxyRequest.id);
 			}, SSE_RESUME_TIMEOUT);
 
-			if (SSE_PROXY_TRACE === true) {
+			if (needTrace === true) {
 				await writeTrace(JSON.stringify(proxyRequest.data));
 			}
 		}
@@ -413,7 +434,7 @@ export async function proxyHandler(itf, ctx) {
 	let result = checkToken(ctx);
 	if (!result) return;
 
-	let [baseUrl, authorization, proxyUrl] = result;
+	let {url: baseUrl, authorization, proxy: proxyUrl, headers} = result;
 	if (!baseUrl.endsWith("/")) baseUrl += '/';
 
 	const res = ctx.res;
@@ -438,6 +459,7 @@ export async function proxyHandler(itf, ctx) {
 		headers: {
 			accept: "application/json",
 			authorization: "Bearer "+authorization,
+			...headers
 		},
 		method,
 		body,
@@ -471,7 +493,7 @@ export function registerSSEProxyRoutes(router, dataPath) {
 	router.get('/models', async (ctx) => {
 		let result = checkToken(ctx);
 		if (!result) return;
-		let [baseUrl, authorization, proxyUrl] = result;
+		let {url: baseUrl, authorization, proxy: proxyUrl, headers} = result;
 		if (!baseUrl.endsWith("/")) baseUrl += '/';
 
 		const key = baseUrl+"|"+authorization;
@@ -482,6 +504,7 @@ export function registerSSEProxyRoutes(router, dataPath) {
 				headers: {
 					accept: "application/json",
 					authorization: "Bearer "+authorization,
+					...headers
 				},
 				agent: getProxyAgent(proxyUrl)
 			});

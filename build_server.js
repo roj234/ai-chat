@@ -28,7 +28,7 @@ const rollupConfig = {
 		...Object.keys(serverPackageInfo.dependencies || {}),
 	],
 	plugins: [
-		nodeResolve(),
+		nodeResolve({basePath: __dirname}),
 		configProxy({
 			include: /[\\/]config\.js$/
 		}),
@@ -41,11 +41,13 @@ const rollupConfig = {
 			 * @return {Promise<{code: string, map: null}>}
 			 */
 			async transform(code, id) {
-				if (!/[\\/]server\.js$/.test(id)) return;
+				code = code.replaceAll("IS_ANDROID_BUILD", "false");
 
-				code = code.replaceAll("{{BUILD_TIME}}", new Date().toISOString());
-				code = code.replaceAll("{{PROJECT_VERSION}}", serverPackageInfo.version);
-				code = code.replaceAll("{{GIT_COMMIT}}", commitNumber);
+				if (/[\\/]server\.js$/.test(id)) {
+					code = code.replaceAll("{{BUILD_TIME}}", new Date().toISOString());
+					code = code.replaceAll("{{PROJECT_VERSION}}", serverPackageInfo.version);
+					code = code.replaceAll("{{GIT_COMMIT}}", commitNumber);
+				}
 
 				return { code, map: null };
 			}

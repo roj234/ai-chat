@@ -42,6 +42,8 @@ const deleteSelected = () => {
 			for (let chk of checks) {
 				all.push(fetch(`${config.db_server}blob/${chk.value}`, {method: 'DELETE'}));
 			}
+			scrollWin.scrollTop = 0;
+			selectAllBtn.checked = false;
 			Promise.all(all).then(fetchList);
 		}
 	});
@@ -65,6 +67,8 @@ const showFull = url => {
 	})
 };
 
+let scrollWin, selectAllBtn;
+
 const container = <div className={"modal-overlay"}>
 	<div className="modal" style={isMobile?"width:100vw":"max-width:70vw"}>
 		<div className="header" style={"display:flex;gap:8px"}>
@@ -75,11 +79,11 @@ const container = <div className={"modal-overlay"}>
 			<button className="ri-close-line btn ghost" style="border:none" title={"关闭窗口"} onClick={() => container.remove(true)}></button>
 		</div>
 
-		<div className={"blob-manager"} style={"overflow:auto"}>
+		<div className={"blob-manager"} style={"overflow:auto"} ref={scrollWin}>
 			<table>
 				<thead>
 				<tr>
-					<th width="30"><input type="checkbox" onClick={({target}) => toggleAll(target)}/></th>
+					<th width="30"><input type="checkbox" ref={selectAllBtn} onClick={({target}) => toggleAll(target)}/></th>
 					<th>预览</th>
 					<th>Hash</th>
 					<th>类型</th>
@@ -91,7 +95,7 @@ const container = <div className={"modal-overlay"}>
 				<tbody ref={table}>
 				{$foreach(blobs, item => {
 					const isImg = item.type.startsWith('image/');
-					const blobUrl = `${config.db_server}/blob/${item.hash}`;
+					const blobUrl = `${config.db_server}blob/${item.hash}`;
 
 					return <tr>
 						<td><input className={"row-check"} type="checkbox" value={item.hash} /></td>

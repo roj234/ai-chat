@@ -5,7 +5,8 @@ export function createPanel(constructor) {
 	let self;
 
 	const open = (preset) => {
-		if (!self) document.body.append(self = constructor(preset, isOpen, close));
+		if (!self) self = constructor(preset, isOpen, close);
+		document.body.append(self);
 		requestAnimationFrame(() => {
 			isOpen.value = true;
 		});

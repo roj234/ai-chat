@@ -7,10 +7,6 @@ import {compressBase64, compressStr, decompressStr} from "./string-compression.j
 const IS_SQLITE = true;
 
 // 注意，这些schema只能追加，规则和protobuf相同
-const conversation_schema = [
-	"activatedModules", "allowedTools", "grantedTools",
-	"bm_leaf", "_0"/* 已删除！ */, "resumeId",
-];
 const finish_reason = ["finish_reason", null, ["stop", "length", "tool_calls", "error", "interrupt"]];
 const message_schema = [
 	["role", null, ["system", "user", "assistant"]],
@@ -57,9 +53,23 @@ const message_schema = [
 	["tool_responses",
 		["time", "content", "success", "duration"]
 	],
-	"name",
+	"label",
 	"parent"
 ];
+const conversation_schema = [];
+conversation_schema.push(
+	"activatedModules", "allowedTools", "grantedTools",
+	"bm_leaf", "_0"/* 已删除！ */,
+	"resumeId", "roleId", "contextUsage",
+	// FileSystem
+	["mnt", conversation_schema],
+	"fs_type", "fs_base", "fs_server", "fs_builtin", "fs_events",
+	// subagent
+	"presets", "overrides",
+	"sa_notify", "sa_async",
+	// inject message
+	["pendingMessages", message_schema],
+);
 const log_schema = [
 	"model", "request_id", "provider",
 	"input_tokens", "output_tokens", "reasoning_tokens", "cached_tokens", "cache_write_tokens",

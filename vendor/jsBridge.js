@@ -3,6 +3,8 @@
  * @export
  */
 
+import {isLanAddress} from "../common/isLanAddress.js";
+
 /**
  *
  * @typedef WebViewApi
@@ -16,32 +18,34 @@
  * @property {Function} requestAudioPermission
  */
 
-const rpc = new Map;
+const rpc = /* #__PURE__ */ new Map;
 
-window.__imageUploaded = (id, url) => {
-	const resolve = rpc.get(id);
-	if (!resolve) return;
-	rpc.delete(id);
+if (IS_ANDROID_BUILD) {
+	window.__imageUploaded = (id, url) => {
+		const resolve = rpc.get(id);
+		if (!resolve) return;
+		rpc.delete(id);
 
-	if (!url) {
-		resolve(null);
-	} else {
-		fetch(url)
-			.then(response => {
-				if (!response.ok) throw new Error(`HTTP ${response.status}`);
-				return response.blob();
-			})
-			.then(resolve)
-			.catch(() => resolve(null));
-	}
-};
+		if (!url) {
+			resolve(null);
+		} else {
+			fetch(url)
+				.then(response => {
+					if (!response.ok) throw new Error(`HTTP ${response.status}`);
+					return response.blob();
+				})
+				.then(resolve)
+				.catch(() => resolve(null));
+		}
+	};
 
-window.__audioPermissionResult = (id, granted) => {
-	const resolve = rpc.get(id);
-	if (!resolve) return;
-	rpc.delete(id);
-	resolve(granted);
-};
+	window.__audioPermissionResult = /* #__PURE__ */ (id, granted) => {
+		const resolve = rpc.get(id);
+		if (!resolve) return;
+		rpc.delete(id);
+		resolve(granted);
+	};
+}
 
 /**
  * @returns {Promise<boolean>}
@@ -93,7 +97,23 @@ export const webviewUploadImage = () => new Promise((resolve) => {
 
 /**
  * 设置请求的 UserAgent
- * @param {string} ua
+ * @param {string | number} ua
  * @return {void}
  */
-export const webviewSetUserAgent = (ua) => WebViewApi.setUserAgent(String(ua || ''));
+export const webviewSetUserAgent = (ua) => WebViewApi.setUserAgent(ua || null);
+
+/**
+ * 代理 fetch — 绕过 CORS
+ * @param {string} url
+ * @param {RequestInit} [options]
+ * @returns {Promise<Response>}
+ */
+export const webviewFetch = (url, options) => {
+	if (!isLanAddress(url)) {
+		const port = WebViewApi.serverPort();
+		const token = WebViewApi.getToken();
+		url = `http://127.0.0.1:${port}/proxy?tk=${token}&url=${encodeURIComponent(url)}`;
+	}
+
+	return fetch(url, options);
+};

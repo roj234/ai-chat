@@ -8,7 +8,7 @@ import "/src/database.js";
 import {requestBackend} from "/src/database/remoteDB.js";
 import {config} from "/src/states.js";
 import {downloadFile} from "/src/utils/utils.js";
-import {writeJPEG, writePNG} from "/common/upng.js";
+import {writeJPEG, writePNG} from "/common/imate.js";
 import {base64Encode} from "unconscious/common/Base64.js";
 
 const API_PREFIX = 'cards/';

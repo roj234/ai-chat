@@ -60,13 +60,13 @@ const compilePattern = pattern => {
 		}
 	}
 
-	regexp += dirOnly ? '(/.*)?$' : '$';
+	regexp += dirOnly ? '(/)?$' : '$';
 
 	return [regexp, dirOnly];
 };
 
 export class IgnoreMatcher {
-	rules = [["(?:^|/)\\.git/"],["^.trash\\b"],[],[]];
+	rules = [["^.trash\\b"],["(?:^|/)\\.git/"],[],[]];
 
 	/**
 	 * @param {string} content
@@ -102,7 +102,7 @@ export class IgnoreMatcher {
 	 *
 	 * @param {string} relPath
 	 * @param {boolean} isDir
-	 * @returns {boolean}
+	 * @returns {false|'file'|'dir'}
 	 */
 	test(relPath, isDir) {
 		const [regexp, regexpDirOnly, regexpNegative, regexpDirOnlyNegative] = this.rules;
@@ -110,8 +110,8 @@ export class IgnoreMatcher {
 		if (regexpNegative?.test(relPath)) return false;
 		if (isDir && regexpDirOnlyNegative?.test(relPath)) return false;
 
-		if (regexp?.test(relPath)) return true;
-		if (isDir && regexpDirOnly?.test(relPath)) return true;
+		if (regexp?.test(relPath)) return 'file';
+		if (isDir && regexpDirOnly?.test(relPath)) return "dir";
 
 		return false;
 	}

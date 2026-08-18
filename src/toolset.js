@@ -121,7 +121,7 @@ toolScriptRegistry["Use"] = {
 
 	renderer(context) {
 		if (context.success === false) return;
-		if (!context.newTools) return loadingBlock("等待调用结果……");
+		if (!context.content) return loadingBlock("等待调用结果……");
 
 		const isRevoked = $state(!context.content.startsWith("You"));
 
@@ -510,7 +510,7 @@ export const addMCPServer = (mcpBaseUrl, mcpName, mcpDescription = "External too
 	}
 };
 
-const CONV_REACTIVE_MAP = debugSymbol("CONV_REACTIVE_MAP");
+const CONV_REACTIVE_MAP = debugSymbol("ReactiveStates");
 
 onConversationLoaded((conv, msg) => redoToolCalls(conv, msg, 0));
 onConversationBeforeunload((conv) => delete conv[CONV_REACTIVE_MAP]);
@@ -547,18 +547,19 @@ const UNSAFE_TOOL_DENY_MESSAGE = "User doesn't permit this tool use. Nothing cha
  * @param {AiChat.Conversation} conv
  * @param {true|number|null=null} forceRerun
  * @param {boolean=} allowUnsafe
- * @return {Promise<boolean>}
+ * @return {Promise<number>}
  */
 export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
 	markMessageDirty(response);
 	const {tool_calls, tool_responses} = response;
 
-	let autoCommit = true;
+	let flags = 0;
 
 	const callTool = async i => {
 		const tc = tool_calls[i];
 		let msg = tool_responses[i];
 		let {name} = tc.function;
+
 		try {
 			let fn = toolScriptRegistry[name];
 			if (!fn) {
@@ -585,9 +586,7 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
 				if (msg.success) fn?.undo?.(msg, conv, tc);
 			}
 
-			msg = tool_responses[i] = {
-				[TOOL_NAME]: name
-			};
+			msg = tool_responses[i] = { [TOOL_NAME]: name };
 
 			const parameters = getToolParameters(msg, tc);
 			const allowRun = name === 'Use' || conv.allowedTools.has(name);
@@ -622,7 +621,7 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
 			msg.time = Date.now();
 			const uiLevel = await getToolUserInteractionLevel(conv, name, parameters);
 			if (uiLevel) {
-				autoCommit = false;
+				flags |= 1; // INTERACTIVE
 				if (uiLevel === 2) {
 					if (null == forceRerun) {
 						delete msg.time;
@@ -653,10 +652,15 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
 			if (typeof e === 'string' && !e.startsWith('Error: '))
 				e = 'Error: '+e;
 			console.error(e);
+			/*msg = tool_responses[i] = {
+				[TOOL_NAME]: name,
+				success: false,
+				content: prettyError(e)
+			};*/
+			if (!msg) msg = tool_responses[i] = { [TOOL_NAME]: name };
 			msg.success = false;
 			msg.content = prettyError(e);
-			if (!(await getCombinedPreset(conv)).afkState)
-				autoCommit = false;
+			flags |= 2; // ERROR
 		}
 		delete msg[TOOL_IS_RUNNING];
 		if (forceRerun === true && null == msg.content) throw 'some interactive tool need user input';
@@ -666,7 +670,7 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
 	if (typeof forceRerun === "number") await callTool(forceRerun);
 	else for (let i = 0; i < tool_calls.length; i++) await callTool(i);
 
-	return autoCommit;
+	return flags;
 };
 
 /**
@@ -810,3 +814,11 @@ export const updateConversationState = (conv, name, value) => {
 	state.value = value;
 	$update(state);
 }
+
+/**
+ *
+ * @param {string} prefix
+ * @param {string} key
+ * @return {function(*, *): string}
+ */
+export const prefixTitle = (prefix, key = 'path') => (req, ctx) => prefix + ' ' + getToolParameters(ctx, req)[key];

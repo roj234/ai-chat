@@ -1,6 +1,18 @@
-import {abortCompletion, inputText, messages, selectedConversation, updateMessageUI} from "../states.js";
-import {$watch, unconscious} from "unconscious";
+import {
+	abortCompletion,
+	config,
+	inputText,
+	messages,
+	selectedConversation,
+	updateConversationUI,
+	updateMessageUI
+} from "../states.js";
+import {$computed, $state, $watch, $watchWithCleanup, unconscious} from "unconscious";
 import {TOOL_NAME, toolScriptRegistry} from "../toolset.js";
+
+import "./ContextUsage.css";
+import {getContextStrokeColor} from "./contextColor.js";
+import {DI} from "../hooks.js";
 
 const x = ["发送", "中止", "继续", "重试", "执行工具"];
 const y = ["ri-send-plane-fill", "ri-square-fill", "ri-play-large-fill", "ri-loop-right-line", "ri-function-ai-line"/* ri-check-double-line */];
@@ -12,13 +24,49 @@ const button_state_map = {
 	tool_calls: 4
 };
 
+export function ContextRing(sendBtn) {
+	const SIZE = 30 + 4 + 4;
+	const RADIUS = 15 + 2;
+	const CIRCUMFERENCE = 2 * Math.PI * RADIUS; // ≈ 502.65
+	let bar, tooltipDiv;
+	const usageText = $state("");
+	const root = <div className="ring">
+		{sendBtn}
+		<span className={"tooltip"} ref={tooltipDiv}>上下文: {usageText}</span>
+		<svg width={SIZE} height={SIZE}>
+			<defs>
+				<linearGradient id="ringGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+					<stop offset="0%" stop-color="#00c6ff"/>
+					<stop offset="100%" stop-color="#0072ff"/>
+				</linearGradient>
+			</defs>
+			<circle className="track" cx={SIZE / 2} cy={SIZE / 2} r={RADIUS}/>
+			<circle className="bar" cx={SIZE / 2} cy={SIZE / 2} r={RADIUS} ref={bar}/>
+		</svg>
+	</div>;
+
+	bar.style.strokeDasharray = CIRCUMFERENCE;
+	const mc = $computed(() => config.maxContext);
+	const cu = $computed(() => selectedConversation.contextUsage);
+	$watchWithCleanup([updateConversationUI, cu, mc], () => {
+		let pct = selectedConversation.contextUsage / config.maxContext;
+		tooltipDiv.style.display = isNaN(pct) ? 'none' : '';
+		if (pct > 1) pct = 1;
+
+		bar.style.strokeDashoffset = CIRCUMFERENCE * (1 - (pct || 0));
+		bar.style.stroke = getContextStrokeColor(pct);
+		usageText.value = (pct * 100).toFixed(2) + "%\n" + `${selectedConversation.contextUsage} / ${config.maxContext}`;
+	});
+	return root;
+}
+
 /**
  * @param {import("unconscious").Reactive<OpenAI.ContentPart[]>} attachments
  * @param {function(Event): void} onSend
  * @return {JSX.Element}
  */
 export const createSendButton = (attachments, onSend) => {
-	const sendBtn = <button onClick={onSend} />;
+	const sendBtn = DI.sendButton = <button onClick={onSend} />;
 
 	/** @param {number} state */
 	const setIcon = state => {
@@ -68,6 +116,5 @@ export const createSendButton = (attachments, onSend) => {
 		const action = checkAuxActions();
 		sendBtn.disabled = action === null || (!action && !inputText.trim() && !attachments.length);
 	});
-
-	return sendBtn;
+	return ContextRing(sendBtn);
 };

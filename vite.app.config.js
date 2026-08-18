@@ -39,6 +39,7 @@ export default {
                 /^btn-/,
                 'closed',
                 'lang',
+                'locked', // presetFastSwitch
                 'my/storyTurn'
             ]
         }),

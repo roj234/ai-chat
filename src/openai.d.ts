@@ -166,25 +166,33 @@ declare namespace OpenAI {
 
     type TextPart = {
         type: 'text';
-        text: string;
+        text: string | Blob | File;
     }
     type ImagePart = {
         type: 'image_url';
         image_url: {
             // file://, http:// or base64 encoded string
-            url: Blob | string;
+            url: File | Blob | string;
+            detail: 'low' | 'default' | 'high';
         };
     }
     type AudioPart = {
         type: 'input_audio';
         input_audio: {
-            data: Blob | string;
+            data: File | Blob | string;
             // llama.cpp only support them
             format: "wav" | "mp3";// | "aiff" | "aac" | "ogg" | "flac" | "m4a"
         };
     }
+    type VideoPart = {
+        type: 'video_url';
+        video_url: {
+            url: File | Blob | string;
+            detail: 'low' | 'default' | 'high';
+        }
+    }
 
-    type ContentPart = TextPart | ImagePart | AudioPart;
+    type ContentPart = TextPart | ImagePart | AudioPart | VideoPart;
 
     type ToolCall = {
         id: string;

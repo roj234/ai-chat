@@ -1,6 +1,6 @@
 import {$computed, $update, $watch, appendChild, appendChildren, AS_IS, ONCE_EVENT, unconscious} from 'unconscious';
 import Filter from 'unconscious/common/components/Filter.jsx';
-import {jsHide, prettyError} from "./utils/utils.js";
+import {jsHide, prettyError, requestIdleCallback} from "./utils/utils.js";
 import {ConversationList} from "./components/ConversationList.jsx";
 import {SETTINGS} from "./settings.js";
 import {databaseError, getMessages, initialize, isIDB, listConversations, updateConversation} from "./database.js";
@@ -18,7 +18,7 @@ import {
 	selectedConversation,
 	state,
 	updateConversationListUI,
-	updateConversationResumeState
+	updateConversationUI
 } from "./states.js";
 import {submitUserChatMessage} from "./api-request.js";
 import {MessageList} from "./components/MessageList.jsx";
@@ -176,6 +176,9 @@ const createApp = () => {
 			}
 		}
 		if (id === 'width') rootStyle.setProperty("--panel-width", newValue + "px");
+		if (id === 'modalities') {
+			toggleSettingUI('image', newValue.includes("image"));
+		}
 
 		if (id === 'mode') {
 			const isTextCompletion = newValue === 'completions';
@@ -255,38 +258,6 @@ const createApp = () => {
 			});
 
 			let hookGetMessages = AS_IS;
-
-			if (!isIDB) {
-				// 只有远程数据库存在这个函数
-				const wsConnected = initialize();
-
-				// batch 优化 对话和消息放在同一个响应里
-				if (id != null) {
-					const stub = { id, ready: false };
-					selectedConversation.value = stub;
-
-					hookGetMessages = async (promise) => {
-						hookGetMessages = AS_IS;
-
-						const messages = await promise;
-
-						const index = conversations.findIndex(t => t.id === id);
-						if (index >= 0) conversations[index] = stub;
-
-						// 等待同步服务下发 LOCKED 对象
-						await wsConnected;
-						return messages;
-					};
-				}
-
-				$watch([updateConversationResumeState], () => {
-					const conv = unconscious(selectedConversation);
-					if (conv?.[LOCKED] && conv.resumeId && !runningConversations.has(conv.id)) {
-						submitUserChatMessage();
-					}
-				})
-			}
-
 			let prevId;
 			$watch(selectedConversation, () => {
 				const conv = unconscious(selectedConversation);
@@ -337,7 +308,38 @@ const createApp = () => {
 				}
 
 				if (isMobile && !sidebar.style.display) toggleSidebar();
-			});
+			}, false);
+
+			if (!isIDB) {
+				// 只有远程数据库存在这个函数
+				const wsConnected = initialize();
+
+				// batch 优化 对话和消息放在同一个响应里
+				if (id != null) {
+					const stub = { id, ready: false };
+					selectedConversation.value = stub;
+
+					hookGetMessages = async (promise) => {
+						hookGetMessages = AS_IS;
+
+						const messages = await promise;
+
+						const index = conversations.findIndex(t => t.id === id);
+						if (index >= 0) conversations[index] = stub;
+
+						// 等待同步服务下发 LOCKED 对象
+						await wsConnected;
+						return messages;
+					};
+				}
+
+				$watch(updateConversationUI, () => {
+					const conv = unconscious(selectedConversation);
+					if (conv?.[LOCKED] && conv.resumeId && !runningConversations.has(conv.id)) {
+						submitUserChatMessage();
+					}
+				});
+			}
 
 			// autosave
 			$watch(messages, () => {
@@ -354,7 +356,7 @@ const createApp = () => {
 				}
 
 				backToBottomBtnShowHide();
-			});
+			}, false);
 
 			$watch($computed(() => config.allowHTMLTags), () => {
 				setAllowHTMLTags(config.allowHTMLTags);
@@ -366,7 +368,7 @@ const createApp = () => {
 const executeLogin = () => new Promise((resolve, reject) => {
 	const abort = new AbortController;
 	let modal;
-	sseFetch(config.db_server+"login", { signal: abort.signal }, ({code, token}) => {
+	sseFetch(config.db_server+"login", { signal: abort.signal }, ({code, token, skip}) => {
 		if (code) {
 			modal = SimpleModal({
 				title: "交互式登录",
@@ -377,15 +379,15 @@ const executeLogin = () => new Promise((resolve, reject) => {
 				onConfirm() {abort.abort();}
 			})
 		}
-		if (token) {
-			config.db_pat = token;
-			setTimeout(() => location.reload());
+		if (token || skip) {
+			config.db_pat = token || "";
+			requestIdleCallback(() => location.reload());
 		}
 	}).catch((err) => {
 		modal?.remove();
 		if (err.name !== 'AbortError')
-			showToast("登录失败\n"+prettyError(err), 'error', 0);
-		resolve();
+			showToast("登录失败\n"+prettyError(err), 'error', err.status ? 30000 : 0);
+		resolve(false);
 	});
 });
 
@@ -406,22 +408,24 @@ const connectDatabase = async () => {
 		onConfirm(value) {
 			let pat;
 			[value, pat] = value.trim().split("@");
+			if (!value) return false;
 
 			if (!value.toLowerCase().startsWith("http") && !value.startsWith('/')) {
 				if (!apiEndpoint) return false;
 				value = apiEndpoint + "v2/"+encodeURIComponent(value);
 			}
 			if (!value.endsWith('/')) value += '/';
+
 			config.db_server = value;
 			if (pat) config.db_pat = pat;
 			config._new = true;
-			location.reload();
+			return executeLogin();
 		},
 		onCancel(value) {
 			if (DB_MODE !== 'mixed') return false;
 			config.db_server = ':idb:';
 			config._new = true;
-			location.reload();
+			requestIdleCallback(() => location.reload());
 		}
 	});
 };
@@ -448,14 +452,27 @@ addEventListener("load", () => {
 			confirmMessage: "禁用所有插件",
 			onCancel() {
 				config.pluginOrder = [];
-				location.reload();
+				requestIdleCallback(() => location.reload());
 			}
 		})
 	});
 });
 
-addEventListener("unhandledrejection", e => {
+addEventListener('beforeprint', e => {
+	const chat = document.querySelector(".chat");
+	chat.classList.add('print');
+	chat.vl.resize();
+	chat.lastElementChild.append(<div style={'display:flex;justify-content:center'}>包含AI生成内容，请仔细甄别。</div>);
+});
+addEventListener('afterprint', e => {
+	const chat = document.querySelector(".chat");
+	chat.classList.remove('print');
+	chat.lastElementChild.lastElementChild.remove();
+});
+
+if (import.meta.env.DEV) addEventListener("unhandledrejection", e => {
 	e.promise.catch(e => {
+		if (typeof e === 'string') return;
 		showToast("未捕获的异常\n"+prettyError(e), 'error', 0);
 	})
 });

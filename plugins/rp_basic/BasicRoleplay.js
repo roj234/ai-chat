@@ -24,7 +24,7 @@ import {
 import {SETTINGS} from "/src/settings.js";
 
 import {cloneNamed, downloadFile} from "/src/utils/utils.js";
-import {readJPEG, readPNG} from "/common/upng.js";
+import {parseImageMeta} from "/common/imate.js";
 import {isIDB, kvListDel, kvListGet, kvListGetKeys, kvListSet} from "/src/database.js";
 import {getToolParameters, registerToolset} from "/src/toolset.js";
 import {showToast} from "/src/components/Toast.js";
@@ -491,25 +491,23 @@ const checkJSON = (json, batch, fileName, imageBlob) => {
 
 registerDataImportHandler("application/json", checkJSON);
 
-registerDataImportHandler("image/png", async (file, batch) => {
+const imageLoader = async (file, batch) => {
 	const imageData = new Uint8Array(await file.arrayBuffer());
-	const {chara} = readPNG(imageData);
+	const im = await parseImageMeta(imageData, { text: true });
+	if (!im) return;
+	let obj;
+	if (im.type === 'jpeg') obj = JSON.parse(im.comments.join(""));
+	else if (im.type === 'png') obj = im.text;
+	const chara = obj?.chara;
 	if (!chara) return;
 
 	const data = JSON.parse(chara[0] === '{' ? chara : base64DecodeToString(chara));
 	const result = checkJSON(data, batch, file.name, file);
 	if (result) return await result;
-});
-registerDataImportHandler("image/jpeg", async (file, batch) => {
-	const imageData = new Uint8Array(await file.arrayBuffer());
-	const comments = readJPEG(imageData).comments.join("");
-	if (!comments) return;
+};
 
-	const data = JSON.parse(comments).chara;
-	if (!data) return;
-	const result = checkJSON(data, batch, file.name, file);
-	if (result) return await result;
-});
+registerDataImportHandler("image/png", imageLoader);
+registerDataImportHandler("image/jpeg", imageLoader);
 
 //endregion
 //region 从角色卡新建对话
@@ -902,7 +900,7 @@ MessageRoles["assistant"] = {
 			const chunk = chunks[i];
 			if (chunk.type === "text") {
 				chunk.rpHook = (chunk.rpHook || 0) + 1;
-				chunk.text = applyRenderReplace(preset, chunk.text, index);
+				chunk.text = applyRenderReplace(preset, chunk.text, messages.length - 1 - index);
 				break;
 			}
 		}

@@ -444,6 +444,60 @@ nlink: ${stats.nlink}`);
 	/** @type {Map<string, {child: import('node:child_process').ChildProcess, logFile: string, cwd: string, timer?: number}>} */
 	const processes = new Map();
 
+	// 事件总线
+	let events = [];
+	let waiters = new Set;
+	let eventId = 0;
+
+	const EVENT_QUEUE_CAP = 1000;
+	const EVENT_TTL = 3600_000;
+	const RUN_ID = Math.random().toString(36).slice(3);
+
+	/**
+	 * 发布事件。无论有没有等待者都入队，客户端断线/F5 期间的事件由积压队列补发。
+	 */
+	const postEvent = (type, data) => {
+		const now = Date.now();
+		events.push({id: eventId++, type, time: now, ...data});
+
+		while (events.length > EVENT_QUEUE_CAP || (events.length && now - events[0].time > EVENT_TTL))
+			events.shift();
+
+		if (waiters.size) {
+			waiters.forEach(waiter => waiter());
+			waiters.clear();
+		}
+	};
+
+	router.post('/event', async (ctx) => {
+		const {runId, since = -1} = await ctx.readAsObject();
+		const deadline = Date.now() + 120000;
+
+		const collect = () => {
+			const pos = events.findIndex(e => e.id > since);
+			return {
+				runId: RUN_ID,
+				events: events.slice(pos),
+				next: eventId,
+			};
+		};
+
+		let id = events.at(-1)?.id;
+		if ((id == null || id <= since) && (runId === RUN_ID)) {
+			await new Promise(resolve => {
+				const timer = setTimeout(done, deadline - Date.now());
+				function done() {
+					clearTimeout(timer);
+					waiters.delete(done);
+					resolve();
+				}
+				waiters.add(done);
+			});
+		}
+
+		ctx.send(200, collect());
+	});
+
 	/**
 	 * 统一执行命令并限制输出大小，按到达顺序交错拼接 stdout/stderr
 	 * @param {string} command     - 要执行的程序或 shell 命令
@@ -551,11 +605,19 @@ nlink: ${stats.nlink}`);
 
 			child.on('exit', (code, signal) => {
 				if (file) file.end();
+
+				if (_async) postEvent('process-exit', {
+					pid: child.pid,
+					code: signal || code,
+					logFile: dir+filename,
+					manual: !processes.has(child.pid)
+				});
+
 				if (head == null) return;
 
 				clearTimeout(timer);
 				resolve({
-					code: signal ? "KILLED" : code,
+					code: signal || code,
 					text: getLog()
 				});
 			});
