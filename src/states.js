@@ -150,6 +150,15 @@ export const switchToConversation = (conv) => {
 };
 
 /**
+ * @param {number} id
+ * @return {AiChat.Conversation | null}
+ */
+export const findConversation = (id) => {
+	const conv = unconscious(selectedConversation);
+	return conv?.id !== id ? unconscious(conversations).find(item => item.id === id) : conv;
+};
+
+/**
  * @type {import("unconscious").Reactive<{}>}
  * @private
  */

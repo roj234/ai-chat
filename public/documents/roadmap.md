@@ -15,11 +15,8 @@
 - **PDF**：JS 沙箱已有 PDFLib 的 ESM 版本
   - 写一些脚本减少 boilerplate
 
-- 使用 WebSocket 和文件系统后端通信，这样可以在后台程序结束后发出通知
-"Track every background job id you start. You are notified in-session when a job finishes — do not busy-poll or sleep on one;"
-- /fsync交本地文件系统的diff 
-- 替换 ws 库
 - 实装我的overlayfs沙箱
 
-### 状态: 知道要做
+### 状态: 可能要做
 - 对话分享和给人类用的文件管理 UI
+- /fsync提交文件的diff而不是修改时间

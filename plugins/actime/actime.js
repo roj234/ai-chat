@@ -103,7 +103,7 @@ function buildData(messages, logs) {
 	return {
 		runningTime, totalTime,
 		breakdown: [
-			{ key: 'thinking', label: '思考', sec: thinkTimeSum / 1000 },
+			{ key: 'thinking', label: '推理', sec: thinkTimeSum / 1000 },
 			{ key: 'tool',     label: '工具调用', sec: toolTimeSum / 1000 },
 			{ key: 'subagent', label: '子代理', sec: subagentTimeSum / 1000 },
 			{ key: 'waiting',  label: '等待',  sec: waitingTimeSum / 1000 },
@@ -170,7 +170,7 @@ async function render() {
 		<section className="section">
 			<h2 className="section-title">耗时
 				<span className={"spacer"}></span>
-				<span>共计 {fmtDur(d.totalTime)}</span>
+				<span title={"墙钟时间"}>共计 {fmtDur(d.totalTime)}</span>
 			</h2>
 			<div className="stacked-bar" role="img">{bars}</div>
 			<div className="time-breakdown">{rows}</div>

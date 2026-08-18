@@ -5,6 +5,7 @@ import {$asyncState, $cleanup, $state, $update, $watch, debugSymbol, unconscious
 import {
 	config,
 	conversations,
+	findConversation,
 	messages,
 	runningConversations,
 	selectedConversation,
@@ -15,16 +16,18 @@ import {fileAccess} from "./fileAccess.js";
 import {compileSchema} from "unconscious/common/json-schema-utils.js";
 import "./subagent.css";
 import {showToast} from "/src/components/Toast.js";
-import {prettyError} from "/src/utils/utils.js";
+import {cloneNamed, prettyError} from "/src/utils/utils.js";
 import {DI} from "/src/hooks.js";
+import {appendMessages} from "/src/inject-message.js";
 
 const readFile = fileAccess("read");
 
 const INIT_AGENT_SYM = debugSymbol("InitAgent");
 const EVAL_AGENT_SYM = debugSymbol("EvaluateAgent");
 const CONVERSATION_CACHE = debugSymbol("CONVERSATION_CACHE");
+const FS_KEYS = ["fs_type", "fs_base", "fs_server", "fs_builtin"];
 
-const findConversation = response => response[CONVERSATION_CACHE] || (response[CONVERSATION_CACHE] = conversations.find(item => item.id === response.agentId));
+const findSubAgent = response => response[CONVERSATION_CACHE] || (response[CONVERSATION_CACHE] = findConversation(response.agentId));
 
 /**
  *
@@ -40,15 +43,10 @@ async function createSubagent(par, response, conv, tools, modules) {
 	const conversation = {
 		title: "子代理 " + par.name + " for #" + conv.id,
 		time: Date.now(),
-		// 继承文件系统
-		fs_type: conv.fs_type,
-		fs_base: conv.fs_base,
-		mnt: structuredClone(conv.mnt),
 		// 有些工具比如SetTimeout判断它是否存在从而进入假设无UI的无头模式
 		owner: conv.id,
 		// 覆盖系统配置
 		overrides: {
-			tools: true,
 			maxToolTurns: 150, // a sanity value
 			permittedTools: ['*'],
 			afkState: 1,
@@ -58,6 +56,18 @@ async function createSubagent(par, response, conv, tools, modules) {
 		allowedTools: new Set(),
 		activatedModules: new Set(modules)
 	};
+
+	// 复制文件系统
+	Object.assign(conversation, cloneNamed(conv, FS_KEYS));
+	const mnt = conv.mnt;
+	if (mnt) {
+		const mnt2 = conversation.mnt;
+		for (const key in mnt) {
+			mnt2[key] = cloneNamed(mnt[key], FS_KEYS);
+		}
+	}
+
+	if (par.async) conversation.sa_notify = true;
 
 	const modelType = par.model || 'inherit';
 	if (modelType !== 'inherit') {
@@ -123,6 +133,7 @@ Do NOT stop or return results in any other way — only \`AgentFinish\` signals 
 
 	await updateConversation(conversation, initMessages);
 	conversations.unshift(conversation);
+	if (par.async) (conv.sa_async ??= []).push(conversation.id);
 	response.agentId = conversation.id;
 	response.time = Date.now();
 	response[CONVERSATION_CACHE] = conversation;
@@ -172,17 +183,33 @@ const subagentLoop = async conversation => {
 			return content;
 		}
 	} else {
+		if (stop === 'error') return messages.at(-1).error;
 		return messages.at(-1).content;
 	}
 };
 const subagentLoopWrapper = ctx => {
-	const conv = findConversation(ctx);
+	const conv = findSubAgent(ctx);
 	let promise = conv[EVAL_AGENT_SYM];
 	if (promise) return promise;
 	promise = conv[EVAL_AGENT_SYM] = subagentLoop(conv);
-	promise.finally(() => {
-		delete conv[EVAL_AGENT_SYM];
-	});
+	if (conv.sa_notify) {
+		promise.then(result => {
+			const parent = findConversation(conv.owner);
+			const idx = parent?.sa_async?.indexOf(conv.id);
+			if (idx != null && idx >= 0) {
+				if (parent.sa_async.length === 1) delete parent.sa_async;
+				else parent.sa_async.splice(idx, 1);
+
+				return appendMessages(parent, [{
+					role: 'user',
+					label: "异步子代理结果",
+					time: Date.now(),
+					content: `<subagent-result id="${conv.id}">\n${result}\n</subagent-result>`,
+				}]);
+			}
+		});
+	}
+	promise.finally(() => { delete conv[EVAL_AGENT_SYM]; });
 	return promise;
 };
 
@@ -196,7 +223,8 @@ const CreateSubagent = {
 		"Equip it with all tools needed to complete the task. " +
 		"Prompts in 'systemPrompt' array are concatenated. " +
 		"If 'responseSchemaPath' (JSON Schema file) is provided, the agent's result will conform to that schema." +
-		"\nThe agent MAY operate in async mode, the call returns immediately with an agentId; use QueryAgentStatus to poll and retrieve the outcome.",
+		"\nThe agent MAY operate in async mode, the call returns immediately with an agentId; use QueryAgentStatus to poll and retrieve the outcome." +
+		"\nNo polling: You will be notified when async agent finishes.",
 	interactive: "secure",
 	parameters: {
 		type: 'object',
@@ -264,7 +292,7 @@ const CreateSubagent = {
 		const id = context.agentId;
 		if (id) {
 			keys.push(id);
-			const conversation = findConversation(context);
+			const conversation = findSubAgent(context);
 			keys.push(conversation?.time);
 			keys.push(context.content);
 		}
@@ -299,7 +327,7 @@ const CreateSubagent = {
 					ctx.success = false;
 					ctx.content = "Error: "+prettyError(e);
 				}
-				ctx.duration = findConversation(ctx).time - ctx.time;
+				ctx.duration = findSubAgent(ctx).time - ctx.time;
 			}
 			markMessageDirty(message);
 			$update(updateMessageUI);
@@ -307,7 +335,7 @@ const CreateSubagent = {
 
 		// 尚未启动：没有 agentId 或 conversation 丢失
 		// 前者应该不可能触发但保留
-		const subagentConv = findConversation(ctx);
+		const subagentConv = findSubAgent(ctx);
 		if (!ctx.agentId || (!has_successor && !subagentConv)) {
 			return <div className={`subagent-card`}>
 				<button className="sa-btn paused" onClick={() => {
@@ -327,8 +355,8 @@ const CreateSubagent = {
 		const status = $asyncState(async () => {
 			if (runningConversations.has(ctx.agentId)) return [ 'running', '运行中' ];
 
-			const status = await QueryAgentStatus.script(ctx);
-			if (status === 'no such agent') return [ 'error', '已删除' ];
+			const status = await QueryAgentStatus.script(ctx, null, unconscious(selectedConversation));
+			if (status === 'No such agent') return [ 'error', '已删除' ];
 			if (status.startsWith('done') && ctx.content) return [ 'done', '已完成' ];
 			if (status.startsWith('error')) return [ 'error', '错误' ];
 			return [ 'paused', '继续' ];
@@ -381,8 +409,8 @@ const QueryAgentStatus = {
 		return par.timeout ? "等待子代理 #"+par.agentId+` 完成 (${par.timeout} 秒)` : "查询子代理 #"+par.agentId+" 状态";
 	},
 	async script(par, resp, conv) {
-		const conversation = findConversation(par);
-		if (!conversation) return 'no such agent';
+		const conversation = findSubAgent(par);
+		if (!conversation || conversation.owner !== conv.id) return 'No such agent';
 
 		const timeout = par.timeout;
 		if (timeout) {
@@ -412,6 +440,54 @@ const QueryAgentStatus = {
 	},
 };
 
+/**
+ * @type {AiChat.FunctionTool<*>}
+ */
+const NotifyAgent = {
+	name: 'NotifyAgent',
+	description: "Send a message to agent.",
+	parameters: {
+		type: 'object',
+		properties: {
+			agentId: { type: 'integer', },
+			message: { type: 'string' },
+		},
+		required: ['agentId', 'message'],
+	},
+	title(req, ctx) {
+		const par = getToolParameters(ctx, req);
+		return "向子代理 #"+par.agentId+" 发送消息";
+	},
+	async script(par, resp, conv) {
+		const conversation = findSubAgent(par);
+		if (!conversation || conversation.owner !== conv.id) throw 'No such agent';
+
+		if (!runningConversations.has(par.agentId)) {
+			const content = subagentLoopWrapper(par).catch(e => "Error: "+prettyError(e));
+
+			const messages = await getMessagesCacheFirst(conversation);
+			const lastMessage = messages.at(-1);
+			const finishReason = lastMessage.finish_reason;
+			if (finishReason !== 'stop') {
+				if (finishReason === "error") throw 'Agent error';
+				if (lastMessage.tool_calls?.find(item => item.function.name === 'AgentFinish')) {
+					return "Agent already finished.";
+				}
+			} else {
+				return "Agent already finished.";
+			}
+		}
+
+		await appendMessages(conversation, [{
+			role: 'user',
+			time: Date.now(),
+			label: "主代理发送的消息",
+			content: par.message
+		}]);
+		return "Message sent";
+	},
+};
+
 const agentFinishParameter = {
 	type: 'object',
 	properties: {
@@ -433,7 +509,7 @@ const AGENT_FINISH_CACHE = debugSymbol("SA_CHILD_FINISH");
 registerToolset(
 	"Subagent",
 	"Create agents to autonomously execute a task and return the result. The agent has its own system prompt and tool set, and can optionally produce structured output via a JSON Schema.",
-	[CreateSubagent, QueryAgentStatus],
+	[CreateSubagent, QueryAgentStatus, NotifyAgent],
 	{
 		default: true
 	}

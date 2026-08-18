@@ -17,13 +17,14 @@ const TaskCreate = {
 			status: {
 				type: 'string',
 				enum: ['pending', 'in_progress'],
+				default: 'pending'
 			},
 		},
 		required: ['title', 'description', 'status'],
 	},
 	script(par, resp, conv) {
 		const tasks = conv.tasks || (conv.tasks = []);
-		const nextTaskId = tasks.push({...par});
+		const nextTaskId = tasks.push({...par, status: par.statue ?? 'pending'});
 		resp.id = nextTaskId;
 		updateConversationState(conv, "TaskList:tasks");
 		return "Task created, id="+nextTaskId;

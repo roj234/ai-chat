@@ -559,6 +559,7 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
 		const tc = tool_calls[i];
 		let msg = tool_responses[i];
 		let {name} = tc.function;
+
 		try {
 			let fn = toolScriptRegistry[name];
 			if (!fn) {
@@ -585,9 +586,7 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
 				if (msg.success) fn?.undo?.(msg, conv, tc);
 			}
 
-			msg = tool_responses[i] = {
-				[TOOL_NAME]: name
-			};
+			msg = tool_responses[i] = { [TOOL_NAME]: name };
 
 			const parameters = getToolParameters(msg, tc);
 			const allowRun = name === 'Use' || conv.allowedTools.has(name);
@@ -653,6 +652,12 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
 			if (typeof e === 'string' && !e.startsWith('Error: '))
 				e = 'Error: '+e;
 			console.error(e);
+			/*msg = tool_responses[i] = {
+				[TOOL_NAME]: name,
+				success: false,
+				content: prettyError(e)
+			};*/
+			if (!msg) msg = tool_responses[i] = { [TOOL_NAME]: name };
 			msg.success = false;
 			msg.content = prettyError(e);
 			if (!(await getCombinedPreset(conv)).afkState)

@@ -5,6 +5,7 @@ import {setWakeLock} from "./utils/wakeLock.js";
 import {
 	abortCompletion,
 	config,
+	EVENT_BUS,
 	getCurrentTheme,
 	inputText,
 	isLlamaCppBackend,
@@ -94,22 +95,24 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 	let markdownRenderer = cfg.afkState === 2 ? (content, container) => container && (container.textContent = content) : createMarkdownStream();
 	let updateCount = 0;
-	let lastContent;
-	let waitingForContent;
+	let lastMessage;
+	let _waitingFor;
 
 	const roleId = conversation.roleId;
 	const schemaPreprocess = roleId ? s => "```"+roleId+"\n"+s : AS_IS;
 
-	const render = (content, force) => {
-		lastContent = content;
+	const render = (message, force) => {
+		lastMessage = message;
 
-		const isThinking = isReactive(content.think);
+		const isThinking = isReactive(message.think);
+		const textContent = (isThinking ? message.think : message).content;
 		const container = findStreamingContainer(isThinking);
 		if (!container) {
-			waitingForContent = isThinking;
+			if (!textContent) return;
+			_waitingFor = isThinking;
 			return true;
 		}
-		waitingForContent = 0;
+		_waitingFor = 0;
 
 		if (!force) {
 			const details = container.closest("details:not([open])");
@@ -117,7 +120,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 				if (!details.classList.contains("m")) {
 					details.classList.add("m");
 					// only update when open
-					details.addEventListener("click", () => render(content));
+					details.addEventListener("click", () => render(message));
 				}
 				return;
 			}
@@ -127,33 +130,33 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			requestAnimationFrame(() => {
 				const wasUpdatedAfterCheckpoint = updateCount > 1;
 				updateCount = 0;
-				if (wasUpdatedAfterCheckpoint) render(content);
+				if (wasUpdatedAfterCheckpoint) render(message);
 			});
 			updateCount++;
 		}
 
 		const atBottom = DI_messageContainer.scrollHeight - DI_messageContainer.clientHeight - DI_messageContainer.scrollTop;
 
-		markdownRenderer(isThinking ? content.think.content : schemaPreprocess(content.content), container, isThinking ? DONT_PARSE_HTML_IN_THINKING : null);
+		markdownRenderer(isThinking ? textContent : schemaPreprocess(textContent), container, isThinking ? DONT_PARSE_HTML_IN_THINKING : null);
 
 		if (atBottom < 250 && !unconscious(lastScrollDirectionIsUp)) DI_messageContainer.vl.scrollTo(DI_messageContainer.scrollHeight);
 	};
-	const renderer = (type, content) => {
+	const renderer = (type, message) => {
 		if (selectedConversation.id !== conversation.id) return;
 
 		switch (type) {
 			case MARKDOWN_APPEND:
 				// noinspection UnnecessaryLocalVariableJS
-				const flag = waitingForContent;
-				if (render(content) && waitingForContent !== flag) break;
+				const flag = _waitingFor;
+				if (render(message) && _waitingFor !== flag) break;
 			return;
 			case MARKDOWN_END: {
-				if (lastContent) {
+				if (lastMessage) {
 					updateCount = 0;
-					render(lastContent, true);
+					render(lastMessage, true);
 					markdownRenderer();
 				}
-				if (null === content?.finish_reason) return;
+				if (null === message?.finish_reason) return;
 			}
 		}
 		$update(updateMessageUI);
@@ -178,6 +181,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		abort,
 		messages
 	});
+	EVENT_BUS.post(['loopBegin'], conversation);
 
 	if (!IS_ANDROID_BUILD) document.title = `工作中(${runningConversations.size}) - ${PAGE_TITLE}`;
 
@@ -355,6 +359,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 		return finishReason;
 	} finally {
+		EVENT_BUS.post(['loopEnd'], conversation);
 		runningConversations.delete(conversation.id);
 		const runningNow = runningConversations.size;
 		if (!runningNow) setWakeLock(false);
@@ -582,7 +587,7 @@ async function sendCompletionRequest(
 	/** @type {string} */
 	let finishReason;
 	/** @type {number} */
-	let firstPacketTime;
+	let firstPacketTime, localTimeDelta = 0;
 	/** @type {Partial<AiChat.BillingLog>} */
 	const log = { provider: (config.provider || new URL(resolveDBRelativeURL(config.endpoint)).host) };
 
@@ -661,6 +666,8 @@ async function sendCompletionRequest(
 						delete conversation.resumeId;
 					}
 
+					localTimeDelta = resumable.now - firstPacketTime;
+					//console.log("time diff to server", localTimeDelta);
 					firstPacketTime = resumable.start;
 				}
 
@@ -689,7 +696,7 @@ async function sendCompletionRequest(
 
 			if (!finishReason) finishReason = chunk?.finish_reason;
 			if (finishReason) {
-				log.duration = Date.now() - firstPacketTime;
+				log.duration = Date.now() + localTimeDelta - firstPacketTime;
 				const currentContext = extractUsageMetrics(json, log);
 				if (Number.isFinite(currentContext)) conversation.contextUsage = currentContext;
 				else delete conversation.contextUsage;
@@ -835,7 +842,7 @@ async function sendCompletionRequest(
 
 			// TTFT
 			if (null == log.latency && (content || thinkState || assistantMessage.tool_calls)) {
-				log.latency = (resumable?.ft||Date.now()) - firstPacketTime;
+				log.latency = (resumable?.ft||(Date.now()+localTimeDelta)) - firstPacketTime;
 			}
 		});
 
@@ -1045,7 +1052,7 @@ async function buildCompletionPayload(
 	} else {
 		body.messages = json_messages;
 
-		if (config.modalities.includes("tool") && conversation.activatedModules?.size) {
+		if (config.modalities.includes("tool") && (conversation.activatedModules?.size || conversation.allowedTools?.size)) {
 			let tools;
 			[tools, toolPrompt] = await getAvailableTools(conversation);
 			if (tools.length) body.tools = tools;

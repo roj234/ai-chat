@@ -13,6 +13,8 @@ export const createAsyncQueue = (concurrency = 6) => {
 
 export const PROMISE_CATCH = () => {};
 
+export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 /**
  * 节流函数，保证最终一定会以最新的参数调用一次
  * @template {Function} T

@@ -260,7 +260,7 @@ export const getKV = (key, val) => {
 	});
 	return promise;
 };
-export const setKV = (key, value) => value === undefined ? u_deleteKV(key) : u_setKV([key, value]);
+export const setKV = (key, value) => value === undefined ? u_deleteKV(key) : u_setKV([key, value]).then(() => EVENT_BUS.post(['kv', key], value));
 
 // values这个接口主要是给备份(导出)用的
 export const kvListGetValues = batched("kvs/values", true);
@@ -328,7 +328,7 @@ const KVLIST_IGNORE_KEYS = new Set(["name", "type"]);
  * @param {Object} value
  * @param {string} type
  * @param {string=} name
- * @return {Promise<*>}
+ * @return {Promise<void>}
  */
 export const kvListSet = async (value, type, name) => {
 	if (name) value.name = name;
@@ -404,7 +404,7 @@ function _FakeBlob(obj) {this.$='BlobH';Object.assign(this, obj);}
 _FakeBlob.prototype = {
 	constructor: File,
 	toUrl() {return dbUrl+`blob/`+this.hash;},
-	async blob() {return this[BLOB] || (this[BLOB] = await (await fetch(this.toUrl(), { cache: 'force-cache', integrity: 'sha256-'+this.hash })).blob());},
+	async blob() {return this[BLOB] || (this[BLOB] = await (await fetch(this.toUrl(), { cache: 'force-cache', integrity: 'sha256-'+this.hash }).catch(() => {throw new Error("附件 "+(this.name||this.hash)+" 丢失或损坏")})).blob());},
 	async toDataURL() {return (await this.blob()).toDataURL();},
 	async arrayBuffer() {return (await this.blob()).arrayBuffer();},
 	async bytes() {return (await this.blob()).bytes();},

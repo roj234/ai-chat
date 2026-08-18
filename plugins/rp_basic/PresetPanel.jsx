@@ -369,7 +369,7 @@ export function _PresetEditor(preset, isOpen, close) {
 		{
 			name: "内容(给AI看)",
 			id: "content",
-			placeholder: "类型为【宏】时，在此填写宏的名称，如 {{chatHistory}}",
+			placeholder: "类型为【宏】时，在此填写宏的名称，如 chatHistory，不包含花括号。花括号在非宏模式中需要",
 			required: true,
 			type: "textbox"
 		},
@@ -405,13 +405,23 @@ export function _PresetEditor(preset, isOpen, close) {
 			name: "正则",
 			id: "search",
 			required: true,
-			placeholder: "使用 /search/g 语法指定修饰符",
+			pattern(v) {
+				if (!v) return "字段不得留空";
+				const pat = /\/(.+)\/([migdus]+)$/;
+				const exec = pat.exec(v);
+				if (exec) new RegExp(exec[1], exec[2]);
+				else if (v[0] === '/') return "语法错误，请检查。可能是不支持的 flag";
+				else new RegExp(v);
+			},
+			placeholder: "直接填写正则，或用 /search/g 语法指定修饰符。请注意：斜杠 ('/') 的转义是可选的",
 			type: "textbox"
 		},
 		{
-			name: "替换",
+			name: <>替换<span className={"spacer"}/><a
+				href={"https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/String/replace#%E6%8C%87%E5%AE%9A%E5%AD%97%E7%AC%A6%E4%B8%B2%E4%BD%9C%E4%B8%BA%E6%9B%BF%E6%8D%A2%E9%A1%B9"}
+				rel={"noopener noreferrer"} target={"_blank"}><i className={"ri-external-link-line"} />正则特殊替换模式</a></>,
 			id: "replace",
-			placeholder: "支持 $$ $1 $& 等高级语法",
+			placeholder: "支持 $$ $1 $& 等高级语法 详见外链",
 			type: "textbox"
 		},
 		{

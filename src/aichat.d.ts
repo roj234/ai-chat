@@ -2,10 +2,11 @@ import {OpenAI} from "./openai";
 
 declare namespace AiChat {
     type Mount = {
-        fs_type: 'db' | 'api' | 'local' | 'config' | 'opfs';
+        fs_type: 'db' | 'api' | 'local' | 'config' | 'opfs' | 'vfs';
         fs_base?: string;
         fs_server?: string;
         fs_builtin?: string;
+        fs_events?: Object[];
     }
 
     export type Conversation = Mount & {
@@ -43,6 +44,9 @@ declare namespace AiChat {
         presets?: string | string[];
         /** 覆盖全局配置，高于 presets 优先级 */
         overrides?: Partial<LocalPreset>;
+
+        /** pending消息缓存 */
+        pendingMessages?: Message[];
     }
 
     export type Message = BaseMessage | AssistantMessage;

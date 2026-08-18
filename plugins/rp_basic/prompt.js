@@ -9,7 +9,7 @@ export const applyMacro = (prompt, ctx) => prompt.replaceAll(/\{\{(.+?)}}/g, (te
 	return ctx[match] || text;
 });
 
-const IS_SYSTEM = debugSymbol("IS_SYSTEM");
+const IS_SYSTEM = debugSymbol("InternalMessage");
 
 /**
  * 预设处理器
@@ -233,7 +233,7 @@ export const applyRenderReplace = ({regexps = []}, content, depth) => {
 	return activeRegexps.length ? regexpReplace(activeRegexps, depth, content) : content;
 };
 
-const COMPILED = debugSymbol("REGEXP");
+const COMPILED = debugSymbol("Pattern");
 
 /**
  * @param {AiChat.DnD.MyRegexp[]} regexps
@@ -259,86 +259,10 @@ const regexpReplace = (regexps, depth, content) => {
 			regexp[COMPILED] = re;
 		}
 
-		content = replaceString(content, re, regexp.replace);
+		content = content.replace(re, regexp.replace);
 	}
 	return content;
 };
 
-/**
- * 将字符串中匹配正则表达式的部分替换为指定的字符串（支持 $1, $& 等占位符）
- * @param {string} str - 原始字符串
- * @param {RegExp} re - 正则表达式（可能带有 g 标志，也可能不带）
- * @param {string} replacement - 替换字符串，可包含以下占位符：
- *   $$  → "$"
- *   $&  → 本次匹配到的子串
- *   $`  → 匹配子串左侧的文本
- *   $'  → 匹配子串右侧的文本
- *   $n  → 第 n 个捕获组（1 起始）
- *   其他 $x 原样保留
- * @returns {string} 替换后的新字符串
- */
-const replaceString = (str, re, replacement) => {
-	re.lastIndex = 0;
 
-	// 非全局模式：只处理第一个匹配
-	if (!re.global) {
-		const match = re.exec(str);
-		if (!match) return str;
 
-		// 拼接：左侧 + 替换后的文本 + 右侧
-		return (
-			str.slice(0, match.index) +
-			getReplacement(replacement, match, str) +
-			str.slice(match.index + match[0].length)
-		);
-	}
-
-	// 全局模式：循环处理所有匹配
-	let result = '';
-	let lastIndex = 0;
-	let match;
-
-	while ((match = re.exec(str)) !== null) {
-		// 添加匹配前的部分
-		result += str.slice(lastIndex, match.index);
-		// 添加替换后的文本
-		result += getReplacement(replacement, match, str);
-		// 更新指针
-		lastIndex = match.index + match[0].length;
-
-		// 防止零长度匹配导致死循环
-		if (match[0].length === 0) {
-			re.lastIndex++;
-		}
-	}
-
-	// 添加剩余部分
-	result += str.slice(lastIndex);
-	return result;
-};
-
-/**
- * 根据匹配信息生成最终的替换字符串
- * @param {string} replacement - 原始替换模板
- * @param {RegExpExecArray} match - exec 返回的匹配数组
- * @param {string} str - 原始字符串（用于 $` 和 $'）
- * @returns {string}
- */
-const getReplacement = (replacement, match, str) => {
-	const matched = match[0];
-	const before = str.slice(0, match.index);
-	const after = str.slice(match.index + matched.length);
-
-	// 替换 $$ 和 $ 开头的占位符
-	return replacement.replace(/\$(\$|&|`|'|\d+)/g, (m, token) => {
-		switch (token) {
-			case '$': return '$';                // $$
-			case '&': return matched;            // $&
-			case '`': return before;             // $`
-			case "'": return after;              // $'
-			default:                              // $n
-				const n = parseInt(token, 10);
-				return n > 0 && n < match.length ? match[n] : m;
-		}
-	});
-};

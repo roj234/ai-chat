@@ -1,5 +1,5 @@
 import {getToolParameters, registerToolset} from "/src/toolset.js";
-import {fileAccess} from "./fileAccess.js";
+import {fileAccess, getChangeableFiles} from "./fileAccess.js";
 import {prefixTitle} from "./agent.js";
 import {
 	compileSchema,
@@ -43,11 +43,11 @@ Modes:
 		required: ["path", "pointer"]
 	},
 
-	async script({path, pointer, value}, response, global) {
+	async script({path, pointer, value}, response, conv) {
 		const text = await readFile({
 			path,
 			noTruncate: true
-		}, response, global);
+		}, response, conv);
 
 		let obj;
 		try {
@@ -83,7 +83,8 @@ Modes:
 			path,
 			content: JSON.stringify(obj, null, 2),
 			overwrite: true
-		}, response, global);
+		}, response, conv);
+		await getChangeableFiles(conv, path);
 
 		return "Successfully edited /"+jsonPointer.map(JSON.stringify).join("/");
 	},
@@ -101,14 +102,21 @@ const WriteJson = {
 		properties: {
 			path: { type: "string" },
 			content: { description: "Complete JSON object or array that replaces all existing content.", type: ["object", "array"], },
-			indent: { enum: ["", "\t", "  ", "    "], default: "  " },
-			overwrite: { type: "boolean", default: false }
+			indent: { enum: ["", "\t", "  ", "    "], default: "  " }
 		},
 		required: ["path", "content"]
 	},
 
-	script({path, content, indent = 2, overwrite}, response, global) {
-		return writeFile({path, content: JSON.stringify(content, null, indent), overwrite}, response, global);
+	async script(par, response, conv) {
+		par = { ...par };
+
+		let changeable = await getChangeableFiles(conv);
+		if (changeable.has(par.path)) par.overwrite = true;
+		par.content = JSON.stringify(par.content, null, par.indent ?? 2);
+
+		const result = await writeFile(par, response, conv);
+		changeable.add(par.path);
+		return result;
 	},
 	title: prefixTitle("写入JSON")
 }

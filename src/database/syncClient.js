@@ -2,6 +2,7 @@ import {
 	BRANCH_MANAGER,
 	conversations,
 	EVENT_BUS,
+	findConversation,
 	LOCKED,
 	messages,
 	resetConversation,
@@ -106,11 +107,6 @@ const setLockStatus = (id, locked) => {
 	if (id1 == null || (id != null && id1 !== id)) return true;
 	selectedConversation[LOCKED] = locked;
 	$update(updateConversationListUI);
-};
-
-const findConversation = (id) => {
-	const conv = unconscious(selectedConversation);
-	return conv?.id !== id ? unconscious(conversations).find(item => item.id === id) : conv;
 };
 
 const checkConcurrentModification = conv => {
@@ -316,7 +312,6 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 					if (conv[DIFF_SNAPSHOT]) {
 						conv[DIFF_SNAPSHOT] = structuredClone(conv);
 					}
-
 
 					const msgs = conv[MESSAGES_CACHE];
 					if (msgs) {

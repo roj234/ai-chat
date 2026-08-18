@@ -184,6 +184,7 @@ export function createTextFileEditHelper(fs) {
 
 		for (let i = 0; i < changes.length; i++) {
 			const {search, replace} = changes[i];
+			if (search === replace) continue;
 			if (!search) {
 				errors.push(`Hunk #${i + 1} is invalid: search is empty.`);
 				continue;
@@ -388,7 +389,7 @@ Lines: ${lines.length} → ${lines.length + delta} (${delta > 0 ? '+': ''}${delt
 			} catch {
 				break check;
 			}
-			throw 'File already exist';
+			throw 'File already exist, fix name or read it.';
 		}
 		await fs.write(absPath, content, ctx);
 		cache.set(absPath, content.split('\n'));

@@ -1,6 +1,6 @@
 import {debugSymbol, unconscious} from "unconscious";
 import {showToast} from "../components/Toast.js";
-import {BRANCH_MANAGER, messages as reactiveMessages, selectedConversation} from "../states.js";
+import {BRANCH_MANAGER, EVENT_BUS, messages as reactiveMessages, selectedConversation} from "../states.js";
 import {redoToolCalls, undoToolCalls} from "../toolset.js";
 
 const INDEX = debugSymbol("INDEX");
@@ -52,6 +52,7 @@ function createBranchManager(conv, messages) {
 					showToast(`分支管理器启用失败
 找不到 #${index} 的父节点 #${parentIndex}
 请尝试编辑原始数据`, "error");
+					delete m.parent;
 					continue;
 				}
 
@@ -172,9 +173,18 @@ function createBranchManager(conv, messages) {
 			if (siblings) {
 				const idx = siblings.indexOf(message);
 				siblings.splice(idx, 1);
-				switchBranch(parent, Math.min(idx, siblings.length-1));
-				if (siblings.length <= 1) delete parent[CHILDREN];
-				return;
+
+				const length = siblings.length;
+				if (length) {
+					switchBranch(parent, Math.min(idx, length-1));
+
+					if (length === 1 && siblings[0][INDEX] === parent[INDEX]+1) {
+						delete parent[CHILDREN];
+					}
+					return;
+				}
+
+				delete parent[CHILDREN];
 			}
 
 			leaf = parent;
@@ -369,7 +379,7 @@ export const setLastMessage = message => {
 };
 
 
-const setMessages = (newMessages, global) => {
+const setMessages = (newMessages, conv) => {
 	const oldMessages = unconscious(reactiveMessages);
 	reactiveMessages.value = newMessages;
 
@@ -377,8 +387,9 @@ const setMessages = (newMessages, global) => {
 	for (; prefix < Math.min(oldMessages.length, newMessages.length); prefix++) {
 		if (oldMessages[prefix] !== newMessages[prefix]) break;
 	}
-	undoToolCalls(global, oldMessages, prefix, true);
-	redoToolCalls(global, newMessages, prefix, true);
+	EVENT_BUS.post(['conversation', 'branch'], [conv, oldMessages, newMessages, prefix]);
+	undoToolCalls(conv, oldMessages, prefix, true);
+	redoToolCalls(conv, newMessages, prefix, true);
 };
 
 /**
@@ -387,11 +398,11 @@ const setMessages = (newMessages, global) => {
  * @param {number} branchIndex - 要切换到的分支下标（在 CHILDREN 数组中的索引）
  */
 export const setBranchIndex = (message, branchIndex) => {
-	const global = unconscious(selectedConversation);
+	const conv = unconscious(selectedConversation);
 	/** @type {AiChat.BranchManager} */
-	const bm = global[BRANCH_MANAGER];
+	const bm = conv[BRANCH_MANAGER];
 	bm.switchBranch(bm.messages[resolveParent(message)], branchIndex);
-	setMessages(bm.getMessages(), global);
+	setMessages(bm.getMessages(), conv);
 };
 
 /**

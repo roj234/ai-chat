@@ -454,8 +454,22 @@ addEventListener("load", () => {
 	});
 });
 
+addEventListener('beforeprint', e => {
+	const chat = document.querySelector(".chat");
+	chat.classList.add('print');
+	chat.vl.resize();
+	chat.lastElementChild.append(<div style={'display:flex;justify-content:center'}>包含AI生成内容，请仔细甄别。</div>);
+});
+addEventListener('afterprint', e => {
+	const chat = document.querySelector(".chat");
+	chat.classList.remove('print');
+	chat.lastElementChild.lastElementChild.remove();
+});
+
+
 addEventListener("unhandledrejection", e => {
 	e.promise.catch(e => {
+		if (typeof e === 'string') return;
 		showToast("未捕获的异常\n"+prettyError(e), 'error', 0);
 	})
 });

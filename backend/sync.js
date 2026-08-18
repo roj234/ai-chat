@@ -17,7 +17,8 @@ export const
 	SYNC_KVS = 14,
 	SYNC_KVS_DEL = 15,
 	SYNC_RPC = 16,
-	SYNC_SEND_TO_OWNER = 17
+	SYNC_SEND_TO_OWNER = 17,
+	SYNC_CLIENTS = 18
 ;
 
 export const PROTOCOL_VERSION = 5;

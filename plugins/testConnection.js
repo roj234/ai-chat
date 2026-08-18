@@ -292,9 +292,9 @@ async function checkModelCapability() {
 		}),
 	]);
 
-	const isJson = (text) => {
+	const isJson = (text, n) => {
 		try {
-			return null != JSON.parse(text).name;
+			return null != JSON.parse(text)[n];
 		} catch {
 			return false;
 		}
@@ -308,9 +308,9 @@ async function checkModelCapability() {
 	if (results[3]) modalities.push("video");
 	config.modalities = modalities;
 
-	if (isJson(results[8])) config.jsonSupport = 3;
-	else if (isJson(results[7])) config.jsonSupport = 2;
-	else if (isJson(results[6])) config.jsonSupport = 1;
+	if (isJson(results[8], 'next_field')) config.jsonSupport = 3;
+	else if (isJson(results[7], 'my_name_is')) config.jsonSupport = 2;
+	else if (isJson(results[6], 'name')) config.jsonSupport = 1;
 	else config.jsonSupport = 0;
 
 	DI_settings.sync();

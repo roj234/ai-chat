@@ -902,7 +902,7 @@ MessageRoles["assistant"] = {
 			const chunk = chunks[i];
 			if (chunk.type === "text") {
 				chunk.rpHook = (chunk.rpHook || 0) + 1;
-				chunk.text = applyRenderReplace(preset, chunk.text, index);
+				chunk.text = applyRenderReplace(preset, chunk.text, messages.length - 1 - index);
 				break;
 			}
 		}

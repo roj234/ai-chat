@@ -103,7 +103,10 @@ async function processMessageRefs(messages, blobDir) {
 		if (val?.$ === 'BlobH') {
 			const hash = val.hash;
 			const filePath = path.join(blobDir, hash.slice(0, 2).toLowerCase(), hash);
-			tasks.push(openAsBlob(filePath).then((blob) => own[key] = blob));
+
+			tasks.push(fs.access(filePath).then(() => openAsBlob(filePath).then((blob) => own[key] = blob), e => {
+				throw new Error("附件 "+(val.name || hash)+" 丢失或损坏");
+			}));
 		}
 	}
 	await Promise.all(tasks);

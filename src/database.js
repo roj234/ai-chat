@@ -1,10 +1,11 @@
 import {debugSymbol, unconscious} from 'unconscious';
-import {BRANCH_MANAGER, config, CONFIG_VERSION, LOCKED} from "./states.js";
+import {BRANCH_MANAGER, config, CONFIG_VERSION, EVENT_BUS, LOCKED} from "./states.js";
 import {deepEqual, delta} from "unconscious/common/deepEqual.js";
 import {prettyError} from "./utils/utils.js";
 import * as idb from "./database/indexedDB.js";
 import * as remote from "./database/remoteDB.js";
 import {showToast} from "./components/Toast.js";
+import {enableBranches} from "./utils/BranchManager.js";
 
 export const MESSAGES_SNAPSHOT = debugSymbol("MessagesSnapshot");
 export const DIFF_SNAPSHOT = debugSymbol("DiffSnapshot");
@@ -161,6 +162,14 @@ export const getMessages = throttledPromise(conversation => (
 				m.set(message.id, structuredClone(message));
 				message[MESSAGE_IS_CLEAN] = true;
 			}
+
+			if (conversation.bm_leaf) {
+				enableBranches(conversation, messages);
+			} else {
+				delete conversation[BRANCH_MANAGER];
+			}
+
+			EVENT_BUS.post(['conversation', 'load'], conversation);
 		}
 
 		return messages;
