@@ -3,20 +3,26 @@ import {SETTINGS} from "/src/settings.js";
 import {$computed, $state, $watch, unconscious} from "unconscious";
 import {config, isMobile} from "/src/states.js";
 import {onLoad} from "/src/hooks.js";
+import "./customBackground.css";
 
 /** @type {import('unconscious').Reactive<Blob>} */
 const BG_BLOB = $state(), FONT_BLOB = $state();
 /** @type {import('unconscious').Reactive<'cover' | 'contain' | 'stretch' | 'tile' | 'center'>} */
 const BG_FIT = $computed(() => config.backgroundFit);
 
+let blurredTrack;
+
 onLoad(() => {
 	getKV("chat-background", BG_BLOB);
 	getKV("chat-font", FONT_BLOB);
 
+	blurredTrack = <div className="blurred-track" />;
+	document.querySelector(".panel").prepend(blurredTrack);
+
 	$watch([BG_BLOB, BG_FIT], () => {
 		const blob = unconscious(BG_BLOB);
 		const style = document.body.style;
-		if (!blob) { style.background = ''; return; }
+		if (!blob) { style.background = ''; blurredTrack.style.display = 'none'; return; }
 		let url = blob.toUrl();
 
 		const pos = isMobile ? 'center top' : 'center center';
@@ -32,7 +38,9 @@ onLoad(() => {
 			case 'center': bgStyle = `${pos} / auto no-repeat`; break;
 		}
 
-		style.background = `url("${url}") `+bgStyle;
+		blurredTrack.style.display = '';
+		blurredTrack.style.background = style.background = `url("${url}") `+bgStyle;
+
 		return () => URL.revokeObjectURL(url);
 	});
 

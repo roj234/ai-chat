@@ -22,10 +22,9 @@ export const resolveDBRelativeURL = (url) => {
 	return url;
 }
 
-export const loadingBlock = (message, progress) => <div className={"my-box loading"}>
+export const loadingBlock = (message) => <div className={"my-box loading"}>
 	<div className="spinner"></div>
 	<span>{message}</span>
-	{progress && <div className={"progress"} style:width={() => unconscious(progress)*100+"%"}></div> }
 </div>;
 
 export const errorBlock = (error, title) => {

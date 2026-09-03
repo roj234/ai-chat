@@ -4,7 +4,7 @@ import {spawn} from 'node:child_process';
 import {readBOM} from "../../common/chardet.js";
 import iconv from "iconv-lite";
 import {getEnvironmentPrompt} from "../utils/checkEnv.js";
-import {createTextFileEditHelper, GREP_MAX_COLUMNS} from "../../common/fs-common.js";
+import {compileGlobPattern, createTextFileEditHelper, GREP_MAX_COLUMNS} from "../../common/fs-common.js";
 import {IGNORED_ERROR_MESSAGE, IgnoreMatcher} from "../../common/ignore.js";
 import {createReadStream, createWriteStream} from 'node:fs';
 import {pipeline} from "node:stream/promises";
@@ -217,14 +217,15 @@ export async function registerFsRoutes(router, allowExec) {
 	const sendText = (res, text) => sendRaw(res, 200, 'text/plain', text);
 
 	const listFileHandler = async ({
-			path: filePath = '.',
-			pattern,
-			json = false,
-			limit = 500,
-			modifiedSince = 0,
-			showDir = null,
-			showModified = false
-		}, ctx) => {
+		path: filePath = '.',
+		pattern,
+		json = false,
+		limit = 500,
+		modifiedSince = 0,
+		showDir = null,
+		showModified = false,
+		showHidden = false,
+	}, ctx) => {
 		pattern = pattern || '*';
 		// 行为一致，顺便给AI擦屁股
 		if (pattern.startsWith("*.") && !pattern.includes('/')) pattern = "**/"+pattern;
@@ -233,28 +234,81 @@ export async function registerFsRoutes(router, allowExec) {
 		const ignored = await getIgnoreMatcher(ctx.fsRoot, safePath);
 
 		let entries;
-		if (pattern !== '*') {
-			if (!(await fs.stat(safePath)).isDirectory()) throw new Error("Is not directory");
-			entries = await fs.glob(pattern, {cwd: safePath, withFileTypes: true});
-		} else {
-			entries = await fs.readdir(safePath, {withFileTypes: true});
+		if (!(await fs.stat(safePath)).isDirectory()) throw new Error("Path is not a directory");
+
+		const glob = compileGlobPattern(pattern, safePath);
+		const segments = glob.segments;
+		const base = glob.path;
+
+		async function* walk(base, relDir, segIdx) {
+			const seg = segments[segIdx];
+			const nextIdx = segIdx + 1;
+			const isLast = nextIdx >= segments.length;
+
+			if (seg === '**') {
+				if (isLast) {
+					yield* yieldDescendants(base, relDir);
+				} else {
+					yield* walk(base, relDir, nextIdx);
+					for (const entry of await fs.readdir(base, { withFileTypes: true })) {
+						const name = entry.name;
+						const childPath = relDir ? relDir + '/' + name : name;
+						if (entry.isDirectory() && !ignored.test(childPath, true)) {
+							yield* walk(path.join(entry.parentPath, entry.name), childPath, segIdx);
+						}
+					}
+				}
+				return;
+			}
+
+			for (const entry of await fs.readdir(base, { withFileTypes: true })) {
+				const name = entry.name;
+				if (name[0] === '.' && !showHidden) continue;
+
+				if (!seg.test(name)) continue;
+
+				const entryPath = relDir ? relDir + '/' + name : name;
+				const isDir = entry.isDirectory();
+
+				if (isLast) {
+					if (!ignored.test(entryPath, isDir)) {
+						yield entry;
+					}
+				} else if (isDir && !ignored.test(entryPath, true)) {
+					yield* walk(path.join(entry.parentPath, entry.name), entryPath, nextIdx);
+				}
+			}
 		}
+
+		async function* yieldDescendants(base, relDir) {
+			for (const entry of await fs.readdir(base, { withFileTypes: true })) {
+				const name = entry.name;
+				const entryPath = relDir ? relDir + '/' + name : name;
+				const isDir = entry.isDirectory();
+
+				const ignore = ignored.test(entryPath, isDir);
+				if (ignore || (name[0] === '.' && !showHidden)) {
+					if (ignore === 'dir') yield entry;
+					continue;
+				}
+
+				yield entry;
+				if (isDir) yield* yieldDescendants(path.join(entry.parentPath, entry.name), entryPath);
+			}
+		}
+
+		entries = walk(base, glob.prefix, 0);
 
 		let prefix = '';
 		let items = 0;
-		let dirPrefix = new Set;
 		let modSince = modifiedSince ? +new Date(modifiedSince) : 0;
 		if (!isFinite(modSince)) throw 'Invalid date';
 
 		const result = [];
 		for await (const entry of entries) {
 			const parentPath = entry.parentPath.slice(safePath.length+1).replaceAll(path.sep, '/');
-			const entryName = pattern !== '*' && parentPath ? parentPath+'/'+entry.name : entry.name;
+			const displayPath = pattern !== '*' && parentPath ? parentPath+'/'+entry.name : entry.name;
 			const isDir = entry.isDirectory();
-			if (ignored.test(entryName, isDir) || dirPrefix.has(parentPath)) {
-				if (isDir) dirPrefix.add(entryName);
-				continue;
-			}
 
 			if (items >= limit) {
 				prefix = `[TRUNCATED to ${limit} entries, use a more specific path or pattern]\n`;
@@ -267,13 +321,13 @@ export async function registerFsRoutes(router, allowExec) {
 				const stats = await fs.stat(fullPath);
 
 				if (stats.mtimeMs > modSince) {
-					const item = [entryName, "file", formatSize(stats.size)];
+					const item = [displayPath, "file", formatSize(stats.size)];
 					if (showModified || modSince) item.push(stats.mtime.toISOString().slice(0, -5));
 					result.push(item);
 				}
-			} else if (entryName && (showDir != null ? showDir : !modSince)) {
-				// 跳过 '.' 当前目录
-				result.push([entryName, "dir"]);
+			} else if (displayPath && (showDir != null ? showDir : !modSince)) {
+				const ignore = ignored.test(displayPath, true);
+				result.push([displayPath,  ignore === 'dir' ? "dir (descents skipped)" : "dir"]);
 			}
 		}
 
@@ -289,7 +343,9 @@ export async function registerFsRoutes(router, allowExec) {
 		async read(path, ctx) {
 			const stats = await fs.stat(path);
 			if (stats.size > 10485760) {
-				return ctx.send(400, { error: `File too large (${stats.size} bytes)` });
+				const msg = `File too large (${stats.size} bytes)`;
+				if (!ctx) throw msg; // for grep
+				return ctx.send(400, { error: msg });
 			}
 			return readAsString(await fs.readFile(path));
 		},
@@ -414,7 +470,7 @@ nlink: ${stats.nlink}`);
 			await fs.mkdir(path.dirname(safeDest), { recursive: true });
 			await fs.rename(safeSrc, safeDest);
 		} else {
-			await fs.cp(safeSrc, safeDest, { recursive: true });
+			await fs.cp(safeSrc, safeDest, { recursive: true, preserveTimestamps: true });
 		}
 		ctx.send(200, 'Success');
 	});
@@ -505,10 +561,10 @@ nlink: ${stats.nlink}`);
 	 * @param {object}   options   - { cwd, timeout(ms), shell(boolean|string), safeCwd(用于落盘) }
 	 * @returns {Promise<{code: number, text: string}>}
 	 */
-	async function executeCommand(command, args, { cwd, timeout, shell = false, dir, noTruncate, async: _async, env, kill }) {
+	async function executeCommand(command, args, { cwd, timeout, shell = false, dir = '.', inline, async: _async, env, kill, stdin = true }) {
 		const child = spawn(command, args, {
 			cwd,
-			stdio: ['pipe', 'pipe', 'pipe'],
+			stdio: [stdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
 			shell,
 			env: {
 				...process.env,
@@ -531,7 +587,7 @@ nlink: ${stats.nlink}`);
 				tail = Buffer.concat([tail, chunk]).subarray(-HALF);
 			} else {
 				tail = Buffer.concat([tail, chunk]);
-				if (!noTruncate && tail.length > OUTPUT_LIMIT) {
+				if (!inline && tail.length > OUTPUT_LIMIT) {
 					file = createWriteStream(path.join(cwd, filename), { flags: 'w' });
 					file.write(tail);
 
@@ -594,7 +650,8 @@ nlink: ${stats.nlink}`);
 				child.stderr.pipe(file, { end: false });
 			}, Math.min(_async ? 100 : timeout, 275000));
 
-			processes.set(child.pid, { child, logFile: dir+filename, cwd, timer });
+			if (!inline)
+				processes.set(child.pid, { child, logFile: dir+filename, cwd, timer });
 
 			console.log("[进程] 已启动", cwd, command, args);
 
@@ -676,13 +733,19 @@ logPath: ${logFile}`
 			const {
 				pattern,
 				path = ".",
-				//glob = "**",
 				context = 0,
 				maxFiles = 50,
 				maxMatchesPerFile = 10,
 			} = body;
 
-			const { code, text } = await executeCommand(rgPath, [
+			const cwd = pathFilter(path, ctx);
+			try {
+				if (!(await fs.stat(cwd)).isDirectory()) break rgNotUsable;
+			} catch {
+				break rgNotUsable;
+			}
+
+			const args = [
 				//"-i", // --ignore-case
 				"-n", // --line-number
 				"--no-require-git",
@@ -694,26 +757,33 @@ logPath: ${logFile}`
 				"--field-match-separator", "\x1f",
 				//"--field-context-separator", "-",
 				//"--context-separator", "--",
+
+				// 这是一个trick，传入glob的同时让rg遵守.ignore规则
+				"--glob-case-insensitive",
+				"--type-add",
+				"foo:"+glob,
+				"-tfoo",
+
 				"-m", maxMatchesPerFile,
 				"-C", context,
-				"-g", glob,
 				"--path-separator", "/",
+				"--engine", "auto",
 				"--",
-				pattern,
-			], {
-				cwd: pathFilter(path, ctx),
-				noTruncate: true,
-				dir: '.',
+				pattern
+			];
+
+			let { code, text } = await executeCommand(rgPath, args, {
+				cwd,
+				inline: true,
+				stdin: false,
 				timeout: 15000,
 				kill: true,
 				charset: 'utf8'
 			});
 
-			//if (code === -1 && text.includes("ENOENT")) {}
-			if (code < 0) {
-				console.log("Failed to execute ripgrep ("+code+")");
-				if (text) console.log(text);
-				//rgUsable = false;
+			// ENOENT
+			if (code === -1) {
+				rgUsable = false;
 				break rgNotUsable;
 			}
 
@@ -756,13 +826,11 @@ logPath: ${logFile}`
 			const {
 				program, arguments: args, cwd = '',
 				timeout = 10, async = false,
-				noTruncate = false, charset = 'utf8',
+				charset = 'utf8',
 				env
 			} = await ctx.readAsObject();
 			const { code, text, duration } = await executeCommand(program, args, {
 				cwd: await pathFilterWithIgnore(ctx, cwd, true),
-				noTruncate,
-				dir: '.',
 				timeout: timeout * 1000,
 				async,
 				charset,
@@ -788,7 +856,6 @@ logPath: ${logFile}`
 
 			let { code, text, duration } = await executeCommand(command, args, {
 				cwd: await pathFilterWithIgnore(ctx, cwd, true),
-				dir: '.',
 				timeout: timeout * 1000,
 				async,
 				shell,

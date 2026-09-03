@@ -4,7 +4,7 @@ import 'katex/dist/katex.min.css';
 import {SafeImage} from "../components/SafeImage.jsx";
 import {unconscious} from "unconscious";
 import {highlight} from "./highlight.js";
-import {once} from "../utils/pure-utils.js";
+import {once} from "/common/pure-utils.js";
 
 const customCodeRenderer = {};
 /**
@@ -20,7 +20,7 @@ const getInnerHTML = node => {
 	if (node._value) return node._value;
 	if (node.nodeType === Node.TEXT_NODE) return node.textContent;
 	// TODO 嵌套回退时可以考虑用 _value = node.title, __value = `![${node.title}](${encodeURI(node.src)})`
-	if (node.nodeName === 'IMG' || node.className === 'safe-image loading') return node.title;
+	if (node.nodeName === 'IMG' || node.classList.contains('safe-image')) return node.title;
 	let html = '';
 	for (const child of node.childNodes) {
 		html += child.__value ?? getInnerHTML(child);
@@ -64,7 +64,7 @@ export function createMarkdownRenderer(root, options = {}) {
 				case fastmd.STRIKE:        slot = <s />         ;break
 				case fastmd.CODE_INLINE:   slot = <kbd />      ;break
 				case fastmd.RAW_URL:
-				case fastmd.LINK:          slot = <a target="_blank" rel="noopener noreferrer" />         ;break
+				case fastmd.LINK:          slot = <a target="_blank" rel="noopener noreferrer" />;break
 				case fastmd.IMAGE:
 					// 并没有写错，因为 noImage 下我不会设置 src 属性
 					slot = options.noImage || options.trusted ? <img referrerPolicy="no-referrer" /> : <div className="safe-image loading">
@@ -83,12 +83,14 @@ export function createMarkdownRenderer(root, options = {}) {
 					parent = parent.appendChild(
 						options.noHighlight ? <pre /> :
 						(<pre className="code-block">
-							<div className="code-header sticky">
-								<span>text</span>
+							<div className={"sticky"} style={"top:0"}>
+							<div className="code-header">
+								<span></span>
 								<span className="buttons">
 									<button className="ri-download-2-line ghost" data-action="save" title="下载代码"></button>
 									<button className="ri-file-copy-line ghost" data-action="copy" title="复制代码"></button>
 								</span>
+							</div>
 							</div>
 						</pre>)
 					);

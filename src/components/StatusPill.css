@@ -1,0 +1,111 @@
+
+:root {
+	--ap-accent-connect: #38bdf8;
+	--ap-accent-wait: #fbbf24;
+	--ap-accent-prefill: #a78bfa;
+	--ap-accent-generate: #34d399;
+	--ap-progress-bg: rgba(255, 255, 255, 0.1);
+}
+
+:root[data-theme='light'] {
+	--ap-accent-connect: #0284c7;  /* 天青蓝 */
+	--ap-accent-wait: #d97706;     /* 琥珀黄 */
+	--ap-accent-prefill: #7c3aed;     /* 罗兰紫 */
+	--ap-accent-generate: #059669;  /* 翡翠绿 */
+	--ap-progress-bg: rgba(0, 0, 0, 0.06);
+}
+
+.ai-progress {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 14px;
+	color: var(--muted);
+	user-select: none;
+
+	& .num {
+		font-family: var(--code-font);
+		color: var(--text);
+	}
+
+	/* 各状态颜色适配 */
+	& > .icon {
+		position: relative;
+		width: 8px;
+		height: 8px;
+	}
+	&.connect {
+		color: var(--ap-accent-connect);
+
+		& .icon {
+			border-radius: 50%;
+			background: var(--ap-accent-connect);
+		}
+
+		& .icon::after {
+			content: '';
+			position: absolute;
+			inset: -3px;
+			border-radius: 50%;
+			border: 1.5px solid var(--ap-accent-connect);
+			animation: ap-radar 1.4s ease-out infinite;
+		}
+	}
+	&.wait {
+		color: var(--ap-accent-wait);
+
+		& .icon {
+			border-radius: 50%;
+			background: var(--ap-accent-wait);
+			animation: ap-pulse 1.2s infinite ease-in-out;
+		}
+	}
+
+	& .track {
+		min-width: 44px;
+		height: 4px;
+		background: var(--ap-progress-bg);
+		border-radius: 2px;
+
+		& > .fill {
+			height: 100%;
+			background: var(--ap-accent-prefill);
+			border-radius: 2px;
+			transition: width 0.2s linear;
+		}
+	}
+
+	&.prefill {
+		color: var(--ap-accent-prefill);
+
+		& .icon {
+			width: 14px;
+			height: 14px;
+			animation: spin 1.2s linear infinite;
+		}
+	}
+	&.generate {
+		color: var(--ap-accent-generate);
+
+		& .icon {
+			width: 14px;
+			height: 14px;
+			animation: ap-zap 2s infinite ease;
+		}
+	}
+}
+
+@keyframes ap-radar {
+	0% { transform: scale(0.6); opacity: 1; }
+	100% { transform: scale(1.6); opacity: 0; }
+}
+
+@keyframes ap-pulse {
+	0%, 100% { opacity: 0.3; transform: scale(0.85); }
+	50% { opacity: 1; transform: scale(1.1); }
+}
+
+@keyframes ap-zap {
+	0%, 100% { transform: scale(1); opacity: 0.9; }
+	50% { transform: scale(1.15); opacity: 1; filter: drop-shadow(0 0 3px var(--ap-accent-generating)); }
+}

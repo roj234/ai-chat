@@ -4,6 +4,7 @@ import {showToast} from "./Toast.js";
 import {config} from "../states.js";
 import {readAsString} from "/common/chardet.js";
 import {formatSize} from "unconscious/common/Utils.js";
+import SimpleModal from "./SimpleModal.jsx";
 
 /**
  * @param {File} file
@@ -75,7 +76,7 @@ const extOf = (name = "") => name.includes(".") ? name.slice(name.lastIndexOf(".
  * @return {JSX.Element}
  */
 export const AttachmentGallery = (attachments) => {
-	return <div className="attachments" onClick.delegate{".attachment button"}={(e) => {
+	return <div className="attachments" onClick.capture.delegate{".attachment button"}.stop={(e) => {
 		const element = e.target.closest('.attachment');
 		const index = indexInParent(element);
 		attachments.splice(index, 1);
@@ -89,7 +90,12 @@ export const AttachmentGallery = (attachments) => {
 					const file = att.image_url.url;
 					const src = typeof file === 'string' ? file : file.toUrl();
 					return (
-						<div className="attachment image-part" title={file.name || '图片附件'}>
+						<div className="attachment image-part" title={(file.name || '图片附件')+"\n点击放大"} onClick={e => {
+							SimpleModal({
+								title: "图像预览",
+								message: <img src={src} />
+							})
+						}}>
 							<img src={src} alt="预览"/>
 							{DeleteBtn}
 						</div>

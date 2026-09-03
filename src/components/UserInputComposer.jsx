@@ -8,12 +8,12 @@ import {
 	messages,
 	selectedConversation
 } from "../states.js";
-import {scrollMessagesToBottom, statusBadge, submitUserChatMessage} from "../api-request.js";
+import {scrollMessagesToBottom, submitUserChatMessage} from "../api-request.js";
 import {AttachmentGallery, blobToContentPart} from "./AttachmentGallery.jsx";
 import {CUSTOM_CONTROLS} from "../settings.js";
 import {createSendButton} from "./SendButton.jsx";
 import {bind} from "../utils/utils.js";
-import {$computed, $state, $watch, unconscious} from "unconscious";
+import {$computed, $state, $update, $watch, unconscious} from "unconscious";
 import {handleCommand} from "../commands.js";
 import SimpleModal from "./SimpleModal.jsx";
 import {getBlob} from "../database.js";
@@ -76,13 +76,10 @@ export const createUserInputComposer = (scroller) => {
 				<div className={"tooltip"}>{() => config.model}</div>
 			</span>
 		</div>
-		<div className={"f-controls"}>
-			{statusBadge}
-			<button className={"ri-arrow-down-s-line chip"} style={"display:none"} ref={backToBottomBtn}
-					onClick={() => {
-						scroller.scrollTop = scroller.scrollHeight;
-					}} title={"返回底部"}/>
-		</div>
+		<button className={"ri-arrow-down-s-line chip back"} style={"display:none"} ref={backToBottomBtn}
+				onClick={() => {
+					scroller.scrollTop = scroller.scrollHeight;
+				}} title={"返回底部"}/>
 		<div className="query">
 			<h1 className={"drag"}>松开上传</h1>
 			<textarea placeholder="有事尽管问我" id="userInput" ref={userInput}
@@ -109,7 +106,7 @@ export const createUserInputComposer = (scroller) => {
 						{IS_ANDROID_BUILD && <label className="ri-camera-4-fill" onClick={() => {
 							webviewUploadImage().then(blobCallback)
 						}}>
-							拍照
+							拍摄照片
 						</label>}
 						<label className="ri-mic-fill" onClick={() => {
 							const modal = <div className={'modal-overlay'}>
@@ -185,6 +182,7 @@ export const createUserInputComposer = (scroller) => {
 		const aborter = unconscious(abortCompletion);
 		if (aborter) {
 			aborter.abort();
+			$update(abortCompletion);
 			return;
 		}
 
@@ -287,9 +285,9 @@ export const createUserInputComposer = (scroller) => {
 			if (sendButton.disabled) return;
 		}
 
-		if (noAI) return;
-
 		scrollMessagesToBottom();
+
+		if (noAI) return;
 
 		await ensureActiveConversation();
 

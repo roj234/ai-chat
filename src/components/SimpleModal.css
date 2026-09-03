@@ -35,7 +35,7 @@
         font-size: 1.2em;
     }
 
-    & .body {
+    & > .body {
         color: var(--muted);
         overflow: auto;
         white-space: pre-wrap;

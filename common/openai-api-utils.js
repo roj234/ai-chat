@@ -121,6 +121,7 @@ export const sseFetch = (url, {key = "", json = true, ...data} = {}, onChunk) =>
 					try {
 						onChunk(obj, event);
 					} catch (e) {
+						console.error(e);
 						if (!error)
 							error = e instanceof Error ? e.message : e;
 					}

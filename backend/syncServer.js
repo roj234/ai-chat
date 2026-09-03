@@ -44,9 +44,7 @@ export const createSyncValidateMiddleware = (DATA_PATH) => /**
 	}
 
 	const emulatedCtx = { req };
-	Object.defineProperty(emulatedCtx, 'db', {
-		get: () => loadUserData(DATA_PATH, userId).sqlite
-	});
+	loadUserData(DATA_PATH, userId, emulatedCtx);
 
 	const pat = myUrl.searchParams.get('t');
 	if (INTERACTIVE_LOGIN && checkPAT(pat || "", emulatedCtx)?.capabilities !== 2) {

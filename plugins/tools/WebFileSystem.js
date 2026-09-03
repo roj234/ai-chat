@@ -1,133 +1,9 @@
 import {readAsString} from "/common/chardet.js";
-import {createTextFileEditHelper} from "/common/fs-common.js";
+import {compileGlobPattern, createTextFileEditHelper} from "/common/fs-common.js";
 import {IGNORED_ERROR_MESSAGE, IgnoreMatcher} from "/common/ignore.js";
 import {normalizePath} from "unconscious/common/path-utils.js";
 import {formatSize} from "unconscious/common/Utils.js";
 import {AS_IS, UTF8_TEXT_ENCODER} from "unconscious";
-
-// ────────────────────────────────── Glob‑to‑Regex (ported from Globs.java) ──────────────────────────
-
-const REGEX_META_CHARS = new Set('.^$+{[]|()');
-const GLOB_META_CHARS = new Set('\\*?[{');
-
-const EOL = undefined;
-const next = (glob, i) => i < glob.length ? glob[i] : EOL;
-
-/**
- * Converts a glob pattern (Unix style) to a RegExp pattern string.
- * Ported from Globs.toRegexPattern with isDos = false.
- */
-function globToRegexPattern(globPattern) {
-	let inGroup = false;
-	const regex = ['^'];
-
-	let i = 0;
-	while (i < globPattern.length) {
-		let c = globPattern[i++];
-		switch (c) {
-			case '\\': {
-				if (i === globPattern.length)
-					throw new Error(`No character to escape at position ${i - 1}`);
-				const nextChar = globPattern[i++];
-				if (GLOB_META_CHARS.has(nextChar) || REGEX_META_CHARS.has(nextChar)) regex.push('\\');
-				regex.push(nextChar);
-				break;
-			}
-			case '/': {
-				regex.push('/');
-				break;
-			}
-			case '[': {
-				regex.push('[[^/]&&[');
-				if (next(globPattern, i) === '^') {
-					regex.push('\\^');
-					i++;
-				} else {
-					if (next(globPattern, i) === '!') {
-						regex.push('^');
-						i++;
-					}
-					if (next(globPattern, i) === '-') {
-						regex.push('-');
-						i++;
-					}
-				}
-				let hasRangeStart = false;
-				let last = 0;
-				while (i < globPattern.length) {
-					c = globPattern[i++];
-					if (c === ']') break;
-					if (c === '/') throw new Error(`Explicit 'name separator' in class at ${i - 1}`);
-					if (c === '\\' || c === '[' || (c === '&' && next(globPattern, i) === '&')) {
-						regex.push('\\');
-					}
-					regex.push(c);
-					if (c === '-') {
-						if (!hasRangeStart) throw new Error(`Invalid range at ${i - 1}`);
-						c = next(globPattern, i);
-						if (c === EOL || c === ']') break;
-						if (c < last) throw new Error(`Invalid range at ${i - 3}`);
-						regex.push(c);
-						i++;
-						hasRangeStart = false;
-					} else {
-						hasRangeStart = true;
-						last = c;
-					}
-				}
-				if (c !== ']') throw new Error('Missing \']\'');
-				regex.push(']]');
-				break;
-			}
-			case '{': {
-				if (inGroup) throw new Error(`Cannot nest groups at ${i - 1}`);
-				regex.push('(?:(?:');
-				inGroup = true;
-				break;
-			}
-			case '}': {
-				if (inGroup) {
-					regex.push('))');
-					inGroup = false;
-				} else {
-					regex.push('}');
-				}
-				break;
-			}
-			case ',': {
-				if (inGroup) {
-					regex.push(')|(?:');
-				} else {
-					regex.push(',');
-				}
-				break;
-			}
-			case '*': {
-				if (next(globPattern, i) === '*') {
-					regex.push('.*');
-					i++;
-				} else {
-					regex.push('[^/]*');
-				}
-				break;
-			}
-			case '?': {
-				regex.push('[^/]');
-				break;
-			}
-			default: {
-				if (REGEX_META_CHARS.has(c)) regex.push('\\');
-				regex.push(c);
-				break;
-			}
-		}
-	}
-
-	if (inGroup) throw new Error(`Missing '}' at ${i - 1}`);
-
-	regex.push('$');
-	return regex.join('');
-}
 
 // ────────────────────────────────── FileSystem Helpers ──────────────────────────────────
 
@@ -163,7 +39,7 @@ const resolveParent = async (rootHandle, filePath, options) => {
 			parent = await parent.getDirectoryHandle(part, options);
 		}
 	} catch (e) {
-		throw typeof e === 'string' ? e : ("Parent directory "+parts.join('/')+" not found");
+		throw typeof e === 'string' ? e : ("Directory "+parts.join('/')+" not found");
 	}
 	return [ parent, name ];
 };
@@ -171,7 +47,7 @@ const resolveParent = async (rootHandle, filePath, options) => {
 /**
  * Resolve a directory handle from a path.
  * @param {FileSystemDirectoryHandle} rootHandle
- * @param {string} dirPath
+ * @param {string | string[]} dirPath
  * @param {{ create: true }} [options]
  */
 export const resolveDirectory = async (rootHandle, dirPath, options) => {
@@ -395,7 +271,8 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			limit = 500,
 			modifiedSince = 0,
 			showDir = null,
-			showModified = false
+			showModified = false,
+			showHidden = false
 		}) {
 			if (!ignored) await loadIgnore();
 
@@ -403,9 +280,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			// 行为一致，顺便给AI擦屁股
 			if (pattern.startsWith("*.") && !pattern.includes('/')) pattern = "**/"+pattern;
 
-			const entries = pattern !== '*'
-				? await glob(pattern, path)
-				: (await resolveDirectory(rootHandle, path)).entries();
+			const entries = await glob(pattern, path, showHidden);
 
 			let prefix = '';
 			let items = 0;
@@ -416,10 +291,6 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 
 			for await (const [name, handle, relDir] of entries) {
 				const displayPath = relDir ? relDir + '/' + name : name;
-				const isDir = handle.kind === 'directory';
-
-				const ignore = ignored.test(displayPath, isDir);
-				if (ignore === 'file') continue;
 
 				if (items >= limit) {
 					prefix = `[TRUNCATED to ${limit} entries, use a more specific path or pattern]\n`;
@@ -435,6 +306,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 						result.push(item);
 					}
 				} else if ((showDir != null ? showDir : !modSince)) {
+					const ignore = ignored.test(displayPath, true);
 					result.push([displayPath, ignore === 'dir' ? "dir (descents skipped)" : "dir"]);
 				}
 			}
@@ -449,25 +321,17 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 	/**
 	 * Walk the filesystem matching a glob pattern.
 	 * Yields { name, relDir, handle } where handle is the FileSystemHandle.
+	 * @param {string} pattern
+	 * @param {string} path
+	 * @param {boolean} [showHidden=false]
+	 * @return {Promise<AsyncGenerator<[name: string, relDir: string, handle: FileSystemDirectoryHandle | FileSystemFileHandle]>>}
 	 */
-	const glob = async (pattern, searchRoot) => {
-		let relDir = '';
+	const glob = async (pattern, path, showHidden) => {
+		const result = compileGlobPattern(pattern, path);
+		if (!result) return [];
 
-		const prefix = pattern.match(/^(?:\.\/)?([^.^$+{[\]|()*?\/]+\/)+/);
-		if (prefix) {
-			relDir = prefix[0].slice(0, -1);
-			searchRoot += '/' + relDir;
-			pattern = pattern.slice(prefix[0].length);
-		}
-
-		const segments = normalizePath(pattern).map((segment) => {
-			if (segment === '**') return segment;
-			return new RegExp(globToRegexPattern(segment), 'iu');
-		});
-		// 处理空pattern
-		if (!segments.length) return;
-
-		const handle = await resolveDirectory(rootHandle, searchRoot);
+		const segments = result.segments;
+		const handle = await resolveDirectory(rootHandle, result.path);
 
 		async function* walk(dirHandle, relDir, segIdx) {
 			const seg = segments[segIdx];
@@ -476,7 +340,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 
 			if (seg === '**') {
 				if (isLast) {
-					yield* yieldChildren(dirHandle, relDir);
+					yield* yieldDescendants(dirHandle, relDir);
 				} else {
 					// ** matches zero directories
 					yield* walk(dirHandle, relDir, nextIdx);
@@ -492,6 +356,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			}
 
 			for await (const [name, handle] of dirHandle.entries()) {
+				if (name[0] === '.' && !showHidden) continue;
 				if (!seg.test(name)) continue;
 
 				const entryPath = relDir ? relDir + '/' + name : name;
@@ -507,33 +372,39 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			}
 		}
 
-		async function* yieldChildren(dirHandle, relDir) {
+		async function* yieldDescendants(dirHandle, relDir) {
 			for await (const [name, handle] of dirHandle.entries()) {
 				const entryPath = relDir ? relDir + '/' + name : name;
 				const isDir = handle.kind === 'directory';
 
 				const ignore = ignored.test(entryPath, isDir);
-				if (ignore) {
+				if (ignore || (name[0] === '.' && !showHidden)) {
 					if (ignore === 'dir') yield [name, handle, relDir];
 					continue;
 				}
 
 				yield [name, handle, relDir];
 				if (isDir) {
-					yield* yieldChildren(handle, entryPath);
+					yield* yieldDescendants(handle, entryPath);
 				}
 			}
 		}
 
-		return walk(handle, relDir, 0);
+		return walk(handle, result.prefix, 0);
 	};
 
 	/** Resolve a File from a path relative to root handle */
 	const resolveFile = async path => {
 		const [parent, name] = await resolveParent(rootHandle, path);
 		if (!name) throw "Root is not file";
-		const fileHandle = await parent.getFileHandle(name);
-		return await fileHandle.getFile();
+		try {
+			const fileHandle = await parent.getFileHandle(name);
+			return await fileHandle.getFile();
+		} catch (e) {
+			if (e.name === "NotFoundError")
+				throw 'File '+JSON.stringify(path)+" not exist";
+			throw e;
+		}
 	};
 
 	const fsCommonApi = {
@@ -566,6 +437,16 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			if (fileHandle) {
 				try {
 					if (_overwrite && config.fs_trashCan) {
+						const file = await fileHandle.getFile();
+						needChange:
+						if (data instanceof Uint8Array && file.size === data.length) {
+							const ab = new Uint8Array(await file.arrayBuffer());
+							for (let i = 0; i < data.length; i++) {
+								if (ab[i] !== data[i]) break needChange;
+							}
+							return;
+						}
+
 						await copyEntry(fileHandle, await rootHandle.getDirectoryHandle(".trash", CREATE), Date.now()+"_"+name, true);
 					} else {
 						await parent.removeEntry(name);

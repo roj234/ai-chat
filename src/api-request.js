@@ -14,7 +14,8 @@ import {
 	MessageRoles,
 	messages,
 	PAGE_TITLE,
-	PROGRESS,
+	PROGRESS_KIND,
+	PROGRESS_VALUE,
 	runningConversations,
 	selectedConversation,
 	state,
@@ -22,7 +23,15 @@ import {
 	updateConversationUI,
 	updateMessageUI
 } from "./states.js";
-import {getAvailableTools, parseFrontmatter, PLACEHOLDERS, runTools, TOOL_NAME, toolScriptRegistry} from "./toolset.js";
+import {
+	getAvailableTools,
+	parseFrontmatter,
+	PLACEHOLDERS,
+	runTools,
+	TEMPORARY_PLACEHOLDER,
+	TOOL_NAME,
+	toolScriptRegistry
+} from "./toolset.js";
 import {$stampLock, $state, $update, $watch, AS_IS, debugSymbol, isReactive, unconscious} from "unconscious";
 import {showToast} from "./components/Toast.js";
 import failure from "../media/failure.js";
@@ -46,35 +55,32 @@ import {setConversationTitle} from "./components/ConversationList.jsx";
 import {deepEntries, jsonEval} from "unconscious/common/json-schema-utils.js";
 import {applyDelta, jsonFetch, ORIGINAL_ERROR, sseFetch} from "/common/openai-api-utils.js";
 import {base64DecodeToUint8Array} from "unconscious/common/Base64.js";
-import {DI, DI_messageContainer} from "./hooks.js";
-import {objectIdentityHash} from "../common/object-hash.js";
+import {DI, DI_messageContainer, DI_messageVirtualList, DID_SYNC_LOCK, DID_SYNC_UNLOCK} from "./hooks.js";
+import {objectIdentityHash} from "/common/object-hash.js";
 import {encodeObjects} from "./utils/marshal.js";
 import {SHA256} from "unconscious/common/SHA256.js";
 import {DONT_PARSE_HTML_IN_THINKING} from "./components/ThinkBlock.jsx";
-
-export const statusBadge = <span />;
-export const updateStatusText = (text, tone = '') => {
-	statusBadge.textContent = text;
-	statusBadge.className = 'badge_ ' + tone;
-};
+import {LLM_COST_SCALE} from "/backend/sync.js";
 
 /**
  * @param {boolean} [loop]
- * @return {Promise<string>}
+ * @return {Promise<void>}
  */
 export const submitUserChatMessage = async (loop) => {
 	const conv = unconscious(selectedConversation);
+	if (!EVENT_BUS.post(["loopEntry"], conv)) return;
+
 	const messages_ = $stampLock(messages);
-	DI.lock?.(conv.id);
+	DI[DID_SYNC_LOCK]?.(conv.id);
 
 	try {
 		let result;
 		do {
 			result = await agentLoop(conv, messages_, null, !loop);
 		} while (result === 'tool_calls' && loop);
-		return result;
+		//return result;
 	} finally {
-		DI.unlock?.(conv.id);
+		DI[DID_SYNC_UNLOCK]?.(conv.id);
 	}
 };
 
@@ -245,7 +251,6 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 		// 读锁也应该能看消息
 		if (writeProtect) {
-			updateStatusText("");
 			messages.pop();
 			return 'interrupt';
 		}
@@ -260,7 +265,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 			let needUpdate;
 			const resumeId = conversation.resumeId;
-			if (finishReason !== 'error' || assistantMessage.error?.trim().endsWith("network error")/* fetch */) {
+			if (finishReason !== 'error' || assistantMessage.error?.trim().endsWith(CANCEL_RESUME)) {
 				if (resumeId) {
 					promises.push(jsonFetch(resolveDBRelativeURL(cfg.endpoint)+"/abort/"+resumeId, {
 						key: cfg.accessToken,
@@ -301,7 +306,8 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 		const hasPendingInput = isDisplaying() && inputText.trim();
 		const tc = assistantMessage.tool_calls;
-		if (tone === '' && !__skipToolCall && !hasPendingInput && !(cfg.maxToolTurns && !(countAgenticTurns(messages_uc) % cfg.maxToolTurns))) {
+		let toolTurnReached;
+		if (tone === '' && !__skipToolCall && !hasPendingInput && !(toolTurnReached = cfg.maxToolTurns && !(countAgenticTurns(messages_uc) % cfg.maxToolTurns))) {
 			const timer = setTimeout(commitMessage, 2000);
 			addEventListener("beforeunload", commitMessage);
 
@@ -317,7 +323,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 				if (!cfg.afkState || (flags&1)) {
 					isSuccess = false;
 					finishReason = 'interrupt';
-				} else if (retryCount < cfg.toolRetryLimit) {
+				} else if (retryCount < cfg.toolRetryLimit && (flags&4)) {
 					conversation[RETRY_COUNT] = retryCount + 1;
 					messages.pop();
 				}
@@ -327,11 +333,15 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		} else if (tc) {
 			assistantMessage.tool_responses = tc.map(tc => ({ [TOOL_NAME]: tc.function.name }));
 			// 因为走到这个分支我们一定要停，所以是ok时停
-			if (isSuccess) finishReason = 'interrupt';
+			if (isSuccess) {
+				finishReason = 'interrupt';
+				if (toolTurnReached && conversation.owner) {
+					assistantMessage.finish_reason = "interrupt";
+					assistantMessage.error = "Max API calls reached.";
+				}
+			}
 			if (isDisplaying()) $update(updateMessageUI);
 		}
-
-		updateStatusText("");
 
 		const commitedDueToToolTimeout = promises.length;
 
@@ -343,18 +353,15 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			await updateConversation(conversation, messages_uc);
 		}
 
-		const generateTitleIfApplicable = async (finishReason, assistantMessage) => {
-			if ('error' !== finishReason) {
-				if (!conversation.title && assistantMessage.content) {
-					await generateChatTitle(conversation, messages_uc, cfg);
-				}
+		const mayGenerateTitle = () => {
+			if ('error' !== finishReason && !conversation.title && assistantMessage.content) {
+				generateChatTitle(conversation, messages_uc, cfg);
 			}
 		};
 
 		const hasPendingInput2 = isDisplaying() && inputText.trim();
-		if (hasPendingInput2) finishReason = 'userInput';
 		if ('tool_calls' !== finishReason) {
-			await generateTitleIfApplicable(finishReason, assistantMessage);
+			mayGenerateTitle();
 
 			if (cfg.sound) {
 				if (cfg.sound === "always" || !document.hasFocus())
@@ -363,9 +370,10 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 			if (!isDisplaying() && cfg.afkState < 2 && !cfg.disableFinishToast)
 				showToast(`对话 ${conversation.title}(#${conversation.id}) 已结束 (${finishReason})`, tone ?? "error");
-		} else if (cfg.generateTitle === 'eager') {
-			await generateTitleIfApplicable(finishReason, assistantMessage);
+		} else if (cfg.generateTitle !== true) {
+			mayGenerateTitle();
 		}
+		if (hasPendingInput2) finishReason = 'userInput';
 
 		// context usage
 		if (isDisplaying()) $update(updateConversationUI);
@@ -412,10 +420,10 @@ const generateChatTitle = async (conversation, messages, config) => {
 	let s1 = getTextContent(messages.findLast(k => k.role === 'user') || messages[0]).slice(0, 512);
 
 	const i = s1.indexOf("\n");
-	conversation.title = i >= 0 && i < 30 ? s1.slice(0, i) : s1.slice(0, Math.min(s1.length, 30));
+	const simpleTitle = i >= 0 && i < 30 ? s1.slice(0, i) : s1.slice(0, Math.min(s1.length, 30));
 
-	if (config.generateTitle !== true) {
-		setConversationTitle(conversation, conversation.title);
+	if (!config.generateTitle) {
+		setConversationTitle(conversation, simpleTitle);
 		return;
 	}
 
@@ -451,7 +459,7 @@ Directly output title in JSON \` { "title": <conversation title> } \`, no explai
 	const [reasoningPath, reasoningEnabledValue, reasoningDisabledValue = 'false'] = (config.reasoningPath||"reasoning/enabled").split(",");
 	if (config.forceThink !== 0) jsonEval(body, reasoningPath, "set", JSON.parse(reasoningDisabledValue));
 
-	updateStatusText('生成标题');
+	setConversationTitle(conversation, '正在生成标题……', true);
 
 	const baseUrl = resolveDBRelativeURL(config.endpoint);
 	const start = Date.now();
@@ -479,8 +487,7 @@ Directly output title in JSON \` { "title": <conversation title> } \`, no explai
 	} catch(err) {
 		console.error(err);
 		showToast("标题生成失败\n"+prettyError(err), 'error');
-	} finally {
-		updateStatusText("");
+		setConversationTitle(conversation, simpleTitle);
 	}
 };
 
@@ -488,10 +495,9 @@ Directly output title in JSON \` { "title": <conversation title> } \`, no explai
 export const MARKDOWN_APPEND = 2, MARKDOWN_END = 3;
 
 export const findStreamingContainer = think => {
-	const bodyNode = DI_messageContainer.children[0].children[0].lastElementChild?.querySelector(".body");
-	if (bodyNode) {
-		const children = bodyNode.children;
-		const element = children[children.length - 1];
+	const loading = DI_messageVirtualList.lastElementChild?.querySelector(".body>.ai-progress");
+	if (loading) {
+		const element = loading.previousElementSibling;
 		if (element) {
 			if (think) {
 				if (element.matches(".think")) return element.lastElementChild;
@@ -521,6 +527,8 @@ const setMessageCacheState = (conversation, messages, hashes, state) => {
 		if (message) message[MESSAGE_CACHED] = state;
 	}
 };
+
+const CANCEL_RESUME = "network error";
 
 /**
  *
@@ -556,11 +564,9 @@ async function sendCompletionRequest(
 		conversation, messages,
 		toolChoice,
 		context, config
-	).catch(error => {
-		return {error};
-	});
+	).catch(error => ({error}));
 
-	if (abortCompletion.signal.aborted) return false;
+	if (abortCompletion.signal.aborted && !error) return false;
 
 	if (assistantMessage) {
 		delete assistantMessage.error;
@@ -622,7 +628,10 @@ async function sendCompletionRequest(
 		thinkState = assistantMessage.think = {...thinkState};
 	};
 
-	updateStatusText('请求中');
+	const progressKind = $state("connect");
+	const progressValue = $state({});
+	assistantMessage[PROGRESS_KIND] = progressKind;
+	assistantMessage[PROGRESS_VALUE] = progressValue;
 
 	// Request
 	try {
@@ -635,25 +644,19 @@ async function sendCompletionRequest(
 		}, (json, messageType) => {
 			if (config.logSSE) console.log("SSE response", json);
 
-			if (json.timings && config.afkState < 2) {
-				if (json.prompt_progress) {
-					const {processed, total} = json.prompt_progress;
-
-					const newValue = processed / total;
-					updateStatusText("预填充: "+(newValue * 100).toFixed(2)+"%");
-					if (!assistantMessage[PROGRESS]) {
-						assistantMessage[PROGRESS] = $state(newValue);
-					} else {
-						assistantMessage[PROGRESS].value = newValue;
-						return;
-					}
-				} else if (PROGRESS in assistantMessage) {
-					onProgress?.();
-					delete assistantMessage[PROGRESS];
+			const timings = json.timings;
+			if (timings && config.afkState < 2) {
+				const promptProgress = json.prompt_progress;
+				if (promptProgress) {
+					progressKind.value = 'prefill';
+					progressValue.value = promptProgress.processed / promptProgress.total;
+					return;
 				}
 
-				const {predicted_per_second, predicted_n} = json.timings;
-				if (predicted_n) updateStatusText("生成中, "+predicted_n+" Tokens, "+predicted_per_second.toFixed(2)+"TPS");
+				progressValue.value = {
+					tps: timings.predicted_per_second,
+					tokens: timings.predicted_n
+				};
 			}
 
 			const res = json.resumable;
@@ -666,7 +669,7 @@ async function sendCompletionRequest(
 					return;
 				}
 
-				updateStatusText('生成中');
+				progressKind.value = 'wait';
 
 				const {id, model} = json;
 
@@ -753,6 +756,9 @@ async function sendCompletionRequest(
 
 					let hasNewToolCalls;
 					for (const {index, ...item} of delta.tool_calls) {
+						const dLen = item.function?.arguments?.length;
+						if (dLen) progressValue.len += dLen;
+
 						if (index === undefined) {
 							toolCalls.push($state(item));
 							hasNewToolCalls = true;
@@ -773,6 +779,8 @@ async function sendCompletionRequest(
 				text = chunk.text;
 				if (!text) return;
 			}
+
+			progressKind.value = 'generate';
 
 			if (context.antiSlop?.sample(chunk, assistantMessage)) {
 				throw "retry";
@@ -867,7 +875,12 @@ async function sendCompletionRequest(
 			}
 
 			assistantMessage.content = content;
-			if (!assistantMessage.tool_calls) onProgress?.(MARKDOWN_APPEND, assistantMessage);
+			if (!assistantMessage.tool_calls) {
+				onProgress?.(MARKDOWN_APPEND, assistantMessage);
+				if (null == progressValue.tps) {
+					progressValue.value = { len: content.length + (thinkState?.content.length || 0) };
+				}
+			}
 
 			// TTFT
 			if (null == log.latency && (content || thinkState || assistantMessage.tool_calls)) {
@@ -877,7 +890,7 @@ async function sendCompletionRequest(
 
 		if (!finishReason) {
 			finishReason = 'error';
-			assistantMessage.error = conversation.resumeId ? "network error" : "连接意外终止";
+			assistantMessage.error = conversation.resumeId ? CANCEL_RESUME : "连接意外终止";
 		}
 	} catch (err) {
 		if (err.name === 'AbortError') {
@@ -898,13 +911,20 @@ async function sendCompletionRequest(
 				}
 
 				if (config.sound) failure();
-				if (err.status) err = `API错误 (${err.status})\n${err.message}`;
-				assistantMessage.error = prettyError(err);
+				if (err.status) {
+					if (conversation.resumeId) err = CANCEL_RESUME;
+					else err = `API错误 (${err.status})\n${err.message}`;
+				} else {
+					err = prettyError(err);
+				}
+				assistantMessage.error = err;
 			}
 		}
 	} finally {
 		streamResponseCompleted(assistantMessage, genImages);
 
+		delete assistantMessage[PROGRESS_KIND];
+		delete assistantMessage[PROGRESS_VALUE];
 		assistantMessage.finish_reason = finishReason;
 		log.finish_reason = finishReason;
 
@@ -1034,9 +1054,8 @@ async function buildCompletionPayload(
 
 		const {tool_calls, tool_responses, think} = m;
 		if (tool_calls) {
-			updateStatusText("正在执行工具");
-			await runTools(m, conversation, true);
-			updateStatusText("");
+			const flags = await runTools(m, conversation, true);
+			if (flags === -1) throw ('取消操作');
 
 			for (let i = 0; i < tool_calls.length; i++) {
 				json_messages.push({
@@ -1067,8 +1086,7 @@ async function buildCompletionPayload(
 		}
 	}
 
-	if (callbacks.length && useRefs)
-		throw new Error("请求体回调函数暂不支持服务端引用");
+	if (callbacks.length && useRefs) throw ("请求体回调函数不支持服务端引用");
 
 	/**
 	 * @type {Partial<OpenAI.ChatCompletionRequest>}
@@ -1093,7 +1111,7 @@ async function buildCompletionPayload(
 	} else {
 		body.messages = json_messages;
 
-		if (config.modalities.includes("tool") && (conversation.activatedModules?.size || conversation.allowedTools?.size)) {
+		if (config.modalities.includes("tool") && (conversation.activatedModules?.size || conversation.tools?.size)) {
 			let tools;
 			[tools, toolPrompt] = await getAvailableTools(conversation);
 			if (tools.length) body.tools = tools;
@@ -1133,19 +1151,34 @@ async function buildCompletionPayload(
 			}
 		}
 	}
-	const additionalBody = config.additionalBody;
-	if (additionalBody) {
-		Object.assign(body, additionalBody);
 
-		const getOrCreateUserId = () => config.user_id || (config.user_id = crypto.randomUUID());
+	{
+		const getUserId = () => config.userId || (config.userId = crypto.randomUUID());
 
-		if (additionalBody.user === 'auto') {
-			body.user = getOrCreateUserId();
+		const userIdField = config.userIdField;
+		if (userIdField) {
+			const userId = getUserId();
+			if (userIdField[0] === '/') {
+				jsonEval(body, userIdField.slice(1), "set", userId);
+			} else {
+				headers[userIdField] = userId;
+			}
 		}
-		if (additionalBody.session_id === 'auto') {
-			body.session_id = new SHA256().update('外币八部\0'+getOrCreateUserId()+'\0'+conversation.id).digest('hex');
+
+		const sessionIdField = config.sessionIdField;
+		if (sessionIdField) {
+			const messageId = (messages.find(m => m.id) ?? conversation).id;
+			const sessionId = new SHA256().update(getUserId()+'\0'+messageId).digest('hex').slice(0, 8);
+			if (sessionIdField[0] === '/') {
+				jsonEval(body, sessionIdField.slice(1), "set", sessionId);
+			} else {
+				headers[sessionIdField] = sessionId;
+			}
 		}
 	}
+
+	const additionalBody = config.additionalBody;
+	if (additionalBody) Object.assign(body, additionalBody);
 
 	let [systemPrompt, systemBody] = await buildSystemPrompt(config, conversation, config.systemPrompt || defaultSystemPrompt, toolPrompt);
 	if (systemPrompt) {
@@ -1247,10 +1280,10 @@ export const buildSystemPrompt = async (config, conversation, prompt, toolPrompt
 		const [meta, content] = parseFrontmatter(prompt);
 
 		// 初始化时处理
-		const allowedTools = meta.allowedTools;
-		if (!conversation.activatedModules && allowedTools) {
+		const tools = meta.tools;
+		if (!conversation.activatedModules && tools) {
 			const Use = toolScriptRegistry['Use'];
-			Use.script({modules: allowedTools.split(" ")}, {}, conversation);
+			Use.script({modules: tools.split(" ")}, {}, conversation);
 		}
 
 		prompt = content;
@@ -1275,38 +1308,34 @@ export const buildSystemPrompt = async (config, conversation, prompt, toolPrompt
 			if (prompt[prev] === '\n') prev++;
 
 			switch (id) {
-				case "model":
-					result += config.model;
-					break;
-				case "theme":
-					result += getCurrentTheme();
-					break;
-				case "language": {
-					result += navigator.language;
-				}
-				break;
+				case "model": result += config.model; break;
+				case "language": result += navigator.language; break;
+				case "theme": result += getCurrentTheme(); break;
 				case "date": {
 					const date = new Date();
 					result += date.getFullYear()+"-"+(""+(date.getMonth()+1)).padStart(2, "0");
 				}
 				break;
+				case "htmlTag": {
+					result += config.allowHTMLTags.includes("basic") ? "\n- HTML tags in Markdown are supported, use HTML table for complex tables, details/summary for spoilers, and optional inline styles." : "";
+				}
 				case "think":
 					result += isThinkingEnabled(config) && config.reasoning === false ? (config.CoTPrompt || defaultCoTPrompt) : "";
-					break;
+				break;
 				case "tools":
 					if (toolPrompt) result += toolPrompt.includes('{{') ? await transform(toolPrompt) : toolPrompt;
-					break;
+				break;
 				default:
 					if (id[0] === ':') {
 						const preset = await kvListGet('preset', id.slice(1));
 						result += preset.systemPrompt;
 					} else {
-						let val = PLACEHOLDERS[id];
+						let val = PLACEHOLDERS[id] ?? conversation[TEMPORARY_PLACEHOLDER]?.[id];
 						if (val != null) {
 							if (typeof val === "function")
 								val = val();
 							result += val;
-						} else {
+						} else if (id[0] !== '#') {
 							throw new Error("未识别的占位符 {{"+id+"}}");
 						}
 					}
@@ -1352,7 +1381,7 @@ const extractUsageMetrics = (json, log) => {
 		if (reasoning_tokens) log.reasoning_tokens = reasoning_tokens;
 		if (cache_write_tokens) log.cache_write_tokens = cache_write_tokens;
 		if (cost) {
-			log.cost = Math.round(cost * 1000000);
+			log.cost = Math.round(cost * LLM_COST_SCALE);
 			log.currency = "USD";
 		}
 

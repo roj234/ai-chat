@@ -120,17 +120,11 @@ const LANGUAGE_TO_EXT = {
 
 export {registerCodeBlockRenderer} from './renderer.js';
 
-/**
- * @param {Element} el
- * @return {Element}
- */
-const getElementToCopy = el => el.parentElement.parentElement.nextElementSibling;
-
 export const copyCodeEventHandler = (e) => {
 	const btn = e.target.closest(".code-block button[data-action]");
 	if (!btn) return;
 
-	const code = getElementToCopy(btn);
+	const code = btn.closest('.sticky').nextElementSibling;
 	switch (btn.dataset.action) {
 		case "copy": {
 			copyButtonAnimation(code._value || code.textContent, btn);

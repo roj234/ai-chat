@@ -1,6 +1,6 @@
 import {getToolParameters, TOOL_NAME, updateConversationState, watchConversationState} from "/src/toolset.js";
 import {$state, appendChild, unconscious} from "unconscious";
-import {messages, onConversationLoaded} from "/src/states.js";
+import {messages, onConversationSwitchTo} from "/src/states.js";
 import {onLoad} from "/src/hooks.js";
 import {renderMarkdownToElement} from "/src/markdown/markdown.js";
 import {jsonGet} from "unconscious/common/json-schema-utils.js";
@@ -60,7 +60,7 @@ export const ConfigureOverlay = {
 const overlayState = $state();
 onLoad((app) => appendChild(app, overlayState));
 
-onConversationLoaded((conv, messages) => {
+onConversationSwitchTo((conv, messages) => {
 	let listeners = [];
 	const runListeners = () => {
 		for (const [element, path] of listeners) {

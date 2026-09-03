@@ -89,17 +89,16 @@ export const MAX_UPLOAD_SIZE = 52428800;
 /**
  * 同时打开的SQLite数据库数量
  */
-export const MAX_OPEN_DATABASES = 10;
+export const MAX_OPEN_DATABASES = 30;
 
 /**
- * 启动/停止时执行的额外 SQLite 语句
+ * 启动时执行的额外 SQLite 语句
  * 默认开启 WAL 模式以提升并发写入性能
  */
 export const STARTUP_SQL = `
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = NORMAL;
 `;
-export const SHUTDOWN_SQL = ``;
 
 /**
  * 启用文件传输助手
@@ -179,27 +178,41 @@ export const SSE_PROXY_MODERATION = (url, apiKey, ctx) => {
 	};
 }
 
-/** 是否开启黑箱调试：记录所有请求响应到 data/logs 目录 */
-export const SSE_PROXY_TRACE = false;
+/**
+ * 断线重连缓存大小。
+ * 该缓存无超时，但客户端重连成功后会删除对应条目。
+ * 一条消息最高占用约 200KB 内存（provider应该不至于攻击client）
+ */
+export const SSE_RESUME_CACHE_SIZE = 254;
 
-/** 会话恢复超时时间 (毫秒)：默认 120 分钟 */
-export const SSE_RESUME_TIMEOUT = 1000 * 60 * 120;
+/** 断线重连超时 (毫秒)：默认禁用 */
+export const SSE_RESUME_TTL = 0;
 
-/** 消息引用（msg_ref）文本缓存 TTL (毫秒)：默认 24 小时 */
-export const SSE_REF_TTL = 1000 * 60 * 60 * 24;
-
-/** 消息引用缓存条目上限（LRU 驱逐） */
+/**
+ * 消息引用缓存大小。
+ * 设置为 0 禁用消息引用功能。
+ * 消息引用将消息块存储在SSE服务端并节省客户端 -> 服务器的流量（但无法节省服务器 -> 提供商的流量）。
+ * 由于消息块的大小是任意的，因此（对恶意请求来说）一条消息最高占用 40MB 的内存。
+ * 通常一条消息占用 几 - 几十KB。
+ */
 export const SSE_REF_CACHE_SIZE = 1000;
 
+/** 消息引用超时 (毫秒)：默认禁用 */
+export const SSE_REF_TTL = 0;
 
 // ==========================================
 // 5. 计费与价格映射 (Billing)
 // ==========================================
 
 function isLiangWenFeng() {
-	const beijingHour = (new Date().getUTCHours() + 8) % 24;
-	return (beijingHour >= 9 && beijingHour < 12) ||
-		(beijingHour >= 14 && beijingHour < 18);
+	const beijingTime = new Date(Date.now() + 8 * 60 * 60 * 1000);
+	const day = beijingTime.getUTCDay();
+	if (day === 0 || day === 6) return 0.5;
+	const minutes = beijingTime.getUTCHours() * 60 + beijingTime.getUTCMinutes();
+	const isPeak =
+		(minutes >= 9 * 60 && minutes < 12 * 60) ||
+		(minutes >= 14 * 60 && minutes < 18 * 60);
+	return isPeak;
 }
 
 // 价格表：每百万 token 价格（元）
@@ -223,7 +236,7 @@ const RATES = {
  * @return {"SKIP"|void}
  */
 export const LOG_HOOK = (log) => {
-	if (log.finish_reason === 'interrupt' && null == log.output_tokens) return 'SKIP';
+	if (null == log.output_tokens) return 'SKIP';
 
 	// 去除 OpenRouter 的模型名称前缀（当然也可以反过来加上，这只是 replace 的两个参数）
 	log.model = log.model.replaceAll(/^(anthropic|google|openrouter|openai|deepseek)\/|[-:]free$/g, "");
@@ -259,22 +272,14 @@ export const LOG_HOOK = (log) => {
 //  - 禁用了 br 也有关不掉的 gzip
 // ==========================================
 
-/** 是否使用 Msgpack 替代 JSON 序列化扩展字段（体积更小，速度更快） */
-export const DB_USE_MSGPACK_SCHEMA = true;
-
 /** 触发压缩的阈值（字节）：超过此大小的数据库字段将进行 brotli 压缩 */
 export const DB_COMPRESS_MIN_SIZE = 1024;
 
-/**
- * 数据库的 Brotli 压缩级别 (0-11)
- */
+/** 数据库的 Brotli 压缩级别 (0-11) */
 export const DB_COMPRESS_LEVEL = 7;
 
 /** 是否使用 Msgpack 替代 JSON 序列化响应（体积更小，速度更快） */
 export const RESPONSE_USE_MSGPACK_SCHEMA = true;
 
-/**
- * 响应的 Brotli 压缩级别 (0-11)
- */
+/** 响应的 Brotli 压缩级别 (0-11) */
 export const RESPONSE_COMPRESS_LEVEL = 6;
-

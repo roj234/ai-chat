@@ -1,6 +1,6 @@
 import "./Dropdown.css";
 
-import {$cleanup, $foreach} from "unconscious";
+import {$cleanup, $computed, $foreach, $state, unconscious} from "unconscious";
 import {indexInParent} from "../utils/utils.js";
 import {onLoad} from "../hooks.js";
 
@@ -27,12 +27,17 @@ export function Dropdown({items, selection, onChanged, dir = 'down'}) {
 			if (i < 0) return;
 		}
 
-		options.children[i]?.classList.add("selected");
+		options.children[i+1]?.classList.add("selected");
 	};
 
+	const filter = $state("");
 	let options;
 	const main = <div className={"pretty-select "+dir}>
-		<div className="input" onClick.stop={() => main.classList.toggle("open")}>
+		<div className="input" onClick.stop={() => {
+			if (main.classList.toggle("open")) {
+				filter.value = "";
+			}
+		}}>
 			<span>{() => selection.value ?? "default"}</span>
 			<span className={"arrow-icon ri-arrow-down-s-line"}></span>
 		</div>
@@ -46,13 +51,16 @@ export function Dropdown({items, selection, onChanged, dir = 'down'}) {
 				}, 2000);
 			} else {
 				const element = target.closest("li");
-				onChanged('d', indexInParent(element));
+				onChanged('d', indexInParent(element)-1);
 			}
 		}}
 			onClick.delegate{"li"}={({target}) => {
-			onChanged('s', indexInParent(target));
+			onChanged('s', indexInParent(target)-1);
 		}}>
-			{$foreach(items, (item) =>
+			<input className={"text-input"} placeholder={"筛选"} onClick.stop={() => {}} onInput={e => {
+				filter.value = e.target.value;
+			}} value={filter} />
+			{$foreach($computed(() => unconscious(filter) ? items.filter(({name}) => name.includes(unconscious(filter))) : unconscious(items)), (item) =>
 				<li class:selected={selection.value === item.name} title={item.name}>{item.name}
 					<i className={"ri-delete-bin-line"} title={"删除"}></i>
 				</li>, (item) => item.name)}

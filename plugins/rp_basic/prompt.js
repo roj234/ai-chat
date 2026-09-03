@@ -154,28 +154,46 @@ export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages, pre
 		messages.shift();
 	}
 
-	const pp = config.st_postProcess;
-	if (pp) {
-		const offset = message[0]?.role === "system" ? 0 : 1;
-		for (let i = 0; i < messages.length; i++) {
-			const item = messages[i];
-			if (item.role === "system" && i) {
-				item.role = "user";
-			}
-
-			if (pp === 2) {
-				if (!offset && !i) continue;
-				item.role = (i + offset) % 2 ? "assistant" : "user";
-			}
-		}
-	}
-
 	const activeRegexps = regexps.filter(item => item.enabled && item.stage !== 'render');
 	if (activeRegexps.length) {
 		for (let i = 0; i < messages.length; i++){
 			let message = messages[i];
 			if (!message[IS_SYSTEM])
 			message.content = regexpReplace(activeRegexps, messages.length - 1 - i, message.content);
+		}
+	}
+
+	const pp = config.st_postProcess;
+	if (pp) {
+		const offset = message[0]?.role === "system" ? 0 : 1;
+		if (pp === 2) {
+			for (let i = messages.length - 1; i >= 0; i--) {
+				const item = messages[i];
+				const prev = messages[i-1];
+				if (i && (item.role === prev.role)) {
+					messages.splice(i, 1);
+
+					if (typeof prev.content === 'string' && typeof item.content === 'string') {
+						prev.content += item.content;
+						continue;
+					}
+
+					if (!Array.isArray(prev.content)) prev.content = [{ type: "text", text: prev.content }];
+					if (!Array.isArray(item.content)) item.content = [{ type: "text", text: item.content }];
+					prev.content.push(...item.content);
+				}
+			}
+		}
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const item = messages[i];
+			if (item.role === "system" && i) {
+				item.role = "user";
+			}
+
+			if (pp === 3) {
+				if (!offset && !i) continue;
+				item.role = (i + offset) % 2 ? "assistant" : "user";
+			}
 		}
 	}
 

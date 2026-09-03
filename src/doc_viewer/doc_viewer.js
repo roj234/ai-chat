@@ -1,6 +1,6 @@
 import {chapterData} from "./documents.js";
 import {renderMarkdownToElement} from "../markdown/markdown.js";
-import {callOnLoadHandler} from "../hooks.js";
+import {EVENT_BUS} from "../states.js";
 
 let hamburgerBtn, mainWrapper, markdownContent, navList, navNoResults, overlay, searchClear, searchInput, sidebar, sidebarNav, tocBadge, tocFab, tocList, tocMobileClose, tocMobileNav, tocMobilePanel, tocNav, tocSidebar;
 
@@ -587,6 +587,6 @@ function init() {
 }
 
 addEventListener("hashchange", init);
+await EVENT_BUS.fire(['load'], app);
+await EVENT_BUS.fire(['loaded'], app);
 init();
-
-callOnLoadHandler(app);

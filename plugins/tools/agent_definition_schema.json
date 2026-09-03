@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "CommaListOrArray": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "AgentDefinition": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "tools": {
+          "$ref": "#/$defs/CommaListOrArray"
+        },
+        "skills": {
+          "$ref": "#/$defs/CommaListOrArray"
+        },
+        "model": {
+          "type": "string"
+        },
+        "maxToolTurns": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxTurns": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "background": {
+          "type": "boolean"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "mounts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "fs_type": { "type": "string" },
+              "fs_base": { "type": "string" },
+              "fs_server": { "type": "string" },
+              "fs_builtin": { "type": "boolean" }
+            },
+            "required": ["fs_type"],
+            "additionalProperties": false
+          }
+        },
+        "mcpServers": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "url": { "type": "string" },
+                  "key": { "type": "string" }
+                },
+                "required": ["name", "url"],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "redirect": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "target": { "enum": ["file", "javascript"] },
+                "path": { "type": "string" },
+                "id": { "type": "integer", "description": "Agent id to send ping notifications to." }
+              },
+              "required": ["target", "path", "id"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "target": { "const": "agent" },
+                "id": { "type": "integer" }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

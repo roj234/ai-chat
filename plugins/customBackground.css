@@ -1,0 +1,16 @@
+.blurred-track {
+	position: fixed;
+	height: 100%;
+	width: var(--panel-width);
+	left: calc(50% - var(--panel-width) / 2 - 0.25rem);
+	filter: blur(8px);
+	contain: strict;
+	pointer-events: none;
+}
+.panel {
+	position: relative;
+}
+
+.no-messages > .blurred-track {
+	display: none;
+}

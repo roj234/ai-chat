@@ -1,4 +1,4 @@
-import {debugSymbol, unconscious} from "unconscious";
+import {$update, debugSymbol, unconscious} from "unconscious";
 import {showToast} from "../components/Toast.js";
 import {BRANCH_MANAGER, EVENT_BUS, messages as reactiveMessages, selectedConversation} from "../states.js";
 import {redoToolCalls, undoToolCalls} from "../toolset.js";
@@ -103,14 +103,14 @@ function createBranchManager(conv, messages) {
 		return branchPoints;
 	};
 
-	const getMessages = () => {
-		const path = [];
+	const push_ = Array.prototype.push;
+	const fillMessages = (path) => {
 		let m = leaf;
 		while (m !== messages[0]) {
-			path.push(m);
+			push_.call(path, m);
 			m = messages[resolveParent(m)];
 		}
-		return path.reverse();
+		path.reverse();
 	};
 
 	const branchAt = (parent, message) => {
@@ -194,6 +194,7 @@ function createBranchManager(conv, messages) {
 				// 没有分支点后禁用分支管理器
 				delete conv.bm_leaf;
 				delete conv[BRANCH_MANAGER];
+				path.length = 0;
 
 				// 不需要删除 [INDEX] 虽然可以删
 				const rawMessages = messages.slice(1);
@@ -203,11 +204,78 @@ function createBranchManager(conv, messages) {
 		}
 	};
 
+	class PathArray extends Array {
+		push(...items) {
+			for (const item of items) branchAt(leaf, item);
+			return push_.apply(path, items);
+		}
+		pop() {
+			const last = path.at(-1);
+			if (last) {
+				remove(last);
+				return Array.prototype.pop.apply(path);
+			}
+		}
+		unshift(...items) {
+			this.splice(0, 0, ...items);
+		}
+		splice(start, deleteCount, ...addItems) {
+			if (!deleteCount && !addItems.length) return [];
+
+			const len = path.length;
+
+			start = Number(start) || 0;
+			if (start < 0) start = Math.max(len + start, 0);
+			else if (start > len) start = len;
+
+			if (deleteCount === undefined) deleteCount = len - start;
+			else deleteCount = Math.max(0, deleteCount | 0);
+
+			if (deleteCount) {
+				if (start + deleteCount !== this.length)
+					throw new Error("无法部分修改分支消息");
+				if (addItems.some(item => item.id > 0))
+					throw new Error("不能加入已入库的消息");
+
+				const last = path.at(-deleteCount);
+				if (last) {
+					remove(last);
+					this.push(...addItems);
+				}
+			} else {
+				if (!addItems.every(item => item.id < 0))
+					throw new Error("只能在开头插入虚拟（不入库）消息");
+
+				for (let i = 0; i < path.length; i++) {
+					if (path[i][CHILDREN]) {
+						if (start > i) {
+							throw new Error("虚拟消息只能插入在第一个分支点前");
+						}
+						break;
+					}
+				}
+
+				const copy = [...messages];
+				copy.splice(start + 1, 0, ...addItems);
+				_updateIndices(copy);
+
+				if (start === path.length) leaf = addItems.at(-1);
+				messages = copy;
+			}
+
+			const removed = Array.prototype.splice.call(path, start, deleteCount);
+			path.length = 0;
+			fillMessages(path);
+			return removed;
+		}
+
+	}
+
+	const path = new PathArray();
+
 	// ---------- 返回闭包对象 ----------
 	return {
-		// 感觉没有必要，目前好像没有set
 		get messages() { return messages; },
-		set messages(m) { messages = m; },
 
 		/**
 		 * @param {number} v
@@ -224,83 +292,8 @@ function createBranchManager(conv, messages) {
 			}
 		},
 		getMessages() {
-			const path = getMessages();
-			Object.defineProperties(path, {
-				push: {
-					value(...items) {
-						for (const item of items) branchAt(leaf, item);
-						return Array.prototype.push.apply(path, items);
-					},
-					configurable: true
-				},
-				pop: {
-					value() {
-						const last = path.at(-1);
-						if (last) {
-							remove(last);
-							return Array.prototype.pop.apply(path);
-						}
-					},
-					configurable: true
-				},
-				unshift: {
-					value(...items) {
-						this.splice(0, 0, ...items);
-					}
-				},
-				splice: {
-					value(start, deleteCount, ...addItems) {
-						if (!deleteCount && !addItems.length) return [];
-
-						const len = path.length;
-
-						start = Number(start) || 0;
-						if (start < 0) start = Math.max(len + start, 0);
-						else if (start > len) start = len;
-
-						if (deleteCount === undefined) deleteCount = len - start;
-						else deleteCount = Math.max(0, deleteCount | 0);
-
-						if (deleteCount) {
-							if (start + deleteCount !== this.length)
-								throw new Error("无法部分修改分支消息");
-							if (addItems.some(item => item.id > 0))
-								throw new Error("不能加入已入库的消息");
-
-							const last = path.at(-deleteCount);
-							if (last) {
-								remove(last);
-								this.push(...addItems);
-							}
-						} else {
-							if (!addItems.every(item => item.id < 0))
-								throw new Error("只能在开头插入虚拟（不入库）消息");
-
-							for (let i = 0; i < path.length; i++) {
-								if (path[i][CHILDREN]) {
-									if (start > i) {
-										throw new Error("虚拟消息只能插入在第一个分支点前");
-									}
-									break;
-								}
-							}
-
-							const copy = [...messages];
-							copy.splice(start + 1, 0, ...addItems);
-							_updateIndices(copy);
-
-							if (start === path.length) leaf = addItems.at(-1);
-							messages = copy;
-						}
-
-						const removed = Array.prototype.splice.call(path, start, deleteCount);
-						path.length = 0;
-						Array.prototype.push.apply(path, getMessages());
-						return removed;
-					},
-					configurable: true
-				}
-			});
+			path.length = 0;
+			fillMessages(path);
 			return path;
 		},
 		branchAt,
@@ -346,11 +339,11 @@ export const cloneMessage = (message) => {
  * @param {AiChat.Message} message - 要复制的消息
  */
 export const copyBranchAt = message => {
-	const global = unconscious(selectedConversation);
+	const conv = unconscious(selectedConversation);
 	/** @type {AiChat.BranchManager} */
-	const bm = global[BRANCH_MANAGER];
+	const bm = conv[BRANCH_MANAGER];
 	bm.branchAt(bm.messages[resolveParent(message)], message);
-	setMessages(bm.getMessages(), global);
+	setMessages(bm.getMessages(), conv);
 };
 
 /**
@@ -371,23 +364,24 @@ export const hasBranchAfter = (message) => {
  * @param {AiChat.Message} message
  */
 export const setLastMessage = message => {
-	const global = unconscious(selectedConversation);
+	const conv = unconscious(selectedConversation);
 	/** @type {AiChat.BranchManager} */
-	const bm = global[BRANCH_MANAGER];
+	const bm = conv[BRANCH_MANAGER];
 	bm.setLeaf(message);
-	setMessages(bm.getMessages(), global);
+	setMessages(bm.getMessages(), conv);
 };
 
 
 const setMessages = (newMessages, conv) => {
 	const oldMessages = unconscious(reactiveMessages);
 	reactiveMessages.value = newMessages;
+	$update(reactiveMessages);
 
 	let prefix = 0;
 	for (; prefix < Math.min(oldMessages.length, newMessages.length); prefix++) {
 		if (oldMessages[prefix] !== newMessages[prefix]) break;
 	}
-	EVENT_BUS.post(['conversation', 'branch'], [conv, oldMessages, newMessages, prefix]);
+	EVENT_BUS.post(['conversationBranch'], conv, oldMessages, newMessages, prefix);
 	undoToolCalls(conv, oldMessages, prefix, true);
 	redoToolCalls(conv, newMessages, prefix, true);
 };

@@ -66,7 +66,7 @@
     max-height: 2000px;
     overflow: auto;
 }
-.messages-container, .msg-vl.alt {
+.messages-container {
     padding: 16px 20px;
     display: flex;
     flex-direction: column;
@@ -74,47 +74,12 @@
 }
 
 .msg.alt {
-    display: flex;
-    flex-direction: column;
-    max-width: 85%;
-    &.user {
-        align-self: flex-end;
-        & > .role {
-            text-align: right;
-        }
-        & > .body {
-              background: var(--user);
-              color: white;
-          }
-    }
+    padding-bottom: 0;
 
-    & kbd {
-        color: var(--warning-accent);
-    }
+    &.assistant { align-self: flex-start; }
 
-    &.assistant {
-        align-self: flex-start;
-    }
-
-    & > .role {
-        font-size: 12px;
-        margin-bottom: 4px;
-        color: var(--muted);
-
-        display: flex;
-        flex-direction: column;
-    }
+    & > .role { color: var(--muted); }
     & > .body {
-        background: var(--card);
-        color: var(--text);
-        border: 1px solid var(--border);
-
-        padding: 12px 16px;
-        border-radius: 16px;
-        font-size: 14px;
-        line-height: var(--md-line-height);
-        word-break: break-word;
-
         /* 修复溢出问题 */
         & > * { min-width: 0; }
 

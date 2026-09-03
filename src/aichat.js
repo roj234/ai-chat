@@ -9,6 +9,7 @@ import {
 	config,
 	CONFIG_VERSION,
 	conversations,
+	EVENT_BUS,
 	isMobile,
 	lastScrollDirectionIsUp,
 	LOCKED,
@@ -28,8 +29,7 @@ import {SettingDialog} from "./components/SettingDialog.jsx";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {createUserInputComposer} from "./components/UserInputComposer.jsx";
 import {onPluginLoaded} from "/plugins/PluginRegistry.js";
-import {callOnLoadHandler, DI} from "./hooks.js";
-import {enableBranches} from "./utils/BranchManager.js";
+import {DI, DID_TITLE_POSITION, injectCommonDI} from "./hooks.js";
 import {checkUpdate} from "../common/updater.js";
 import {setAllowHTMLTags} from "./markdown/markdown.js";
 import {sseFetch} from "../common/openai-api-utils.js";
@@ -90,7 +90,7 @@ const createApp = () => {
 		<header className={"header"} class:closed={() => !unconscious(selectedConversation)}>
 			<div className="bar">
 				<button className="ri-menu-line btn ghost" title="展开侧边栏" onClick={toggleSidebar}></button>
-				<TitleEditor ref={DI.title} />
+				<TitleEditor ref={DI[DID_TITLE_POSITION]} />
 				<button className="ri-add-line btn ghost" title="开启新对话" onClick={resetConversation}></button>
 			</div>
 		</header>
@@ -195,10 +195,6 @@ const createApp = () => {
 		if (id === 'reasoning') toggleSettingUI('CoTPrompt', !newValue);
 		if (id === 'generateTitle') toggleSettingUI('title', !!newValue);
 		if (id === 'canPrefill') toggleSettingUI('prefillPath', !!newValue);
-		if (id === 'messageTheme') {
-			const el = messagesPanel.querySelector('._vl');
-			el.className = '_vl msg-vl '+newValue;
-		}
 	}
 
 	$watch(messages, () => {
@@ -234,7 +230,7 @@ const createApp = () => {
 				if (isFinite(id1) && id1 >= 0) id = id1;
 			}
 
-			listConversations(null).catch(err => {
+			listConversations().catch(err => {
 				if (err.error === "no such user") {
 					connectDatabase();
 				} else if (err.status === 401) {
@@ -255,6 +251,9 @@ const createApp = () => {
 				if (isIDB && id != null) {
 					selectedConversation.value = conversations.find(t => t.id === id);
 				}
+
+				const event = ['loaded'];
+				EVENT_BUS.fire(event, $("app"));
 			});
 
 			let hookGetMessages = AS_IS;
@@ -277,7 +276,7 @@ const createApp = () => {
 
 						if (unconscious(selectedConversation) === conv) {
 							$update(selectedConversation);
-							messages.value = conv.bm_leaf ? enableBranches(conv, data) : data;
+							messages.value = data;
 							scroller.scrollToBottom();
 						}
 					}).catch(err => {
@@ -295,7 +294,7 @@ const createApp = () => {
 							submitUserChatMessage();
 						} else if (Date.now() - conv.time < RESUME_TIMEOUT) {
 							submitUserChatMessage();
-							showToast("尝试继续意外中断的请求", 'ok');
+							showToast("继续意外中断的请求", 'ok');
 						} else {
 							delete conv.resumeId;
 							updateConversation(conv);
@@ -443,7 +442,8 @@ addEventListener("load", () => {
 			return;
 		}
 
-		callOnLoadHandler(wrapper, settings, messageContainer);
+		injectCommonDI(settings, messageContainer);
+		EVENT_BUS.fire(['load'], wrapper);
 		onLoad_(wrapper);
 	}).catch(e => {
 		SimpleModal({

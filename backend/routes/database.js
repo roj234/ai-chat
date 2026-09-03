@@ -5,11 +5,12 @@ import {
 	compressMessage,
 	decompressConversation,
 	decompressLog,
-	decompressMessage,
-	deserializeRow
+	decompressMessage
 } from "../utils/compression.js";
 import fs from "node:fs/promises";
 import path from "node:path";
+import {LLM_COST_SCALE} from "../sync.js";
+import {getProxyAgent} from "../utils/socks5-agent.js";
 
 /**
  * @param {AiChatBackend.Router} router
@@ -17,30 +18,42 @@ import path from "node:path";
  */
 export function registerDatabaseRoutes(router, rootPath) {
 	router.delete('/database', async (ctx) => {
-		const logs = ctx.db.prepare(`SELECT ROWID, data FROM "logs"`).all();
-		const updateLog = ctx.db.prepare(`UPDATE "logs" SET data = ? WHERE ROWID = ?`);
-		for (const row of logs) {
-			const data = decompressLog(row.data);
-			const result = await LOG_HOOK(data);
-			if (result === 'SKIP') {
-				ctx.db.prepare(`DELETE FROM "logs" WHERE ROWID = ?`).run(row.rowid);
-				continue;
-			}
-			updateLog.run(await compressLog(data), row.rowid);
-		}
+		const processLog = (async () => {
+			const logs = await ctx.logDB;
+			const changes = new Map;
+			for (let i = Math.max(0, logs.size - 5000); i < logs.size; i++) {
+				const row = await logs.get(i);
+				const data = decompressLog(row.data);
+				const choice = await LOG_HOOK(data);
+				if (choice === 'SKIP') {
+					changes.set(i, null);
+					continue;
+				}
 
-		const conversations = ctx.db.prepare(`SELECT id, data FROM "conversations"`).all();
-		const updateConversation = ctx.db.prepare(`UPDATE "conversations" SET data = ? WHERE id = ?`);
+				const result = await compressLog(data);
+				if (Buffer.compare(row.data, result)) changes.set(i, result);
+			}
+
+			await logs.update(changes);
+		})();
+
+		const db = ctx.db;
+		db.exec("BEGIN;");
+
+		const conversations = db.prepare(`SELECT id, data FROM "conversations"`).all();
+		const updateConversation = db.prepare(`UPDATE "conversations" SET data = ? WHERE id = ?`);
 		for (const row of conversations) {
 			const data = decompressConversation(row.data);
-			updateConversation.run(await compressConversation(data), row.id);
+			const result = await compressConversation(data);
+			if (Buffer.compare(row.data, result)) updateConversation.run(result, row.id);
 		}
 
-		const messages = ctx.db.prepare(`SELECT id, data FROM "messages"`).all();
-		const updateMessage = ctx.db.prepare(`UPDATE "messages" SET data = ? WHERE id = ?`);
+		const messages = db.prepare(`SELECT id, data FROM "messages"`).all();
+		const updateMessage = db.prepare(`UPDATE "messages" SET data = ? WHERE id = ?`);
 		for (const row of messages) {
 			const data = decompressMessage(row.data);
-			updateMessage.run(await compressMessage(data), row.id);
+			const result = await compressMessage(data);
+			if (Buffer.compare(row.data, result)) updateMessage.run(result, row.id);
 		}
 
 		/*const kv = ctx.db.prepare(`SELECT key, value FROM "kv"`).all();
@@ -50,52 +63,67 @@ export function registerDatabaseRoutes(router, rootPath) {
 			updateMessage.run(await compressGeneric(data), row.key);
 		}*/
 
-		ctx.db.exec('VACUUM');
-		ctx.db.exec("PRAGMA wal_checkpoint(TRUNCATE);");
+		db.exec(`COMMIT; VACUUM; PRAGMA wal_checkpoint(TRUNCATE);`);
+
+		await processLog;
+
 		ctx.send(200, { success: true });
 	});
 
 	router.post('/database/fetch', async (ctx) => {
-		const rows = ctx.db.prepare(`SELECT ROWID, data FROM "logs" WHERE time >= ? ORDER BY ROWID DESC LIMIT 1000`).all(Date.now() - 86400000);
-		const updateData = ctx.db.prepare(`UPDATE "logs" SET data = ? WHERE ROWID = ?`);
-		let zenmuxToken;
-
 		let sync = 0;
-		for (const row of rows) {
-			const {rowid, ...logItem} = deserializeRow(row, decompressLog);
+		let zenmuxToken, zenmuxProxy;
 
-			if (logItem.provider === "ZenMux" && null == logItem.cost) {
-				if (null == zenmuxToken) zenmuxToken = await fs.readFile(path.join(rootPath, "zenmux-token.txt"));
-				if (!zenmuxToken) break;
+		const logs = await ctx.logDB;
+		const records = await logs.findByTime(Date.now() - 86400000, Date.now());
+		if (records) {
+			const changes = new Map;
+			for (let i = records.firstId; i <= records.lastId; i++) {
+				const row = await logs.get(i);
+				const logItem = decompressLog(row.data);
 
-				const json = (await fetch("https://zenmux.ai/api/v1/management/generation?id="+logItem.request_id, {
-					headers: {
-						authorization: "Bearer "+zenmuxToken
+				if (logItem.provider === "ZenMux" && logItem.cost == null) {
+					if (null == zenmuxToken) {
+						zenmuxToken = (await fs.readFile(path.join(rootPath, "zenmux-token.txt"), "utf-8")).trim();
+						if (!zenmuxToken) break;
+
+						const pos = zenmuxToken.indexOf('\n');
+						if (pos > 0) {
+							zenmuxProxy = zenmuxToken.slice(pos+1);
+							zenmuxToken = zenmuxToken.slice(0, pos).trim();
+						}
 					}
-				}).then(r => r.json())).data;
 
-				let {
-					prompt_tokens, prompt_tokens_details = {},
-					completion_tokens, completion_tokens_details = {},
-				} = json.nativeTokens;
+					const json = (await fetch("https://zenmux.ai/api/v1/management/generation?id="+logItem.request_id, {
+						headers: { authorization: "Bearer "+zenmuxToken },
+						agent: getProxyAgent(zenmuxProxy)
+					}).then(r => r.json())).data;
 
-				const {reasoning_tokens = 0} = completion_tokens_details;
-				const {cached_tokens = 0, cache_write_tokens = 0} = prompt_tokens_details;
+					let {
+						prompt_tokens, prompt_tokens_details = {},
+						completion_tokens, completion_tokens_details = {},
+					} = json.nativeTokens;
 
-				logItem.input_tokens = prompt_tokens - cached_tokens;
-				logItem.output_tokens = completion_tokens;
+					const {reasoning_tokens = 0} = completion_tokens_details;
+					const {cached_tokens = 0, cache_write_tokens = 0} = prompt_tokens_details;
 
-				logItem.duration = json.generationTime;
-				logItem.latency = json.latency;
+					logItem.input_tokens = prompt_tokens - cached_tokens;
+					logItem.output_tokens = completion_tokens;
 
-				if (cached_tokens) logItem.cached_tokens = cached_tokens;
-				if (reasoning_tokens) logItem.reasoning_tokens = reasoning_tokens;
-				logItem.currency = "USD";
-				logItem.cost = json.ratingResponses.billAmount;
+					logItem.duration = json.generationTime;
+					logItem.latency = json.latency;
 
-				updateData.run(await compressLog(logItem), rowid);
-				sync++;
+					if (cached_tokens) logItem.cached_tokens = cached_tokens;
+					if (reasoning_tokens) logItem.reasoning_tokens = reasoning_tokens;
+					logItem.currency = "USD";
+					logItem.cost = Math.round(json.ratingResponses.billAmount * LLM_COST_SCALE);
+
+					changes.set(i, await compressLog(logItem));
+					sync++;
+				}
 			}
+
+			await logs.update(changes);
 		}
 
 		ctx.send(200, { updated: sync });

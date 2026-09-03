@@ -7,6 +7,7 @@ export const EditWidget = ({value, placeholder, onChange}) => {
 		input.style.height = `${input.scrollHeight + 2}px`;
 	};
 	const input = <textarea className={"edit-widget text-input"}
+							cols={999}
 							onInput={updateHeight}
 							onChange={() => {
 								onChange(input.value);

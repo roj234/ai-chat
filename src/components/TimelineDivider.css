@@ -1,0 +1,45 @@
+
+.timeline-divider {
+	position: relative;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+
+	&::before {
+		content: "";
+		position: absolute;
+		left: 0;
+		right: 0;
+		height: 1px;
+		background: linear-gradient(90deg,
+			transparent 0%,
+			rgba(51, 65, 85, 0.6) 20%,
+			rgba(51, 65, 85, 0.6) 80%,
+			transparent 100%
+		);
+	}
+
+	& button {
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+		gap: 1ch;
+		background: var(--card);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		padding: 4px 1ch;
+		font-size: 14px;
+		color: var(--muted);
+		transition: all 0.2s ease;
+
+		&:hover {
+			background: var(--panel);
+			border-color: var(--accent);
+			color: var(--text);
+		}
+	}
+
+	& .white {
+		color: var(--text);
+	}
+}

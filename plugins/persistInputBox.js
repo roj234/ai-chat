@@ -1,4 +1,4 @@
-import {inputText, onConversationLoaded, selectedConversation} from "/src/states.js";
+import {conversations, EVENT_BUS, inputText, onConversationSwitchTo, selectedConversation} from "/src/states.js";
 import {$store, $watch, unconscious} from "unconscious";
 
 const inputTextObj = $store("inputText", {}, {persist: true});
@@ -13,6 +13,12 @@ $watch(inputText, () => {
 	}
 }, false);
 
-onConversationLoaded((conv) => {
+onConversationSwitchTo((conv) => {
 	inputText.value = inputTextObj[conv.id] || '';
+});
+
+EVENT_BUS.on('loaded', () => {
+	const ids = new Set(Object.keys(inputTextObj));
+	conversations.forEach(c => ids.delete(String(c.id)));
+	for (const id of ids) delete inputTextObj[id];
 });

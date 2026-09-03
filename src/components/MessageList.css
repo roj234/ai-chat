@@ -111,15 +111,24 @@
 /* 文本附件 */
 .text-attachment {
     border: 1px solid var(--border);
-    border-left: 4px solid var(--accent-2);
     background: color-mix(in srgb, var(--accent-2) 6%, transparent);
     border-radius: var(--border-radius-md);
     padding: 8px 12px;
-    margin: 4px 0;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
     gap: 8px;
+
+    overflow: hidden;
+    position: relative;
+
+    &::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 4px;
+        background-color: var(--accent-2);
+    }
 
     &.deleted span {
         text-decoration: line-through;
@@ -142,13 +151,12 @@
 
     & .attach-meta {
         font-size: 0.75rem;
-        color: var(--muted);
+        color: var(--text-lighter);
     }
 
     & .btn {
         padding: 4px 10px;
         border-radius: 6px;
-        background: var(--chip-active);
         color: var(--accent-2);
         border: 1px solid var(--accent-2);
 

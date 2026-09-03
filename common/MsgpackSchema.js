@@ -12,7 +12,7 @@ msgpack_schema.push(
 	"status",
 
 	// conversation
-	"activatedModules", "allowedTools", "grantedTools",
+	"activatedModules", "tools", "grantedTools",
 	"bm_leaf",
 	"resumeId", "roleId", "contextUsage",
 	// FileSystem

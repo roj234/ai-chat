@@ -4,6 +4,7 @@ import {unconscious} from "unconscious";
 import {getBillingLog} from "/src/database.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {showToast} from "/src/components/Toast.js";
+import {LLM_COST_SCALE} from "/backend/sync.js";
 
 
 function buildData(messages, logs) {
@@ -110,8 +111,8 @@ function buildData(messages, logs) {
 		],
 		inTokens, outTokens,
 		cache: { avg: cacheAvg, points: cachePoints },
-		cost: cost / 1000000,
-		costPerMin: runningTime > 0 ? cost / 1000000 / (runningTime / 60) : 0,
+		cost: cost / LLM_COST_SCALE,
+		costPerMin: runningTime > 0 ? cost / LLM_COST_SCALE / (runningTime / 60) : 0,
 		avgResponseTime: latN ? latMs / latN : 0,
 		turns: assistantTurns,
 		tools,

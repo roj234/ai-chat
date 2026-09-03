@@ -1,12 +1,12 @@
 // 聊天软件接口
-import {registerToolset, runTools, TOOL_NAME, tools, toolScriptRegistry, toolset} from "/src/toolset.js";
+import {registerToolset, runTools, TOOL_NAME, toolInfo, toolScriptRegistry, toolset} from "/src/toolset.js";
 import {SETTINGS} from "/src/settings.js";
 import {config, conversations, messages} from "/src/states.js";
 import {agentLoop} from "/src/api-request.js";
 import {$stampLock, $state, $unwatch, $watch} from "unconscious";
 import {renderMarkdownToString} from "/src/markdown/markdown.js";
 import {showToast} from "/src/components/Toast.js";
-import {throttled} from "/src/utils/pure-utils.js";
+import {throttled} from "/common/pure-utils.js";
 import {getMessagesCacheFirst} from "/src/database.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {fileAccess} from "../tools/fileAccess.js";
@@ -54,7 +54,7 @@ const ListTools = {
 
 		prompt += '独立工具\n\n';
 		for (const key of myTools) {
-			const val = tools[key];
+			const val = toolInfo[key];
 			if (toolScriptRegistry[key]?.interactive === true && key !== 'SetTimeout')
 				continue;
 			prompt += key+" - "+val.function.description+"\n\n";

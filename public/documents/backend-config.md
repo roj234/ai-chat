@@ -4,32 +4,24 @@
 > 这只是我在用的代码，并且可以让 config.js 更好用，不是什么要求
 
 ### 从文件加载代理路由
-> 期望的格式类似 https://deepseek-key:sk-xxxx@api.deepseek.com/beta
 
 ```js
+export const SSE_PROXY_BACKEND = AiChatAPI.parseProviderFile("keys.conf");
+```
 
-import fs from 'node:fs';
+格式示例：
+```
+# 内联URL
+https://opencode.ai/zen/go/v1 ocg sk-123456
 
-/**
- * SSE 后端代理路由表
- *
- * 匹配逻辑：
- * 1. 匹配 Header 中的 Authorization (Bearer 后面的 Key)。
- * 2. 若匹配成功，则转发至对应的 url 并覆盖 authorization。
- * 3. 若未匹配，则尝试使用 'default' 配置。
- * 4. 若 'default' 未定义 authorization，则执行 BYOK (Bring Your Own Key) 模式。
- * 5. 无匹配项且无 default 时返回 403。
- */
-export const SSE_PROXY_BACKEND = {};
+# 定义提供商
+provider or {
+	url: "https://openrouter.ai/api/v1",
+	proxy: "socks5://127.0.0.1:10808"
+}
 
-fs.readFileSync("keys.txt", "utf8").split('\n').map(item=>item.trim()).filter(item=>item&&!item.startsWith("#")).forEach(item => {
-	const {username,password,origin,pathname} = new URL(item);
-	SSE_PROXY_BACKEND[username] = {
-		url: origin+pathname,
-		authorization: password
-	};
-	console.log(` [ApiKey] Loaded key '${username}' (****${password.slice(-4)}) on ${origin}`);
-});
+# 引用提供商
+or openrouter sk-123456
 ```
 
 ### 基于正则表达式的内容审核

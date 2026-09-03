@@ -331,7 +331,6 @@ async def api_embeddings(request: EmbeddingRequest) -> EmbeddingResponse:
 @app.post("/api/v1/embeddings/raw")
 async def api_embeddings_raw(request: Request):
     body = await request.body()
-    # todo pre-check ??
     if len(body) > 1024 * 1024:
         raise HTTPException(status_code=413, detail="Payload too large")
 

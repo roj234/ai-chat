@@ -1,6 +1,7 @@
 import {getTextContent} from "../utils/utils.js";
 import {IndexedDBAccess} from "../utils/dbAccess.js";
 import {EVENT_BUS} from "../states.js";
+import {LLM_COST_SCALE} from "/backend/sync.js";
 
 const [transaction, deleteDatabase] = IndexedDBAccess('AiChat', 9, (event) => {
 	const db = event.target.result;
@@ -26,7 +27,7 @@ const [transaction, deleteDatabase] = IndexedDBAccess('AiChat', 9, (event) => {
 			if (cursor) {
 				const record = cursor.value;
 				if (typeof record.cost === 'number') {
-					record.cost = Math.round(record.cost * 1000000);
+					record.cost = Math.round(record.cost * LLM_COST_SCALE);
 					cursor.update(record);
 				}
 				cursor.continue();

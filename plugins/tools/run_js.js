@@ -7,10 +7,40 @@ import {normalizePath} from "unconscious/common/path-utils.js";
 import {getToolParameters, runTools} from "/src/toolset.js";
 import {formatSize} from "unconscious/common/Utils.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
+import {stringify} from "/common/json5-stringify.js";
+import {HighlightBox} from "../../src/components/TextDiff.jsx";
 
 const sandboxInstances = new Map;
 
-export const JS_MODULES = {
+/**
+ * @type {Record<string, function(AiChat.Conversation): Record<string, Function>>}
+ */
+export const JS_HOST_MODULES = {
+	'tools': conv => new Proxy({}, {
+		get(target, key) {
+			const exist = conv.tools.has(key);
+			if (!exist) return;
+
+			return async (args) => {
+				const resp = [];
+
+				await runTools({
+					tool_calls: [{
+						function: {
+							name: key,
+							arguments: JSON.stringify(args || {})
+						}
+					}],
+					tool_responses: resp
+				}, conv, 0);
+
+				return resp[0];
+			}
+		}
+	})
+};
+
+export const JS_SANDBOX_MODULES = {
 	'json5': {
 		path: "assets/sandbox/json5.mjs",
 		description: `Fast Streaming JSON5 Parser
@@ -179,14 +209,14 @@ export {
 	},
 	OffscreenCanvas: {
 		description: "builtin FontFace createImageBitmap getContext()",
-		k: "jpg jpeg png bmp image"
+		k: "jpg jpeg png bmp image font ttf otf render opengl"
 	},
 	"crypto.subtle": {
 		description: " builtin",
 		k: "hash uuid encrypt decrypt cipher sha md5"
 	}
 };
-const aliases = new Set(Object.values(JS_MODULES).map(k => k.alias).filter(Boolean).flat());
+const aliases = new Set(Object.values(JS_SANDBOX_MODULES).map(k => k.alias).filter(Boolean).flat());
 const loadSystemModule = (mod) => {
 	return fetch(mod.path || mod.url, {
 		referrerPolicy: 'no-referrer',
@@ -206,7 +236,7 @@ const rpcMethods = {
 	append: [ (args) => ({ path: args[0], content: args[1], newline: false }) ],
 	mkdir: [ (args) => ({ path: args[0] }) ],
 	delete: [ (args) => ({ path: args[0] }) ],
-	list: [ (args) => ({ path: args[0], json: args[1], pattern: args[2] || '*' }), AS_IS ],
+	list: [ (args) => ({ path: args[0], json: args[1], pattern: args[2] || '*', showHidden: true }), AS_IS ],
 	stat: [ (args) => ({ path: args[0] }), AS_IS ],
 	copy: [ (args) => ({ src: args[0], dest: args[1], move: args[2] || false }) ],
 };
@@ -239,7 +269,7 @@ export const RunJS = {
 - Supports CommonJS. extension must be \`.cjs\`.
 - Node.js shim: Buffer, fs, path, process, fetch.
 - Not real Node.js: no require(), Only three modules: \`fs/promises\`, \`path\`, \`url\`.
-- After the module evaluated, the sandbox detaches — await Promises before return or they will fail.
+- After the module evaluated, the sandbox detaches — MUST await top-level Promises.
 - Permissions: "network" for fetch, "eval" for Function, wasm and http/data import().
 - For Uint8Array, use \`fs.writeFile(path, data, { transfer: true })\` (or appendFile) to transfer the buffer ownership for better performance. The returned promise resolves to a new Uint8Array with the same content; the original buffer becomes invalid.`,
 	parameters: {
@@ -287,11 +317,29 @@ export const RunJS = {
 		const args = getToolParameters(ctx, tc);
 		let label = '运行';
 		if (args.path) label += ' '+args.path;
-		else label += `内联代码 (${formatSize(args.code?.length)})`;
+		else label += `JS代码 (${formatSize(args.code?.length)})`;
 		return label;
 	},
+	renderInput(ctx, box, tc) {
+		let {code, ...rest} = getToolParameters(ctx, tc);
+		if (code) {
+			let start = 1;
 
-	async script({code, path, env, argv, timeout = 10, permissions, persist }, response, conv) {
+			if (Object.keys(rest).length) {
+				const lines = stringify(rest).split('\n').map(s=> "// "+s);
+				start -= lines.length;
+				code = lines.join("\n")+'\n' + code;
+			}
+			return <HighlightBox start={start} code={code} filename={"js"} />;
+		}
+
+		return false;
+	},
+	interactive(par, conv) {
+		return par.permissions?.length ? "secure" : null;
+	},
+
+	async script({code, path, env, argv, timeout = 10, permissions, persist, thread, throw: exc }, response, conv) {
 		if (null == code) {
 			if (null == path) throw 'Neither path nor code is specified';
 			code = await readFile({
@@ -303,63 +351,42 @@ export const RunJS = {
 			if (path != null) throw 'Both path and code are specified';
 		}
 
-		const id = conv.id;
-		const obj = sandboxInstances.get(id) || {};
+		if (null == thread) thread = conv.id;
+		const obj = sandboxInstances.get(thread) || {};
 		let {worker, workerPermissions, destroyTimeout} = obj;
 
 		clearTimeout(destroyTimeout);
 		const stopWorker = (m) => {
 			worker.destroy(m);
-			sandboxInstances.delete(id);
+			sandboxInstances.delete(thread);
 		};
 
 		if (!worker || !deepEqual(workerPermissions, permissions || [])) {
 			worker?.destroy();
 
 			const hostModules = new Map;
-			hostModules.set('@tools', {});
+			for (const key in JS_HOST_MODULES) hostModules.set(key, {});
 
 			const handlers = { hostModules };
 			const realPermissions = ['fs'];
 			if (permissions?.includes('network')) realPermissions.push('net');
 			if (permissions?.includes('eval')) realPermissions.push('eval');
 
-			worker = createSandbox(handlers,  realPermissions, { hostModules, name: "RunJS" });
+			worker = createSandbox(handlers,  realPermissions, { hostModules, name: "AiChat-"+thread });
 			worker.handlers = handlers;
 			workerPermissions = permissions || [];
 
 			obj.workerPermissions = workerPermissions;
 			obj.worker = worker;
 
-			sandboxInstances.set(id, obj);
+			sandboxInstances.set(thread, obj);
 		}
 
 		// 它的存在不直接告知模型 (PTC)
 		const hostModules = worker.handlers.hostModules;
-		hostModules.set('tools', new Proxy({}, {
-			get(target, key) {
-				const exist = conv.allowedTools.has(key);
-				if (!exist) return;
+		for (const key in JS_HOST_MODULES) hostModules.set(key, JS_HOST_MODULES[key](conv));
 
-				return async (args) => {
-					const resp = [];
-
-					await runTools({
-						tool_calls: [{
-							function: {
-								name: key,
-								arguments: JSON.stringify(args || {})
-							}
-						}],
-						tool_responses: resp
-					}, conv, 0);
-
-					return resp[0];
-				}
-			}
-		}))
-
-		const timer = setTimeout(() => stopWorker("Error: Timeout"), timeout * 1000);
+		const timer = setTimeout(() => stopWorker("Timeout"), timeout * 1000);
 
 		worker.handlers.load = (path, systemModule) => {
 			if (systemModule) {
@@ -367,7 +394,7 @@ export const RunJS = {
 					worker.handlers.log('[WARN] Builtin module '+path+' is alias, DO NOT IMPORT, THEY ARE ALREADY USABLE.');
 					return '';
 				}
-				const mod = JS_MODULES[path];
+				const mod = JS_SANDBOX_MODULES[path];
 				if (!mod) throw new Error('Module not found: '+path);
 				return loadSystemModule(mod);
 			}
@@ -450,6 +477,8 @@ export const RunJS = {
 
 			obj.destroyTimeout = setTimeout(stopWorker, 600000);
 		} catch (e) {
+			if (exc) throw e;
+
 			err = prettyError(e);
 			stopWorker();
 		} finally {
@@ -468,7 +497,7 @@ export const RunJS = {
 			}
 		}
 
-		return (getLog()+err) || '[No console output]';
+		return (getLog()+err) || '[No console output] (Hint: Have you awaited top-level Promise?)';
 	}
 };
 
@@ -501,7 +530,7 @@ export const SearchModules = {
 	async script({ keywords = '', limit = 20 }, response, conv) {
 		const kws = keywords.toLowerCase().split(' ');
 		const keys = [];
-		const entries = Object.entries(JS_MODULES);
+		const entries = Object.entries(JS_SANDBOX_MODULES);
 		for (const [key, { k, description }] of entries) {
 			if (!kws.length || kws.some(filter => key.includes(filter) || k.includes(filter))) {
 				keys.push(key+": "+description);

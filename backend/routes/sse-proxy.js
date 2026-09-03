@@ -1,10 +1,10 @@
 import {
 	SSE_PROXY_BACKEND,
 	SSE_PROXY_MODERATION,
-	SSE_PROXY_TRACE,
 	SSE_REF_CACHE_SIZE,
 	SSE_REF_TTL,
-	SSE_RESUME_TIMEOUT
+	SSE_RESUME_CACHE_SIZE,
+	SSE_RESUME_TTL
 } from "../config.js";
 import {EventEmitter} from "node:events";
 import {applyDelta, sseFetch} from "../../common/openai-api-utils.js";
@@ -12,43 +12,29 @@ import fs from "node:fs/promises";
 import {openAsBlob} from "node:fs";
 import path from "node:path";
 import {Transform} from 'node:stream';
-import {createSocks5Agent} from "../utils/socks5-agent.js";
 import {LRUCache} from "../../common/LRUCache.js";
 import {createJsonStream} from "../../common/StreamJsonSerializer.js";
 import {deepEntries} from "unconscious/common/json-schema-utils.js";
 import {isLanAddress} from "../../common/isLanAddress.js";
+import {getProxyAgent} from "../utils/socks5-agent.js";
 
 const log = (str, ...args) => console.log(`[SSE Proxy] `+str, ...args);
 
-const proxyCache = new Map;
-const getProxyAgent = (proxyUrl) => {
-	if (!proxyUrl) return; // undefined
-	let proxyAgent = proxyCache.get(proxyUrl);
-	if (!proxyAgent) {
-		proxyCache.set(proxyUrl, proxyAgent = createSocks5Agent(proxyUrl));
-	}
-	return proxyAgent;
-}
-
-const agentOptions = {
-	keepAlive: true,
-	//keepAliveMsecs: 1000,
-	freeSocketTimeout: 60000,
-	scheduling: 'lifo',
-	maxSockets: 100
-};
-
 /**
- *
  * @type {Map<string, AiChatBackend.SSEProxyRequest>}
  */
 const activeRequests = new Map;
+/**
+ * @type {LRUCache<string, AiChatBackend.SSEProxyRequest>}
+ */
+let finishedRequests ;
 
 /**
  * 消息引用缓存：hash -> 完整消息对象
  * 命中后客户端无需重复上传历史消息内容，仅引用 hash
+ * @type {LRUCache<string, OpenAI.Message[]>}
  */
-const messageCache = new LRUCache(SSE_REF_CACHE_SIZE);
+let messageCache;
 
 /**
  * @param {OpenAI.Message[]} messages
@@ -56,6 +42,10 @@ const messageCache = new LRUCache(SSE_REF_CACHE_SIZE);
  * @returns {Promise<[OpenAI.Message[], string[]]>}
  */
 async function processMessageRefs(messages, blobDir) {
+	if (messageCache?.capacity !== SSE_REF_CACHE_SIZE) {
+		messageCache = new LRUCache(SSE_REF_CACHE_SIZE, SSE_REF_TTL ? { ttlMode: "access" } : null);
+	}
+
 	const missing = new Set;
 	const created = new Set;
 	const output = [];
@@ -119,7 +109,6 @@ function checkToken(ctx) {
 	if (!authorization?.startsWith("Bearer ")) return ctx.send(403, { error: 'unknown key' });
 	authorization = authorization.slice(7);
 
-	let url, proxy;
 	let target = SSE_PROXY_BACKEND[authorization] || SSE_PROXY_BACKEND['default'];
 	if (!target?.url) return ctx.send(403, { error: 'unknown key' });
 	if (!target.authorization) {
@@ -198,8 +187,7 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 	const MAX_BODY_LENGTH = 20971520;
 	let body;
 	let duplex;
-	const needTrace = SSE_PROXY_TRACE && trace;
-	if (needTrace || blobDir || moderation) {
+	if (trace || blobDir || moderation) {
 		body = await ctx.readAsString(MAX_BODY_LENGTH);
 	} else {
 		body = createLimiter(ctx.req, MAX_BODY_LENGTH);
@@ -207,7 +195,7 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 	}
 	// body 在 refs 路由中稍后会被替换成 ReadableStream。trace 必须保留原始
 	// 请求字符串；否则日志写入和 fetch 会同时消费同一个流，导致流被锁定。
-	const traceBody = needTrace ? body : null;
+	const traceBody = trace ? body : null;
 
 	let firstChunk;
 	if (blobDir || moderation) {
@@ -249,6 +237,17 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 		//duplex = 'half';
 	}
 
+	if (finishedRequests?.capacity !== SSE_RESUME_CACHE_SIZE) {
+		finishedRequests = new LRUCache(SSE_RESUME_CACHE_SIZE, SSE_RESUME_TTL ? { ttlMode: "update" } : null);
+	}
+
+	const extraHeaders = {};
+	for (let key in ctx.req.headers) {
+		if (key.startsWith("x-")) {
+			extraHeaders[key] = ctx.req.headers[key];
+		}
+	}
+
 	let completion = {};
 	/** @type {AiChatBackend.SSEProxyRequest} */
 	let proxyRequest;
@@ -260,7 +259,7 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 	function sendChunk(serialized) {
 		if (!ctx.res.closed) ctx.res.write(`data: ${serialized}\n\n`);
 		// log every chunk
-		if (needTrace === 'packet') writeTrace(serialized);
+		if (trace === 'packet') writeTrace(serialized);
 		proxyRequest.event.emit('data', serialized);
 	}
 
@@ -270,7 +269,7 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 
 	try {
 		const optionalParams = baseUrl+apiPath;
-		if (needTrace) log('请求发送', optionalParams);
+		if (trace) log('请求发送', optionalParams);
 
 		ctx.res.on('close', () => {
 			if (!proxyRequest) abort.abort();
@@ -279,7 +278,10 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 		await sseFetch(optionalParams, {
 			body,
 			duplex,
-			headers,
+			headers: {
+				...extraHeaders,
+				...headers
+			},
 			signal: abort.signal,
 			agent: getProxyAgent(proxyUrl),
 			key: authorization
@@ -292,7 +294,7 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 				const response = JSON.stringify(chunk);
 
 				// non-stream response
-				if (needTrace) {
+				if (trace) {
 					const fileName = `${logPath}/${encodeURIComponent(id)}_${now%1000}.jsonl`;
 					fs.mkdir(logPath, {recursive: true})
 						.then(() => fs.appendFile(fileName, traceBody))
@@ -318,7 +320,7 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 					isFinished: false
 				});
 
-				if (needTrace) {
+				if (trace) {
 					const fileName = `${logPath}/${encodeURIComponent(id)}_${now%1000}.jsonl`;
 					proxyRequest._fileName = fileName;
 					proxyRequest._append = fs.mkdir(logPath, {recursive: true})
@@ -411,11 +413,13 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 			proxyRequest.event.emit('end');
 			proxyRequest.event.removeAllListeners();
 
-			proxyRequest.timeoutId = setTimeout(() => {
-				activeRequests.delete(proxyRequest.id);
-			}, SSE_RESUME_TIMEOUT);
+			delete proxyRequest.event;
+			delete proxyRequest.abort;
 
-			if (needTrace === true) {
+			activeRequests.delete(proxyRequest.id);
+			finishedRequests.set(proxyRequest.id, proxyRequest, SSE_RESUME_TTL);
+
+			if (trace === true) {
 				await writeTrace(JSON.stringify(proxyRequest.data));
 			}
 		}
@@ -484,6 +488,8 @@ export function registerSSEProxyRoutes(router, dataPath) {
 	const logPath = path.join(dataPath, "logs");
 	const blobDir = path.join(dataPath, "blobs");
 
+	finishedRequests = new LRUCache(SSE_RESUME_CACHE_SIZE, SSE_RESUME_TTL ? { ttlMode: "update" } : null);
+
 	router.post("/models/wipe_cache", (ctx) => {
 		messageCache.clear();
 		modelCache.clear();
@@ -531,9 +537,9 @@ export function registerSSEProxyRoutes(router, dataPath) {
 	router.post('/chat/completions', SSEHandler.bind(null, logPath, "chat/completions", null));
 	router.post('/completions', SSEHandler.bind(null, logPath, "completions", null));
 
-	router.post('/resume/:id', async (ctx) => {
+	router.post('/resume/:id', (ctx) => {
 		const {id} = ctx.params;
-		const state = activeRequests.get(id);
+		const state = activeRequests.get(id) ?? finishedRequests.get(id);
 		if (!state) return ctx.send(404, { error: "no such session" });
 
 		ctx.res.setHeader('Content-Type', 'text/event-stream');
@@ -556,32 +562,29 @@ export function registerSSEProxyRoutes(router, dataPath) {
 
 		ctx.res.on('close', () => {event.off('data', onData);});
 	});
-
-	router.get('/trace/:id', async (ctx) => {
+	router.post('/abort/:id', (ctx) => {
 		const {id} = ctx.params;
-		const state = activeRequests.get(id);
+		const state = activeRequests.get(id) ?? finishedRequests.get(id);
 
 		if (state) {
-			return ctx.send(200, state);
-		}
-
-		ctx.send(404, { error: "no such session" });
-	});
-
-	router.post('/abort/:id', async (ctx) => {
-		const {id} = ctx.params;
-		const state = activeRequests.get(id);
-
-		if (state) {
-			clearTimeout(state.timeoutId);
-			activeRequests.delete(id);
-			state.abort.abort(); // 停止向 OpenAI 请求
+			if (activeRequests.delete(id)) {
+				state.abort.abort();
+			} else {
+				finishedRequests.delete(id);
+			}
 			return ctx.send(200, { success: true });
 		}
 		ctx.send(404, { error: "no such session" });
 	});
 
-	router.get("/resume/list", (ctx) => {
-		ctx.send(200, { sessions: [...activeRequests.keys()] });
+	router.get('/trace/:id', (ctx) => {
+		const {id} = ctx.params;
+		const state = activeRequests.get(id) ?? finishedRequests.get(id);
+		if (state) return ctx.send(200, state);
+
+		ctx.send(404, { error: "no such session" });
+	});
+	router.get("/trace/list", (ctx) => {
+		ctx.send(200, { active: [...activeRequests.keys()], finished: [...finishedRequests.keys()] });
 	});
 }

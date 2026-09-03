@@ -5,6 +5,7 @@ import {
 	MessageRoles,
 	messages,
 	onConversationLoaded,
+	onConversationSwitchTo,
 	selectedConversation,
 	updateMessageUI
 } from "/src/states.js";
@@ -53,7 +54,7 @@ import {VirtualDirectory} from "../tools/VirtualFileSystem.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
 import {FS_INSTANCE} from "../tools/fileAccess.js";
 import {createWebFileSystem} from "../tools/WebFileSystem.js";
-import {PROMISE_CATCH} from "/src/utils/pure-utils.js";
+import {PROMISE_CATCH} from "/common/pure-utils.js";
 
 compileSchema(schema);
 
@@ -137,10 +138,8 @@ function createSchemaEditColumn(typeId, editorConstructor) {
 	const element = <>
 		<div className={"choice-scroll"}>
 			<button className={"btn ghost"} onClick={() => {
-				_closePanel();
+				const closePanel = _closePanel();
 				showOverwriteConfirm(selectedItem, typeStr, () => {
-					selectedItem.value = undefined;
-					dropdown.setSelection(null);
 					SimpleModal({
 						type: "input",
 						title: "输入新"+typeStr+"的名称",
@@ -149,6 +148,12 @@ function createSchemaEditColumn(typeId, editorConstructor) {
 							selectedItem.value = {name};
 							dropdown.setSelection(name);
 							openEditor();
+						},
+						onCancel() {
+							return closePanel.then(() => {
+								selectedItem.value = undefined;
+								dropdown.setSelection(null);
+							});
 						}
 					})
 				});
@@ -303,7 +308,8 @@ SETTINGS.push(
 		_tab: "character",
 		choices: {
 			"单系统消息": 1,
-			"交替对话": 2
+			"合并同角色消息": 2,
+			"交替对话": 3
 		}
 	},
 	{
@@ -353,12 +359,23 @@ onLoad(() => {
 			$update(updateMessageUI);
 		}
 	});
+
+	EVENT_BUS.on(['createAgent', 'character'], (conv, messages, data, path) => {
+		messages.unshift({
+			role: "st|char",
+			content: {
+				name: data.character,
+				lorebookNames: [""],
+				greeting: 0
+			}
+		});
+		return loadCB(conv, messages);
+	});
 })
 
 //region 工具调用世界书 实验性
-const lorebookToolKey = [];
-let lorebookToolContent = {};
 
+const FetchLorebookCache = debugSymbol("FetchLorebookCache");
 /** @type {AiChat.FunctionTool} */
 const FetchLorebook = {
 	name: "FetchLorebook",
@@ -368,30 +385,56 @@ const FetchLorebook = {
 		properties: {
 			name: {
 				type: "string",
-				enum: lorebookToolKey
+				enum: []
 			}
 		},
 		required: ["name"]
 	},
 
-	script({name}) {
-		return lorebookToolContent[name].content;
+	script({name}, ctx, conv) {
+		return conv[INST].lbCache.toolVals.get(name);
 	},
 	title(tc, ctx) {
-		const id = getToolParameters(ctx, tc).name;
-		return `读取世界书：${lorebookToolContent[id]?.name}`
+		const name = getToolParameters(ctx, tc).name;
+		return `读取世界书：${name}`
 	}
 };
 
-registerToolset("ST/Register", "", [FetchLorebook], {hidden: true});
+const RP_TOOLSET_ID = 'rp:imp';
+registerToolset(RP_TOOLSET_ID, "", [FetchLorebook], {
+	hidden: true,
+	systemPrompt(conv, tools) {
+		const lbCache = conv[INST].lbCache;
+
+		let tool = lbCache[FetchLorebookCache];
+		if (!tool) {
+			const par = structuredClone(FetchLorebook.parameters);
+			par.properties.name.enum = [...lbCache.toolVals.keys()];
+
+			lbCache[FetchLorebookCache] = tool = {
+				type: "function",
+				function: {
+					name: FetchLorebook.name,
+					description: FetchLorebook.description,
+					parameters: par
+				}
+			};
+		}
+
+		conv.tools?.delete(FetchLorebook.name);
+		tools.push(tool);
+	}
+});
 //endregion
 
-// 对话从数据库加载完成回调
-onConversationLoaded((conv, messages, loadFromCache) => {
-	//现在仅仅是GC省内存了
-	lorebookToolKey.length = 0;
-	lorebookToolContent = {};
-
+/**
+ * 对话从数据库加载/切换到回调
+ * FIXME: 初次打开时会调用两次，幂等但浪费性能（数据库加载/切换）
+ * @param {AiChat.Conversation} conv
+ * @param {AiChat.Message[]} messages
+ * @param {string[]} [isLoadFromDB]
+ */
+const loadCB = (conv, messages, isLoadFromDB) => {
 	/** @type {AiChat.DnD.MyCharConversation} */
 	const charInstance = messages[0];
 	const isCharacterCard = charInstance?.role === "st|char";
@@ -430,20 +473,21 @@ onConversationLoaded((conv, messages, loadFromCache) => {
 		}
 	}
 
-	Promise.all(promises).finally(() => {
+	return Promise.all(promises).finally(() => {
 		conv[INST] = charInstance[INST] = readyObj;
 		const character = readyObj.character;
 		charInstance.time = character?.time;
-		if (!loadFromCache && character?.greetings?.length) {
+		if (isLoadFromDB && character?.greetings?.length) {
 			messages.splice(1, 0, {
 				id: -1, // 不保存到数据库
 				role: "st|greeting",
 				content: charInstance
 			});
 		}
-		$update(updateMessageUI);
 	})
-});
+};
+onConversationSwitchTo(loadCB);
+onConversationLoaded(loadCB);
 
 //region 数据导入
 /**
@@ -480,12 +524,15 @@ const checkJSON = (json, batch, fileName, imageBlob) => {
 	}
 
 	if (definition[json.type]) {
-		const error = validateAndShowError(json, schema.$defs[json.type]);
+		const [typeStr, names] = definition[json.type];
+		const obj = cloneNamed(json, ["name", "type", "time", ...names]);
+
+		const error = validateAndShowError(obj, schema.$defs[json.type]);
 		if (error) {
 			showToast("格式校验失败\n"+error, 'error', 10000);
 			return;
 		}
-		return importObject(json.type, json, imageBlob);
+		return importObject(json.type, obj, imageBlob);
 	}
 };
 
@@ -493,15 +540,18 @@ registerDataImportHandler("application/json", checkJSON);
 
 const imageLoader = async (file, batch) => {
 	const imageData = new Uint8Array(await file.arrayBuffer());
-	const im = await parseImageMeta(imageData, { text: true });
+	const im = await parseImageMeta(imageData, { text: true, strip: true });
 	if (!im) return;
 	let obj;
 	if (im.type === 'jpeg') obj = JSON.parse(im.comments.join(""));
-	else if (im.type === 'png') obj = im.text;
+	else if (im.type === 'png') obj = im.texts;
 	const chara = obj?.chara;
 	if (!chara) return;
 
-	const data = JSON.parse(chara[0] === '{' ? chara : base64DecodeToString(chara));
+	const data = typeof chara === 'object' ? chara : JSON.parse(chara[0] === '{' ? chara : base64DecodeToString(chara));
+
+	file = new File([im.strip], file.name, file);
+
 	const result = checkJSON(data, batch, file.name, file);
 	if (result) return await result;
 };
@@ -545,17 +595,90 @@ MessageRoles["st|char"] = {
 	 * @param output
 	 * @param callbacks
 	 */
-	compose(self, output, callbacks) {
-		callbacks.push((input, output, body, prefill, conv) => {
-			let {
-				/** @type {AiChat.DnD.MyCharacter} */
-				character: char,
-				/** @type {AiChat.DnD.MyLorebook[]} */
-				lorebooks,
-				/** @type {AiChat.DnD.MyPreset} */
-				preset = unconscious(currentPreset)
-			} = self[INST];
+	compose(self, output, callbacks, _idx, _len, conv) {
+		const {
+			/** @type {AiChat.DnD.MyCharacter} */
+			character: char,
+			/** @type {AiChat.DnD.MyLorebook[]} */
+			lorebooks,
+			/** @type {AiChat.DnD.MyPreset} */
+			preset = unconscious(currentPreset)
+		} = self[INST];
 
+		const lorebookCaches = self[INST].lbCache || (self[INST].lbCache = {});
+
+		/** @type {AiChat.DnD.MyLorebookPage[]} */
+		let pages = lorebookCaches.pages, constantPages = lorebookCaches.constant;
+
+		if (!pages) {
+			lorebookCaches.pages = pages = [];
+			lorebookCaches.constant = constantPages = [];
+			for (let lorebook of lorebooks) {
+				if (lorebook) {
+					lorebook.pages.forEach(page => {
+						if (!page.enabled || !page.content) return;
+						if (page.constant) constantPages.push(page);
+						else pages.push(page);
+					})
+				}
+			}
+		}
+
+		const lorebookImplType = pages.length && config.st_lorebookImp;
+
+		const {tools, activatedModules} = conv;
+		if (lorebookImplType === 'tool') {
+			let keywords = lorebookCaches.toolKeys;
+			if (!keywords) {
+				lorebookCaches.toolKeys = keywords = [];
+
+				const lorebookToolContent = new Map;
+				lorebookCaches.toolVals = lorebookToolContent;
+
+				for (let page of pages) {
+					const name = page.name;
+					if (lorebookToolContent.has(name)) throw `世界书 ${name} 重复了`;
+					lorebookToolContent.set(name, page.content);
+					keywords.push(" - "+name+": "+page.triggers.join(","));
+				}
+			}
+
+			if (!activatedModules) conv.activatedModules = new Set([RP_TOOLSET_ID]);
+			else activatedModules.add(RP_TOOLSET_ID);
+		} else {
+			tools?.delete(FetchLorebook.name);
+			activatedModules?.delete(RP_TOOLSET_ID);
+		}
+		if (lorebookImplType === 'fs') {
+			let vfs = lorebookCaches.vfs;
+			if (!vfs) {
+				const map = new NestedMap();
+
+				for (let lorebook of lorebooks) {
+					if (lorebook) {
+						const keys = new Map;
+						lorebook.pages.forEach(page => {
+							let counter = keys.get(page.name) || 0;
+							map.set([".", lorebook.name, page.name+(counter?"_"+counter:"")+".md"], {
+								read() {
+									return page.content;
+								},
+							});
+							keys.set(page.name, counter+1);
+						})
+					}
+				}
+
+				lorebookCaches.vfs = vfs = createWebFileSystem(new VirtualDirectory(map));
+			}
+
+			(conv.mnt || (conv.mnt = {})).lorebook = { [FS_INSTANCE]: vfs };
+		} else {
+
+			delete conv.mnt?.lorebook;
+		}
+
+		callbacks.push((input, output, body, prefill, conv) => {
 			// 宏环境
 			const macro = createSimpleMacroContext(char);
 
@@ -569,96 +692,48 @@ MessageRoles["st|char"] = {
 				}
 			}
 			//endregion
-			let worldInfoBefore = '', worldInfoAfter = '';
 			//region 处理世界书
-			const lorebookCaches = self[INST].lbCache || (self[INST].lbCache = {});
+			let worldInfoBefore = '', worldInfoAfter = '';
 
-			/** @type {AiChat.DnD.MyLorebookPage[]} */
-			let pages = lorebookCaches.pages, constantPages = lorebookCaches.constant;
-
-			if (!pages) {
-				lorebookCaches.pages = pages = [];
-				lorebookCaches.constant = constantPages = [];
-				for (let lorebook of lorebooks) {
-					if (lorebook) {
-						lorebook.pages.forEach(page => {
-							if (!page.enabled || !page.content) return;
-							if (page.constant) constantPages.push(page);
-							else pages.push(page);
-						})
+			let depthTargets;
+			/**
+			 * @param {OpenAI.Role} role
+			 * @param {number} depth
+			 * @return {OpenAI.Message}
+			 */
+			const findDepthTarget = (role, depth) => {
+				if (!depthTargets) {
+					depthTargets = new Map;
+					for (let i = output.length - 1; i >= 0; i--) {
+						const o = output[i];
+						for (const key of ["", o.role]) {
+							const list = depthTargets.get(key);
+							if (list) list.push(o);
+							else depthTargets.set(key, [o]);
+						}
 					}
 				}
-			}
+
+				return depthTargets.get(role || "")?.[depth - 1];
+			};
 
 			const insertBook = book => {
 				const content = "\n\n"+applyMacro(book.content, macro);
 				if (book.position === "worldInfoBefore") worldInfoBefore += content;
 				else if (book.position === "worldInfoAfter") worldInfoAfter += content;
 				else {
-					let depth = book.depth;
-					// TODO 优化这个循环
-					for (let i = output.length - 1; i >= 0; i--) {
-						const o = output[i];
-						if ((!book.role || o.role === book.role) && !--depth) {
-							insertText(content, o);
-							return;
-						}
-					}
-					worldInfoAfter += content;
+					const target = findDepthTarget(book.role, book.depth);
+					if (target) insertText(content, target);
+					else worldInfoAfter += content;
 				}
 			};
 			constantPages.forEach(insertBook);
 
-			const implType = config.st_lorebookImp;
-
-			const {allowedTools} = conv;
-			allowedTools?.delete(FetchLorebook.name);
-			delete conv.mnt?.lorebook;
-
-			if (implType) {
-				if ('fs' === implType) {
-					const map = new NestedMap();
-
-					for (let lorebook of lorebooks) {
-						if (lorebook) {
-							const keys = new Map;
-							lorebook.pages.forEach(page => {
-								let counter = keys.get(page.name) || 0;
-								map.set([".", lorebook.name, page.name+(counter?"_"+counter:"")+".md"], {
-									read() {
-										return page.content;
-									},
-								});
-								keys.set(page.name, counter+1);
-							})
-						}
-					}
-
-					(conv.mnt || (conv.mnt = {})).lorebook = {
-						[FS_INSTANCE]: createWebFileSystem(new VirtualDirectory(map))
-					};
-
+			if (lorebookImplType) {
+				if ('fs' === lorebookImplType) {
 					worldInfoBefore += "\n\n<lorebook>\nLorebook 在文件夹 `~/lorebook/` 中\n使用Read、Grep、Glob工具读取你的知识</lorebook>";
-				} else {
-					if (!allowedTools) conv.allowedTools = new Set([FetchLorebook.name]);
-					else allowedTools.add(FetchLorebook.name);
-
-					let keywords = lorebookCaches.toolKeywords;
-					if (!keywords) {
-						lorebookCaches.toolKeywords = keywords = [];
-						lorebookToolKey.length = 0;
-						lorebookToolContent = {};
-
-						for (let page of pages) {
-							const name = page.name;
-							lorebookToolKey.push(name);
-							if (lorebookToolContent[name]) throw `世界书名称 ${name} 重复了`;
-							lorebookToolContent[name] = page.content;
-							keywords.push(" - "+name+": "+page.triggers.join(","));
-						}
-					}
-
-					worldInfoBefore += "\n\n<lorebook>\nLorebook 名称与关键词：\n"+keywords.join("\n")+"\n</lorebook>";
+				} else { // tool
+					worldInfoBefore += "\n\n<lorebook>\nLorebook 名称与关键词：\n"+lorebookCaches.toolKeys.join("\n")+"\n</lorebook>";
 				}
 			} else {
 				/** @type {LorebookMatcher} */
@@ -700,11 +775,6 @@ MessageRoles["st|char"] = {
 	 * @param index
 	 */
 	renderContent(self, chunks, index) {
-		if (!self[INST]) {
-			chunks.push({ type: "loading", text: "加载中" });
-			return;
-		}
-
 		const {
 			/** @type {AiChat.DnD.MyCharacter} */
 			character: char,
@@ -719,7 +789,7 @@ MessageRoles["st|char"] = {
 		if (!char) {
 			chunks.push({
 				type: "error",
-				error: "致命错误\n引用的角色 "+self.content.name+" 不存在"
+				error: "不存在\n找不到 角色 "+self.content.name
 			});
 			return;
 		}
@@ -775,7 +845,7 @@ MessageRoles["st|char"] = {
 				if (self.content.lorebookNames[i] !== "") {
 					chunks.push({
 						type: "error",
-						error: "错误\n引用的世界书 "+self.content.lorebookNames?.[i]+" 不存在"
+						error: "不存在\n找不到世界书 "+self.content.lorebookNames?.[i]
 					});
 				}
 			} else {
@@ -798,7 +868,7 @@ MessageRoles["st|char"] = {
 		if (!preset && self.content.presetName) {
 			chunks.push({
 				type: "error",
-				error: "错误\n引用的预设 "+self.content.presetName+" 不存在"
+				error: "不存在\n找不到预设 "+self.content.presetName
 			});
 		}
 

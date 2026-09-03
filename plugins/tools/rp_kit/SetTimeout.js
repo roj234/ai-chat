@@ -13,7 +13,7 @@ export const SetTimeout = {
 	name: "SetTimeout",
 	description:
 		"Create a real-time timer and receive a message when it finishes. "
-		+ "If the user replies before the deadline, the tool call resolves with result: 'userInput'. "
+		+ "If the user replies before the deadline, the tool call resolves with result: 'interrupt'. "
 		+ "Otherwise the tool call resolves with result: 'timeout'. "
 		+ "\n"
 		+ "Use for timed interactions (QTE), reminders, or waiting real-time events. "
@@ -75,7 +75,7 @@ export const SetTimeout = {
 		keys.push(frozen);
 		if (frozen && "" === response.content) {
 			const deadline = response.deadline;
-			response.content = `userInput (${deadline - Date.now()}ms remaining)`;
+			response.content = `interrupt (${deadline - Date.now()}ms remaining)`;
 			markMessageDirty(message);
 		}
 	},

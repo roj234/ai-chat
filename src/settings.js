@@ -10,9 +10,10 @@ const defaultSystemPrompt = `You are a helpful assistant.
 {{think}}
 {{tools}}
 <markdown-format>
-{{mdfmt}}
+{{mdfmt}}{{htmlTag}}
 </markdown-format>
-<date>{{date}}</date>`;
+<date>{{date}}</date>
+{{#AGENTS.md}}`;
 
 const defaultTitlePrompt = `### Title Requirements
 - Language: 简体中文
@@ -62,7 +63,11 @@ export const SETTINGS = [
 		choices: {
 			"关闭": false,
 			"模型总结": true,
-			"模型总结(及早)": "eager"
+			"模型总结(立即)": "eager"
+		},
+		title: {
+			"模型总结": "在工具调用链结束后生成标题",
+			"模型总结(立即)": "在第一条回复时生成标题"
 		}
 	},
 	{
@@ -550,17 +555,6 @@ export const SETTINGS = [
 		},
 	},
 	{
-		id: 'messageTheme',
-		_tab: "customize",
-		name: "对话界面样式（实验性）",
-		type: "radio",
-		required: true,
-		choices: {
-			"默认 (信息流)": 'def',
-			"聊天 (分靠左右)": "alt",
-		},
-	},
-	{
 		_tab: "customize",
 		id: "allowHTMLTags",
 		name: "允许在 Markdown 中渲染的 HTML 标签",
@@ -674,24 +668,40 @@ export const SETTINGS = [
 	// logs
 	{
 		id: "provider",
-		name: "模型供应商标识",
+		name: "供应商标识",
 		type: "input",
 		_tab: ["model", "data"],
-		placeholder: "猫娘中转站",
-		title: "仅用于数据统计, 留空使用API域名。跟随模型",
+		placeholder: "示例: 猫娘中转站",
+		title: "仅用于数据统计, 留空使用API域名。跟随模型配置",
 		_group: "model"
 	},
 	{
-		id: "user_id",
-		name: "(高级) 用户标识",
+		id: "sessionIdField",
+		name: "对话标识字段",
+		type: "input",
+		_tab: "model",
+		placeholder: "示例: x-opencode-session",
+		title: "在受支持 API （如OpenRouter/OCG）中维护缓存亲和与滥用防范\n"
+			+ "请求头注入：输入请求头名称\n请求体注入：输入以/开头的JSONPointer路径\n"
+			+ "session_id = sha256(user_id+'\\x00'+first_message_id)[0:8]\n",
+		_group: "model"
+	},
+	{
+		id: "userIdField",
+		name: "用户标识字段 (规则同上)",
+		type: "input",
+		_tab: "model",
+		placeholder: "示例: /user",
+		_group: "model"
+	},
+	{
+		id: "userId",
+		name: "用户标识",
 		type: "input",
 		_tab: ["model", "data"],
-		placeholder: "留空会自动随机生成",
-		title: "在受支持 API （如OpenRouter）保证缓存亲和性和滥用管理（防封号）\n"
-			+ "使用方法：在自定义请求体中填入 user: \"auto\" 和/或 session_id: \"auto\"。\n"
-			+ "会话 ID 将根据 user_id + 盐 + 对话ID 生成哈希值，以确保缓存亲和。",
+		placeholder: "留空以随机生成，跟随模型配置",
 		_group: "model"
-	}
+	},
 ];
 
 // 数据库

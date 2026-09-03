@@ -154,7 +154,7 @@ const onCompleted = async (conv, messages, assistantResponse) => {
 		assistantResponse.tool_responses = [];
 		await runTools(assistantResponse, {
 			...selectedConversation,
-			allowedTools: new Set(["UpdateVariable"])
+			tools: new Set(["UpdateVariable"])
 		}, true);
 	}
 

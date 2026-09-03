@@ -1,5 +1,6 @@
 
-:root {
+/* 顶层骨架 */
+.jsonEditorApp {
 	--bg-panel: #11141a;
 	--bg-header: #151922;
 	--border: #242b37;
@@ -9,10 +10,7 @@
 
 	--text: #f3f4f6;
 	--muted: #9ca3af;
-}
 
-/* 顶层骨架 */
-.jsonEditorApp {
 	display: flex;
 	flex-direction: column;
 	background-color: var(--bg-panel);

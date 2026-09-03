@@ -18,7 +18,7 @@ import {normalizePath} from "unconscious/common/path-utils.js";
 
 /** @type {Map<string, {
  * handle: FileSystemDirectoryHandle,
- * fs: AiChat.FileSystemInstance
+ * fss: Map<string, AiChat.FileSystemInstance>
  }>} */
 const webFileSystemInstances = new Map;
 
@@ -122,10 +122,10 @@ const directoryPickerAvailable = window.showDirectoryPicker;
 const FS_OPENING = debugSymbol("FS_OPENING");
 export const FS_INSTANCE = debugSymbol("FileSystem");
 
-async function initializeWebFileSystem(fs) {
-	if (!fs.fs) {
+async function initializeWebFileSystem(inst, relPath) {
+	if (!inst.fss) {
 		try {
-			await fs.handle.requestPermission({mode: 'readwrite'});
+			await inst.handle.requestPermission({mode: 'readwrite'});
 		} catch (e) {
 			if (e.message.includes('User activation')) {
 				await new Promise((resolve) => {
@@ -136,12 +136,16 @@ async function initializeWebFileSystem(fs) {
 						onCancel: null
 					})
 				});
-				return initializeWebFileSystem(fs);
+				return initializeWebFileSystem(inst, relPath);
 			}
 		}
-		fs.fs = createWebFileSystem(fs.handle, unconscious(config));
+		inst.fss = new Map;
 	}
-	return fs.fs;
+
+	const key = relPath.join('/');
+	let fs = inst.fss.get(key);
+	if (!fs) inst.fss.set(key, fs = createWebFileSystem(await resolveDirectory(inst.handle, relPath), unconscious(config)));
+	return fs;
 }
 
 const MSG = "文件服务响应异常，你无法自行解决，请向管理员确认 URL 是否配置正确。";
@@ -296,17 +300,17 @@ async function callFBI(mountPoint) {
 						el.remove();
 						resolve(delegateTarget.className);
 					}}>
-						{!isIDB && <div>
-							<button className={"db"} title={"数据库后端的文件访问服务"}>🗄️ 典藏</button>
-							<span>典于云端，多端同步如一。<br/>不可行令，记忆、角色等宜归于此。</span>
+						{directoryPickerAvailable && <div>
+							<button className={"local"} title={"浏览器的showDirectoryPicker API"}>📁 启门</button>
+							<span>推开现世之扉，直抵本地文件。<br/>浏览器亲自操刀，无有阻隔。</span>
 						</div>}
 						<div>
 							<button className={"api"} title={"专用文件访问服务(见Readme.md)"}>🐳 缚印</button>
 							<span>缚于容器，如囚于笼，可运行万般程序。<br/>务必置于容器之内，方得施展。</span>
 						</div>
-						{directoryPickerAvailable && <div>
-							<button className={"local"} title={"浏览器的showDirectoryPicker API"}>📁 启门</button>
-							<span>推开现世之扉，直抵本地文件。<br/>浏览器亲自操刀，无有阻隔。</span>
+						{!isIDB && <div>
+							<button className={"db"} title={"数据库后端的文件访问服务"}>🗄️ 典藏</button>
+							<span>典于云端，多端同步如一。<br/>不可行令，记忆、角色等宜归于此。</span>
 						</div>}
 						<div>
 							<button className={"config"}>📜 化卷</button>
@@ -395,8 +399,11 @@ async function callFBI(mountPoint) {
 			return remoteFileSystem(baseUrl, pat, fs_base);
 		}
 		case "local": {
-			const fs = webFileSystemInstances.get(fs_base);
-			if (!fs) {
+			const paths = fs_base?.split("/") || [];
+			const base = paths.shift();
+
+			const inst = webFileSystemInstances.get(base);
+			if (!inst) {
 				if (!webFileSystemInstances.size) {
 					const folders = await listFolders();
 					for (const folder of folders) {
@@ -408,20 +415,21 @@ async function callFBI(mountPoint) {
 
 				return new Promise((resolve, reject) => {
 					let el;
-					const onClick = () => {
+					const onClick = async () => {
 						directoryPickerAvailable({
 							id: APP_NAME+"_agent_root",
 							mode: "readwrite"
-						}).then(handle => {
+						}).then(async handle => {
 							const folderName = handle.name;
 							if (!folderName) throw "选择的文件夹没有名称";
 
-							const fs = createWebFileSystem(handle, unconscious(config));
+							const fs = createWebFileSystem(await resolveDirectory(handle, paths), unconscious(config));
+							const fss = new Map([[ paths.join('/'), fs ]]);
 							webFileSystemInstances.set(folderName, {
 								handle,
-								fs
+								fss
 							});
-							upsertFolder(handle, folderName);
+							await upsertFolder(handle, folderName);
 							mountPoint.fs_base = folderName;
 							return fs;
 						}).then(resolve).catch(reject).finally(() => el?.remove());
@@ -429,13 +437,13 @@ async function callFBI(mountPoint) {
 						return false;
 					};
 
-					if (!fs_base && !webFileSystemInstances.size) {
+					if (!base && !webFileSystemInstances.size) {
 						onClick();
 						return;
 					}
-					const oldChoice = webFileSystemInstances.get(fs_base);
+					const oldChoice = webFileSystemInstances.get(base);
 					if (oldChoice) {
-						resolve(initializeWebFileSystem(oldChoice));
+						resolve(initializeWebFileSystem(oldChoice, paths));
 						return;
 					}
 
@@ -443,10 +451,10 @@ async function callFBI(mountPoint) {
 						title: "📁 启门·忆旧径 "+(fs_name||""),
 						message: (
 							<div className="md" style={"position: relative"}>
-								{fs_base && <blockquote>
-									曾启之门「<q>{fs_base}</q>」<ruby>虽铭于心，却未寻得实径<rt>浏览器文件系统刷新后失效</rt></ruby>。
+								{base && <blockquote>
+									曾启之门「<q>{base}</q>」<ruby>虽铭于心，却未寻得实径<rt>浏览器文件系统刷新后失效</rt></ruby>。
 								</blockquote>}
-								{webFileSystemInstances.size && <p>{fs_base ? "若欲改投他门，可叩下方已存之门扉；": "故门仍在，一触即入，旧卷悉陈。"}</p>}
+								{webFileSystemInstances.size && <p>{base ? "若欲改投他门，可叩下方已存之门扉；": "故门仍在，一触即入，旧卷悉陈。"}</p>}
 								<div className={"agent-popup fs-options"}>
 									{Array.from(webFileSystemInstances.entries()).map(([name, instance]) => (
 										<div className="option">
@@ -455,7 +463,7 @@ async function callFBI(mountPoint) {
 														el.remove();
 														upsertFolder(instance.handle, name);
 														mountPoint.fs_base = name;
-														resolve(initializeWebFileSystem(instance));
+														resolve(initializeWebFileSystem(instance, paths));
 													}}>
 												📂 {name}
 												<button className={"ri-delete-bin-line"} title={"删除最近访问项"} onClick.stop={({target}) => {
@@ -466,7 +474,7 @@ async function callFBI(mountPoint) {
 										</div>
 									))}
 								</div>
-								<p style={"text-align:right"}>{fs_base ? "唤「启新门」重择之。" : "推开现世之扉，另定一域。"}</p>
+								<p style={"text-align:right"}>{base ? "唤「启新门」重择之。" : "推开现世之扉，另定一域。"}</p>
 							</div>
 						),
 						confirmMessage: "🚪 启新门",
@@ -476,7 +484,7 @@ async function callFBI(mountPoint) {
 					});
 				})
 			}
-			return initializeWebFileSystem(fs);
+			return initializeWebFileSystem(inst, paths);
 		}
 		case "opfs": {
 			let baseDir = await navigator.storage.getDirectory();

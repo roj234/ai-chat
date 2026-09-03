@@ -1,0 +1,59 @@
+
+/* 核心卡片容器 */
+.grep-card {
+	background: var(--code-bg);
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	/*font-size: 12px;*/
+
+	& details:not(:last-child) {
+		border-bottom: 1px solid var(--border);
+	}
+
+	& .chevron { transition: transform 0.2s ease; color: var(--muted); }
+	& details[open] .chevron { transform: rotate(90deg); }
+
+	& .path {
+		font-family: var(--code-font);
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		overflow: hidden;
+		color: var(--text-on-accent);
+	}
+
+	& .match-badge {
+		background: var(--ok-bg);
+		color: var(--ok);
+		font-size: 12px;
+		padding: 2px 7px;
+		border-radius: 12px;
+		flex-shrink: 0;
+	}
+
+	& summary {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 8px 14px;
+		background: rgba(33, 38, 45, 0.5);
+		gap: 8px;
+
+		&:hover {
+			background: rgba(56, 139, 253, 0.05);
+		}
+	}
+
+	& .no {
+		border-right: 1px solid rgba(48, 54, 61, 0.4);
+	}
+
+	& .text {
+		padding-left: 1ch;
+		color: var(--text-primary);
+	}
+
+	& mark {
+		background-color: rgba(255, 214, 2, 0.18);
+		color: #ffd602;
+	}
+}

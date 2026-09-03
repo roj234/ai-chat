@@ -117,7 +117,7 @@ export class VirtualDirectory {
 	}
 }
 
-const FAKE_DIR_CONSTANT = { type: "directory" };
+const FAKE_DIR_CONSTANT = { kind: "directory" };
 const FAKE_FILE_CONSTANT = {
 	kind: "file",
 	getFile() {

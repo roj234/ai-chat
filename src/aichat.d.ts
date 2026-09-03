@@ -4,7 +4,7 @@ declare namespace AiChat {
     type Mount = {
         fs_type: 'db' | 'api' | 'local' | 'config' | 'opfs' | 'vfs';
         fs_base?: string;
-        fs_server?: string;
+        fs_server?: string | string[];
         fs_builtin?: string;
         fs_events?: Object[];
     }
@@ -25,7 +25,7 @@ declare namespace AiChat {
         /** 已激活的模块(技能) */
         activatedModules?: Set<string>,
         /** 允许使用的工具 */
-        allowedTools?: Set<string>,
+        tools?: Set<string>,
         /** 本会话中自动允许的工具 */
         grantedTools?: Set<string>,
 
@@ -45,6 +45,8 @@ declare namespace AiChat {
         /** 覆盖全局配置，高于 presets 优先级 */
         overrides?: Partial<LocalPreset>;
 
+        /** 子代理宿主 */
+        owner?: number;
         /** pending消息缓存 */
         pendingMessages?: Message[];
     }
@@ -85,6 +87,7 @@ declare namespace AiChat {
     export type MessageListItem = {
         key: BaseMessage | AssistantMessage,
         index: number,
+        end_index?: number,
         role: string,
         content: ResponseContentPart[];
     }
@@ -135,6 +138,10 @@ declare namespace AiChat {
 
         imageLongLimit: number,
         imageSizeLimit: number
+
+        userId: string,
+        userIdField: string,
+        sessionIdField: string
 
         jsonSupport: 0 | 1 | 2 | 3
     }
@@ -203,7 +210,8 @@ declare namespace AiChat {
         theme?: 'light' | 'dark';
         allowHTMLTags: ('basic' | 'style' | 'script')[]
 
-        blobCacheCapacity: number
+        blobCacheCapacity: number,
+        subagentDepth: number,
 
         incognito: boolean,
 
@@ -242,8 +250,10 @@ declare namespace AiChat {
         currency: string,
     }
 
-    type LoadingPart = {
-        type: "loading";
+    type ProgressPart = {
+        type: "progress";
+        kind: "connect" | "wait" | "prefill" | "generate";
+        data: number | string;
     }
 
     type ThinkPart = {
@@ -295,7 +305,7 @@ declare namespace AiChat {
         html: string;
     }
 
-    type ResponseContentPart = (OpenAI.TextPart | GalleryPart | ThinkPart | ToolPart | ToolUIPart | UsagePart | ErrorPart | BranchPart | HTMLPart | LoadingPart) & {
+    type ResponseContentPart = (OpenAI.TextPart | GalleryPart | ThinkPart | ToolPart | ToolUIPart | UsagePart | ErrorPart | BranchPart | HTMLPart | ProgressPart) & {
         key?: object;
     };
 
@@ -351,7 +361,17 @@ declare namespace AiChat {
          * @param has_successor 是否不是最后一条消息，可以决定生成什么HTML
          * @param message 如果渲染器修改了消息（主要是那些 interactive=true 的）需要调用 markMessageDirty 函数
          */
-        renderer?: (context: ToolResponse & Payload, has_successor: boolean, toolCall: OpenAI.ToolCall, message: AssistantMessage) => HTMLElement;
+        renderer?: (context: ToolResponse & Payload, has_successor: boolean, toolCall: OpenAI.ToolCall, message: AssistantMessage) => JSX.Element;
+        /**
+         * 工具调用展开后的【参数】框的渲染函数
+         * 覆盖的话请注意不要漏掉了本来可以展示的参数。
+         */
+        renderInput?: (context: ToolResponse & Payload, box: HTMLElement, toolCall: OpenAI.ToolCall, message: AssistantMessage) => HTMLElement | false;
+        /**
+         * 工具调用展开后的【返回值】框的渲染函数
+         * 这个函数可能被调用多次，而且状态可能是不完整的，返回 false 默认处理
+         */
+        renderOutput?: (context: ToolResponse & Payload, box: HTMLElement, toolIsRunning: boolean, toolCall: OpenAI.ToolCall, message: AssistantMessage) => HTMLElement | false;
         /**
          * 判断是否需要重新生成HTML
          * 往keys里面填任何对象

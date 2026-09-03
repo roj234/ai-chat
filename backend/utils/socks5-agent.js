@@ -24,6 +24,7 @@ import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
 import tls from 'node:tls';
+import {LRUCache} from "../../common/LRUCache.js";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -290,7 +291,7 @@ export function createSocks5Agent(proxyUrl, agentOptions) {
  *   username       – SOCKS5 username (optional)
  *   password       – SOCKS5 password (optional)
  */
-export class Socks5HttpAgent extends http.Agent {
+class Socks5HttpAgent extends http.Agent {
 	#proxyHost;
 	#proxyPort;
 	#username;
@@ -341,7 +342,7 @@ export class Socks5HttpAgent extends http.Agent {
  * performs a TLS handshake on top of it, so the returned socket is a
  * `tls.TLSSocket` ready for HTTPS traffic.
  */
-export class Socks5HttpsAgent extends https.Agent {
+class Socks5HttpsAgent extends https.Agent {
 	#proxyHost;
 	#proxyPort;
 	#username;
@@ -380,4 +381,18 @@ export class Socks5HttpsAgent extends https.Agent {
 
 		return null; // async
 	}
+}
+
+
+const proxyCache = new LRUCache(100);
+/**
+ *
+ * @param {string} proxyUrl
+ * @return {undefined | Socks5HttpAgent | Socks5HttpsAgent}
+ */
+export const getProxyAgent = (proxyUrl) => {
+	if (!proxyUrl) return; // undefined
+	let proxyAgent = proxyCache.get(proxyUrl);
+	if (!proxyAgent) proxyCache.set(proxyUrl, proxyAgent = createSocks5Agent(proxyUrl));
+	return proxyAgent;
 }

@@ -1,7 +1,8 @@
 import './ConversationList.css';
-import {VirtualList} from 'unconscious/common/VirtualList.js';
-import {formatDate} from 'unconscious/common/Utils.js';
 import {$state, $update, $watch, $watchWithCleanup, debugSymbol, ONCE_EVENT, unconscious} from 'unconscious';
+import {ITEM_KEY, VirtualList} from 'unconscious/common/VirtualList.js';
+import {formatDate} from 'unconscious/common/Utils.js';
+import {deepEqual} from "unconscious/common/deepEqual.js";
 import {deleteConversation, getKV, setKV, updateConversation} from "../database.js";
 import {
 	conversations,
@@ -33,7 +34,7 @@ const closeHoverMenu = (e) => {
  * @type {import("unconscious").Reactive<number>}
  */
 const hoverConversationIndex = $state({});
-const hoverMenu = <div className={"dropdown"} style={"position:fixed"}>
+const hoverMenu = <div className={"dropdown"} style={"position:fixed;z-index:1"}>
 	<div className="list mid" style={"display:block;"}>
 		<label data-action={"edit"}>编辑标题</label>
 		<label data-action={"export"}>导出</label>
@@ -244,8 +245,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 		e.target.append(hoverMenu);
 		e.stopPropagation();
 	};
-	const b2i = (n) => n ? 1 : 0;
-	const keyFunc = conv => conv.textContent ?? conv.id + "\0" + conv.title + "\0" + b2i(conv[LOCKED]) + b2i(runningConversations.has(conv.id));
+	const keyFunc = conv => conv.textContent ?? [conv.id, conv.title, conv[LOCKED]];
 
 	const list = <div className="sidebar-list scroll" onClick={eventHandler}></div>;
 	const groupAndConvArr = [];
@@ -255,6 +255,12 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 		gap: 8,
 		data: groupAndConvArr,
 		keyFunc,
+		isSameKey(node, key) {
+			if (Array.isArray(key)) {
+				node.classList.toggle('spin-before', runningConversations.has(key[0]));
+			}
+			return deepEqual(node[ITEM_KEY], key);
+		},
 		renderer(conv) {
 			if (conv.nodeType) return conv;
 
@@ -265,13 +271,12 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 			// 多选删除 删除未使用的文件
 			return <div
 				_conv={conv}
-				className={`chat-item${unconscious(selectedConversation) === conv ? ' active' : ''}`}
+				className={`chat-item ${running?' spin-before' : ''}${unconscious(selectedConversation) === conv ? ' active' : ''}`}
 				title={conv.title+" (#"+conv.id+")\n"+formatDate("Y-m-d H:i:s", conv.time)}
 			>
 				{(!running && inSelectionMode) && <input type={"checkbox"} checked={conv[SELECTED]} onClick.stop={e => {
 					conv[SELECTED] = e.target.checked;
 				}}/>}
-				{running && <span className={"spinner"} />}
 				{conv[LOCKED] && <span className="ri-lock-line" title={"其它端正在编辑"} />}
 				<span className="chat-title">{conv.title || '无标题'}</span>
 				{inSelectionMode ? null : btn}

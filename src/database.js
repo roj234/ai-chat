@@ -136,45 +136,49 @@ const getMessages_ = throttledPromise(db.getMessages);
 /**
  * 获取一个会话的消息，缓存优先
  * @param {AiChat.Conversation} conversation 对话
- * @param {boolean} [noStore] 结果不保存到缓存
+ * @param {boolean} [noStore] 结果不保存到缓存 (警告，可能有bug)
  * @returns {Promise<AiChat.Message[]>}
  */
-export const getMessagesCacheFirst = async (conversation, noStore) => (conversation[MESSAGES_CACHE] || (noStore ? getMessages_(conversation) : getMessages(conversation)));
+export const getMessagesCacheFirst = async (conversation, noStore) => {
+	const bm = conversation[BRANCH_MANAGER];
+	if (bm) return bm.getMessages();
+
+	return (conversation[MESSAGES_CACHE] || (noStore ? getMessages_(conversation) : getMessages(conversation)));
+};
 
 /**
  * 获取一个会话的消息
  * @param {AiChat.Conversation} conversation 对话
  * @returns {Promise<AiChat.Message[]>}
  */
-export const getMessages = throttledPromise(conversation => (
-	getMessages_(conversation).then(messages => {
-		conversation[DIFF_SNAPSHOT] = structuredClone(conversation);
+export const getMessages = throttledPromise(async conversation => {
+	let messages = await getMessages_(conversation);
+	conversation[DIFF_SNAPSHOT] = structuredClone(conversation);
 
-		if (messages !== conversation[MESSAGES_CACHE]) {
-			/** @type {Map<number, AiChat.Message>} */
-			const m = new Map();
+	if (messages !== conversation[MESSAGES_CACHE]) {
+		/** @type {Map<number, AiChat.Message>} */
+		const m = new Map();
 
-			conversation[MESSAGES_SNAPSHOT] = m;
-			conversation[MESSAGES_CACHE] = messages;
+		conversation[MESSAGES_SNAPSHOT] = m;
+		conversation[MESSAGES_CACHE] = messages;
 
-			for (let message of messages) {
-				delete message.owner;
-				m.set(message.id, structuredClone(message));
-				message[MESSAGE_IS_CLEAN] = true;
-			}
-
-			if (conversation.bm_leaf) {
-				enableBranches(conversation, messages);
-			} else {
-				delete conversation[BRANCH_MANAGER];
-			}
-
-			EVENT_BUS.post(['conversation', 'load'], conversation);
+		for (let message of messages) {
+			delete message.owner;
+			m.set(message.id, structuredClone(message));
+			message[MESSAGE_IS_CLEAN] = true;
 		}
 
-		return messages;
-	})
-));
+		if (conversation.bm_leaf) {
+			messages = enableBranches(conversation, messages);
+		} else {
+			delete conversation[BRANCH_MANAGER];
+		}
+
+		await EVENT_BUS.post(['conversationLoad'], conversation, messages);
+	}
+
+	return messages;
+});
 
 const DIFF_IGNORE_KEYS = new Set(["id", "ready"]);
 
@@ -308,6 +312,7 @@ export const updateConversation = async (conversation, messages, keepTime) => {
  */
 export const deleteConversation = conversation => {
 	if (config.incognito) return DONE;
+	conversation[LOCKED] = "DELETED"; // 忽略后续的数据库写入
 	return db.deleteConversation(conversation.id);
 };
 

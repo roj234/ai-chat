@@ -16,31 +16,22 @@
         font-size: smaller;
         position: relative;
     }
-    .progress {
-        position: absolute;
-        left: 0;
-        top: 0;
-        height: 100%;
-        width: 0;
-        border-radius: var(--border-radius-md);
-        box-shadow: 0 0 12px var(--accent);
-        transition: width 0.3s ease;
-    }
 }
 
-.spinner {
+.spinner, .spin-before::before {
+    content: "";
     width: 16px;
     height: 16px;
     border: 2px solid var(--border);
     border-top-color: var(--accent);
     border-radius: 50%;
+    animation: spin 1s linear infinite;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .spinner {
-        animation: spin 1s linear infinite;
-    }
+.spin {
+    animation: spin 1s linear infinite;
 }
+
 
 @keyframes spin {
     to { transform: rotate(360deg); }

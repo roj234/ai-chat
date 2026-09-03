@@ -3,7 +3,7 @@ import {SYNC_RPC, SYNC_SEND_TO_OWNER} from "/backend/sync.js";
 import {config, conversations, inputText, isMobile, selectedConversation, switchToConversation} from "/src/states.js";
 import {$state, $update, $watch, unconscious} from "unconscious";
 import {showToast} from "/src/components/Toast.js";
-import {DI, onLoad} from "/src/hooks.js";
+import {DI, DID_RMI, DID_SEND_BUTTON, onLoad} from "/src/hooks.js";
 import {delta, patch, rep} from "unconscious/common/deepEqual.js";
 import {prettyError} from "/src/utils/utils.js";
 import {VirtualList} from "unconscious/common/VirtualList.js";
@@ -289,9 +289,9 @@ export const registerRemoteControl = () => {
 		},
 	});
 
-	DI.RMI = RMI;
+	DI[DID_RMI] = RMI;
 	onLoad((app) => {
-		sendBtn = DI.sendButton;
+		sendBtn = DI[DID_SEND_BUTTON];
 		composer = sendBtn.closest(".composer");
 
 		// server

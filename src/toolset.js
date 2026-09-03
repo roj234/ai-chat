@@ -1,7 +1,8 @@
 import {
 	messages,
-	onConversationBeforeunload,
 	onConversationLoaded,
+	onConversationSwitchOut,
+	runningConversations,
 	selectedConversation,
 	updateMessageUI
 } from "./states.js";
@@ -16,14 +17,16 @@ import {parseJson5} from "unconscious/common/Json.js";
 import {highlightJsonLike} from "./markdown/highlight.js";
 import {getCombinedPreset, markMessageDirty} from "./database.js";
 
-export const TOOL_NAME = debugSymbol("TOOL_NAME");
-export const TOOL_IS_RUNNING = debugSymbol("TOOL_IS_RUNNING");
-const TOOL_PARAM = debugSymbol("TOOL_PARAM");
+export const TOOL_NAME = debugSymbol("ToolName");
+export const TOOL_IS_RUNNING = debugSymbol("Running");
+//export const TOOL_LIST = debugSymbol("ToolList");
+const TOOL_PARAM = debugSymbol("ToolArgumentCache");
 
 /**
  * @type {Record<string, string | function(): string>}
  */
 export const PLACEHOLDERS = {};
+export const TEMPORARY_PLACEHOLDER = debugSymbol("PlaceholderOnConversation");
 
 /**
  * 常开模块
@@ -39,7 +42,7 @@ export const toolset = {};
  * 根据工具摘要按需激活的工具元数据
  * @type {Record<string, OpenAI.Tool>}
  */
-export const tools = {};
+export const toolInfo = {};
 /**
  * 工具脚本，调用后执行的代码都在这里
  * @type {Record<string, AiChat.FunctionToolImpl & { parameters?: OpenAI.ObjectSchema, default?: boolean }>}
@@ -74,9 +77,10 @@ toolset["Use"] = {
 	hidden: "manual"
 };
 toolScriptRegistry["Use"] = {
+	default: true,
 	reentrant: true,
 	async script({modules}, response, conv) {
-		let {allowedTools, activatedModules} = conv;
+		let {tools, activatedModules} = conv;
 
 		this.undo(response, conv);
 
@@ -104,8 +108,8 @@ toolScriptRegistry["Use"] = {
 				}
 
 				toolArr?.forEach(name => {
-					if (!allowedTools.has(name)) {
-						allowedTools.add(name);
+					if (!tools.has(name)) {
+						tools.add(name);
 						newToolNames.push(name);
 					}
 				});
@@ -159,25 +163,25 @@ toolScriptRegistry["Use"] = {
 	undo({modules}, conv) {
 		delete conv[NSLOOKUP];
 
-		const {allowedTools, activatedModules} = conv;
-		if (!allowedTools || !modules) return;
+		const {tools, activatedModules} = conv;
+		if (!tools || !modules) return;
 
-		allowedTools.clear();
+		tools.clear();
 		for (const moduleName of modules) {
 			activatedModules.delete(moduleName);
 			toolset[moduleName]?.onDeactivated?.(conv);
 		}
-		activatedModules.forEach(name => toolset[name]?.tools?.forEach(name => allowedTools.add(name)));
+		activatedModules.forEach(name => toolset[name]?.tools?.forEach(name => tools.add(name)));
 	}
 };
 
 /**
  *
- * @param {{allowedTools: Set<string>, activatedModules: Set<string>}} conversation
+ * @param {{tools: Set<string>, activatedModules: Set<string>}} conversation
  * @return {Promise<[OpenAI.Tool[], string]>}
  */
 export const getAvailableTools = async (conversation) => {
-	let {allowedTools, activatedModules} = conversation;
+	let {tools, activatedModules} = conversation;
 
 	let outputTools = [];
 	let systemPrompt = [];
@@ -214,16 +218,16 @@ export const getAvailableTools = async (conversation) => {
 		});
 	}
 
-	if (allowedTools) {
-		for (const name of allowedTools) {
-			const tool = tools[name];
+	if (tools) {
+		for (const name of tools) {
+			const tool = toolInfo[name];
 			if (!tool) throw '工具 '+name+' 不存在';
 			outputTools.push(tool);
 		}
 	}
 	return [outputTools.sort((a, b) => {
 		return a.function.name.localeCompare(b.function.name);
-	}), systemPrompt.join("\n\n")];
+	}), systemPrompt.filter(Boolean).join("\n")];
 };
 
 const convertToCamelCase = str => str.replace(/-([a-z])/g, (match, letter) => letter.toUpperCase());
@@ -332,7 +336,7 @@ export const parseFrontmatter = content => {
 		else if (YAML_BLOCK.test(value)) {
 			stack.push([ MARK, '', key, [value, 0] ]);
 			continue;
-		} else if (value === '[' || value === '{') {
+		} else if (ch === '[' || ch === '{') {
 			try {
 				value = parseJson5(value);
 			} catch {
@@ -396,7 +400,7 @@ export const registerToolset = (name, description, toolDefs, {
 		rest.parameters = parameters;
 		toolScriptRegistry[nsName] = rest;
 
-		tools[nsName] = {
+		toolInfo[nsName] = {
 			type: "function",
 			function: {name, description, parameters}
 		};
@@ -429,7 +433,7 @@ export const addMCPServer = (mcpBaseUrl, mcpName, mcpDescription = "External too
 		if (!open) {
 			if (toolArrayPromise) toolArrayPromise.then(toolNames => {
 				for (const name of toolNames) {
-					delete tools[name];
+					delete toolInfo[name];
 					delete toolScriptRegistry[name];
 				}
 			});
@@ -445,7 +449,7 @@ export const addMCPServer = (mcpBaseUrl, mcpName, mcpDescription = "External too
 				const displayName = (options.prefix?mcpToolGroup+"_":"")+name;
 				const registryName = registryPrefix+name;
 
-				tools[registryName] = {
+				toolInfo[registryName] = {
 					type: "function", function: {
 						name: displayName, description,
 						parameters: inputSchema
@@ -485,17 +489,17 @@ export const addMCPServer = (mcpBaseUrl, mcpName, mcpDescription = "External too
 	registerToolset(mcpToolGroup, mcpDescription, [], {
 		async systemPrompt(conv) {
 			if (!client.isOpen) {
-				const tools = await connectServer();
-				toolset[mcpToolGroup].tools = tools;
+				const newTools = await connectServer();
+				toolset[mcpToolGroup].tools = newTools;
 				delete conv[NSLOOKUP];
 
-				const allowedTools = conv.allowedTools;
-				for (const name of allowedTools) {
+				const tools = conv.tools;
+				for (const name of tools) {
 					if (name.startsWith(registryPrefix)) {
-						allowedTools.delete(name)
+						tools.delete(name)
 					}
 				}
-				tools.forEach(name => allowedTools.add(name));
+				newTools.forEach(name => tools.add(name));
 			}
 			return ''
 		},
@@ -510,10 +514,26 @@ export const addMCPServer = (mcpBaseUrl, mcpName, mcpDescription = "External too
 	}
 };
 
-const CONV_REACTIVE_MAP = debugSymbol("ReactiveStates");
+const CONV_REACTIVE_MAP = debugSymbol("UIStates");
 
 onConversationLoaded((conv, msg) => redoToolCalls(conv, msg, 0));
-onConversationBeforeunload((conv) => delete conv[CONV_REACTIVE_MAP]);
+onConversationSwitchOut((conv) => delete conv[CONV_REACTIVE_MAP]);
+
+/**
+ *
+ * @param {AiChat.ToolResponse} ctx
+ * @param {OpenAI.ToolCall} tool
+ * @param {AiChat.Conversation} conv
+ * @return {"secure" | boolean}
+ */
+export const getToolInteractiveLevel = (ctx, tool, conv) => {
+	let secure = toolScriptRegistry[ctx[TOOL_NAME]]?.interactive;
+	let tp;
+	if (typeof secure === "function" && (tp = getToolParameters(ctx, tool, true)))
+		secure = secure(tp, conv);
+
+	return secure;
+}
 
 /**
  * @param {AiChat.Conversation} conv
@@ -526,14 +546,12 @@ const getToolUserInteractionLevel = async (conv, name, parameters) => {
 	const allowed = (await getCombinedPreset(conv)).permittedTools;
 	let interactive = allowed?.includes("!"+name) ? 'secure' : fn?.interactive;
 	if (interactive) {
-		if (typeof interactive === "function") {
-			interactive = await interactive(parameters, conv);
-		}
+		if (typeof interactive === "function") interactive = interactive(parameters, conv);
+
 		if (interactive === "secure") {
 			return !allowed?.includes(name) && !allowed?.includes('*') && !conv.grantedTools?.has(name) ? 2 : 0;
 		}
-
-		return 1;
+		if (interactive) return 1;
 	}
 
 	return 0;
@@ -547,11 +565,14 @@ const UNSAFE_TOOL_DENY_MESSAGE = "User doesn't permit this tool use. Nothing cha
  * @param {AiChat.Conversation} conv
  * @param {true|number|null=null} forceRerun
  * @param {boolean=} allowUnsafe
+ * @param {string} customRejectText
  * @return {Promise<number>}
  */
-export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
+export const runTools = async (response,  conv, forceRerun, allowUnsafe, customRejectText) => {
 	markMessageDirty(response);
 	const {tool_calls, tool_responses} = response;
+
+	const signal = runningConversations.get(conv.id)?.abort.signal;
 
 	let flags = 0;
 
@@ -570,13 +591,16 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
 				let nsLookup = conv[NSLOOKUP];
 				if (!nsLookup) {
 					conv[NSLOOKUP] = nsLookup = new Map;
-					for (let toolName of conv.allowedTools) {
-						nsLookup.set(tools[toolName].function.name, toolName);
+					for (let name of conv.tools) {
+						nsLookup.set(toolInfo[name].function.name, name);
 					}
 				}
 
 				name = nsLookup.get(name);
-				if (null == name) throw 'The tool name is invalid';
+				if (null == name) {
+					flags |= 4; // UNRECOVERABLE_ERROR
+					throw 'The tool name is invalid';
+				}
 
 				fn = toolScriptRegistry[name];
 			}
@@ -589,7 +613,7 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
 			msg = tool_responses[i] = { [TOOL_NAME]: name };
 
 			const parameters = getToolParameters(msg, tc);
-			const allowRun = name === 'Use' || conv.allowedTools.has(name);
+			const allowRun = fn.default || conv.tools.has(name);
 
 			if (!(fn && allowRun)) {
 				// 帮模型擦屁股
@@ -599,6 +623,7 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
 						name: name = msg[TOOL_NAME] = 'Use',
 					}
 				} else {
+					flags |= 4; // UNRECOVERABLE_ERROR
 					throw 'The tool exists, but is not allowed.';
 				}
 			}
@@ -612,7 +637,10 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
 						fix(parameters, error);
 						error = validateAndShowError(parameters, schema);
 					}
-					if (error) throw "Schema validation error:\n"+error;
+					if (error) {
+						flags |= 4; // UNRECOVERABLE_ERROR
+						throw "Schema validation error:\n"+error;
+					}
 					// 改变历史
 					tc.function.arguments = JSON.stringify(parameters);
 				}
@@ -629,17 +657,19 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
 					}
 
 					if (!allowUnsafe) {
-						throw UNSAFE_TOOL_DENY_MESSAGE;
+						throw customRejectText||UNSAFE_TOOL_DENY_MESSAGE;
 					}
 				}
 			} else if (false === allowUnsafe) {
-				throw UNSAFE_TOOL_DENY_MESSAGE;
+				throw customRejectText||UNSAFE_TOOL_DENY_MESSAGE;
 			}
 
 			msg[TOOL_IS_RUNNING] = true;
 			let result = fn.script(parameters, msg, conv);
 			if (result instanceof Promise) {
 				$update(updateMessageUI);
+				// 这太危险了，可能导致无法撤销的副作用
+				//if (signal) result = abortable(result, signal);
 				result = await result;
 			}
 			if (result !== undefined) {
@@ -668,7 +698,10 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
 	};
 
 	if (typeof forceRerun === "number") await callTool(forceRerun);
-	else for (let i = 0; i < tool_calls.length; i++) await callTool(i);
+	else for (let i = 0; i < tool_calls.length; i++) {
+		if (signal?.aborted) return -1;
+		await callTool(i);
+	}
 
 	return flags;
 };

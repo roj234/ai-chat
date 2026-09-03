@@ -61,3 +61,18 @@ export function parseCsv(csvText, { delimiter = ',', quote = '"' } = {}) {
 
 	return result;
 }
+
+export function parseCsvObj(csvText, options) {
+	const csvLines = parseCsv(csvText, options);
+	const names = csvLines[0];
+	for (let i = 1; i < csvLines.length; i++) {
+		const data = csvLines[i];
+		const obj = Object.create(null);
+		for (let j = 0; j < data.length; j++) {
+			obj[names[j]] = data[j];
+		}
+		csvLines[i-1] = obj;
+	}
+	csvLines.length--;
+	return csvLines;
+}

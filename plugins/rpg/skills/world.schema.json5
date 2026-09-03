@@ -83,7 +83,7 @@
           },
           prefix: {
             type: "string",
-            example: ["Lv.", "$", "￥"],
+            example: ["Lv.", "$", "¥"],
             description: "数值的UI前缀，可选。"
           },
           postfix: {

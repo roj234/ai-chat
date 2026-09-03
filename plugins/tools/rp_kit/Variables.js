@@ -26,10 +26,6 @@ Returns new value at the pointer after the operation completes.`,
 			// maybe a MOVE(from, to)
 			operation: { enum: ["set", "plus", "delete"], },
 			pointer: {pattern: `^(?:/[a-zA-Z0-9]+)+(?:/-)?$`, description: `JSON Pointer (RFC 6901)`},
-			explanation: {
-				type: "string",
-				description: "One sentence human-readable summary of why change it."
-			},
 			value: { type: "value", description: "Omit for delete" },
 		},
 		required: ["operation", "pointer"]

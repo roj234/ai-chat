@@ -437,10 +437,10 @@ sampler_name cfg_scale steps
 		{
 			systemPrompt(conv) {
 				let fsType = conv.fs_type;
-				const allowedTools = conv.allowedTools;
+				const tools = conv.tools;
 				const activatedModules = conv.activatedModules;
-				const addTools = tool => allowedTools.add(tool.name);
-				const removeTools = tool => allowedTools.delete(tool.name);
+				const addTools = tool => tools.add(tool.name);
+				const removeTools = tool => tools.delete(tool.name);
 
 				let prompt = '';
 

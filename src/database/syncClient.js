@@ -16,7 +16,7 @@ import {
 import {decodeObjects, serializeJSON} from "../utils/marshal.js";
 import {showToast} from "../components/Toast.js";
 import {$computed, $state, $update, ONCE_EVENT, unconscious} from "unconscious";
-import {DI, onLoad} from "../hooks.js";
+import {DI, DID_RMI, DID_SYNC_LOCK, DID_SYNC_UNLOCK, DID_TITLE_POSITION, onLoad} from "../hooks.js";
 
 import {
 	SYNC_CONFLICT,
@@ -93,10 +93,10 @@ const showReadonlyUI = (id) => {
 		<div className={"tooltip down"}>{"对话被其它客户端打开\n接管控制权可能导致未保存的数据丢失"}</div>
 	</button>;
 
-	DI.title.append(div);
+	DI[DID_TITLE_POSITION].append(div);
 	const closer = () => div.remove();
 
-	const cb = DI.RMI?.render(id);
+	const cb = DI[DID_RMI]?.render(id);
 	if (cb) lockedToast = () => (closer(), cb());
 	else lockedToast = closer;
 
@@ -118,9 +118,9 @@ const checkConcurrentModification = conv => {
 };
 
 export const initSync = (address) => new Promise((resolve, reject) => {
-	const RMI = DI.RMI;
-	DI.lock = lock;
-	DI.unlock = unlock;
+	const RMI = DI[DID_RMI];
+	DI[DID_SYNC_LOCK] = lock;
+	DI[DID_SYNC_UNLOCK] = unlock;
 
 	ws = new WebSocket(address);
 	let closeToast;

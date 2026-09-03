@@ -179,5 +179,9 @@ export default defineConfig(async ({mode}) => {
                 //experimentalMinChunkSize: 10240,
             },
         }
+    },
+
+    server: {
+        watch: { ignored: ['**/data/**', '**/misc/**'] }
     }
 }});

@@ -11,6 +11,7 @@ import {RunJS} from "../run_js.js";
 export const GetTime = {
 	name: "GetTime",
 	description: "Read current date, time and timezone",
+	title: () => "查看时间",
 	script: () => new Date().toString()
 };
 

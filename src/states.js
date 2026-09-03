@@ -85,17 +85,22 @@ export const messages = $state([]);
  */
 export const selectedConversation = $state(null);
 
-const CACHED_FLAG = debugSymbol("MessageIsCached");
 const conversationLoadedCallbacks = [];
 const conversationBeforeunloadCallbacks = [];
+
 /**
- * @param {function(AiChat.Conversation, AiChat.Message[], boolean): void} callback
+ * @param {function(AiChat.Conversation, AiChat.Message[]): void} callback
  */
-export const onConversationLoaded = callback => conversationLoadedCallbacks.push(callback);
+export const onConversationLoaded = callback => EVENT_BUS.on('conversationLoad', callback);
+
+/**
+ * @param {function(AiChat.Conversation, AiChat.Message[]): void} callback
+ */
+export const onConversationSwitchTo = callback => conversationLoadedCallbacks.push(callback);
 /**
  * @param {function(AiChat.Conversation): void} callback
  */
-export const onConversationBeforeunload = callback => conversationBeforeunloadCallbacks.push(callback);
+export const onConversationSwitchOut = callback => conversationBeforeunloadCallbacks.push(callback);
 
 let prevConversation;
 $watch(selectedConversation, () => {
@@ -104,9 +109,7 @@ $watch(selectedConversation, () => {
 		if (conv.id !== prevConversation?.id) {
 			prevConversation = conv;
 			const msg = unconscious(messages);
-			const flg = msg[CACHED_FLAG];
-			for (const cb of conversationLoadedCallbacks) cb(conv, msg, flg);
-			msg[CACHED_FLAG] = true;
+			for (const cb of conversationLoadedCallbacks) cb(conv, msg);
 		}
 	} else if (prevConversation) {
 		for (const cb of conversationBeforeunloadCallbacks) cb(prevConversation);
@@ -237,7 +240,8 @@ let nativeTheme;
  */
 export const getCurrentTheme = () => config.theme || nativeTheme;
 
-export const PROGRESS = debugSymbol("PrefillProgress");
+export const PROGRESS_KIND = debugSymbol("ProgressType");
+export const PROGRESS_VALUE = debugSymbol("ProgressValue");
 
 export const BRANCH_MANAGER = debugSymbol("BranchManager");
 export const LOCKED = debugSymbol("ConversationLocker");

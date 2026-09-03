@@ -134,7 +134,7 @@ Shell 和程序无法读取、修改或删除这些文件——它们来自虚�
 
 // TODO 我们可能还需要一些索引，例如“在什么情况下该想起这条记忆”
 //   以及embedding，总是需要的，这要把后端API暴露出来
-registerToolset("Memories", "记忆（也是挂载点 + 提示词）", [], {
+registerToolset("Memories", "记忆", [], {
 	hidden: 'manual',
 	systemPrompt,
 	depend: ["Files"],
@@ -142,7 +142,7 @@ registerToolset("Memories", "记忆（也是挂载点 + 提示词）", [], {
 		(conv.mnt || (conv.mnt = {}))["memory"] = {
 			fs_builtin: true,
 			fs_base: "memory",
-			fs_name: "长期记忆目录"
+			fs_name: "记忆目录"
 		};
 		return [];
 	},

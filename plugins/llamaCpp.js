@@ -7,61 +7,14 @@ import {jsonFetch} from "/common/openai-api-utils.js";
 import {SETTINGS} from "/src/settings.js";
 import {showToast} from "/src/components/Toast.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
-import {updateStatusText} from "/src/api-request.js";
-import {onLoad} from "/src/hooks.js";
-import {throttled} from "/src/utils/pure-utils.js";
 
 const _endpoint = $state({});
 const _stateChanging = $state("");
-
-// token计数
-let emptyMessageTokens = -1;
-{
-	let userInput;
-	const countTokens = async text => {
-		if (emptyMessageTokens < 0) {
-			emptyMessageTokens = await _countTokens("");
-		}
-		return await _countTokens(text) - emptyMessageTokens;
-	};
-	const _countTokens = (text) => {
-		return jsonFetch(resolveDBRelativeURL(config.endpoint)+"/messages/count_tokens", {
-			key: config.accessToken,
-			body: JSON.stringify({
-				model: config.model,
-				messages: [{
-					role: "user",
-					content: text
-				}]
-			})
-		}).then(result => result.input_tokens);
-	};
-	const delayedCountTokens = throttled(() => {
-		if (!config.countTokens) return;
-
-		const value = userInput.value;
-		if (!value) {
-			updateStatusText("");
-			return
-		}
-
-		if (isLlamaCppBackend) {
-			countTokens(value).then(token_count => {
-				updateStatusText(token_count+" Tokens");
-			});
-		}
-	}, 200);
-	onLoad(() => {
-		userInput = document.getElementById("userInput");
-		userInput.addEventListener("input", delayedCountTokens);
-	});
-}
 
 /**
  * @type {import("unconscious").ReactivePromise<boolean>}
  */
 const isLLaMACppRouter = $asyncState(({url, token}) => {
-	emptyMessageTokens = -1;
 	setIsLlamaCppBackend(false, false);
 	if (!url) return false;
 	return jsonFetch(url+"props", { key: token }).then(json => {
@@ -94,50 +47,40 @@ const BUTTON_STYLES = {
 SETTINGS.push({
 	type: "element",
 	_tab: "model",
-		element: $computed(() => {
-			if (!isLLaMACppRouter.loading && isLLaMACppRouter.value && !isLLaMACppRouter.error) {
-				const div = <div className="filter-row">
-					<div className="filter-label">[llama] 模型路由管理</div>
-					<div className={"llama"}>
-						{$foreach(models, model => {
-							const status = model.status?.value;
-							if (!status) return;
-							return <div className="model">
-								<div>
-									<span>{model.id}</span>
-									<small>{status}</small>
-								</div>
-								<button className={"btn "+(BUTTON_STYLES[status]??"ghost")}
-										disabled={() => _stateChanging.value || status === "loading"}
-										onClick={() => {
-											llamaModelManage(model);
-										}}
-								>{status === 'unloaded' ? '加载' : '卸载'}
-								</button>
+	element: $computed(() => {
+		if (!isLLaMACppRouter.loading && isLLaMACppRouter.value && !isLLaMACppRouter.error) {
+			const div = <div className="filter-row">
+				<div className="filter-label">[llama] 模型路由管理</div>
+				<div className={"llama"}>
+					{$foreach(models, model => {
+						const status = model.status?.value;
+						if (!status) return;
+						return <div className="model">
+							<div>
+								<span>{model.id}</span>
+								<small>{status}</small>
 							</div>
-						})}
-					</div>
-				</div>;
-
-				updateModelInfo.observe(div);
-				$cleanup(div, () => {updateModelInfo.unobserve(div);});
-				return div;
-			} else if (isLLaMACppRouter.error.startsWith?.("网络")) {
-				return <div>[llama]: 与 llama-server 检测接口 /props 的连接异常<br/>
-					<button className={"btn primary"} onClick={() => $update(_endpoint)}>重试</button>
+							<button className={"btn "+(BUTTON_STYLES[status]??"ghost")}
+									disabled={() => _stateChanging.value || status === "loading"}
+									onClick={() => {
+										llamaModelManage(model);
+									}}
+							>{status === 'unloaded' ? '加载' : '卸载'}
+							</button>
+						</div>
+					})}
 				</div>
-			}
-		})
-	},
-	{
-		id: "countTokens",
-		_tab: "customize",
-		name: "统计输入框的 Token 数量",
-		title: "仅支持 llama.cpp 后端，路由模式下可能意外加载模型。",
-		type: "radio",
-		choices: {
-		"启用": true,
-	}
+			</div>;
+
+			updateModelInfo.observe(div);
+			$cleanup(div, () => {updateModelInfo.unobserve(div);});
+			return div;
+		} else if (isLLaMACppRouter.error.startsWith?.("网络")) {
+			return <div>[llama]: 与 llama-server 检测接口 /props 的连接异常<br/>
+				<button className={"btn primary"} onClick={() => $update(_endpoint)}>重试</button>
+			</div>
+		}
+	})
 });
 
 /**

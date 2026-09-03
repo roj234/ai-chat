@@ -2,8 +2,8 @@ import {$store, $update, debugSymbol} from "unconscious";
 import {EVENT_BUS} from "/src/states.js";
 import {updateConversation} from "/src/database.js";
 import {createFileSystem} from "./fileAccess.js";
-import {sleep} from "/src/utils/pure-utils.js";
-import {appendMessages} from "/src/inject-message.js";
+import {sleep} from "/common/pure-utils.js";
+import {injectMessages} from "/src/inject-message.js";
 
 const OWNER = debugSymbol("FS__OWNER");
 const FS = debugSymbol("FS__FS");
@@ -142,7 +142,7 @@ const dispatch = (callback, event) => {
 
 	if (event?.manual) return;
 
-	appendMessages(conv, [{
+	injectMessages(conv, {
 		role: "user",
 		label: "异步进程结束",
 		time: Date.now(),
@@ -151,7 +151,7 @@ const dispatch = (callback, event) => {
 </system-remainder>` : `<system-remainder>
 FileService restarted: PID ${callback.pid} cannot be tracked.
 </system-remainder>`
-	}]);
+	});
 };
 
 // 重新拉起轮询

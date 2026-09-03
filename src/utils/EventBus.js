@@ -45,9 +45,9 @@ export class EventBus {
 	/**
 	 *
 	 * @param {string[]} event
-	 * @param {Object} data
+	 * @param {Object} [data]
 	 */
-	post(event, data) {
+	post(event, ...data) {
 		const x = [];
 
 		const initEvent = [...event];
@@ -55,9 +55,11 @@ export class EventBus {
 			let set = this.#events.get(event);
 			if (set) for (const fn of set) {
 				try {
-					const res = fn(data, initEvent);
+					const res = fn.call(null, ...data, initEvent);
 					if (res instanceof Promise)
 						x.push(res);
+					else if (res === false)
+						return false;
 				} catch (e) {
 					showToast("事件发送失败\n"+prettyError(e), 'error');
 				}
@@ -67,5 +69,11 @@ export class EventBus {
 		}
 
 		return Promise.all(x);
+	}
+
+	fire(event, data) {
+		const promise = this.post(event, data);
+		this.delete(event, true);
+		return promise;
 	}
 }

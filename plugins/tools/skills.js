@@ -2,9 +2,9 @@ import {getToolParameters, parseFrontmatter, registerToolset} from "/src/toolset
 import {debugSymbol} from "unconscious";
 import {fileAccess} from "./fileAccess.js";
 import skillDescription from './skill-description.md?raw';
-import {createAsyncQueue} from "/src/utils/pure-utils.js";
+import {createAsyncQueue} from "/common/pure-utils.js";
 
-const SKILL_CACHE = debugSymbol("SkillCache");
+const SKILL_INFO = debugSymbol("Skills");
 const glob = fileAccess("list");
 const readFile = fileAccess("read");
 const writeFile = fileAccess("write");
@@ -27,7 +27,7 @@ Skills provide specialized capabilities and domain knowledge.`,
 		required: ["name"]
 	},
 	async script({name}, a, conv) {
-		const cache = (await initSkillCache(conv)).index;
+		const cache = (await getSkillCache(conv)).index;
 		const [path, offset] = cache[name] || [];
 		if (!path) {
 			throw 'Skill not found.\nNote: To avoid cache miss, new skills are not loaded automatically, create a new session or reload current session to flush skills.'
@@ -47,8 +47,8 @@ Skills provide specialized capabilities and domain knowledge.`,
 	}
 }
 
-async function initSkillCache(conv) {
-	let skillCache = conv[SKILL_CACHE];
+export async function getSkillCache(conv) {
+	let skillCache = conv[SKILL_INFO];
 	if (!skillCache) {
 		const index = {};
 		let prompt = `<skills>
@@ -87,7 +87,7 @@ Available skills:
 			prompt += metadata.name+":\n"+metadata.description+"\n\n";
 		});
 
-		return conv[SKILL_CACHE] = {
+		return conv[SKILL_INFO] = {
 			index,
 			prompt: prompt + '</skills>'
 		};
@@ -96,11 +96,11 @@ Available skills:
 	return skillCache;
 }
 
-registerToolset("Skills", "技能（挂载点 + 提示词）", [Skill], {
+registerToolset("Skills", "技能", [Skill], {
 	hidden: 'manual',
 	//default: true,
 	async systemPrompt(conv) {
-		let prompt = (await initSkillCache(conv)).prompt;
+		let prompt = (await getSkillCache(conv)).prompt;
 		if (conv.activatedModules.has("Files")) {
 			try {
 				await statFile( {
@@ -113,7 +113,7 @@ registerToolset("Skills", "技能（挂载点 + 提示词）", [Skill], {
 				}, 0, conv);
 			}
 
-			prompt = "<skills>\nRead '~/.skills/CONTRIBUTING.md' before create or modify skills."+prompt.slice(8);
+			prompt = "<skills>\nRead '~/.skills/CONTRIBUTING.md' before change skills or agent definitions."+prompt.slice(8);
 		}
 		return prompt;
 	},

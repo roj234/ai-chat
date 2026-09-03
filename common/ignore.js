@@ -66,7 +66,7 @@ const compilePattern = pattern => {
 };
 
 export class IgnoreMatcher {
-	rules = [["^.trash\\b"],["(?:^|/)\\.git/"],[],[]];
+	rules = [["^\\.trash\\b"],["(?:^|/)\\.git/"],[],[]];
 
 	/**
 	 * @param {string} content

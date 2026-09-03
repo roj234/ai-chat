@@ -3,6 +3,9 @@ import Chart from "/plugins/tools/chart.async.js";
 import {formatDate} from "unconscious/common/Utils.js";
 import {isIDB, listBillingLogs} from "../database.js";
 import {requestBackend} from "../database/remoteDB.js";
+import {LLM_COST_SCALE} from "/backend/sync.js";
+import {showToast} from "../components/Toast.js";
+import {highlightJsonLike} from "../markdown/highlight.js";
 
 // ============ STATE ============
 let allLogs = [];
@@ -41,12 +44,14 @@ function bsearchLT(logs, target) {
 }
 
 function normalizeCachedLog(log) {
-	log.cost /= 1000000;
-	// Currency conversion
-	if (log.currency === "USD") {
-		log.cost /= 0.15;
+	if (log.cost) {
+		log.cost /= LLM_COST_SCALE;
+		// Currency conversion
+		if (log.currency === "USD") {
+			log.cost /= 0.15;
+		}
+		log.currency = "CNY";
 	}
-	log.currency = "CNY";
 	return log;
 }
 
@@ -72,15 +77,10 @@ const formatNumber = n => {
 	return n.toLocaleString('en-US', { maximumFractionDigits: 0 });
 };
 
-const formatCost = (c, currency) => {
+const formatCostTbl = (c, currency) => {
 	if (c == null || isNaN(c)) return '—';
 	const sym = currency === 'CNY' ? '¥' : '$';
-	if (c) {
-		if (Math.abs(c) < 0.001) return sym + c.toFixed(6);
-		if (Math.abs(c) < 0.01) return sym + c.toFixed(5);
-		if (Math.abs(c) < 1) return sym + c.toFixed(4);
-	}
-	return sym + c.toFixed(3);
+	return sym + c.toFixed(6);
 };
 
 const formatDuration = ms => {
@@ -98,28 +98,16 @@ const formatTime = ts => {
 };
 
 function getFinishBadge(reason) {
-	if (typeof reason !== "string") return <span className="badge badge-neutral">{reason}</span>;
 	const r = reason.toLowerCase();
-	if (r === 'stop' || r === 'end_turn') return <span className="badge badge-success">stop</span>;
-	if (r === 'length' || r === 'max_tokens') return <span className="badge badge-warning">length</span>;
-	if (r.includes('tool')) return <span className="badge badge-info">{reason}</span>;
-	if (r === 'error' || r === 'content_filter') return <span className="badge badge-error">{reason}</span>;
-	return <span className="badge badge-neutral">{reason}</span>;
+	if (r === 'stop' || r === 'end_turn') return <span className="badge success">stop</span>;
+	if (r === 'length' || r === 'max_tokens') return <span className="badge warning">length</span>;
+	if (r.includes('tool')) return <span className="badge info">{reason}</span>;
+	if (r === 'error' || r === 'content_filter') return <span className="badge error">{reason}</span>;
+	return <span className="badge neutral">{reason}</span>;
 }
 
-function escapeHtml(str) {
-	const div = document.createElement('div');
-	div.textContent = str;
-	return div.innerHTML;
-}
-
-function showToast(msg, isError = false) {
-	$toast.textContent = msg;
-	$toast.className = 'toast ' + (isError ? 'error' : '') + ' show';
-	clearTimeout($toast._timeout);
-	$toast._timeout = setTimeout(() => {
-		$toast.className = 'toast';
-	}, 2500);
+function showToast_(msg, isError = false) {
+	showToast(msg, isError ? 'error': '', 2500);
 }
 
 // ============ TIME RANGE ============
@@ -171,38 +159,34 @@ const setPresetRange = range => {
 };
 
 // ============ API CALL ============
-const fetchPrices = () => requestBackend("database/fetch", {"method": "POST"});
+const fetchPrices = () => requestBackend("database/fetch", {"method": "POST"}).then(() => cachedLogs.length = 0);
 
 const BATCH_LIMIT = 5000;
 // 这些函数假设毫秒时间戳是unique的了……也许哪天我真拿time做主键呢/doge
 
-const realFetchLogs = async (start, end) => {
-	const dbLogs = [];
+const realFetchLogs = async (start, end, callback) => {
 	let cursor;
 
-	while (dbLogs.length < MAX_CACHE_SIZE) {
+	while (true) {
 		const logs = await listBillingLogs(start, end, cursor);
 
-		for (const log of logs) {
-			dbLogs.push(normalizeCachedLog(log));
-		}
+		logs.forEach(normalizeCachedLog)
+		callback(logs);
 
 		if (logs.length < BATCH_LIMIT) break;
 
 		const last = logs.at(-1);
-		cursor = last.rowid;
+		cursor = last.id;
 		end = last.time - 1;
 		if (end <= start) break;
 	}
-
-	return dbLogs;
 };
 
 async function fetchLogs() {
 	const [ start, end ] = getTimeRange();
 
 	if (cachedLogs.length === 0) {
-		cachedLogs = await realFetchLogs(start, end);
+		await realFetchLogs(start, end, logs => cachedLogs.push(...logs));
 	} else {
 		const newestCachedTime = cachedLogs[0].time;
 		const oldestCachedTime = cachedLogs.at(-1).time;
@@ -210,10 +194,10 @@ async function fetchLogs() {
 		const promises = [];
 
 		if (end > newestCachedTime) {
-			promises.push(realFetchLogs(Math.max(start, newestCachedTime+1), end).then(logs => logs.forEach(log => cachedLogs.unshift(log))));
+			promises.push(realFetchLogs(Math.max(start, newestCachedTime+1), end, logs => cachedLogs.unshift(...logs)));
 		}
 		if (start < oldestCachedTime) {
-			promises.push(realFetchLogs(start, Math.min(end, oldestCachedTime-1)).then(logs => logs.forEach(log => cachedLogs.push(log))));
+			promises.push(realFetchLogs(start, Math.min(end, oldestCachedTime-1), logs => cachedLogs.push(...logs)));
 		}
 
 		await Promise.all(promises);
@@ -229,10 +213,11 @@ async function fetchLogs() {
 
 // ============ DATA PROCESSING ============
 function processLogs(logs) {
-	return logs.map(log => ({
-		...log,
-		total_tokens: (log.input_tokens || 0) + (log.output_tokens || 0) + (log.cached_tokens || 0),
-	}));
+	logs.forEach(log => {
+		const total_tokens = (log.input_tokens || 0) + (log.output_tokens || 0) + (log.cached_tokens || 0);
+		if (total_tokens) log.total_tokens = total_tokens;
+	});
+	return logs;
 }
 
 function updateFilters() {
@@ -249,15 +234,10 @@ function updateFilters() {
 	const currentModel = $filterModel.value;
 	const currentFR = $filterFinishReason.value;
 
-	$filterProvider.innerHTML = '<option value="">全部渠道</option>' +
-		[...providers].sort().map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`)
-			.join('');
-	$filterModel.innerHTML = '<option value="">全部模型</option>' +
-		[...models].sort().map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join(
-			'');
-	$filterFinishReason.innerHTML = '<option value="">全部状态</option>' +
-		[...finishReasons].sort().map(r =>
-			`<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');
+	const mapToOption = p => <option value={p}>{p}</option>;
+	$filterProvider.replaceChildren(<option value="">全部渠道</option>, ...[...providers].sort().map(mapToOption));
+	$filterModel.replaceChildren(<option value="">全部模型</option>, ...[...models].sort().map(mapToOption));
+	$filterFinishReason.replaceChildren(<option value="">全部状态</option>, ...[...finishReasons].sort().map(mapToOption));
 
 	$filterProvider.value = providers.has(currentProv) ? currentProv : '';
 	$filterModel.value = models.has(currentModel) ? currentModel : '';
@@ -318,7 +298,6 @@ function updateStats() {
 	const cachedTokens = logs.reduce((s, l) => s + (l.cached_tokens || 0), 0);
 	const cacheWriteTokens = logs.reduce((s, l) => s + (l.cache_write_tokens || 0), 0);
 	const totalCost = logs.reduce((s, l) => s + (l.cost || 0), 0);
-	const currency = logs.length > 0 ? (logs[0].currency || 'USD') : 'USD';
 	const avgDuration = total > 0 ? logs.reduce((s, l) => s + (l.duration || 0), 0) / total : 0;
 	const avgTTFT = total > 0 ? logs.reduce((s, l) => s + (l.latency || 0), 0) / total : 0;
 	const cacheHitRate = (inputTokens + cachedTokens) > 0 ? cachedTokens / (inputTokens + cachedTokens) *
@@ -326,15 +305,14 @@ function updateStats() {
 
 	statTotalRequests.textContent = formatNumber(total);
 	statInputTokens.textContent = formatNumber(inputTokens);
-	statInputTokensSub.textContent = reasoningTokens > 0 ?
-		`平均: ${formatNumber(Math.round(inputTokens / total))}/${formatNumber(Math.round(outputTokens / total))}tok/次` : '';
+	statInputTokensSub.textContent = outputTokens > 0 ?
+		`平均每次 ${formatNumber(Math.round(inputTokens / total))}↑ ${formatNumber(Math.round(outputTokens / total))}↓` : '';
 	statOutputTokens.textContent = formatNumber(outputTokens);
 
 	statReasoningTokens.textContent = `${formatNumber(reasoningTokens)}`;
 
-	statTotalCost.textContent = formatCost(totalCost, currency);
-	statTotalCostSub.textContent = total > 0 ?
-		`平均: ${formatCost(totalCost / total, currency)}/请求` : '';
+	statTotalCost.textContent = '¥'+totalCost.toFixed(2);
+	statTotalCostSub.textContent = total > 0 ? `平均每次 ${formatCostTbl(totalCost / total, 'CNY')}` : '';
 	statAvgDuration.textContent = formatDuration(avgDuration);
 	statAvgTTFT.textContent = formatDuration(avgTTFT);
 	statCachedTokens.textContent = formatNumber(cachedTokens);
@@ -378,7 +356,7 @@ function aggregateLogs(logs) {
 	else bucketDur = 7 * 86400 * 1000;
 
 	// Create empty buckets
-	for (let t = start; t <= end; t += bucketDur) {
+	for (let t = start; ; t += bucketDur) {
 		const label = getBucketLabel(t, bucketSize);
 		buckets.set(label, {
 			label,
@@ -391,6 +369,8 @@ function aggregateLogs(logs) {
 			cost: 0,
 			requests: 0,
 		});
+
+		if (t >= end) break;
 	}
 
 	// Fill buckets
@@ -398,6 +378,10 @@ function aggregateLogs(logs) {
 		const logTime = log.time || 0;
 		const label = getBucketLabel(logTime, bucketSize);
 		let b = buckets.get(label);
+		if (!b) {
+			console.log("error could not found", label);
+			return;
+		}
 		b.input_tokens += (log.input_tokens || 0);
 		b.output_tokens += (log.output_tokens || 0);
 		b.reasoning_tokens += (log.reasoning_tokens || 0);
@@ -413,11 +397,12 @@ function aggregateLogs(logs) {
 
 function updateCharts() {
 	const { bucketArr, bucketSize } = aggregateLogs(filteredLogs);
+	const LOG_ZERO = 0.1;
 	const labels = bucketArr.map(b => b.label);
-	const inputData = bucketArr.map(b => b.input_tokens);
-	const outputData = bucketArr.map(b => b.output_tokens);
-	const reasoningData = bucketArr.map(b => b.reasoning_tokens);
-	const cachedData = bucketArr.map(b => b.cached_tokens);
+	const inputData = bucketArr.map(b => Math.max(b.input_tokens, LOG_ZERO));
+	const outputData = bucketArr.map(b => Math.max(b.output_tokens, LOG_ZERO));
+	const reasoningData = bucketArr.map(b => Math.max(b.reasoning_tokens, LOG_ZERO));
+	const cachedData = bucketArr.map(b => Math.max(b.cached_tokens, LOG_ZERO));
 	const costData = bucketArr.map(b => b.cost);
 	const requestData = bucketArr.map(b => b.requests);
 
@@ -431,7 +416,7 @@ function updateCharts() {
 	const colors = [
 		{ label: '输入', color: '#4d94ff', data: inputData },
 		{ label: '输出', color: '#3db87b', data: outputData },
-		{ label: '缓存', color: '#3cc8c8', data: cachedData },
+		{ label: '缓存 (对数)', color: '#3cc8c8', data: cachedData },
 	];
 	if (reasoningData.some(v => v > 0)) {
 		colors.splice(2, 0, { label: '思考', color: '#9b7ef0', data: reasoningData });
@@ -450,6 +435,7 @@ function updateCharts() {
 			pointBackgroundColor: c.color,
 		});
 	});
+	datasets.at(-1).yAxisID = 'y1';
 
 	tokenChartInstance = new Chart(tokenCtx, {
 		type: 'line',
@@ -483,20 +469,30 @@ function updateCharts() {
 			scales: {
 				x: {
 					ticks: {
-						color: '#6b7385',
+						color: '#94A3B8',
 						maxRotation: 45,
 						font: { size: 10 },
 					},
-					grid: { color: '#2a304080', drawBorder: false },
+					grid: { color: '#323a4a' },
 				},
 				y: {
 					ticks: {
-						color: '#6b7385',
+						color: '#94A3B8',
 						font: { size: 10 },
 						callback: formatNumber,
 					},
-					grid: { color: '#2a304080', drawBorder: false },
-					beginAtZero: true,
+					grid: { color: '#323a4a' },
+				},
+				y1: {
+					position: 'right',
+					type: "logarithmic",
+					min: LOG_ZERO,
+					ticks: {
+						color: '#3cc8c8',
+						font: { size: 10 },
+						callback: formatNumber,
+					},
+					grid: { drawOnChartArea: false },
 				},
 			},
 		},
@@ -523,7 +519,7 @@ function updateCharts() {
 					order: 2,
 				},
 				{
-					label: '请求',
+					label: '调用',
 					data: requestData,
 					type: 'line',
 					borderColor: '#4d94ff',
@@ -545,7 +541,7 @@ function updateCharts() {
 				legend: {
 					position: 'top',
 					labels: {
-						color: '#9ba3b5',
+						color: '#94A3B8',
 						usePointStyle: true,
 						font: { size: 11 },
 					},
@@ -560,7 +556,7 @@ function updateCharts() {
 					cornerRadius: 8,
 					callbacks: {
 						label: (ctx) => {
-							if (ctx.dataset.label.includes('成本')) return `${ctx.dataset.label}: ${formatCost(ctx.raw, currency)}`;
+							if (ctx.dataset.label.includes('成本')) return `${ctx.dataset.label}: ${formatCostTbl(ctx.raw, currency)}`;
 							return `${ctx.dataset.label}: ${formatNumber(ctx.raw)}`;
 						},
 					},
@@ -568,29 +564,26 @@ function updateCharts() {
 			},
 			scales: {
 				x: {
-					ticks: { color: '#6b7385', maxRotation: 45, font: { size: 10 }, },
-					grid: { color: '#2a304080', drawBorder: false },
+					ticks: { color: '#94A3B8', maxRotation: 45, font: { size: 10 }, },
+					grid: { color: '#323a4a' },
 				},
 				y: {
-					type: 'linear',
-					position: 'left',
 					ticks: {
 						color: '#f0a050',
 						font: { size: 10 },
-						callback: (v) => formatCost(v, currency),
+						callback: (v) => "¥"+v.toFixed(2),
 					},
-					grid: { color: '#2a304080', drawBorder: false },
+					grid: { color: '#323a4a' },
 					beginAtZero: true,
 				},
 				y1: {
-					type: 'linear',
 					position: 'right',
 					ticks: {
 						color: '#4d94ff',
 						font: { size: 10 },
 						callback: formatNumber,
 					},
-					grid: { drawOnChartArea: false, drawBorder: false },
+					grid: { drawOnChartArea: false },
 					beginAtZero: true,
 				},
 			},
@@ -608,37 +601,7 @@ let foreachTable = $foreach(renderLogs, (log, i) => {
 
 	const makeDetails = () => <tr className="expand-row-detail">
 		<td colSpan="11">
-			<div className="detail-grid">
-				<div className="detail-item">
-					<span className="detail-label">ID</span>
-					<span className="detail-value">{log.request_id} (#{log.id||log.usage})</span>
-				</div>
-				<div className="detail-item">
-					<span className="detail-label">Tokens</span>
-					<span
-						className="detail-value">{log.input_tokens}{log.cached_tokens && `(+${log.cached_tokens} cached)`}↑ {log.output_tokens}{log.reasoning_tokens && `(${log.reasoning_tokens} reasoning)`}↓</span>
-				</div>
-				{log.cache_write_tokens && <div className="detail-item">
-					<span className="detail-label">缓存写入</span>
-					<span className="detail-value">{log.cache_write_tokens}</span>
-				</div>}
-				<div className="detail-item">
-					<span className="detail-label">延迟与耗时</span>
-					<span className="detail-value">{log.latency}ms{log.duration && ("/"+log.duration+"ms")}</span>
-				</div>
-				<div className="detail-item">
-					<span className="detail-label">渠道和模型</span>
-					<span className="detail-value">{log.provider}:{log.model}</span>
-				</div>
-				<div className="detail-item">
-					<span className="detail-label">成本</span>
-					<span className="detail-value">{log.cost.toFixed(6)} {(currency)}</span>
-				</div>
-				<div className="detail-item">
-					<span className="detail-label">时间戳</span>
-					<span className="detail-value">{new Date(log.time).toISOString()}</span>
-				</div>
-			</div>
+			<pre dangerouslySetInnerHTML={highlightJsonLike(log)} style={"margin:0"} />
 		</td>
 	</tr>;
 
@@ -652,10 +615,10 @@ let foreachTable = $foreach(renderLogs, (log, i) => {
 		<td className="mono" style="text-align:right;font-weight:600;color:#e8ecf1">{formatNumber(totalTok)}</td>
 		<td className="mono" style="text-align:right;font-size:12px">{cachedInfo}</td>
 		<td className="mono"
-			style="text-align:right;font-weight:600;color:#f0c060">{formatCost(log.cost, currency)}</td>
+			style="text-align:right;font-weight:600;color:#f0c060">{formatCostTbl(log.cost, currency)}</td>
 		<td className="mono" style="text-align:right;color:#e0a870">{log.duration == null ? "非流" : formatDuration(log.duration)}</td>
 		<td className="mono" style="text-align:right;color:#e890b0">{formatDuration(log.latency)}</td>
-		<td>{getFinishBadge(log.finish_reason)}</td>
+		<td style="text-align:center">{getFinishBadge(log.finish_reason)}</td>
 	</tr>;
 	return self;
 });
@@ -673,7 +636,7 @@ function renderTable() {
 					<div class="state-message">
 						<div class="state-icon">📭</div>
 						<div class="state-title">暂无数据</div>
-						<div class="state-desc">所选时间范围内没有匹配的请求日志</div>
+						<div class="state-desc">所选时间范围内没有匹配的调用日志</div>
 					</div>
 				</td>
 			</tr>
@@ -692,7 +655,7 @@ function renderTable() {
 	let pagBtnsHtml = [];
 	pagBtnsHtml.push(<button className="page-btn" onClick={goToPage.bind(null, currentPage - 1)}
 							 disabled={currentPage <= 1}>◀</button>);
-	const maxVisible = 7;
+	const maxVisible = 5;
 	let pStart = Math.max(1, currentPage - Math.floor(maxVisible / 2));
 	let pEnd = Math.min(totalPages, pStart + maxVisible - 1);
 	if (pEnd - pStart < maxVisible - 1) pStart = Math.max(1, pEnd - maxVisible + 1);
@@ -729,7 +692,7 @@ const toggleRow = async (log, row, makeDetails) => {
 		if (!log.request_id) {
 			const fullLog = (await requestBackend(`batch`, {
 				method: 'POST',
-				body: [["log/by-rowid", log.rowid]]
+				body: [["log/by-rowid", log.id]]
 			}))[0];
 			if (fullLog) {
 				normalizeCachedLog(fullLog);
@@ -751,43 +714,35 @@ const goToPage = page => {
 	$tableScroll.scrollTop = 0;
 };
 
-const toggleAutoRefresh = () => {
-	if (autoRefreshInterval) {
-		clearInterval(autoRefreshInterval);
-		autoRefreshInterval = null;
-		$autoRefreshBtn.classList.remove('btn-active');
-	} else {
-		autoRefreshInterval = setInterval(() => document.visibilityState === 'visible' && refreshData(true), 1000);
-		$autoRefreshBtn.classList.add('btn-active');
-		showToast('自动刷新已开启（1秒间隔）');
-	}
-};
+document.addEventListener("visibilitychange", ev => {
+	document.visibilityState === 'visible' && refreshData(true);
+});
 
 const refreshData = async (auto) => {
 	$refreshIndicator.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #6b7385;border-top-color:#4d94ff;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:4px;"></span> 加载中...';
 	try {
 		const logs = await fetchLogs();
-		if (auto && logs.length === allLogs.length) {
+		if (auto === true && logs.at(-1) === allLogs.at(-1)) {
 
 		} else {
 			allLogs = processLogs(logs);
 			updateFilters();
 			applyFilters();
-			showToast(`成功加载 ${logs.length} 条日志`);
+			showToast_(`成功加载 ${logs.length} 条日志`);
 		}
 		const now = new Date();
 		$refreshIndicator.innerHTML = `更新于 ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
 	} catch (err) {
 		console.error('获取日志失败:', err);
 		$refreshIndicator.innerHTML = '<span style="color:#e0556a">⚠ 加载失败</span>';
-		showToast('加载失败: ' + err.message, true);
+		showToast_('加载失败: ' + err.message, true);
 		if (allLogs.length === 0) {
 			$tableBody.replaceChildren(<tr>
 				<td colSpan="11">
 					<div className="state-message">
 						<div className="state-icon">⚠️</div>
 						<div className="state-title">加载失败</div>
-						<div className="state-desc">${escapeHtml(err.message)}</div>
+						<div className="state-desc">{err.message}</div>
 						<button className="btn btn-sm btn-primary" onClick={refreshData} style="margin-top:8px">🔄
 							重试
 						</button>
@@ -836,20 +791,14 @@ const topBar = () => {
 			/>
 			<span className="top-bar-spacer"></span>
 			<span className="refresh-indicator" ref={$refreshIndicator}></span>
-			{!isIDB && <>
-				<button className="btn btn-sm btn-ghost" onClick={toggleAutoRefresh} ref={$autoRefreshBtn}
-						title="自动刷新">
-					<span>⏱️</span> 自动
-				</button>
-				<button className="btn btn-sm" onClick={({target}) => {
-					target.disabled = true;
-					fetchPrices().then(refreshData).finally(() => {
-						target.disabled = false;
-					})
-				}} title="刷新数据">
-					<span>🔄</span> 刷新
-				</button>
-			</>}
+			<button className="btn btn-sm" onClick={({target}) => {
+				target.disabled = true;
+				(isIDB ? refreshData() : fetchPrices().then(refreshData)).finally(() => {
+					target.disabled = false;
+				})
+			}} title="刷新数据">
+				<span>🔄</span> 刷新
+			</button>
 		</div>
 	);
 }
@@ -858,35 +807,35 @@ const statsGrid = () => {
 		<div className="stats-grid">
 			<div className="stat-card">
 				<div className="stat-icon stat-icon-blue">📊</div>
-				<div className="stat-sub">请求次数</div>
+				<div className="stat-label">调用次数</div>
 				<div className="stat-value" ref={statTotalRequests}>—</div>
 				<div className="stat-sub" ref={statInputTokensSub}></div>
 			</div>
 			<div className="stat-card">
 				<div className="stat-icon stat-icon-green">📥</div>
-				<div className="stat-sub" style="font-size: 14px">输入 Tokens</div>
-				<span className="stat-value" ref={statInputTokens}>—</span>/<span ref={statCachedTokens}>—</span>
+				<div className="stat-label">输入 Tokens</div>
+				<span className="stat-value" title={"未缓存输入"} ref={statInputTokens}>—</span>/<span title={"缓存输入"} ref={statCachedTokens}>—</span>
 				<div className="stat-sub" ref={statCachedTokensSub}></div>
 			</div>
 			<div className="stat-card">
 				<div className="stat-icon stat-icon-purple">📤</div>
-				<div className="stat-sub" style="font-size: 14px">输出 Tokens</div>
-				<span className="stat-value" ref={statOutputTokens}>—</span>/<span ref={statReasoningTokens}>—</span>
+				<div className="stat-label">输出 Tokens</div>
+				<span className="stat-value" title={"总输出"} ref={statOutputTokens}>—</span>/<span title={"思考"} ref={statReasoningTokens}>—</span>
 			</div>
 			<div className="stat-card">
 				<div className="stat-icon stat-icon-cyan">💰</div>
-				<div className="stat-sub">总成本</div>
+				<div className="stat-label">范围内成本</div>
 				<div className="stat-value" ref={statTotalCost}>—</div>
 				<div className="stat-sub" ref={statTotalCostSub}></div>
 			</div>
 			<div className="stat-card">
 				<div className="stat-icon stat-icon-pink">⚡</div>
-				<div className="stat-label">平均延迟</div>
+				<div className="stat-label">平均延迟 (TTFT)</div>
 				<div className="stat-value" ref={statAvgTTFT}>—</div>
 			</div>
 			<div className="stat-card">
 				<div className="stat-icon stat-icon-orange">⏳</div>
-				<div className="stat-label">平均耗时</div>
+				<div className="stat-label">平均耗时 (Duration)</div>
 				<div className="stat-value" ref={statAvgDuration}>—</div>
 			</div>
 		</div>
@@ -909,7 +858,7 @@ const chartCard = () => {
 			<div className="chart-card">
 				<div className="chart-header">
 					<div>
-						<div className="chart-title">成本 & 请求趋势</div>
+						<div className="chart-title">成本 & 调用趋势</div>
 						<div className="chart-subtitle" ref={chartCostSubtitle}>按时间段聚合</div>
 					</div>
 				</div>
@@ -965,7 +914,7 @@ const tableScroll = () => {
 							className="sort-arrow">▾</span></th>
 						<th className="sortable" data-sort="latency" style="text-align:right">延迟 <span
 							className="sort-arrow">▾</span></th>
-						<th data-sort="finish_reason">状态</th>
+						<th data-sort="finish_reason" style={"text-align:center"}>状态</th>
 					</tr>
 					</thead>
 					<tbody ref={$tableBody}>
@@ -974,7 +923,7 @@ const tableScroll = () => {
 							<div className="state-message">
 								<div className="spinner"></div>
 								<div className="state-title">加载中...</div>
-								<div className="state-desc">正在获取请求日志数据</div>
+								<div className="state-desc">正在获取调用日志数据</div>
 							</div>
 						</td>
 					</tr>
@@ -991,17 +940,14 @@ const tableScroll = () => {
 
 // ============ INIT ============
 addEventListener("load", () => {
-	const app = <>
-		<div className="main-container">
-			{topBar()}
-			{statsGrid()}
-			{chartCard()}
-			{filterRow()}
-			{tableScroll()}
-		</div>
-		<div className="toast" ref={$toast}></div>
-	</>;
+	const app = <div className="main-container">
+		{topBar()}
+		{statsGrid()}
+		{chartCard()}
+		{filterRow()}
+		{tableScroll()}
+	</div>;
 
-	document.body.replaceChildren(...app);
+	document.body.replaceChildren(app);
 	setPresetRange('24h');
 }, ONCE_EVENT);

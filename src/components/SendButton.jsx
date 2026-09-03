@@ -8,21 +8,22 @@ import {
 	updateMessageUI
 } from "../states.js";
 import {$computed, $state, $watch, $watchWithCleanup, unconscious} from "unconscious";
-import {TOOL_NAME, toolScriptRegistry} from "../toolset.js";
+import {getToolInteractiveLevel} from "../toolset.js";
 
 import "./ContextUsage.css";
 import {getContextStrokeColor} from "./contextColor.js";
-import {DI} from "../hooks.js";
+import {DI, DID_SEND_BUTTON} from "../hooks.js";
+import {fastObjectMap} from "/common/pure-utils.js";
 
-const x = ["发送", "中止", "继续", "重试", "执行工具"];
-const y = ["ri-send-plane-fill", "ri-square-fill", "ri-play-large-fill", "ri-loop-right-line", "ri-function-ai-line"/* ri-check-double-line */];
-const button_state_map = {
+const x = ["发送", "中止", "继续", "重试", "执行工具", "取消中"];
+const y = ["ri-send-plane-fill", "ri-square-fill", "ri-play-large-fill", "ri-loop-right-line", "ri-function-ai-line", "ri-square-fill spin"];
+const stateMap = fastObjectMap({
 	//stop: 0,
 	interrupt: 2,
 	length: 2,
 	error: 3,
 	tool_calls: 4
-};
+});
 
 export function ContextRing(sendBtn) {
 	const SIZE = 30 + 4 + 4;
@@ -66,7 +67,7 @@ export function ContextRing(sendBtn) {
  * @return {JSX.Element}
  */
 export const createSendButton = (attachments, onSend) => {
-	const sendBtn = DI.sendButton = <button onClick={onSend} />;
+	const sendBtn = DI[DID_SEND_BUTTON] = <button onClick={onSend} />;
 
 	/** @param {number} state */
 	const setIcon = state => {
@@ -76,8 +77,8 @@ export const createSendButton = (attachments, onSend) => {
 
 	const checkAuxActions = () => {
 		const value = unconscious(abortCompletion);
-		setIcon(value ? 1 : 0);
-		if (value) return true;
+		setIcon(value ? value.signal.aborted ? 5 : 1 : 0);
+		if (value) return !value.signal.aborted;
 
 		const last = messages.at(-1);
 		if (!last || selectedConversation.noAI) return false;
@@ -88,20 +89,22 @@ export const createSendButton = (attachments, onSend) => {
 		}
 
 		if (last.role === 'assistant') {
-			let state = button_state_map[last.finish_reason];
+			let state = stateMap[last.finish_reason];
+			const tc = last.tool_calls;
 			if (state == null) {
 				// 手动构造消息
-				if (last.tool_calls?.length) {
-					state = 4;
-				}
+				if (tc?.length) state = 4;
 			}
 			if (!state) return false;
 			setIcon(state);
 
 			if (state === 4) {
-				for (let response of last.tool_responses) {
+				const conv = unconscious(selectedConversation);
+				const tr = last.tool_responses;
+				for (let i = 0; i < tr.length; i++) {
+					const response = tr[i];
 					if (!response) return 0;
-					if (toolScriptRegistry[response[TOOL_NAME]]?.interactive && !response.content)
+					if (getToolInteractiveLevel(response, tc[i], conv) && !response.content)
 						return response.content == null ? null : false;
 				}
 			}

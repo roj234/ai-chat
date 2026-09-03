@@ -1,7 +1,8 @@
-dist
-dist-app
-data
-node_modules
-public/assets
-misc
-vendor
+/dist
+/dist-app
+/data
+/backend/config.js
+node_modules/
+/public/assets/
+/misc
+/vendor/

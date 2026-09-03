@@ -65,7 +65,7 @@ function createList() {
 		await ensureActiveConversation();
 		const conv = unconscious(selectedConversation);
 		if (!conv.activatedModules) {
-			conv.allowedTools = new Set;
+			conv.tools = new Set;
 			conv.activatedModules = new Set;
 			//await toolScriptRegistry['Use'].script({modules: [...defaultGroups]}, {}, conv);
 			//$update(selectedConversation);
@@ -256,7 +256,7 @@ CUSTOM_CONTROLS.find(el => el.matches(".ri-robot-2-line")).addEventListener("cli
 
 	const ms = conv.activatedModules;
 	if (!ms || (!open && !ms.size)) {
-		conv.allowedTools = new Set;
+		conv.tools = new Set;
 		conv.activatedModules = new Set;
 		await toolScriptRegistry['Use'].script({modules: [...defaultGroups]}, {}, conv);
 		$update(selectedConversation);

@@ -1,16 +1,15 @@
 import {$update, unconscious} from "unconscious";
 import {EVENT_BUS, LOCKED, messages, runningConversations, selectedConversation, updateMessageUI} from "/src/states.js";
 import {getMessagesCacheFirst, updateConversation} from "/src/database.js";
-import {enableBranches} from "/src/utils/BranchManager.js";
 import {submitUserChatMessage} from "./api-request.js";
 
 /**
  * 向会话注入消息。
  *
  * @param {AiChat.Conversation} conv
- * @param {AiChat.Message[]} items
+ * @param {AiChat.Message} items
  */
-export const appendMessages = async (conv, items) => {
+export const injectMessages = async (conv, ...items) => {
 	if (conv[LOCKED]) return;
 
 	if (runningConversations.has(conv.id)) {
@@ -19,8 +18,9 @@ export const appendMessages = async (conv, items) => {
 		return false;
 	}
 
-	const cached = await getMessagesCacheFirst(conv, false);
-	const msgs = conv.bm_leaf ? enableBranches(conv, cached) : cached;
+	const msgs = await getMessagesCacheFirst(conv);
+	if (msgs.at(-1)?.error) return false;
+
 	const last =  msgs.at(-1);
 	msgs.push(...items);
 	await updateConversation(conv, msgs);
@@ -35,6 +35,7 @@ export const appendMessages = async (conv, items) => {
 		}
 	}
 
+	EVENT_BUS.post(['injectMessage'], conv);
 	return true;
 };
 

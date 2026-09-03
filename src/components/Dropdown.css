@@ -21,6 +21,10 @@
             background-color: var(--chip-hover);
         }
     }
+
+    & .text-input {
+        border-radius: 0;
+    }
 }
 
 .filter { border: none; }

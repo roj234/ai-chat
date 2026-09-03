@@ -1,7 +1,7 @@
 import {ThinkBlock} from "./ThinkBlock.jsx";
 import {ToolCallCard} from "./ToolCallCard.jsx";
 import {$computed, $foreach, $state, $update, $watch, AppendObserver, debugSymbol, unconscious} from "unconscious";
-import {formatDate, formatSize} from "unconscious/common/Utils.js";
+import {formatDate, formatSize, prettyTime} from "unconscious/common/Utils.js";
 import {copyCodeEventHandler, renderMarkdownToElement, renderMarkdownToString} from "../markdown/markdown.js";
 import {
 	abortCompletion,
@@ -11,7 +11,8 @@ import {
 	MessageCopyHandler,
 	MessageRoles,
 	messages,
-	PROGRESS,
+	PROGRESS_KIND,
+	PROGRESS_VALUE,
 	selectedConversation,
 	updateMessageUI
 } from "../states.js";
@@ -21,13 +22,14 @@ import {
 	downloadFile,
 	errorBlock,
 	getTextContent,
-	loadingBlock,
+	MORPH_CHILD_FUNCTION,
 	MORPH_CHILD_HANDLER,
 	prettyError
 } from "../utils/utils.js";
 import "./MessageList.css";
+import "./TimelineDivider.css";
 import {getToolParameters, toolScriptRegistry, undoToolCalls} from "../toolset.js";
-import {getBillingLog, markMessageDirty} from "../database.js";
+import {markMessageDirty} from "../database.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
 import {
 	cloneMessage,
@@ -41,13 +43,18 @@ import {ITEM_KEY, PINNED, VirtualList} from "unconscious/common/VirtualList.js";
 import {EditWidget} from "./EditWidget.jsx";
 import {AudioPlayer} from "./AudioPlayer.jsx";
 
-import "./MyLoading.jsx";
 import morphdom from "morphdom";
 import SimpleModal from "./SimpleModal.jsx";
 import {ToolCallEditor} from "./ToolCallEditor.jsx";
+import {StatusPill} from "./StatusPill.jsx";
+import {UsageBlock} from "./UsageBlock.jsx";
 
-const CURRENT_EDITING = debugSymbol("CURRENT_EDITING");
+const CURRENT_EDITING = debugSymbol("EditingNow");
 const isEditing = message => (selectedConversation[CURRENT_EDITING] === message);
+
+const CTC_EXPAND_COUNT = debugSymbol("ExpandedSize");
+const CTC_BASE_COUNT = 50;
+const CTC_EXPAND_ONCE = 50;
 
 /**
  *
@@ -61,7 +68,7 @@ const createBlobDisplay = (blob, className) => {
 		<div className="attach-header">
 			<i className={className}></i>
 			<span className="ellipsis">{blob.name || "文件"}</span>
-			{!deleted && <span className="attach-meta ellipsis">{formatSize(blob.size)}, {blob.type}</span>}
+			{!deleted && <span className="attach-meta ellipsis">{formatSize(blob.size)}, {prettyTime(blob.lastModified)}上传</span>}
 		</div>
 		<button className="btn" disabled={deleted}
 				onClick={() => downloadFile(blob)}>
@@ -82,7 +89,7 @@ const chunkRenderer = m => {
 		switch (item.type) {
 			default: {
 				let {error, title} = item;
-				if (!error) return errorBlock(item, "AssertError");
+				if (!error) return errorBlock(item, "不支持渲染");
 				if (typeof error !== "string") error = prettyError(error);
 				if (title) return errorBlock(error, title);
 
@@ -93,8 +100,23 @@ const chunkRenderer = m => {
 				let element = item.html;
 				if (typeof element === "function") element = element();
 				return typeof element === "string" ? <div dangerouslySetInnerHTML={item.html} /> : element;
-			case "loading":
-				return loadingBlock(<my-loading text={item.text} />, item.progress);
+			case "progress":return <StatusPill {...item} />;
+			case "divider": {
+				const el = <div className="timeline-divider">
+					<button onClick={() => {
+						const message = m.key;
+						message[CTC_EXPAND_COUNT] = (message[CTC_EXPAND_COUNT]||0) + CTC_EXPAND_ONCE;
+						$update(updateMessageUI);
+					}}>
+						<span className={"ri-stack-line"} />
+						展开余下 <span className="white">{item.steps}</span> 轮
+					</button>
+				</div>;
+				el[MORPH_CHILD_FUNCTION] = (key, node) => {
+					node.querySelector('.white').textContent = key.steps;
+				};
+				return el;
+			}
 			case "input_audio": {
 				const src = item.input_audio.data;
 				if (src.size < 0) return createBlobDisplay(src, "ri-file-music-line");
@@ -133,8 +155,14 @@ const chunkRenderer = m => {
 			}
 			case "images":
 				return <div className="gallery">{item.images.map(part => {
-					const url = part.image_url?.url;
-					return url && <img src={url.toUrl?.() || url}/>;
+					const blob = part.image_url?.url;
+					const src = blob.toUrl?.() || blob;
+					return blob && <img src={src} alt={blob.name || '图片'} onClick={e => {
+						SimpleModal({
+							title: "图像预览",
+							message: <img src={src} />
+						})
+					}} />;
 				})}</div>;
 			case "think":
 				return <ThinkBlock message={item} edit={isEditing(m.key)}/>;
@@ -148,106 +176,18 @@ const chunkRenderer = m => {
 					return errorBlock(e, "工具UI渲染失败");
 				}
 			case "usage":
-				const logData = $state("加载中");
-
-				return (<div className="stats" onMouseEnter.once={() => {
-					Promise.all(messages.slice(m.index, m.end_index).map(m => m.log||getBillingLog(m.id))).then((logs) => {
-						let totalInput = 0;
-						let totalCacheRead = 0;
-						let totalOutput = 0;
-						let totalReasoning = 0;
-						let totalCacheWrite = 0;
-						let totalCost = 0;
-						let totalTime = 0;
-
-						logs.forEach(item => {
-							if (!item) return;
-
-							let {
-								input_tokens = 0, cached_tokens = 0, output_tokens = 0, reasoning_tokens = 0, cache_write_tokens = 0,
-								cost = 0, duration = 0
-							} = item;
-
-							duration /= 1000;
-
-							totalInput += input_tokens;
-							totalCacheRead += cached_tokens;
-							totalOutput += output_tokens;
-							totalReasoning += reasoning_tokens;
-							totalCacheWrite += cache_write_tokens;
-							totalCost += cost / 1000000;
-							totalTime += duration;
-						});
-
-						const log = logs[0];
-						if (!log) {
-							logData.value = "无记录";
-							return;
-						}
-						logData.value = [
-							totalInput,
-							totalCacheRead,
-							totalOutput,
-							totalReasoning,
-							totalCacheWrite,
-							log.time,
-							log.latency / 1000,
-							totalTime,
-							totalCost,
-							log.currency,
-							totalOutput / totalTime,
-							logs.findLast(Boolean)?.finish_reason
-						];
-					}, (err) => {
-						logData.value = "错误："+prettyError(err)
-					});
-				}} style={"--height:"+(30 + (m.end_index-m.index)*64)+"px"}>
-					<i className="ri-information-line"></i>
-					<div className="stats-popover">
-						{() => {
-							const item = unconscious(logData);
-							if (typeof item !== 'object') return <div className="stats-row"><div className="stats-row-top">{item || "数据暂缺"}</div></div>;
-
-							let [
-								input_tokens, cached_tokens, output_tokens, reasoning_tokens, cache_write_tokens,
-								time, latency, duration, cost, currency, tps, finish_reason
-							] = item;
-
-							return <div className="stats-row">
-								<div className="stats-row-top">
-									<span className="tps">
-										{tps ? tps.toFixed(2)+" TPS" : finish_reason}
-									</span>
-									&nbsp;
-									<span className="timestamp" title={`开始于: ${formatDate('Y-m-d H:i:s', time)}\n首字延迟: ${latency.toFixed(2)}s`}>
-										{duration.toFixed(2)}s
-									</span>
-								</div>
-								<div className="stats-row-bottom">
-									{input_tokens ? <span>↑ <b>{input_tokens}{cached_tokens?` (+${cached_tokens})`:null}</b> Tokens</span> : null}
-									{output_tokens ? <span title={"缓存写入: " + cache_write_tokens}>↓ <b>{output_tokens}{reasoning_tokens?` (${reasoning_tokens} 思考)`:null}</b> Tokens</span> : null}
-									{cost ? (<span>价格: <b>{currency === 'CNY' ? '￥' : '$'}{cost.toFixed(6)}</b></span>) : null}
-								</div>
-							</div>;
-						}}
-					</div>
-				</div>);
+				return UsageBlock(m);
 			case "branch":
 				return (
 					<div className="branch-selector" onClick.delegate{'button'}={({delegateTarget}) => {
-						// TODO 到时候隐藏按钮
-						if (unconscious(abortCompletion)) return;
-
 						const branchIndex = item.current + parseInt(delegateTarget.dataset.step);
 						if (item.callback) item.callback(branchIndex);
 						else setBranchIndex(m.key, branchIndex);
 					}}>
-								<button data-step="-1" className="ri-play-reverse-fill" title="上一版本"
-										disabled={item.current === 0}></button>
-								<span className="branch-count">{item.current+1} / {item.total}</span>
-								<button data-step="1" className="ri-play-fill" title="下一版本"
-										disabled={item.current === item.total-1}></button>
-							</div>);
+						<button data-step="-1" className="ri-play-reverse-fill" title="上一版本" disabled={() => item.current === 0 || unconscious(abortCompletion)}></button>
+						<span className="branch-count">{item.current+1} / {item.total}</span>
+						<button data-step="1" className="ri-play-fill" title="下一版本" disabled={() => item.current === item.total - 1 || unconscious(abortCompletion)}></button>
+					</div>);
 		}
 	}, chunkKeyFunc.bind(currentKeys,m), {
 		morphChild: MORPH_CHILD_HANDLER,
@@ -381,7 +321,7 @@ function chunkKeyFunc(message, chunk) {
 
 	switch (type) {
 		default: keys.push(type); break;
-		case "loading": keys.push(chunk.progress); break;
+		case "progress": keys.push(chunk.data); break;
 		case "error": keys.push("error", chunk.error); break;
 		case "text": {
 			keys.push(chunk.text);
@@ -492,7 +432,7 @@ function updateButtons(m, container) {
 			if (!key.think) {
 				buttons.push(insertThinkBtn);
 			}
-			if (config.modalities.includes("tool_ui") || key.tool_responses) {
+			if (config.modalities.includes("tool") || key.tool_responses) {
 				buttons.push(insertToolBtn);
 			}
 		}
@@ -751,6 +691,7 @@ const combinedMessages = $computed((oldMessages) => {
 			content: chunks,
 		};
 
+		const initSize = chunks.length;
 		chunkGather(message, chunks, i, arr);
 
 		i++;
@@ -761,10 +702,20 @@ const combinedMessages = $computed((oldMessages) => {
 
 		if (message.role === "assistant") {
 			if (config.combineToolCalls) {
+				const maxSize = initSize + CTC_BASE_COUNT + (message[CTC_EXPAND_COUNT] ?? 0);
+
 				for (; i < arr.length; i++) {
 					if (!message.tool_calls || isEditing(arr[i]) || arr[i].role !== "assistant") break;
 					message = arr[i];
 					chunkGather(message, chunks, i, arr);
+				}
+
+				const removeCount = chunks.length - maxSize;
+				if (removeCount > 0) {
+					chunks.splice(initSize, removeCount, {
+						type: "divider",
+						steps: removeCount
+					});
 				}
 			}
 
@@ -774,9 +725,7 @@ const combinedMessages = $computed((oldMessages) => {
 
 			generationEnded = message.finish_reason !== '';
 			ref[PINNED] = !generationEnded || isEditing(message);
-			if (!generationEnded) {
-				if (!message.time || (!message.content && !message.think && !message.tool_calls)) chunks.push({ type: "loading", progress: message[PROGRESS] });
-			}
+			if (!generationEnded) chunks.push({ type: "progress", kind: message[PROGRESS_KIND], data: message[PROGRESS_VALUE] });
 			// show token usage & billing
 			else {
 				// 手动添加的消息不显示usage
@@ -856,7 +805,7 @@ export function MessageList() {
 		const callback = () => updateButtons(m, buttons);
 		const buttonDiv = <div className={"btn-line"}><span ref={buttons}></span></div>;
 		const isAI = !selectedConversation.noAI;
-		const div = <div onMouseEnter={callback} onTouchStart.passive={callback} className={`msg ${role} ${config.messageTheme||''}`} _identity={m}>
+		const div = <div onMouseEnter={callback} onTouchStart.passive={callback} className={`msg ${role}`} _identity={m}>
 			<div className={"role"}>
 				{isEditing(m.key) && isAI && roleSelection.includes(m.role) ? <select onChange={e => {
 					const realMessage = m.key;

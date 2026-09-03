@@ -50,7 +50,7 @@ const deleteSelected = () => {
 };
 
 const toggleAll = master => {
-	table.querySelectorAll('.row-check').forEach(chk => chk.checked = master.checked);
+	table.querySelectorAll('.row-check:not(.named)').forEach(chk => chk.checked = master.checked);
 };
 
 const changePage = delta => {
@@ -83,7 +83,7 @@ const container = <div className={"modal-overlay"}>
 			<table>
 				<thead>
 				<tr>
-					<th width="30"><input type="checkbox" ref={selectAllBtn} onClick={({target}) => toggleAll(target)}/></th>
+					<th width="30"><input type="checkbox" ref={selectAllBtn} title={"选择/反选不具名项(临时文件)"} onClick={({target}) => toggleAll(target)}/></th>
 					<th>预览</th>
 					<th>Hash</th>
 					<th>类型</th>
@@ -98,7 +98,7 @@ const container = <div className={"modal-overlay"}>
 					const blobUrl = `${config.db_server}blob/${item.hash}`;
 
 					return <tr>
-						<td><input className={"row-check"} type="checkbox" value={item.hash} /></td>
+						<td><input className={"row-check"+(item.name?" named":"")} type="checkbox" value={item.hash} /></td>
 						<td>{isImg ? <img src={blobUrl} onClick={() => showFull(blobUrl)}/> : '-'}</td>
 						<td style="text-align:left;word-break:break-all;font-size:14px">{item.name}<br/>{item.hash}</td>
 						<td>{item.type}</td>

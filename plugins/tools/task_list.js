@@ -1,5 +1,5 @@
 import {getToolParameters, registerToolset, updateConversationState, watchConversationState} from "/src/toolset.js";
-import {config, messages, onConversationLoaded, selectedConversation} from "/src/states.js";
+import {config, messages, onConversationSwitchTo, selectedConversation} from "/src/states.js";
 import {$computed, $foreach, $state, unconscious} from "unconscious";
 import "./task_list.css";
 
@@ -103,7 +103,7 @@ registerToolset(
 	}
 );
 
-onConversationLoaded((conv) => {
+onConversationSwitchTo((conv) => {
 	let done_r = $state(),
 		success_r = $state(),
 		failed_r = $state(),

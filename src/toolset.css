@@ -64,33 +64,3 @@
     font-style: italic;
     gap: 4px;
 }
-
-/* Loading 样式 */
-.think {
-    & .my-loading {
-        display: flex;
-        gap: 10px;
-        padding: 8px 12px;
-        border-radius: 8px;
-        cursor: inherit;
-        font-size: 14px;
-        letter-spacing: 1px;
-    }
-
-    /* 闪烁的呼吸点 */
-    & .status-dot {
-        width: 8px;
-        height: 8px;
-        background-color: var(--accent);
-        border-radius: 50%;
-        position: relative;
-        box-shadow: 0 0 8px rgba(59, 130, 246, 0.6);
-        animation: pulse 1.5s infinite ease-in-out;
-    }
-}
-
-@keyframes pulse {
-    0% { transform: scale(0.95); opacity: 0.5; }
-    50% { transform: scale(1.2); opacity: 1; box-shadow: 0 0 12px rgba(59, 130, 246, 0.9); }
-    100% { transform: scale(0.95); opacity: 0.5; }
-}

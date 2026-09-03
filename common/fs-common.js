@@ -1,7 +1,180 @@
-import {createAsyncQueue} from "../src/utils/pure-utils.js";
+import {createAsyncQueue} from "./pure-utils.js";
 import {LRUCache} from "./LRUCache.js";
+import {normalizePath} from "unconscious/common/path-utils.js";
+
+// ────────────────────────────────── Glob‑to‑Regex (ported from Globs.java) ──────────────────────────
+
+const REGEX_META_CHARS = new Set('.^$+{}[]|()');
+const GLOB_META_CHARS = new Set('\\*?[{');
+
+const EOL = undefined;
+const next = (glob, i) => i < glob.length ? glob[i] : EOL;
+
+/**
+ * Converts a glob pattern (Unix style) to a RegExp pattern string.
+ * Ported from Globs.toRegexPattern with isDos = false.
+ */
+function globToRegexPattern(globPattern) {
+	let inGroup = false;
+	const regex = ['^'];
+
+	let i = 0;
+	while (i < globPattern.length) {
+		let c = globPattern[i++];
+		switch (c) {
+			case '\\': {
+				if (i === globPattern.length)
+					throw new Error(`No character to escape at position ${i - 1}`);
+				const nextChar = globPattern[i++];
+				if (GLOB_META_CHARS.has(nextChar) || REGEX_META_CHARS.has(nextChar)) regex.push('\\');
+				regex.push(nextChar);
+				break;
+			}
+			case '/': {
+				regex.push('/');
+				break;
+			}
+			case '[': {
+				regex.push('[');
+				if (next(globPattern, i) === '^') {
+					regex.push('\\^');
+					i++;
+				} else {
+					if (next(globPattern, i) === '!') {
+						regex.push('^');
+						i++;
+					}
+					if (next(globPattern, i) === '-') {
+						regex.push('-');
+						i++;
+					}
+				}
+				let hasRangeStart = false;
+				let last = 0;
+				while (i < globPattern.length) {
+					c = globPattern[i++];
+					if (c === ']') break;
+					if (c === '/') throw new Error(`Explicit 'name separator' in class at ${i - 1}`);
+					if (c === '\\' || c === '[') regex.push('\\');
+					regex.push(c);
+					if (c === '-') {
+						if (!hasRangeStart) throw new Error(`Invalid range at ${i - 1}`);
+						c = next(globPattern, i);
+						if (c === EOL) break;
+						if (c === ']') { i++; break; }
+						if (c < last) throw new Error(`Invalid range at ${i - 3}`);
+						if (c === '\\' || c === '[') regex.push('\\');
+						regex.push(c);
+						i++;
+						hasRangeStart = false;
+					} else {
+						hasRangeStart = true;
+						last = c;
+					}
+				}
+				if (c !== ']') throw new Error('Missing \']\'');
+				regex.push(']');
+				break;
+			}
+			case '{': {
+				if (inGroup) throw new Error(`Cannot nest groups at ${i - 1}`);
+				regex.push('(?:(?:');
+				inGroup = true;
+				break;
+			}
+			case '}': {
+				if (inGroup) {
+					regex.push('))');
+					inGroup = false;
+				} else {
+					regex.push('\\}');
+				}
+				break;
+			}
+			case ',': {
+				if (inGroup) {
+					regex.push(')|(?:');
+				} else {
+					regex.push(',');
+				}
+				break;
+			}
+			case '*': {
+				if (next(globPattern, i) === '*') {
+					regex.push('.*');
+					i++;
+				} else {
+					regex.push('[^/]*');
+				}
+				break;
+			}
+			case '?': {
+				regex.push('[^/]');
+				break;
+			}
+			default: {
+				if (REGEX_META_CHARS.has(c)) regex.push('\\');
+				regex.push(c);
+				break;
+			}
+		}
+	}
+
+	if (inGroup) throw new Error(`Missing '}' at ${i - 1}`);
+
+	regex.push('$');
+	return regex.join('');
+}
+
+const LITERAL_PREFIX = /^(?:\.\/)?([^.^$+{[\]|()*?\/]+\/)+/;
+
+/**
+ *
+ * @param {string} pattern
+ * @param {string} path
+ * @return {undefined | {path: string, prefix: string, segments: ('**'|RegExp)[]}}
+ */
+export function compileGlobPattern(pattern, path) {
+	let prefix = '';
+
+	const match = pattern.match(LITERAL_PREFIX);
+	if (match) {
+		prefix = match[0].slice(0, -1);
+		path += '/' + prefix;
+		pattern = pattern.slice(match[0].length);
+	}
+
+	const segments = normalizePath(pattern).map((segment) => {
+		if (segment === '**') return segment;
+		return new RegExp(globToRegexPattern(segment), 'iu');
+	});
+
+	// 处理空pattern
+	if (!segments.length) return;
+
+	return { path, prefix, segments };
+}
+
+// ────────────────────────────────── Grep and TextFileEditHelper ──────────────────────────
 
 export const GREP_MAX_COLUMNS = 180;
+
+/**
+ * @param {string} pattern
+ * @return {RegExp}
+ */
+export function compileGrepPattern(pattern) {
+	let flag = 'ug';
+	const FETCH_PATTERN = /^\(\?([a-z]+)\)/;
+	const exec = FETCH_PATTERN.exec(pattern);
+	if (exec) {
+		flag = exec[1];
+		if (!/^[iusm]+$/.test(flag)) throw 'Unrecognized flag ' + flag;
+		flag += 'g';
+		pattern = pattern.slice(flag.length + 2);
+	}
+	return new RegExp(pattern, flag);
+}
 
 /**
  *
@@ -17,7 +190,7 @@ export function createTextFileEditHelper(fs) {
 	/**
 	 * @type {Map<string, string[]>}
 	 */
-	const cache = new LRUCache(200);
+	const cache = new LRUCache(254);
 
 	const readLines = async (path, ctx) => {
 		const absPath = fs.absPath(path, ctx);
@@ -166,13 +339,12 @@ export function createTextFileEditHelper(fs) {
 
 		let content = respLines.join('\n') + '\x03';
 		if (truncated || needWarning) {
-			if (truncated) content += `\nTRUNCATED(maxChars): Only ${respLines.length} of ${last - first} (${lineCount} total) lines shown`;
-			if (needWarning) content += `\nOVERFLOW(${needWarning}): Only ${last - first} lines available in requested range (${lineCount} total lines)`;
+			if (truncated) content += `TRUNCATED(maxChars): Only ${respLines.length} of ${last - first} lines shown.\n`;
+			if (needWarning) content += `OVERFLOW(${needWarning}): Only ${last - first} lines available in the range.\n`;
 		} else if (last === lineCount) {
-			content += 'EOF';
-		} else {
-			content += `Total lines: ${lineCount}`;
+			content += 'EOF\n';
 		}
+		content += `totalLines: ${lineCount}`;
 		return content;
 	};
 
@@ -253,21 +425,22 @@ Add more unchanged context and/or correct indentation for this hunk so it identi
 
 			const startLine = newLines.length + 1;
 			const endLine = startLine + Math.max(0, replaceLines.length - 1);
-			msg += `\nChanged lines: ${startLine}-${endLine}`;
+			msg += `\nchangedRange: ${startLine}-${endLine}`;
 
 			newLines.push(...replaceLines);
 			lastIndex = end;
 		}
 		newLines.push(...lines.slice(lastIndex));
 
-		newLines.mtime = Date.now();
 		const absPath = fs.absPath(path, ctx);
 		await fs.write(absPath, newLines.join('\n'), ctx);
+
+		newLines.mtime = Date.now();
 		cache.set(absPath, newLines);
 
 		const delta = newLines.length - lines.length;
 		return msg+`
-Lines: ${lines.length} → ${newLines.length} (${delta > 0 ? '+': ''}${delta})`;
+totalLines: ${newLines.length} (${delta >= 0 ? '+': ''}${delta})`;
 	};
 
 	const countLines = (content) => {
@@ -325,9 +498,12 @@ No changes were written.`);
 				const wholeFile = lines.join('\n');
 				if (wholeFile.indexOf(search) >= 0) {
 					const matchLines = findStringMatchLines(wholeFile, search);
-					throw (`"search" exists outside the requested lines ${actualStart + 1}-${actualEnd}, at line(s) ${formatLineRanges(matchLines, countLines(search))}.
+					if (matchLines.length > 1) {
+						throw (`"search" exists outside the requested lines ${actualStart + 1}-${actualEnd}, at line(s) ${formatLineRanges(matchLines, countLines(search))}.
 Adjust startLine/endLine or omit them.
 No changes were written.`);
+					}
+					return edit({ path, search, replace }, ctx);
 				}
 
 				const reindent = findReindentedMatches(slice, search.split('\n'), replace.split('\n'));
@@ -362,53 +538,55 @@ No changes were written.`;
 			const replaceLines = countLines(effectiveReplace);
 			const originalLines = countLines(effectiveSearch);
 			msg += `
-Changed lines: ${prefixLines}-${prefixLines + Math.max(0, replaceLines - 1)}`;
+changedRange: ${prefixLines}-${prefixLines + Math.max(0, replaceLines - 1)}`;
 			delta = replaceLines - originalLines;
 		}
 
-		newContent = [
-			lines.slice(0, actualStart).join("\n"),
-			newContent,
-			lines.slice(actualEnd).join("\n")
-		].filter(Boolean).join("\n");
+		const newLines = [
+			...lines.slice(0, actualStart),
+			...newContent.split('\n'),
+			...lines.slice(actualEnd)
+		];
 
 		const absPath = fs.absPath(path, ctx);
-		await fs.write(absPath, newContent, ctx);
-		cache.delete(absPath);
+		await fs.write(absPath, newLines.join('\n'), ctx);
+
+		newLines.mtime = Date.now();
+		cache.set(absPath, newLines);
 
 		return msg+`
-Lines: ${lines.length} → ${lines.length + delta} (${delta > 0 ? '+': ''}${delta})`;
+totalLines: ${lines.length + delta} (${delta >= 0 ? '+': ''}${delta})`;
 	};
 
 	const write = async ({ path, content, overwrite }, ctx) => {
 		const absPath = fs.absPath(path, ctx);
-		check:
-		if (!overwrite) {
+		check: {
+			let mtime;
 			try {
-				await fs.mtime(absPath, ctx);
+				mtime = await fs.mtime(absPath, ctx);
 			} catch {
 				break check;
 			}
-			throw 'File already exist, fix name or read it.';
+
+			// 有必要吗？
+			if (!overwrite) throw 'File exists and you never access it, Read or Delete and try again.';
+
+			let cached = cache.get(absPath);
+			// TODO 搞一个 Diff 工具返回本地文件系统和缓存的差异，这样fsync也可以用上了
+			if (cached && cached.mtime < mtime) throw "File was modified since last operation.";
 		}
 		await fs.write(absPath, content, ctx, 1);
-		cache.set(absPath, content.split('\n'));
+
+		const arr = content.split('\n');
+		arr.mtime = Date.now();
+		cache.set(absPath, arr);
 		return 'Success';
 	};
 
 	const del = filePath => cache.delete(filePath);
 
 	const grep = async ({ pattern, path = ".", glob = "**", maxFiles = 50, maxMatchesPerFile = 10, context = 0 }, ctx) => {
-		let flag = 'ug';
-		const FETCH_PATTERN = /^\(\?([a-z]+)\)/;
-		const exec = FETCH_PATTERN.exec(pattern);
-		if (exec) {
-			flag = exec[1];
-			if (!/^[iusm]+$/.test(flag)) throw 'Unrecognized flag '+flag;
-			flag += 'g';
-			pattern = pattern.slice(flag.length+2);
-		}
-		const regExp = new RegExp(pattern, flag);
+		const regExp = compileGrepPattern(pattern);
 
 		let results = '';
 		let matchedFiles = 0;
@@ -419,7 +597,7 @@ Lines: ${lines.length} → ${lines.length + delta} (${delta > 0 ? '+': ''}${delt
 		let files;
 		try {
 			files = await fs.list({path, pattern: glob, json: true}, ctx);
-			path += '/';
+			if (path) path += '/';
 		} catch (e) {
 			if (glob !== '**' && glob !== '*' && path !== glob && !path.endsWith("/"+glob)) throw e;
 			listError = e;
@@ -435,8 +613,7 @@ Lines: ${lines.length} → ${lines.length + delta} (${delta > 0 ? '+': ''}${delt
 
 				let content;
 				try {
-					// TODO 这里可以缓存，但是可能搜索的文件多内存压力大
-					content = await fs.read(fs.absPath(path + relPath, ctx), ctx);
+					content = await fs.read(fs.absPath(path + relPath, ctx));
 				} catch {
 					if (listError) throw listError;
 					return;
@@ -460,6 +637,8 @@ Lines: ${lines.length} → ${lines.length + delta} (${delta > 0 ? '+': ''}${delt
 				for (let i = 1; i <= matches.length; i++) {
 					if (i < matches.length && matches[i] - matches[i-1] <= context * 2) continue;
 
+					if (context && prevI) results += '--\n';
+
 					const start = Math.max(0, matches[prevI] - context);
 					const end = Math.min(lines.length, matches[i-1] + context + 1);
 
@@ -470,6 +649,7 @@ Lines: ${lines.length} → ${lines.length + delta} (${delta > 0 ? '+': ''}${delt
 						if (isMatch) matchIndex++;
 
 						if (line.length > GREP_MAX_COLUMNS) {
+							regExp.lastIndex = 0;
 							line = line.slice(0, GREP_MAX_COLUMNS) + (isMatch
 								? " [... "+[...line.matchAll(regExp)].filter((val) => val.index > GREP_MAX_COLUMNS).length+" more matches]"
 								: " [... omitted end of long line]"
@@ -477,7 +657,6 @@ Lines: ${lines.length} → ${lines.length + delta} (${delta > 0 ? '+': ''}${delt
 						}
 						results += (j+1) + (isMatch ? "\x1F" : "-") + line + '\n';
 					}
-					if (context) results += '---\n';
 					prevI = i;
 				}
 			})

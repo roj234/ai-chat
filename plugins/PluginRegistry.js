@@ -125,7 +125,6 @@ const pluginDefinitions = [
 	{
 		name: "多媒体资源生成工具",
 		description: "提供ComfyUI/SD WebUI文生图工具，以及TTS工具（后者WIP）",
-		defaultEnabled: true,
 		load: registerMultimediaGeneration
 	},
 	{
@@ -141,11 +140,13 @@ const pluginDefinitions = [
 	{
 		name: "远程控制",
 		description: "需要两端都启用，并且被控端设为无人值守模式。",
+		defaultEnabled: true,
 		load: registerRemoteControl
 	},
 	{
 		name: "耗时分析",
 		description: "使用 `/actime` 命令查看当前对话的分析",
+		defaultEnabled: true,
 		load: () => import("./actime/actime.js")
 	},
 	{
