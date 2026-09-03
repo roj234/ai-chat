@@ -47,8 +47,9 @@ const activeRequests = new Map;
 /**
  * 消息引用缓存：hash -> 完整消息对象
  * 命中后客户端无需重复上传历史消息内容，仅引用 hash
+ * @type {LRUCache<string, OpenAI.Message[]>}
  */
-const messageCache = new LRUCache(SSE_REF_CACHE_SIZE);
+let messageCache;
 
 /**
  * @param {OpenAI.Message[]} messages
@@ -56,6 +57,10 @@ const messageCache = new LRUCache(SSE_REF_CACHE_SIZE);
  * @returns {Promise<[OpenAI.Message[], string[]]>}
  */
 async function processMessageRefs(messages, blobDir) {
+	if (messageCache?.capacity !== SSE_REF_CACHE_SIZE) {
+		messageCache = new LRUCache(SSE_REF_CACHE_SIZE, { ttlMode: "access" });
+	}
+
 	const missing = new Set;
 	const created = new Set;
 	const output = [];

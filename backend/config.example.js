@@ -89,7 +89,7 @@ export const MAX_UPLOAD_SIZE = 52428800;
 /**
  * 同时打开的SQLite数据库数量
  */
-export const MAX_OPEN_DATABASES = 10;
+export const MAX_OPEN_DATABASES = 30;
 
 /**
  * 启动/停止时执行的额外 SQLite 语句
@@ -99,7 +99,6 @@ export const STARTUP_SQL = `
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = NORMAL;
 `;
-export const SHUTDOWN_SQL = ``;
 
 /**
  * 启用文件传输助手
@@ -223,7 +222,7 @@ const RATES = {
  * @return {"SKIP"|void}
  */
 export const LOG_HOOK = (log) => {
-	if (log.finish_reason === 'interrupt' && null == log.output_tokens) return 'SKIP';
+	if (null == log.output_tokens) return 'SKIP';
 
 	// 去除 OpenRouter 的模型名称前缀（当然也可以反过来加上，这只是 replace 的两个参数）
 	log.model = log.model.replaceAll(/^(anthropic|google|openrouter|openai|deepseek)\/|[-:]free$/g, "");
@@ -258,9 +257,6 @@ export const LOG_HOOK = (log) => {
 //  - 设置压缩级别为 0 来禁用 br
 //  - 禁用了 br 也有关不掉的 gzip
 // ==========================================
-
-/** 是否使用 Msgpack 替代 JSON 序列化扩展字段（体积更小，速度更快） */
-export const DB_USE_MSGPACK_SCHEMA = true;
 
 /** 触发压缩的阈值（字节）：超过此大小的数据库字段将进行 brotli 压缩 */
 export const DB_COMPRESS_MIN_SIZE = 1024;

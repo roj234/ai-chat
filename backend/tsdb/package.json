@@ -1,0 +1,17 @@
+{
+  "name": "@roj234/tsdb",
+  "description": "A fast and space-saving append-only time-series database engine.",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "types": "types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "import": "./index.js"
+    }
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

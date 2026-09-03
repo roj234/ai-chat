@@ -9,6 +9,7 @@ import {
 	config,
 	CONFIG_VERSION,
 	conversations,
+	EVENT_BUS,
 	isMobile,
 	lastScrollDirectionIsUp,
 	LOCKED,
@@ -234,7 +235,7 @@ const createApp = () => {
 				if (isFinite(id1) && id1 >= 0) id = id1;
 			}
 
-			listConversations(null).catch(err => {
+			listConversations().catch(err => {
 				if (err.error === "no such user") {
 					connectDatabase();
 				} else if (err.status === 401) {
@@ -255,6 +256,10 @@ const createApp = () => {
 				if (isIDB && id != null) {
 					selectedConversation.value = conversations.find(t => t.id === id);
 				}
+
+				const event = ['load'];
+				EVENT_BUS.post(event);
+				EVENT_BUS.delete(event, true);
 			});
 
 			let hookGetMessages = AS_IS;

@@ -17,7 +17,7 @@ export function registerVectorDBRoutes(router, dataPath) {
 	 * 向量库缓存：LRU 驱逐时自动关闭句柄
 	 * @type {LRUCache<string, VectorDB>}
 	 */
-	const dbCache = new LRUCache(MAX_OPEN_DBS, (_name, db) => {
+	const dbCache = new LRUCache(MAX_OPEN_DBS, (db) => {
 		db.close().catch(e => console.error("VectorDB close error:", e));
 	});
 

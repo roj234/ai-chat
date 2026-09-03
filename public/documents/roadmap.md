@@ -15,7 +15,8 @@
 - **PDF**：JS 沙箱已有 PDFLib 的 ESM 版本
   - 写一些脚本减少 boilerplate
 
-- 实装我的overlayfs沙箱
+- 实装我的overlayfs沙箱 sadbox
+- node 后端上 glob 支持是半残的，ripgrep根本也用不了，之后我想办法把glob实现也翻译到node那边吧
 
 ### 状态: 可能要做
 - 对话分享和给人类用的文件管理 UI

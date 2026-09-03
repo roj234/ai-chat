@@ -1,4 +1,6 @@
 import {OpenAI} from "/src/openai";
+import {DatabaseSync} from "node:sqlite";
+import {TSDB} from "./tsdb";
 
 namespace AiChatBackend {
     type Router = {
@@ -26,13 +28,11 @@ namespace AiChatBackend {
         send(number, Object): void,
         req: import("node:http").IncomingMessage,
         res: import("node:http").ServerResponse,
-        db?: import("node:sqlite").DatabaseSync
-        vectorDB?: VectorDB
 
         getVariable(name: string): Promise<any> | null;
         setVariable(name: string): ((value: any) => void);
         variables: Function[];
-    }
+    } & User;
 
     type VectorDB = {
         readonly size: number;
@@ -58,6 +58,12 @@ namespace AiChatBackend {
 
     type SyncManager = {
         onBatch(ctx: RouteContext, func: string, body: *): void;
+    }
+
+    type User = {
+        db: DatabaseSync,
+        vectorDB?: VectorDB,
+        logDB: Promise<TSDB>
     }
 
     type SSEProxyTarget = {

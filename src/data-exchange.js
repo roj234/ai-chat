@@ -310,7 +310,7 @@ SETTINGS.push(
 		name: "导入对话、预设、备份及更多格式",
 		element: <div className={"choice-scroll"}>
 			<label className="btn ghost">导入
-				<input type="file" accept="application/zip,application/json,image/png" style="display:none;" multiple onChange={importConversation}/>
+				<input type="file" accept="application/zip,application/json,image/png,image/jpeg" style="display:none;" multiple onChange={importConversation}/>
 			</label>
 		</div>
 	},

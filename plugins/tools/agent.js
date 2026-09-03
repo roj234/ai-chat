@@ -455,12 +455,18 @@ const Mount = {
 	},
 	title: prefixTitle("挂载", 'subdir'),
 
-	script({subdir, label}, resp, conv) {
+	async script({subdir, label}, resp, conv) {
 		if (/[~/]/.test(subdir)) throw 'path contains invalid character';
 
+		const opt = { fs_label: label };
+		await createFileSystem(opt);
+
+		const fsBase = opt.fs_base;
+		if (fsBase && !fsBase.includes("/")) subdir = fsBase;
+
 		resp.subdir = subdir;
-		(conv.mnt || (conv.mnt = {}))[subdir] = { fs_label: label };
-		return "Mounted on ~/"+subdir;
+		(conv.mnt || (conv.mnt = {}))[subdir] = opt;
+		return "Mounted on ~/"+(subdir);
 	},
 	undo(resp, conv, tc) {
 		const mnt = conv.mnt;

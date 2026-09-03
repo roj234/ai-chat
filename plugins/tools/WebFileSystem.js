@@ -38,7 +38,7 @@ function globToRegexPattern(globPattern) {
 				break;
 			}
 			case '[': {
-				regex.push('[[^/]&&[');
+				regex.push('[');
 				if (next(globPattern, i) === '^') {
 					regex.push('\\^');
 					i++;
@@ -76,7 +76,7 @@ function globToRegexPattern(globPattern) {
 					}
 				}
 				if (c !== ']') throw new Error('Missing \']\'');
-				regex.push(']]');
+				regex.push(']');
 				break;
 			}
 			case '{': {
@@ -566,6 +566,16 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			if (fileHandle) {
 				try {
 					if (_overwrite && config.fs_trashCan) {
+						const file = await fileHandle.getFile();
+						needChange:
+						if (data instanceof Uint8Array && file.size === data.length) {
+							const ab = new Uint8Array(await file.arrayBuffer());
+							for (let i = 0; i < data.length; i++) {
+								if (ab[i] !== data[i]) break needChange;
+							}
+							return;
+						}
+
 						await copyEntry(fileHandle, await rootHandle.getDirectoryHandle(".trash", CREATE), Date.now()+"_"+name, true);
 					} else {
 						await parent.removeEntry(name);

@@ -66,14 +66,7 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 				return true;
 			}
 
-			const getData = () => ctx._db || (ctx._db = loadUserData(dataPath, userId));
-
-			Object.defineProperty(ctx, "db", {
-				get: () => getData().sqlite,
-			});
-			Object.defineProperty(ctx, "vectorDB", {
-				get: () => getData().vector,
-			});
+			loadUserData(dataPath, userId, ctx);
 
 			if (INTERACTIVE_LOGIN) {
 				const pat = (ctx.req.headers.authorization || '').slice("Bearer ".length);

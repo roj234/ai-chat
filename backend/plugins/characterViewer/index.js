@@ -1,4 +1,4 @@
-const {compressGeneric, decompressGeneric} = globalThis.AiChatAPI;
+const {decompressGeneric} = globalThis.AiChatAPI;
 
 export default function (router) {
 	router.push('v2/:userId/cards');
@@ -55,42 +55,5 @@ function registerCardStorageRoutes(router) {
 		const data = cards.slice(start, start + pageSize);
 
 		ctx.send(200, { total, data });
-	});
-
-	// GET /cards/:name — 获取单个
-	router.get('/:name', ctx => {
-		const { db } = ctx;
-		const row = db.prepare('SELECT data FROM kvs WHERE type = ? AND name = ?').get(CARD_TYPE, ctx.params.name);
-		if (!row) return ctx.send(404, { error: 'Card not found' });
-		ctx.send(200, decompressGeneric(row.data));
-	});
-
-	// PUT /cards/:name — 更新卡片
-	router.post('/:name', async ctx => {
-		const { db } = ctx;
-		const row = db.prepare('SELECT data FROM kvs WHERE type = ? AND name = ?').get(CARD_TYPE, ctx.params.name);
-		if (!row) return ctx.send(404, { error: 'Card not found' });
-
-		const current = decompressGeneric(row.data);
-		const {type,name,time,...updates} = await ctx.readAsObject();
-		const updated = { ...current, ...updates, time: Date.now() };
-
-		db.prepare('REPLACE INTO kvs (type, name, data) VALUES (?, ?, ?)').run(
-			CARD_TYPE,
-			ctx.params.name,
-			await compressGeneric(updated),
-		);
-
-		ctx.send(200, updated);
-	});
-
-	// DELETE /cards/:name — 删除卡片
-	router.delete('/:name', ctx => {
-		const result = ctx.db.prepare('DELETE FROM kvs WHERE type = ? AND name = ?').run(CARD_TYPE, ctx.params.name);
-
-		if (result.changes === 0)
-			return ctx.send(404, { error: 'Card not found' });
-
-		ctx.send(200, { success: true });
 	});
 }

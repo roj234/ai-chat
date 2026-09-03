@@ -24,7 +24,7 @@ const convertToCamelCase = str => str.replace(/[-_]([a-z])/g, (match, letter) =>
 
 const DAY = 86400_000;
 
-const cache = new LRUCache(500);
+const cache = new LRUCache(500, { ttlMode: 'set' });
 
 mcp.tool(
 	'SearchLocation',
@@ -73,7 +73,7 @@ mcp.tool(
 
 		if (!json.results) {
 			const result = 'No results found.';
-			cache.set(cacheKey, result, 0);
+			cache.set(cacheKey, result);
 			return result;
 		}
 
@@ -82,7 +82,7 @@ mcp.tool(
 			return `Name: ${item.name}, latitude: ${item.latitude}, longitude: ${item.longitude}, elevation: ${item.elevation}m, country: ${item.country}, timezone: ${item.timezone}, location: ${admins}`;
 		}).join("\n");
 
-		cache.set(cacheKey, result, 0);
+		cache.set(cacheKey, result);
 		return result;
 	}
 );

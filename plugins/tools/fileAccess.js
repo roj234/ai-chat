@@ -296,17 +296,17 @@ async function callFBI(mountPoint) {
 						el.remove();
 						resolve(delegateTarget.className);
 					}}>
-						{!isIDB && <div>
-							<button className={"db"} title={"数据库后端的文件访问服务"}>🗄️ 典藏</button>
-							<span>典于云端，多端同步如一。<br/>不可行令，记忆、角色等宜归于此。</span>
+						{directoryPickerAvailable && <div>
+							<button className={"local"} title={"浏览器的showDirectoryPicker API"}>📁 启门</button>
+							<span>推开现世之扉，直抵本地文件。<br/>浏览器亲自操刀，无有阻隔。</span>
 						</div>}
 						<div>
 							<button className={"api"} title={"专用文件访问服务(见Readme.md)"}>🐳 缚印</button>
 							<span>缚于容器，如囚于笼，可运行万般程序。<br/>务必置于容器之内，方得施展。</span>
 						</div>
-						{directoryPickerAvailable && <div>
-							<button className={"local"} title={"浏览器的showDirectoryPicker API"}>📁 启门</button>
-							<span>推开现世之扉，直抵本地文件。<br/>浏览器亲自操刀，无有阻隔。</span>
+						{!isIDB && <div>
+							<button className={"db"} title={"数据库后端的文件访问服务"}>🗄️ 典藏</button>
+							<span>典于云端，多端同步如一。<br/>不可行令，记忆、角色等宜归于此。</span>
 						</div>}
 						<div>
 							<button className={"config"}>📜 化卷</button>

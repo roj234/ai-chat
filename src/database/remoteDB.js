@@ -110,7 +110,7 @@ const runBatch = async () => {
 		// 如果切换了数据库服务器
 		if (!config._new) {
 			for (const item of mq) {
-				queue.push([await decodeObjects(JSON.parse(item)), AS_IS, AS_IS]);
+				queue.push([JSON.parse(item), AS_IS, AS_IS]);
 			}
 		}
 		mq.length = 0;
@@ -145,14 +145,26 @@ const runBatch = async () => {
 		}
 
 		if (mq.length) {
+			if (err.status === 413 && mq.length > 1) {
+				for (const one of mq) {
+					batchQueue = [];
+					messageQueue.value = [one];
+					runBatch();
+				}
+				return;
+			}
+
 			$update(messageQueue);
 			prevError?.remove();
 			prevError = SimpleModal({
 				title: "请求失败 ("+mq.length+")",
-				message: `刷新页面将会自动重放请求\n\n详细错误信息：`+prettyError(err),
+				message: `刷新页面将尝试重放请求\n取消将丢弃失败的请求（数据可能丢失）\n\n详细错误信息：`+prettyError(err),
 				confirmMessage: "刷新页面",
 				onConfirm() {
 					location.reload()
+				},
+				onCancel() {
+					messageQueue.value = [];
 				}
 			});
 		}

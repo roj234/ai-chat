@@ -29,20 +29,31 @@
 - 单人项目，可能随时破坏性更改
 - 纯前端，无法在无头环境运行，但支持手机远程控制（需后端）
 - 不支持主动缓存写入 —— 你不应该将它接入缓存需要主动写入的模型
+  - 当然，你也可以通过插入下面的自定义请求体来实现，只不过这不会非常智能
+  - 详见文档。
+  ```json5
+  {
+    cache_control: {
+      type: "ephemeral",
+      ttl: "5m" // or 1h
+    }
+  }
+  ```
 
 ## 特性
 
 ### 高性能，低内存
 
-> 性能是一种尊重。  
-> 我自己就是 AiChat 的深度用户，页面一开就是几天，从未 Out Of Memory，内存几乎不超过 100MB。  
-> 你可能会说这有什么特殊的，但我使用 32 位的 Chrome。  
-> 相当一部分"现代化"网站会在一下午甚至几分钟内内存溢出，例如 DeepSeek 网页版和模搭社区。
+> <details>
+> <summary>性能是一种尊重。</summary>
+> 不信请找其他 Web 甚至 CLI 实现 profile 一下。<br/>
+> 建议选 Svelte 做的，我担心 React 输的太惨
+> </details>
 
-- **流式 Markdown 渲染**：自研解析器，性能优于 `marked`  
+- **流式 Markdown 渲染**：自研增量解析器，性能优于 `marked`  
 正确渲染**“中文引号加粗”**（不符合 CommonMark 规范，但 LLM 输出中很常见）
-- **语法高亮**：比 `shiki-stream` 更快，数百 TPS 下流畅不丢帧（大概）
-- **虚拟列表**：对话和代码块均使用虚拟滚动
+- **语法高亮**：比 `shiki-stream` 更快(的启发式非精确算法)，足够在我显示器刷新率(120Hz)下流畅更新
+- **虚拟列表**：对话和代码块均使用**支持选区复制**的虚拟列表
 - **按需加载**：Chart.js、KaTeX、Mermaid、语法高亮等按需加载
 
 ### Agent & 工具
@@ -54,25 +65,25 @@
   - 从来没有人！没有人！！如此发挥浏览器的潜力！！！
 - **可选后端**：命令执行、文件去重、工作区隔离（`--workspace`）
 - **MCP 支持**：接入任何 MCP 服务器
-- **记忆系统**：插件化，提供一个符合作者哲学的设计，不满意？反正有 MCP
+- **记忆系统**：一个符合作者哲学的记忆插件，不满意？反正有 MCP
 
 ### 角色扮演
 
 - 支持导入酒馆（SillyTavern）角色卡、世界书、预设（JSON / PNG）
-   - 导入，而不是兼容，意味着内部使用自有格式，不支持导出回酒馆。
+   - 导入，而不是兼容，意味着会转换为自有格式，无法原样导出。
 - 基于工具调用的世界书：精度和省钱吊打正则匹配
-- **RPG 管线**（开发中）：使用 JSON Schema 和约束采样，模型**不可能**格式错误
+- **RPG 管线**（开发中）：使用 JSON Schema 和约束采样，模型**不可能**格式错误，还有其它优点，这就是 Agent
 
 ### 用户体验
 
 - **AntiSlop 采样器**：从 token 层面概率拒绝"AI 八股"
-- **ZIP 导出**：多媒体不使用 Base64，原始数据体积小，便于查看和编辑
+- **ZIP 导出**：多媒体不使用 Base64，体积小，便于查看、编辑
 - **请求日志**：每条消息可追溯计费信息，并提供按日期聚合的统计图表
-- **TTS & 文生图**：内置工具，BYOEndpoint，TTS为实验性功能，文生图已稳定可用
+- **TTS & 文生图**：内置工具，BYOEndpoint，TTS为实验性功能，文生图已稳定可用（需手动开启插件）
 - **暗色主题 & 移动端适配**：手机能用，手机好用，还有安卓版
 - **多端同步（需后端）**：对话和其它数据无缝同步，甚至还能多端同时流式生成，`stream.tee()`！
 - **断线重连（需后端）**：无线连接断开了？后端替你缓存，像大厂 App 一样后台生成！
-- **远程控制（需后端）**：手机控制PC，实验性功能，需要手动在设置中启用插件
+- **远程控制（需后端）**：手机控制PC，当然，其他PC也可以；需要在设置中允许远程
 
 ## 快速开始
 
@@ -131,15 +142,22 @@ llama-server --path ./dist
 
 ## 依赖
 
-- [Unconscious](https://github.com/Roj234/unconscious) — 无 VDOM 响应式框架
-- [streaming-markdown](https://github.com/Roj234/streaming-markdown) — 流式 Markdown 解析器 + KaTeX
+> unconscious/common 的设计目标: smaller, faster, or both
+- [Unconscious](https://github.com/Roj234/unconscious) — 8KB 的无 VDOM 响应式框架，以及大量公共代码。
+  - qr.js：大概最快的JavaScript二维码生成库 - 6KB
+  - msgpack.js：性能很好的Msgpack编解码库 - 8KB
+  - Zip-IO：比JSZip快三十倍的Zip读写库。在Node上支持Brotli，另有JSZip-兼容API shim - 8KB
+  - safe-worker：基于语法解析/转换和原型锁定的安全WebWorker沙箱。支持权限控制、ESM/CJS模块、异步RPC和文件系统shim - 24KB
+  - Json.js：流式JSON5解析器。支持JSONL以及增量回调 - 4KB
+  - ws2：比 ws 快 10% 的 WebSocket 服务器/客户端 - 41KB
+- [streaming-markdown](https://github.com/Roj234/streaming-markdown) — 流式 Markdown 解析器
+- KaTeX
 - [Remix Icon](https://github.com/Remix-Design/remixicon)
 - [Modern Normalize](https://github.com/sindresorhus/modern-normalize)
 
 ### 后端
 - iconv-lite
 - remove-markdown
-- 没有 ws，因为我自己做了一个，mask 函数的性能是 ws 的 JS 实现的 1000%
 
 浏览器需求：Chrome 118+  
 在 118-124 上测试  
@@ -167,7 +185,7 @@ llama-server --path ./dist
 ## 鸣谢
 
 - [DsChat](https://github.com/huzpsb/DsChat)：可编辑工具调用和 Human-as-tool 的灵感来源
-- V8引擎：让原生JS比WASM和Emscripten更快！
+- V8引擎：让原生JS比(poorly written的)WASM和Emscripten更快！
 
 ## 推荐项目 (See also)
 

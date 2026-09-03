@@ -45,7 +45,7 @@ export class EventBus {
 	/**
 	 *
 	 * @param {string[]} event
-	 * @param {Object} data
+	 * @param {Object} [data]
 	 */
 	post(event, data) {
 		const x = [];

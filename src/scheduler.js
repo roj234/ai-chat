@@ -1,60 +1,8 @@
 import {kvListDel, kvListGetValues, kvListSet} from './database.js';
 import {onLoad} from "./hooks.js";
+import {TimerHeap} from "../common/TimerHeap.js";
 
-// ==================== 最小堆 ====================
-
-let heap = [];
-const cancelled = new Set();
-
-const heapPush = task => {
-	heap.push(task);
-	siftUp(heap.length - 1);
-};
-
-const heapPeek = () => {
-	while (heap.length && cancelled.has(heap[0].name)) {
-		cancelled.delete(heap[0].name);
-		removeTop();
-	}
-	return heap[0];
-};
-
-const removeTop = () => {
-	if (heap.length <= 1) { heap.length = 0; return; }
-	heap[0] = heap.pop();
-	siftDown(0);
-};
-
-const siftUp = i => {
-	const node = heap[i];
-	while (i > 0) {
-		const p = (i - 1) >> 1;
-		if (heap[p].dueTime <= node.dueTime) break;
-		heap[i] = heap[p];
-		i = p;
-	}
-	heap[i] = node;
-};
-
-const siftDown = i => {
-	const node = heap[i];
-	const size = heap.length;
-	const half = size >> 1;
-	while (i < half) {
-		let child = (i << 1) + 1;
-		let right = child + 1;
-		if (right < size && heap[right].dueTime < heap[child].dueTime) child = right;
-		if (node.dueTime <= heap[child].dueTime) break;
-		heap[i] = heap[child];
-		i = child;
-	}
-	heap[i] = node;
-};
-
-/** O(n) Floyd 建堆 */
-const heapify = () => {
-	for (let i = (heap.length >> 1) - 1; i >= 0; i--) siftDown(i);
-};
+const heap = new TimerHeap();
 
 const TASK_TYPE = 'timer';
 const callbacks = new Map();
@@ -69,7 +17,7 @@ let nextTimer, nextDue;
 const reschedule = () => {
 	clearTimeout(nextTimer);
 
-	nextDue = heapPeek()?.dueTime;
+	nextDue = heap.peek()?.time;
 	if (!nextDue) return;
 
 	const delay = nextDue - Date.now();
@@ -78,9 +26,9 @@ const reschedule = () => {
 		const now = Date.now();
 
 		while (true) {
-			const t = heapPeek();
-			if (!t || t.dueTime > now) break;
-			removeTop();
+			const t = heap.peek();
+			if (!t || t.time > now) break;
+			heap.shift();
 			execute(t);
 		}
 
@@ -116,55 +64,53 @@ export const registerScheduler = (name, fn) => callbacks.set(name, fn);
 export async function schedule(callback, delay, ...args) {
 	if (!callbacks.has(callback)) throw new Error(`[TaskScheduler] 未注册的回调: '${callback}'`);
 
-	const name = Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
-	const task = { callback, args, dueTime: Date.now() + delay };
+	const name = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+	const task = { callback, args, time: Date.now() + delay };
 
 	await kvListSet(task, TASK_TYPE, name);
-	heapPush(task);
+	task.id = name;
+	heap.push(task);
 
-	if (!nextDue || task.dueTime < nextDue) reschedule();
+	if (!nextDue || task.time < nextDue) reschedule();
 	return name;
 }
 
 /**
  * 取消指定任务
- * @param {string} taskId
+ * @param {string} name
  */
-export async function cancel(taskId) {
-	const top = heapPeek();
+export async function cancel(name) {
+	await kvListDel(TASK_TYPE, name);
 
-	cancelled.add(taskId);
-	await kvListDel(TASK_TYPE, taskId);
+	const resched = heap.cancel(name);
 
-	if (top?.name === taskId) {
-		removeTop();
-		reschedule();
-	}
-
-	const size = cancelled.size;
+	const size = heap.cancelled.size;
 	if (size > 32 && size > heap.length / 2) {
 		clearTimeout(nextTimer);
 		await reload();
+	} else if (resched) {
+		reschedule();
 	}
 }
 
 const reload = async () => {
 	heap.length = 0;
-	cancelled.clear();
+	heap.cancelled.clear();
 
 	const tasks = await kvListGetValues(TASK_TYPE);
 	const now = Date.now();
 	const due = [];
 	for (const task of tasks) {
-		if (task.dueTime <= now) {
+		if (task.time <= now) {
 			due.push(task);
 		} else {
 			heap.push(task);
+			task.id = task.name;
 		}
 	}
 
 	if (heap.length) {
-		heapify();
+		heap.init();
 		reschedule();
 	}
 

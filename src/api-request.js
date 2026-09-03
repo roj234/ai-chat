@@ -260,7 +260,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 			let needUpdate;
 			const resumeId = conversation.resumeId;
-			if (finishReason !== 'error' || assistantMessage.error?.trim().endsWith("network error")/* fetch */) {
+			if (finishReason !== 'error' || assistantMessage.error?.trim().endsWith(CANCEL_RESUME)) {
 				if (resumeId) {
 					promises.push(jsonFetch(resolveDBRelativeURL(cfg.endpoint)+"/abort/"+resumeId, {
 						key: cfg.accessToken,
@@ -317,7 +317,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 				if (!cfg.afkState || (flags&1)) {
 					isSuccess = false;
 					finishReason = 'interrupt';
-				} else if (retryCount < cfg.toolRetryLimit) {
+				} else if (retryCount < cfg.toolRetryLimit && (flags&4)) {
 					conversation[RETRY_COUNT] = retryCount + 1;
 					messages.pop();
 				}
@@ -521,6 +521,8 @@ const setMessageCacheState = (conversation, messages, hashes, state) => {
 		if (message) message[MESSAGE_CACHED] = state;
 	}
 };
+
+const CANCEL_RESUME = "network error";
 
 /**
  *
@@ -877,7 +879,7 @@ async function sendCompletionRequest(
 
 		if (!finishReason) {
 			finishReason = 'error';
-			assistantMessage.error = conversation.resumeId ? "network error" : "连接意外终止";
+			assistantMessage.error = conversation.resumeId ? CANCEL_RESUME : "连接意外终止";
 		}
 	} catch (err) {
 		if (err.name === 'AbortError') {
@@ -898,8 +900,13 @@ async function sendCompletionRequest(
 				}
 
 				if (config.sound) failure();
-				if (err.status) err = `API错误 (${err.status})\n${err.message}`;
-				assistantMessage.error = prettyError(err);
+				if (err.status) {
+					if (conversation.resumeId) err = CANCEL_RESUME;
+					else err = `API错误 (${err.status})\n${err.message}`;
+				} else {
+					err = prettyError(err);
+				}
+				assistantMessage.error = err;
 			}
 		}
 	} finally {
