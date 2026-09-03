@@ -41,12 +41,14 @@ function bsearchLT(logs, target) {
 }
 
 function normalizeCachedLog(log) {
-	log.cost /= 1000000;
-	// Currency conversion
-	if (log.currency === "USD") {
-		log.cost /= 0.15;
+	if (log.cost) {
+		log.cost /= 1000000;
+		// Currency conversion
+		if (log.currency === "USD") {
+			log.cost /= 0.15;
+		}
+		log.currency = "CNY";
 	}
-	log.currency = "CNY";
 	return log;
 }
 
@@ -98,19 +100,12 @@ const formatTime = ts => {
 };
 
 function getFinishBadge(reason) {
-	if (typeof reason !== "string") return <span className="badge badge-neutral">{reason}</span>;
 	const r = reason.toLowerCase();
 	if (r === 'stop' || r === 'end_turn') return <span className="badge badge-success">stop</span>;
 	if (r === 'length' || r === 'max_tokens') return <span className="badge badge-warning">length</span>;
 	if (r.includes('tool')) return <span className="badge badge-info">{reason}</span>;
 	if (r === 'error' || r === 'content_filter') return <span className="badge badge-error">{reason}</span>;
 	return <span className="badge badge-neutral">{reason}</span>;
-}
-
-function escapeHtml(str) {
-	const div = document.createElement('div');
-	div.textContent = str;
-	return div.innerHTML;
 }
 
 function showToast(msg, isError = false) {
@@ -190,7 +185,7 @@ const realFetchLogs = async (start, end) => {
 		if (logs.length < BATCH_LIMIT) break;
 
 		const last = logs.at(-1);
-		cursor = last.rowid;
+		cursor = last.id;
 		end = last.time - 1;
 		if (end <= start) break;
 	}
@@ -249,15 +244,10 @@ function updateFilters() {
 	const currentModel = $filterModel.value;
 	const currentFR = $filterFinishReason.value;
 
-	$filterProvider.innerHTML = '<option value="">全部渠道</option>' +
-		[...providers].sort().map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`)
-			.join('');
-	$filterModel.innerHTML = '<option value="">全部模型</option>' +
-		[...models].sort().map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join(
-			'');
-	$filterFinishReason.innerHTML = '<option value="">全部状态</option>' +
-		[...finishReasons].sort().map(r =>
-			`<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');
+	const mapToOption = p => <option value={p}>{p}</option>;
+	$filterProvider.replaceChildren(<option value="">全部渠道</option>, ...[...providers].sort().map(mapToOption));
+	$filterModel.replaceChildren(<option value="">全部模型</option>, ...[...models].sort().map(mapToOption));
+	$filterFinishReason.replaceChildren(<option value="">全部状态</option>, ...[...finishReasons].sort().map(mapToOption));
 
 	$filterProvider.value = providers.has(currentProv) ? currentProv : '';
 	$filterModel.value = models.has(currentModel) ? currentModel : '';
@@ -378,7 +368,7 @@ function aggregateLogs(logs) {
 	else bucketDur = 7 * 86400 * 1000;
 
 	// Create empty buckets
-	for (let t = start; t <= end; t += bucketDur) {
+	for (let t = start; ; t += bucketDur) {
 		const label = getBucketLabel(t, bucketSize);
 		buckets.set(label, {
 			label,
@@ -391,6 +381,8 @@ function aggregateLogs(logs) {
 			cost: 0,
 			requests: 0,
 		});
+
+		if (t >= end) break;
 	}
 
 	// Fill buckets
@@ -398,6 +390,10 @@ function aggregateLogs(logs) {
 		const logTime = log.time || 0;
 		const label = getBucketLabel(logTime, bucketSize);
 		let b = buckets.get(label);
+		if (!b) {
+			console.log("error could not found", label);
+			return;
+		}
 		b.input_tokens += (log.input_tokens || 0);
 		b.output_tokens += (log.output_tokens || 0);
 		b.reasoning_tokens += (log.reasoning_tokens || 0);
@@ -611,7 +607,7 @@ let foreachTable = $foreach(renderLogs, (log, i) => {
 			<div className="detail-grid">
 				<div className="detail-item">
 					<span className="detail-label">ID</span>
-					<span className="detail-value">{log.request_id} (#{log.id||log.usage})</span>
+					<span className="detail-value">{log.request_id} ({log.usage??("#"+log.id)})</span>
 				</div>
 				<div className="detail-item">
 					<span className="detail-label">Tokens</span>
@@ -632,7 +628,7 @@ let foreachTable = $foreach(renderLogs, (log, i) => {
 				</div>
 				<div className="detail-item">
 					<span className="detail-label">成本</span>
-					<span className="detail-value">{log.cost.toFixed(6)} {(currency)}</span>
+					<span className="detail-value">{log.cost != null ? log.cost.toFixed(6)+" "+currency : '—'}</span>
 				</div>
 				<div className="detail-item">
 					<span className="detail-label">时间戳</span>
@@ -729,7 +725,7 @@ const toggleRow = async (log, row, makeDetails) => {
 		if (!log.request_id) {
 			const fullLog = (await requestBackend(`batch`, {
 				method: 'POST',
-				body: [["log/by-rowid", log.rowid]]
+				body: [["log/by-rowid", log.id]]
 			}))[0];
 			if (fullLog) {
 				normalizeCachedLog(fullLog);
@@ -787,7 +783,7 @@ const refreshData = async (auto) => {
 					<div className="state-message">
 						<div className="state-icon">⚠️</div>
 						<div className="state-title">加载失败</div>
-						<div className="state-desc">${escapeHtml(err.message)}</div>
+						<div className="state-desc">{err.message}</div>
 						<button className="btn btn-sm btn-primary" onClick={refreshData} style="margin-top:8px">🔄
 							重试
 						</button>

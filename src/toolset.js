@@ -16,9 +16,10 @@ import {parseJson5} from "unconscious/common/Json.js";
 import {highlightJsonLike} from "./markdown/highlight.js";
 import {getCombinedPreset, markMessageDirty} from "./database.js";
 
-export const TOOL_NAME = debugSymbol("TOOL_NAME");
-export const TOOL_IS_RUNNING = debugSymbol("TOOL_IS_RUNNING");
-const TOOL_PARAM = debugSymbol("TOOL_PARAM");
+export const TOOL_NAME = debugSymbol("ToolName");
+export const TOOL_IS_RUNNING = debugSymbol("Running");
+//export const TOOL_LIST = debugSymbol("ToolList");
+const TOOL_PARAM = debugSymbol("ToolArgumentCache");
 
 /**
  * @type {Record<string, string | function(): string>}
@@ -549,7 +550,7 @@ const UNSAFE_TOOL_DENY_MESSAGE = "User doesn't permit this tool use. Nothing cha
  * @param {boolean=} allowUnsafe
  * @return {Promise<number>}
  */
-export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
+export const runTools = async (response,  conv, forceRerun, allowUnsafe, customRejectText) => {
 	markMessageDirty(response);
 	const {tool_calls, tool_responses} = response;
 
@@ -576,7 +577,10 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
 				}
 
 				name = nsLookup.get(name);
-				if (null == name) throw 'The tool name is invalid';
+				if (null == name) {
+					flags |= 4; // UNRECOVERABLE_ERROR
+					throw 'The tool name is invalid';
+				}
 
 				fn = toolScriptRegistry[name];
 			}
@@ -599,6 +603,7 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
 						name: name = msg[TOOL_NAME] = 'Use',
 					}
 				} else {
+					flags |= 4; // UNRECOVERABLE_ERROR
 					throw 'The tool exists, but is not allowed.';
 				}
 			}
@@ -612,7 +617,10 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
 						fix(parameters, error);
 						error = validateAndShowError(parameters, schema);
 					}
-					if (error) throw "Schema validation error:\n"+error;
+					if (error) {
+						flags |= 4; // UNRECOVERABLE_ERROR
+						throw "Schema validation error:\n"+error;
+					}
 					// 改变历史
 					tc.function.arguments = JSON.stringify(parameters);
 				}
@@ -629,11 +637,11 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe) => {
 					}
 
 					if (!allowUnsafe) {
-						throw UNSAFE_TOOL_DENY_MESSAGE;
+						throw customRejectText||UNSAFE_TOOL_DENY_MESSAGE;
 					}
 				}
 			} else if (false === allowUnsafe) {
-				throw UNSAFE_TOOL_DENY_MESSAGE;
+				throw customRejectText||UNSAFE_TOOL_DENY_MESSAGE;
 			}
 
 			msg[TOOL_IS_RUNNING] = true;

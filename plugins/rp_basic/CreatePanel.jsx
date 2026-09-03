@@ -1,4 +1,4 @@
-import {$state} from "unconscious";
+import {$state, unconscious} from "unconscious";
 
 export function createPanel(constructor) {
 	const isOpen = $state(false);
@@ -12,13 +12,17 @@ export function createPanel(constructor) {
 		});
 	};
 	const close = () => {
+		let resolve;
 		isOpen.value = false;
 		setTimeout(() => {
-			if (!isOpen.value) {
+			const closed = !unconscious(isOpen);
+			if (closed) {
 				self?.remove();
 				self = null;
 			}
+			resolve(closed);
 		}, 300);
+		return new Promise(r => resolve = r);
 	};
 
 	return {open, close, isOpen};

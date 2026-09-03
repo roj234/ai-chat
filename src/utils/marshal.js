@@ -6,7 +6,7 @@ let uploadingHashes = 0;
 let closeToast;
 const beforeUpload = (n) => {
 	if (!uploadingHashes++)
-		closeToast = showToast("正在上传文件", '', 0);
+		closeToast = showToast("文件上传中\n请勿关闭网页", '', -1);
 	return n;
 };
 const afterUpload = (hash) => {

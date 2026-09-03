@@ -129,6 +129,16 @@ async function createSubagent(par, response, conv, tools, modules) {
 					if (allowedTools) allowedTools.split(" ").forEach(t => toolScriptRegistry[t = t.trim()] && conversation.allowedTools.add(t));
 
 					text = content;
+
+					const reads = frontmatter.reads;
+					if (reads) {
+						const includes = (await Promise.all(reads.split(" ").map(path => readFile({
+							path,
+							noTruncate: true
+						}, response, conv).then(text => `# Document ${path}\n\n`+text)))).join('\n\n');
+
+						text += "\n\n"+includes;
+					}
 				}
 
 				systemPrompt += text;

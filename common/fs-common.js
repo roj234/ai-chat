@@ -253,7 +253,7 @@ Add more unchanged context and/or correct indentation for this hunk so it identi
 
 			const startLine = newLines.length + 1;
 			const endLine = startLine + Math.max(0, replaceLines.length - 1);
-			msg += `\nChanged lines: ${startLine}-${endLine}`;
+			msg += `\nchangedRange: ${startLine}-${endLine}`;
 
 			newLines.push(...replaceLines);
 			lastIndex = end;
@@ -267,7 +267,7 @@ Add more unchanged context and/or correct indentation for this hunk so it identi
 
 		const delta = newLines.length - lines.length;
 		return msg+`
-Lines: ${lines.length} → ${newLines.length} (${delta > 0 ? '+': ''}${delta})`;
+totalLines: ${newLines.length} (${delta >= 0 ? '+': ''}${delta})`;
 	};
 
 	const countLines = (content) => {
@@ -362,7 +362,7 @@ No changes were written.`;
 			const replaceLines = countLines(effectiveReplace);
 			const originalLines = countLines(effectiveSearch);
 			msg += `
-Changed lines: ${prefixLines}-${prefixLines + Math.max(0, replaceLines - 1)}`;
+changedRange: ${prefixLines}-${prefixLines + Math.max(0, replaceLines - 1)}`;
 			delta = replaceLines - originalLines;
 		}
 
@@ -377,7 +377,7 @@ Changed lines: ${prefixLines}-${prefixLines + Math.max(0, replaceLines - 1)}`;
 		cache.delete(absPath);
 
 		return msg+`
-Lines: ${lines.length} → ${lines.length + delta} (${delta > 0 ? '+': ''}${delta})`;
+totalLines: ${lines.length + delta} (${delta >= 0 ? '+': ''}${delta})`;
 	};
 
 	const write = async ({ path, content, overwrite }, ctx) => {

@@ -3,53 +3,46 @@
     border-top: none;
     font: 14px/1.5 monospace;
 
-    & .diff {
-        overflow: hidden;
-        max-height: var(--collapsed-height, none);
-        transition: max-height 0.2s ease;
+    overflow: auto;
+    max-height: 20lh;
+
+    transition: max-height 0.2s ease;
+
+    border-radius: 8px;
+
+    color: var(--code-fg);
+    background: var(--code-bg);
+
+    & .hunk {
+        background-color: var(--secondary-bg);
+        color: var(--text);
+        padding-left: 8px;
     }
 
-    & .ghost {
-        border: 1px solid transparent;
-        padding: 4px;
+    /* space + 99999 + space + sign */
+    &.has-lines .no { width: 8ch; }
 
-        &:hover {
-            border-color: var(--border);
-        }
-    }
-
-    &.open {
-        & .diff {
-            overflow: auto;
-            max-height: 20lh;
-        }
+    & .no {
+        width: 3ch;
+        text-align: right;
+        flex-shrink: 0;
+        user-select: none;
     }
 
     & .line {
         display: flex;
 
-        &:before {
-            content: ' ';
-            width: 24px;
-            text-align: center;
-            flex-shrink: 0;
+        & .text {
+            font-family: var(--code-font);
         }
 
         &.add {
             background: var(--ok-bg);
-
-            &:before {
-                content: '+';
-                color: var(--ok);
-            }
+            & .no { color: var(--ok); }
         }
         &.del {
             background: var(--error-bg);
-
-            &:before {
-                content: '-';
-                color: var(--error);
-            }
+            & .no { color: var(--error); }
         }
     }
 }

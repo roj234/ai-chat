@@ -6,29 +6,37 @@ import {LOG_HOOK} from "../config.js";
  * @param {Record<string, function(body: any, ctx: Partial<AiChatBackend.RouteContext>): any>} batcher
  */
 export function registerLogRoutes(router, batcher) {
-	batcher['logs'] = ([start = 0, end = Date.now(), lastRow], ctx) => {
+	batcher['logs'] = async ([start = 0, end = Date.now(), lastRow], ctx) => {
 		if (!Number.isFinite(start) || !Number.isFinite(end) ||(lastRow && !Number.isFinite(lastRow))) return { error: "illegal params" };
-		const rows =
-			typeof lastRow === 'number'
-				? ctx.db.prepare('SELECT data, time, ROWID FROM logs WHERE ROWID < ? AND time >= ? ORDER BY time DESC LIMIT 5000').all(lastRow, start)
-				: ctx.db.prepare('SELECT data, time, ROWID FROM logs WHERE time >= ? AND time <= ? ORDER BY time DESC LIMIT 5000').all(start, end);
-		return rows.map(row => {
+		const tsdb = await ctx.logDB;
+		const range = await tsdb.findByTime(start, end);
+		if (!range) return [];
+
+		// TODO optimize this to use lastRow.
+		const rows = [];
+		const idx = Math.max(range.firstId, range.lastId - 4999);
+		for (let i = range.lastId; i >= idx; i--) {
+			const row = await tsdb.get(i);
 			const data = deserializeRow(row, decompressLog);
 			delete data.request_id;
 			delete data.usage;
-			return data;
-		});
+			rows.push(data);
+		}
+
+		return rows;
 	};
 
-	batcher['log/by-rowid'] = (id, {db}) => {
+	batcher['log/by-rowid'] = async (id, ctx) => {
 		if (!Number.isFinite(id)) return { error: "illegal id" };
-		const row = db.prepare('SELECT id, data, time FROM logs WHERE ROWID = ?').get(id);
+		const tsdb = await ctx.logDB;
+		const row = await tsdb.get(id);
 		return row ? deserializeRow(row, decompressLog) : null;
 	};
 
-	batcher['log'] = (id, {db}) => {
+	batcher['log'] = async (id, ctx) => {
 		if (!Number.isFinite(id)) return { error: "illegal id" };
-		const row = db.prepare('SELECT data, time FROM logs WHERE id = ?').get(id);
+		const tsdb = await ctx.logDB;
+		const row = await tsdb.getByOwnerId(id);
 		return row ? deserializeRow(row, decompressLog) : null;
 	};
 
@@ -40,7 +48,13 @@ export function registerLogRoutes(router, batcher) {
 		const result = await LOG_HOOK(body);
 		if (result === 'SKIP') return false;
 
-		ctx.db.prepare('INSERT INTO logs (id, time, data) VALUES (?, ?, ?)').run(id, time, await compressLog(body));
+		if (typeof id !== 'number') {
+			body.id = id;
+			id = undefined;
+		}
+
+		const tsdb = await ctx.logDB;
+		await tsdb.append(await compressLog(body), id, time);
 		return true;
 	};
 }

@@ -83,12 +83,14 @@ export function createMarkdownRenderer(root, options = {}) {
 					parent = parent.appendChild(
 						options.noHighlight ? <pre /> :
 						(<pre className="code-block">
-							<div className="code-header sticky">
+							<div className={"sticky"}>
+							<div className="code-header">
 								<span>text</span>
 								<span className="buttons">
 									<button className="ri-download-2-line ghost" data-action="save" title="下载代码"></button>
 									<button className="ri-file-copy-line ghost" data-action="copy" title="复制代码"></button>
 								</span>
+							</div>
 							</div>
 						</pre>)
 					);

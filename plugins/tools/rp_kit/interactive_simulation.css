@@ -36,6 +36,7 @@
         }
 
         &.selected {
+            color: var(--text-on-accent);
             background: var(--rp-primary) !important;
             box-shadow: 0 0 15px rgba(99, 102, 241, 0.4);
         }

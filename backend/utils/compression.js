@@ -1,10 +1,7 @@
 import {bakeSchema, decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
 import {brotliCompress, brotliDecompressSync, constants} from 'node:zlib';
-import {DB_COMPRESS_LEVEL, DB_COMPRESS_MIN_SIZE, DB_USE_MSGPACK_SCHEMA} from "../config.js";
-import {UTF8_TEXT_DECODER, UTF8_TEXT_ENCODER} from "unconscious/shared.js";
+import {DB_COMPRESS_LEVEL, DB_COMPRESS_MIN_SIZE} from "../config.js";
 import {compressBase64, compressStr, decompressStr} from "./string-compression.js";
-
-const IS_SQLITE = true;
 
 // 注意，这些schema只能追加，规则和protobuf相同
 const finish_reason = ["finish_reason", null, ["stop", "length", "tool_calls", "error", "interrupt"]];
@@ -77,6 +74,7 @@ const log_schema = [
 	finish_reason,
 	"cost",
 	["currency", null, ["USD", "CNY"]],
+	"usage"
 ];
 
 bakeSchema(conversation_schema);
@@ -101,15 +99,8 @@ export function deserializeRow(row, decompression = decompressGeneric) {
  * @return {Object}
  */
 function decompressIfNeeded(data, schema) {
-	if (typeof data === 'string') return JSON.parse(data);
-
 	// 0xC1 是 msgpack 的保留字
 	if (data[0] === 0xC1) data = brotliDecompressSync(data.subarray(1));
-	if (data[0] === 123) { // '{' 不排除和msgpack的某些index重复。
-		try {
-			return JSON.parse(UTF8_TEXT_DECODER.decode(data));
-		} catch {}
-	}
 	return decodeMsg(data, {schema});
 }
 
@@ -120,14 +111,7 @@ function decompressIfNeeded(data, schema) {
  * @return {Buffer|Promise<Buffer>}
  */
 function compressIfEnabled(data, schema) {
-	let packed;
-
-	if (DB_USE_MSGPACK_SCHEMA) {
-		packed = encodeMsg(data, schema);
-	} else {
-		packed = JSON.stringify(data);
-		if (!IS_SQLITE) packed = UTF8_TEXT_ENCODER.encode(packed);
-	}
+	let packed = encodeMsg(data, schema);
 
 	if (packed.length > DB_COMPRESS_MIN_SIZE) {
 		return new Promise((resolve, reject) => {
@@ -161,7 +145,7 @@ export const compressMessage = (data) => {
 		for (const item of details) {
 			for (const key of RD_KEYS) {
 				const data = item[key];
-				if (typeof data === 'string') item[key] =  key === 'id' ? compressStr(data, RD_DICT) : compressBase64(data);
+				if (typeof data === 'string') item[key] = key === 'id' ? compressStr(data, RD_DICT) : compressBase64(data);
 			}
 		}
 	}

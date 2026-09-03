@@ -234,7 +234,7 @@ export async function registerFsRoutes(router, allowExec) {
 
 		let entries;
 		if (pattern !== '*') {
-			if (!(await fs.stat(safePath)).isDirectory()) throw new Error("Is not directory");
+			if (!(await fs.stat(safePath)).isDirectory()) throw new Error("Path is not directory");
 			entries = await fs.glob(pattern, {cwd: safePath, withFileTypes: true});
 		} else {
 			entries = await fs.readdir(safePath, {withFileTypes: true});
@@ -414,7 +414,7 @@ nlink: ${stats.nlink}`);
 			await fs.mkdir(path.dirname(safeDest), { recursive: true });
 			await fs.rename(safeSrc, safeDest);
 		} else {
-			await fs.cp(safeSrc, safeDest, { recursive: true });
+			await fs.cp(safeSrc, safeDest, { recursive: true, preserveTimestamps: true });
 		}
 		ctx.send(200, 'Success');
 	});

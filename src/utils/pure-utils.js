@@ -16,6 +16,13 @@ export const PROMISE_CATCH = () => {};
 export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
+ * @template T
+ * @param {T} input
+ * @return {Readonly<T>}
+ */
+export const fastObjectMap = input => Object.freeze(Object.assign(Object.create(null), input));
+
+/**
  * 节流函数，保证最终一定会以最新的参数调用一次
  * @template {Function} T
  * @param {T} fn

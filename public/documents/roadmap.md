@@ -15,8 +15,14 @@
 - **PDF**：JS 沙箱已有 PDFLib 的 ESM 版本
   - 写一些脚本减少 boilerplate
 
-- 实装我的overlayfs沙箱
+- 实装我的overlayfs沙箱 sadbox
+- node 后端上 glob 支持是半残的，ripgrep根本也用不了，之后我想办法把glob实现也翻译到node那边吧
+- 步退时要允许撤销文件工具的副作用，除了reentrant之外可能还要专门加一个类别，删除消息时不应该触发。步退时才撤销。
+- 要配置。撤销的话可以让服务端除了返回string之外还返回结构化数据，行号、偏移之类的。或者直接复用diff？会很大，不好。
+- JSONEditor还是要想办法上虚拟列表，不然元素太多
+- PINNED貌似并不会触发强制渲染
+- 搞一个引用按钮好了，插blockqoute而已
 
 ### 状态: 可能要做
-- 对话分享和给人类用的文件管理 UI
+- 给人类用的文件管理 UI
 - /fsync提交文件的diff而不是修改时间

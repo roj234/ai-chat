@@ -109,7 +109,7 @@ export const createUserInputComposer = (scroller) => {
 						{IS_ANDROID_BUILD && <label className="ri-camera-4-fill" onClick={() => {
 							webviewUploadImage().then(blobCallback)
 						}}>
-							拍照
+							拍摄照片
 						</label>}
 						<label className="ri-mic-fill" onClick={() => {
 							const modal = <div className={'modal-overlay'}>

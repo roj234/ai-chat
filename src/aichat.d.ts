@@ -351,7 +351,17 @@ declare namespace AiChat {
          * @param has_successor 是否不是最后一条消息，可以决定生成什么HTML
          * @param message 如果渲染器修改了消息（主要是那些 interactive=true 的）需要调用 markMessageDirty 函数
          */
-        renderer?: (context: ToolResponse & Payload, has_successor: boolean, toolCall: OpenAI.ToolCall, message: AssistantMessage) => HTMLElement;
+        renderer?: (context: ToolResponse & Payload, has_successor: boolean, toolCall: OpenAI.ToolCall, message: AssistantMessage) => JSX.Element;
+        /**
+         * 工具调用展开后的【参数】框的渲染函数
+         * 覆盖的话请注意不要漏掉了本来可以展示的参数。
+         */
+        renderInput?: (context: ToolResponse & Payload, box: HTMLElement, toolCall: OpenAI.ToolCall, message: AssistantMessage) => HTMLElement | false;
+        /**
+         * 工具调用展开后的【返回值】框的渲染函数
+         * 这个函数可能被调用多次，而且状态可能是不完整的，返回 false 默认处理
+         */
+        renderOutput?: (context: ToolResponse & Payload, box: HTMLElement, toolIsRunning: boolean, toolCall: OpenAI.ToolCall, message: AssistantMessage) => void | false;
         /**
          * 判断是否需要重新生成HTML
          * 往keys里面填任何对象

@@ -38,7 +38,7 @@ function globToRegexPattern(globPattern) {
 				break;
 			}
 			case '[': {
-				regex.push('[[^/]&&[');
+				regex.push('[');
 				if (next(globPattern, i) === '^') {
 					regex.push('\\^');
 					i++;
@@ -76,7 +76,7 @@ function globToRegexPattern(globPattern) {
 					}
 				}
 				if (c !== ']') throw new Error('Missing \']\'');
-				regex.push(']]');
+				regex.push(']');
 				break;
 			}
 			case '{': {
@@ -163,7 +163,7 @@ const resolveParent = async (rootHandle, filePath, options) => {
 			parent = await parent.getDirectoryHandle(part, options);
 		}
 	} catch (e) {
-		throw typeof e === 'string' ? e : ("Parent directory "+parts.join('/')+" not found");
+		throw typeof e === 'string' ? e : ("Directory "+parts.join('/')+" not found");
 	}
 	return [ parent, name ];
 };
@@ -532,8 +532,14 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 	const resolveFile = async path => {
 		const [parent, name] = await resolveParent(rootHandle, path);
 		if (!name) throw "Root is not file";
-		const fileHandle = await parent.getFileHandle(name);
-		return await fileHandle.getFile();
+		try {
+			const fileHandle = await parent.getFileHandle(name);
+			return await fileHandle.getFile();
+		} catch (e) {
+			if (e.name === "NotFoundError")
+				throw 'File '+JSON.stringify(path)+" not exist";
+			throw e;
+		}
 	};
 
 	const fsCommonApi = {
@@ -566,6 +572,16 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			if (fileHandle) {
 				try {
 					if (_overwrite && config.fs_trashCan) {
+						const file = await fileHandle.getFile();
+						needChange:
+						if (data instanceof Uint8Array && file.size === data.length) {
+							const ab = new Uint8Array(await file.arrayBuffer());
+							for (let i = 0; i < data.length; i++) {
+								if (ab[i] !== data[i]) break needChange;
+							}
+							return;
+						}
+
 						await copyEntry(fileHandle, await rootHandle.getDirectoryHandle(".trash", CREATE), Date.now()+"_"+name, true);
 					} else {
 						await parent.removeEntry(name);

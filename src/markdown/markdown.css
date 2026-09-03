@@ -1,27 +1,47 @@
 
-/* 统一代码块 */
 .code-block {
-    background: #242a36;
+    position: relative; /* 为右上角悬浮做绝对定位基准 */
+    background: var(--code-bg);
+    color: var(--code-fg);
+    border: 1px solid var(--border);
     border-radius: var(--border-radius-md);
-    margin: var(--spacing-md) 0;
-    font-size: 0.875rem;
+    font-size: 14px;
 
     & > code {
+        font-family: var(--code-font);
         display: block;
-        padding: 1em 0 1em 1em;
+        padding: 10px 12px;
+    }
+
+    & .sticky {
+        position: sticky;
+        height: 0;
+        overflow: visible;
+    }
+
+    & .code-header {
+        position: absolute;
+        top: 0;
+        right: 0;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 6px;
+        border-radius: var(--border-radius-md);
+        opacity: 0.6;
+        transition: opacity 0.2s ease;
+    }
+
+    &:hover .code-header {
+        background: rgba(20, 23, 29, 0.85);
+        border: 1px solid var(--border);
+        border-right: none;
+        border-top: none;
+
+        opacity: 1;
     }
 }
-.code-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: smaller;
-    padding: 2px var(--spacing-sm);
-    background: #4a5568;
-    color: #e2e8f0;
-    /*border-bottom: 1px solid #718096;*/
-    /*border-radius: var(--border-radius-md) var(--border-radius-md) 0 0;*/
-}
+
 code, kbd {
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 

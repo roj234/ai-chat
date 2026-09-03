@@ -2,13 +2,14 @@ import hljs from "/vendor/hljs/core.js";
 import morphdom from "morphdom";
 import './highlight-theme.css';
 
-import json from 'highlight.js/lib/languages/json';
 import {ITEM_KEY, VirtualList} from "unconscious/common/VirtualList.js";
 import {$cleanup} from "unconscious";
 import {selectableVirtualListMixin} from "unconscious/common/selectableVirtualListMixin.js";
 import {VOID_TAGS} from "fastmd";
+import {stringify} from "/common/json5-stringify.js";
+import json5 from "/common/json5-highlight.js";
 
-hljs.registerLanguage('json', json);
+hljs.registerLanguage('json5', json5);
 
 // 换成白名单
 const fullStreamableLanguages = new Set(["json"/*, "xml"*/]);
@@ -56,7 +57,7 @@ export const lightSync = (newCode, language) => {
 };
 
 // 辅助工具：提取并修补不完整的 HTML 行
-const processLines = (rawHtml, openTagsStack = []) => {
+export const splitMultilineHTML = (rawHtml, openTagsStack = []) => {
 	const lines = rawHtml.split('\n');
 	return lines.map((lineContent, index) => {
 		// 1. 在行首补全之前未闭合的标签
@@ -133,7 +134,7 @@ export const highlight = (code, language, node, is_finished) => {
 				node.replaceChildren(virtualList.dom);
 				virtualList.attach(node);
 				// noinspection JSPrimitiveTypeWrapperUsage
-				virtualList.items = processLines(value, []).map(s => new String(s));
+				virtualList.items = splitMultilineHTML(value, []).map(s => new String(s));
 
 				selectableVirtualListMixin(virtualList, (line) => lines[line]);
 
@@ -186,7 +187,7 @@ export const highlight = (code, language, node, is_finished) => {
 					if (!testHtml.startsWith(stableHtml)) break;
 
 					if (testHtml === stableHtml) {
-						const lines = processLines(testHtml, []);
+						const lines = splitMultilineHTML(testHtml, []);
 
 						vl.items.at(-1).text += lines.shift();
 						vl.items.push(...lines.map(i => {return{text:i}}));
@@ -252,28 +253,25 @@ export const highlight = (code, language, node, is_finished) => {
  */
 export const highlightJsonLike = (obj, maxChars = 10000, maxStringLen = 1000) => {
 	let str = obj && typeof obj !== 'string' ? "/* 原始对象 */ " : "";
-	let isJson;
 
 	try {
-		if (typeof obj === 'string') obj = JSON.parse(obj, (key, value) => {
-			if (typeof value === 'string' && value.length > maxStringLen) {
-				return value.slice(0, maxStringLen) + "... 与 " + (value.length - maxStringLen) + " 额外字符";
-			}
-			return value;
-		});
-
-		str += JSON.stringify(obj, null, 2).replace(/\[(?:[\n ]+(\d+|".*"),)+[\n ]+(\d+|".*")[\n ]+]/g, function (a) {
-			return a.replace(/[\n ]+/g, ' ');
-		});
-
-		isJson = true;
+		if (typeof obj === 'string' && (obj[0] === '[' || obj[0] === '{')) {
+			obj = JSON.parse(obj, (key, value) => {
+				if (typeof value === 'string' && value.length > maxStringLen) {
+					return value.slice(0, maxStringLen) + "... 与 " + (value.length - maxStringLen) + " 额外字符";
+				}
+				return value;
+			});
+		}
+		if (typeof obj === 'object') str += stringify(obj, null, 2);
+		else str += obj;
 	} catch {
 		str += String(obj) || "/* 空字符串 */";
 	}
 
 	if (str.length > maxChars) str = str.slice(0, maxChars) + "\n/* 与 " + (str.length - maxChars) + " 额外字符 */";
 
-	return /*isJson ? */lightSync(str, 'json');
+	return lightSync(str, 'json5');
 };
 
 /**
@@ -341,13 +339,14 @@ const trimLastTopLevelElement = originalHtml => {
  * @param {string} languageName
  * @return {null | Promise<string>}
  */
-const loadLanguage = languageName => {
+export const loadLanguage = languageName => {
 	const initial_id = languageName;
 	let asyncLoader;
 
 	for(;;) {
 		if (hljs.getLanguage(languageName)) {
-			hljs.registerAliases([initial_id], {languageName});
+			if (initial_id !== languageName)
+				hljs.registerAliases([initial_id], {languageName});
 			return Promise.resolve(languageName);
 		}
 
@@ -413,6 +412,8 @@ const DEPS = {
 	yaml: ['ruby'],
 };
 const LANGUAGES = {
+	'mjs': 'javascript',
+	'cjs': 'javascript',
 	"jsonl": "json",
 	"vue": "xml",
 	"asp": "vbscript-html",

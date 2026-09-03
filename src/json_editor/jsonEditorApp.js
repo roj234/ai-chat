@@ -1,6 +1,7 @@
 import {JsonEditor} from "../components/JsonEditor.jsx";
 import {$state} from "unconscious";
 import './jsonEditorApp.css';
+import {stringify} from "/common/json5-stringify.js";
 
 export const createEditorApp = (text, saveCallback) => {
 	const editor = $state();
@@ -10,7 +11,7 @@ export const createEditorApp = (text, saveCallback) => {
 				<span className="panel-title"><i className="ri-code-s-slash-line"></i> JSON 编辑器</span>
 				<div className="panel-actions">
 					<button className="btn-icon" disabled={() => !editor.obj} onClick={() => {
-						text.value = JSON.stringify(editor.obj, null, 2);
+						text.value = stringify(editor.obj, null, 2);
 					}} title="美化">
 						<i className="ri-magic-line"></i> 格式化
 					</button>

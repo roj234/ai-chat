@@ -1,22 +1,29 @@
 
 /* Tool calls */
 .tool-call {
-    border: 1px solid transparent;
-    border-left: 4px solid var(--accent);
-    background: rgba(76,141,255,0.1);
-    border-radius: var(--border-radius-md);
+    font-size: 14px;
+
+    border: 1px solid var(--tc-border);
+    background: var(--tc-bg);
+    border-radius: var(--border-radius-sm);
+    position: relative;
+
+    transition: background 0.1s ease, border 0.1s ease;
 
     & .tool-header {
-        list-style: none;
         padding: 4px 10px;
-        font-size: 0.8rem;
-    }
-    & .tool-body {
-        padding: 0 10px 10px 10px;
-        font-size: 12px;
-    }
-    &[open] .tool-header, &.tce[open] .tool-body {
+        gap: 8px;
+        display: flex;
         font-size: 14px;
+        align-items: baseline;
+    }
+
+    & .tool-body {
+        padding: 0 10px 8px 10px;
+    }
+    &[open] .tool-header {
+        border-bottom: 1px solid var(--chip-hover);
+        margin-bottom: 5px;
     }
 
     & .args-title {
@@ -29,13 +36,18 @@
         max-height: 256px;
         padding: 8px 10px;
 
-        /* TODO copy from hljs style */
-        color: #abb2bf;
-        background: #171922;
+        color: var(--code-fg);
+        background: var(--code-bg);
+
+        font-family: monospace;
 
         border: 1px solid var(--border);
         border-radius: 8px;
         overflow: auto;
+    }
+
+    & button:not(.btn)[class^="ri-"] {
+        padding: 0;
     }
 
     & .rerun-btn {
@@ -44,29 +56,74 @@
         background: var(--chip-active); color: var(--accent);
         border: 1px solid var(--accent);
 
-        &:hover {
+        &:not(:disabled):hover {
             background: var(--accent);
             color: var(--text);
+        }
+
+        &:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
     }
 
     & .gallery {
-        margin-top: 8px;
-        & img {
-            max-width: 25%;
-            max-height: 200px;
-        }
-    }
-
-    &.secure {
-        background-color: var(--warning-bg);
-        border: 1px solid var(--warning-border);
-        border-left: 4px solid var(--warning-accent);
+        grid-template: none;
     }
 
     &.pending {
-        & .rerun-btn, &.pend-expand > :nth-child(3) {
+        & .rerun-btn, &.need-approval > :nth-child(3) {
             display: none;
+        }
+    }
+
+    & .btn {
+        border-radius: var(--border-radius-sm);
+    }
+
+    --tc-bg: rgba(76,141,255,0.1);
+
+    &.running {
+        --tc-border: var(--chip-hover);
+    }
+
+    &.t-error {
+        --tc-border: var(--error);
+        --tc-bg: var(--error-bg);
+    }
+
+    &.t-success {
+       /* --tc-border: var(--ok);
+        --tc-bg: var(--ok-bg);*/
+        --tc-border: var(--chip-hover);
+    }
+
+    &.pending, &.editing {
+        --tc-border: #818cf8;
+        --tc-bg: rgba(129, 140, 248, 0.08);
+    }
+
+    & .text-input {
+        flex: 1;
+    }
+
+    &.secure {
+        --tc-bg: var(--warning-bg);
+        --tc-border: var(--warning-accent);
+
+        & .audit {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 12px;
+            margin: 8px 14px 12px 14px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--warning-border);
+
+            & .args-title {
+                color: var(--warning-accent);
+            }
         }
     }
 }

@@ -1,10 +1,10 @@
 import './ToolCallCard.css';
 import {$state, $update, $watch, appendChildren, isPureObject, unconscious} from "unconscious";
 import {JsonEditor} from "./JsonEditor.jsx";
-import {runTools, TOOL_NAME, toolScriptRegistry} from "../toolset.js";
+import {runTools, TOOL_NAME, tools, toolScriptRegistry} from "../toolset.js";
 import {validateAndShowError} from "unconscious/common/json-schema-utils.js";
-import {onLoad} from "../hooks.js";
-import {selectedConversation, updateMessageUI} from "../states.js";
+import {EVENT_BUS, selectedConversation, updateMessageUI} from "../states.js";
+import {stringify} from "/common/json5-stringify.js";
 
 /**
  *
@@ -22,7 +22,7 @@ export function ToolCallEditor(props) {
 
     const formatJson = (s) => {
         try {
-            return JSON.stringify(typeof s === "string" ? JSON.parse(s) : s, null, 2);
+            return stringify(typeof s === "string" ? JSON.parse(s) : s, null, 2);
         } catch {
             return s;
         }
@@ -40,6 +40,8 @@ export function ToolCallEditor(props) {
             inputState = $state(),
             toolCallId = $state(props.tool.id);
         const reset = () => {
+            toolName.value = fn.name;
+            toolCallId.value = props.tool.id;
             input.value = formatJson(fn.arguments);
             output.value = formatJson(message.tool_responses[index()]?.content);
         };
@@ -53,11 +55,16 @@ export function ToolCallEditor(props) {
         let saveBtn;
         appendChildren(base, <>
             <div className="tool-body">
-                <div className="args-title">调用ID</div>
+                <div className="args-title">
+                    调用ID
+                    <span className={"spacer"}></span>
+                    <button className={"ri-dice-line ghost"} title={"随机生成"} onClick={e => {
+                        toolCallId.value = Math.random().toString(36).slice(3);
+                    }}></button>
+                </div>
                 <div className={"input-warp"}>
-                    <input className={"text-input"} class:invalid={() => !unconscious(toolCallId)} value={toolCallId}
+                    <input className={"text-input"} placeholder={"不能为空，点击骰子随机生成"} class:invalid={() => !unconscious(toolCallId)} value={toolCallId}
                            onInput={({target}) => toolCallId.value = target.value}/>
-                    {() => !unconscious(toolCallId) ? <div className={"input-warning"}>不能为空</div> : null}
                 </div>
             </div>
             <div className="tool-body">
@@ -67,7 +74,7 @@ export function ToolCallEditor(props) {
             </div>
             <div className="tool-body">
                 <div className="args-title">返回值 (可编辑, 可置空)<span className={"spacer"}></span>
-                    <button className={"btn rerun-btn"}
+                    <button className={"rerun-btn"}
                             disabled={() => !inputState.obj} onClick={({target}) => {
                         const idx = index();
 
@@ -93,6 +100,23 @@ export function ToolCallEditor(props) {
             </div>
             <div className="tool-body">
                 <div style={"display:flex;gap:8px"}>
+                    <button className={"btn danger"} onClick={() => {
+                        const idx = index();
+                        message.tool_calls.splice(idx, 1);
+                        message.tool_responses.splice(idx, 1);
+                        if (!message.tool_calls.length) {
+                            delete message.tool_calls;
+                            delete message.tool_responses;
+                        }
+                        $update(updateMessageUI);
+                    }}>
+                        删除
+                    </button>
+                    <span className={"spacer"}></span>
+                    <button className={"btn secondary"} onClick={reset}>
+                        重置
+                        <span className={"tooltip"}>恢复上次保存的值</span>
+                    </button>
                     <button className={"btn primary"} ref={saveBtn} onClick={({target}) => {
                         fn.name = unconscious(toolName);
                         fn.arguments = JSON.stringify(inputState.obj);
@@ -110,23 +134,6 @@ export function ToolCallEditor(props) {
                         base.open = false;
                     }}>
                         保存
-                    </button>
-                    <button className={"btn secondary"} onClick={reset}>
-                        重置
-                        <span className={"tooltip"}>恢复上次保存的值</span>
-                    </button>
-                    <span className={"spacer"}></span>
-                    <button className={"btn danger"} onClick={() => {
-                        const idx = index();
-                        message.tool_calls.splice(idx, 1);
-                        message.tool_responses.splice(idx, 1);
-                        if (!message.tool_calls.length) {
-                            delete message.tool_calls;
-                            delete message.tool_responses;
-                        }
-                        $update(updateMessageUI);
-                    }}>
-                        删除
                     </button>
                 </div>
             </div>
@@ -153,13 +160,12 @@ export function ToolCallEditor(props) {
         });
     };
 
-    const base = <details className={"tool-call secure tce"} onClick.once={initializeHtml}>
-        <summary className="tool-header" title={"编辑工具"}>
-            <div className="args-title">工具名称</div>
+    const base = <details className={"tool-call editing"} onClick.once={initializeHtml}>
+        <summary className="tool-header">
+            <div className="args-title">编辑工具</div>
             <div className={"input-warp"}>
                 <input className={"text-input"} class:invalid={nameError} value={toolName} list={"DL-tools"}
                        onInput={({target}) => toolName.value = target.value}/>
-                {() => unconscious(nameError) ? <div className={"input-warning"}>工具名称无效</div> : null}
             </div>
         </summary>
     </details>;
@@ -167,8 +173,8 @@ export function ToolCallEditor(props) {
     return base;
 }
 
-onLoad((app) => {
+EVENT_BUS.on('load', (app) => {
     app.append(<datalist id="DL-tools">{Object.keys(toolScriptRegistry).map(item =>
-        <option value={item} />)
+        <option value={item}>{tools[item]?.function.description?.slice(0, 80)}</option>)
     }</datalist>);
-})
+});

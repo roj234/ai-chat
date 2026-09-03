@@ -9,6 +9,7 @@ import {
 	config,
 	CONFIG_VERSION,
 	conversations,
+	EVENT_BUS,
 	isMobile,
 	lastScrollDirectionIsUp,
 	LOCKED,
@@ -28,7 +29,7 @@ import {SettingDialog} from "./components/SettingDialog.jsx";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {createUserInputComposer} from "./components/UserInputComposer.jsx";
 import {onPluginLoaded} from "/plugins/PluginRegistry.js";
-import {callOnLoadHandler, DI} from "./hooks.js";
+import {DI, injectCommonDI} from "./hooks.js";
 import {enableBranches} from "./utils/BranchManager.js";
 import {checkUpdate} from "../common/updater.js";
 import {setAllowHTMLTags} from "./markdown/markdown.js";
@@ -234,7 +235,7 @@ const createApp = () => {
 				if (isFinite(id1) && id1 >= 0) id = id1;
 			}
 
-			listConversations(null).catch(err => {
+			listConversations().catch(err => {
 				if (err.error === "no such user") {
 					connectDatabase();
 				} else if (err.status === 401) {
@@ -255,6 +256,9 @@ const createApp = () => {
 				if (isIDB && id != null) {
 					selectedConversation.value = conversations.find(t => t.id === id);
 				}
+
+				const event = ['loaded'];
+				EVENT_BUS.fire(event, $("app"));
 			});
 
 			let hookGetMessages = AS_IS;
@@ -295,7 +299,7 @@ const createApp = () => {
 							submitUserChatMessage();
 						} else if (Date.now() - conv.time < RESUME_TIMEOUT) {
 							submitUserChatMessage();
-							showToast("尝试继续意外中断的请求", 'ok');
+							showToast("继续意外中断的请求", 'ok');
 						} else {
 							delete conv.resumeId;
 							updateConversation(conv);
@@ -443,7 +447,8 @@ addEventListener("load", () => {
 			return;
 		}
 
-		callOnLoadHandler(wrapper, settings, messageContainer);
+		injectCommonDI(settings, messageContainer);
+		EVENT_BUS.fire(['load'], wrapper);
 		onLoad_(wrapper);
 	}).catch(e => {
 		SimpleModal({

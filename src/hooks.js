@@ -1,4 +1,4 @@
-let listeners = [];
+import {EVENT_BUS} from "./states.js";
 
 /** @type {import("unconscious/common/components/Filter").FilterInstance} */
 export let DI_settings;
@@ -10,11 +10,9 @@ export const DI = {};
 /**
  * @param {function(HTMLBodyElement): void} callback
  */
-export const onLoad = callback => listeners.push(callback);
+export const onLoad = callback => EVENT_BUS.on('load', callback);
 
-export const callOnLoadHandler = (app, set, mc) => {
+export const injectCommonDI = (set, mc) => {
 	DI_settings = set;
 	DI_messageContainer = mc;
-	for (const listener of listeners) listener(app);
-	listeners = null;
 };

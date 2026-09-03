@@ -613,7 +613,9 @@ export class Router {
 				req.on('data', chunk => {
 					const length = chunk.length;
 					if (totalLength + length > maxLength) {
-						reject(new Error('Request body too large'));
+						const error = new Error('Request body too large');
+						error.status = 413;
+						reject(error);
 						return;
 					}
 					totalLength += length;
@@ -647,7 +649,7 @@ export class Router {
 			let msg = err.message ?? err;
 			if (ctx.errorFilter) msg = ctx.errorFilter(msg, err);
 			try {
-				ctx.send(500, { error: msg });
+				ctx.send(err.status || 500, { error: msg });
 			} catch {}
 		}
 	}

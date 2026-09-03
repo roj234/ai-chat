@@ -189,12 +189,12 @@ export const openWindow = ({id, icon, title, element, resizable = false}) => {
 			root.style.top = ny + 'px';
 		};
 		const onUp = () => {
-			document.removeEventListener('mousemove', onMove);
-			document.removeEventListener('mouseup', onUp);
+			document.removeEventListener('pointermove', onMove);
+			document.removeEventListener('pointerup', onUp);
 			classList.remove('dragging');
 		};
-		document.addEventListener('mousemove', onMove);
-		document.addEventListener('mouseup', onUp);
+		document.addEventListener('pointermove', onMove);
+		document.addEventListener('pointerup', onUp);
 		e.preventDefault();
 	};
 
@@ -212,12 +212,12 @@ export const openWindow = ({id, icon, title, element, resizable = false}) => {
 			root.style.height = nh + 'px';
 		};
 		const onUp = () => {
-			document.removeEventListener('mousemove', onMove);
-			document.removeEventListener('mouseup', onUp);
+			document.removeEventListener('pointermove', onMove);
+			document.removeEventListener('pointerup', onUp);
 			root.classList.remove('resizing');
 		};
-		document.addEventListener('mousemove', onMove);
-		document.addEventListener('mouseup', onUp);
+		document.addEventListener('pointermove', onMove);
+		document.addEventListener('pointerup', onUp);
 		e.preventDefault(); // 防止触发 selection 行为
 	};
 
@@ -230,10 +230,10 @@ export const openWindow = ({id, icon, title, element, resizable = false}) => {
 	const root = (
 		<div className="window"
 			 style={`left:${left}px;top:${top}px;width:${width}px;height:${height}px;`}
-			 onMouseDown={() => focusWindow(state)}>
+			 onPointerDown={() => focusWindow(state)}>
 			<div className="win-header">
 				<span className="icon">{cloneContent(icon)}</span>
-				<span className="title" onMouseDown.left={startDrag} onDblclick={handleMaximize}>{cloneContent(title)}</span>
+				<span className="title" onPointerDown.left={startDrag} onDblclick={handleMaximize}>{cloneContent(title)}</span>
 				<span className="controls">
 					<button className="ri-subtract-line ghost" title="最小化" onClick={() => minimizeWindow(state)}></button>
 					{resizable && <button ref={maxBtn} className="ri-fullscreen-line ghost" title="最大化" onClick={handleMaximize}></button>}
@@ -241,7 +241,7 @@ export const openWindow = ({id, icon, title, element, resizable = false}) => {
 				</span>
 			</div>
 			<div className="win-body">{element}</div>
-			{resizable && <div className="win-resize" onMouseDown.left={startResize}></div>}
+			{resizable && <div className="win-resize" onPointerDown.left={startResize}></div>}
 		</div>
 	);
 

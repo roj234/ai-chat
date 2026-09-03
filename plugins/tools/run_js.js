@@ -7,6 +7,8 @@ import {normalizePath} from "unconscious/common/path-utils.js";
 import {getToolParameters, runTools} from "/src/toolset.js";
 import {formatSize} from "unconscious/common/Utils.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
+import {lightAsync, loadLanguage} from "/src/markdown/highlight.js";
+import {stringify} from "/common/json5-stringify.js";
 
 const sandboxInstances = new Map;
 
@@ -179,7 +181,7 @@ export {
 	},
 	OffscreenCanvas: {
 		description: "builtin FontFace createImageBitmap getContext()",
-		k: "jpg jpeg png bmp image"
+		k: "jpg jpeg png bmp image font ttf otf render opengl"
 	},
 	"crypto.subtle": {
 		description: " builtin",
@@ -239,7 +241,7 @@ export const RunJS = {
 - Supports CommonJS. extension must be \`.cjs\`.
 - Node.js shim: Buffer, fs, path, process, fetch.
 - Not real Node.js: no require(), Only three modules: \`fs/promises\`, \`path\`, \`url\`.
-- After the module evaluated, the sandbox detaches — await Promises before return or they will fail.
+- After the module evaluated, the sandbox detaches — MUST await top-level Promises.
 - Permissions: "network" for fetch, "eval" for Function, wasm and http/data import().
 - For Uint8Array, use \`fs.writeFile(path, data, { transfer: true })\` (or appendFile) to transfer the buffer ownership for better performance. The returned promise resolves to a new Uint8Array with the same content; the original buffer becomes invalid.`,
 	parameters: {
@@ -287,8 +289,22 @@ export const RunJS = {
 		const args = getToolParameters(ctx, tc);
 		let label = '运行';
 		if (args.path) label += ' '+args.path;
-		else label += `内联代码 (${formatSize(args.code?.length)})`;
+		else label += `JS代码 (${formatSize(args.code?.length)})`;
 		return label;
+	},
+	renderInput(ctx, box, tc) {
+		let {code, ...rest} = getToolParameters(ctx, tc);
+		if (code) {
+			if (Object.keys(rest).length)
+				code = stringify(rest).split('\n').map(s=> "// "+s).join("\n")+'\n' + code;
+			box.innerText = code;
+			loadLanguage('javascript').then(name => {
+				lightAsync(code, name, html => box.innerHTML = html, () => !box.isConnected);
+			});
+			return;
+		}
+
+		return false;
 	},
 
 	async script({code, path, env, argv, timeout = 10, permissions, persist }, response, conv) {
@@ -359,7 +375,7 @@ export const RunJS = {
 			}
 		}))
 
-		const timer = setTimeout(() => stopWorker("Error: Timeout"), timeout * 1000);
+		const timer = setTimeout(() => stopWorker("Timeout"), timeout * 1000);
 
 		worker.handlers.load = (path, systemModule) => {
 			if (systemModule) {
@@ -468,7 +484,7 @@ export const RunJS = {
 			}
 		}
 
-		return (getLog()+err) || '[No console output]';
+		return (getLog()+err) || '[No console output] (Hint: Have you awaited top-level Promise?)';
 	}
 };
 

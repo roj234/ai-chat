@@ -137,10 +137,8 @@ function createSchemaEditColumn(typeId, editorConstructor) {
 	const element = <>
 		<div className={"choice-scroll"}>
 			<button className={"btn ghost"} onClick={() => {
-				_closePanel();
+				const closePanel = _closePanel();
 				showOverwriteConfirm(selectedItem, typeStr, () => {
-					selectedItem.value = undefined;
-					dropdown.setSelection(null);
 					SimpleModal({
 						type: "input",
 						title: "输入新"+typeStr+"的名称",
@@ -149,6 +147,12 @@ function createSchemaEditColumn(typeId, editorConstructor) {
 							selectedItem.value = {name};
 							dropdown.setSelection(name);
 							openEditor();
+						},
+						onCancel() {
+							return closePanel.then(() => {
+								selectedItem.value = undefined;
+								dropdown.setSelection(null);
+							});
 						}
 					})
 				});
@@ -480,12 +484,15 @@ const checkJSON = (json, batch, fileName, imageBlob) => {
 	}
 
 	if (definition[json.type]) {
-		const error = validateAndShowError(json, schema.$defs[json.type]);
+		const [typeStr, names] = definition[json.type];
+		const obj = cloneNamed(json, ["name", "type", "time", ...names]);
+
+		const error = validateAndShowError(obj, schema.$defs[json.type]);
 		if (error) {
 			showToast("格式校验失败\n"+error, 'error', 10000);
 			return;
 		}
-		return importObject(json.type, json, imageBlob);
+		return importObject(json.type, obj, imageBlob);
 	}
 };
 
@@ -493,15 +500,18 @@ registerDataImportHandler("application/json", checkJSON);
 
 const imageLoader = async (file, batch) => {
 	const imageData = new Uint8Array(await file.arrayBuffer());
-	const im = await parseImageMeta(imageData, { text: true });
+	const im = await parseImageMeta(imageData, { text: true, strip: true });
 	if (!im) return;
 	let obj;
 	if (im.type === 'jpeg') obj = JSON.parse(im.comments.join(""));
-	else if (im.type === 'png') obj = im.text;
+	else if (im.type === 'png') obj = im.texts;
 	const chara = obj?.chara;
 	if (!chara) return;
 
-	const data = JSON.parse(chara[0] === '{' ? chara : base64DecodeToString(chara));
+	const data = typeof chara === 'object' ? chara : JSON.parse(chara[0] === '{' ? chara : base64DecodeToString(chara));
+
+	file = new File([im.strip], file.name, file);
+
 	const result = checkJSON(data, batch, file.name, file);
 	if (result) return await result;
 };

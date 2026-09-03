@@ -1,6 +1,6 @@
 import {getToolParameters, prefixTitle, registerToolset} from "/src/toolset.js";
 import {inputText, messages, selectedConversation, updateMessageUI} from "/src/states.js";
-import {$state, $update, $watch, unconscious} from "unconscious";
+import {$state, $update, $watch, debugSymbol, unconscious} from "unconscious";
 import {AskUser} from "./rp_kit/AskUser.js";
 import {
 	callFileSystemFunc,
@@ -20,10 +20,41 @@ import {InspectImage} from "./inspect_image.js";
 import {SetTimeout} from "./rp_kit/SetTimeout.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {prettyTime} from "unconscious/common/Utils.js";
-import {TextDiff} from "/src/components/TextDiff.jsx";
+import {DiffHeader, makeDiff, TextDiff} from "/src/components/TextDiff.jsx";
 import {createAsyncQueue} from "/src/utils/pure-utils.js";
 import {getCombinedPreset, markMessageDirty} from "/src/database.js";
 import {trackProcess} from "./apiFsEvents.js";
+import {lightSync, loadLanguage} from "/src/markdown/highlight.js";
+
+const DIFF_CACHE = debugSymbol("Diff");
+/**
+ *
+ * @param {string} prefix
+ * @param {function(Record<string, string>): import("unconscious/common/text-diff.d.ts").DiffOp[]} fn
+ * @return {function(OpenAI.ToolCall, AiChat.ToolResponse): JSX.Element}
+ */
+const diffTitleRenderer = (prefix, fn) => (req, ctx) => {
+	const par = getToolParameters(ctx, req);
+	let diff = ctx[DIFF_CACHE];
+	if (undefined === diff) diff = ctx[DIFF_CACHE] = fn(par);
+	const str = prefix+" "+par.path;
+	return null === diff ? str : <>{str}<span className={"spacer"} /><DiffHeader diff={diff} /></>
+};
+/**
+ *
+ * @param {function(Record<string, string>): import("unconscious/common/text-diff.d.ts").DiffOp[]} fn
+ * @return {function(AiChat.ToolResponse, HTMLElement, OpenAI.ToolCall): JSX.Element}
+ */
+const diffContentRenderer = (fn) => (ctx, box, tc) => {
+	const par = getToolParameters(ctx, tc);
+	let diff = ctx[DIFF_CACHE];
+	if (undefined === diff) diff = ctx[DIFF_CACHE] = fn(par);
+
+	const searchString = "changedRange: ";
+	const starts = ctx.content.split("\n").filter(l => l.startsWith(searchString)).map(l => parseInt(l.slice(searchString.length)));
+
+	return null === diff ? false : <TextDiff start={starts} diff={diff} filename={par.path} />
+};
 
 let globFiles, readFile = fileAccess("read"), writeFile = fileAccess("write"), statFile;
 //region Filesystem tools
@@ -99,6 +130,11 @@ const Read = {
 	}
 };
 
+const writeDiffHandler = (args) => {
+	const content = args.content;
+	return content && makeDiff('', content);
+};
+
 /** @type {AiChat.FunctionTool} */
 const Write = {
 	name: "Write",
@@ -110,30 +146,38 @@ const Write = {
 		changeable.add(par.path);
 		return result;
 	},
-	interactive: false, // 手动指定 interactive 之后 renderer 总是会被调用，而不是必须等到执行结束
-	title: (tc, ctx) => {
-		const toolParameters = getToolParameters(ctx, tc);
-		return <div style={"display:flex"}>
-			{"写入 "+toolParameters.path}
-			<div className={"spacer"}></div>
-			<button className={"danger"} onClick={async () => {
-				const start = Date.now();
-				toolParameters.content = await readFile({path: toolParameters.path, noTruncate: true}, ctx, unconscious(selectedConversation));
-				tc.function.arguments = JSON.stringify(toolParameters);
-				const now = Date.now();
-				ctx.time = now;
-				ctx.duration = now - start;
-				$update(updateMessageUI);
-			}} title={"从磁盘读取文件内容，更新到最新状态"}>回读
-			</button>
-		</div>
-	},
-	keyFunc(keys, z, b) {
-		keys.push(z.time);
-	},
-	renderer(ctx, frozen, tc) {
-		const content = getToolParameters(ctx, tc).content;
-		return content ? <TextDiff oldText={''} newText={content}/> : undefined;
+	title: diffTitleRenderer("写入", writeDiffHandler),
+	renderInput: (ctx, box, tc, message) => {
+		const par = getToolParameters(ctx, tc);
+		let diff = ctx[DIFF_CACHE];
+		if (undefined === diff) diff = ctx[DIFF_CACHE] = writeDiffHandler(par);
+
+		box.previousElementSibling.append(<button className={"danger"} onClick={async () => {
+			const start = Date.now();
+			par.content = await readFile({
+				path: par.path,
+				noTruncate: true
+			}, ctx, unconscious(selectedConversation));
+			tc.function.arguments = JSON.stringify(par);
+
+			const now = Date.now();
+			ctx.time = now;
+			ctx.duration = now - start;
+			delete ctx[DIFF_CACHE];
+
+			// 其实只要更新TextDiff和DiffHeader两个组件
+			const tcs = message.tool_calls;
+			const idx = tcs.indexOf(tc);
+			tcs[idx] = {...tc};
+			$update(updateMessageUI);
+
+			markMessageDirty(message);
+		}}>回读<span className={"tooltip"}>{"从磁盘读取文件，更新工具数据\n（反向操作）\n仅限专业人士操作！"}</span>
+		</button>);
+
+		if (null === diff) return false;
+		diff.forEach(d => d.type = "same");
+		return <TextDiff start={[1]} diff={diff} filename={par.path}/>
 	},
 
 	parameters: {
@@ -145,17 +189,14 @@ const Write = {
 		required: ["path", "content"]
 	}
 };
+
 /** @type {AiChat.FunctionTool} */
 const Append = {
 	name: "Append",
 	description: "Append to the end of a file. New file will be created.",
 	script: fileAccess("append"),
-	title: prefixTitle("追加"),
-	interactive: false,
-	renderer(ctx, frozen, tc) {
-		const args = getToolParameters(ctx, tc);
-		return <TextDiff oldText={''} newText={args.content} />
-	},
+	title: diffTitleRenderer("追加", writeDiffHandler),
+	renderInput: diffContentRenderer(writeDiffHandler),
 	parameters: {
 		type: "object",
 		properties: {
@@ -206,13 +247,23 @@ function parseUnifiedHunk(text) {
 }
 
 const patchHandler = fileAccess("patch");
+const patchDiffHandler = (par) => {
+	const diff = [];
+	parseUnifiedHunk(par.diff)
+		.filter(i => i.search !== i.replace)
+		.forEach(({search, replace}) => {
+			diff.push({ type: "hunk", text: par.path })
+			diff.push(...makeDiff(search, replace));
+		});
+	return diff;
+};
 
 /** @type {AiChat.FunctionTool} */
 const Patch = {
 	name: "Patch",
-	description: "Apply unified diff hunks atomically to a file. Write only changed lines + 2–3 context lines (`@@` numbers are advisory). Use `-` for removed lines, `+` for added lines, ` ` for unchanged lines.",
-	title: prefixTitle("修改"),
-	interactive: false,
+	description: "Apply unified diff hunks atomically to a file. (`@@` numbers are ignored).",
+	title: diffTitleRenderer("修改", patchDiffHandler),
+	renderInput: diffContentRenderer(patchDiffHandler),
 	script(par, ctx, conv) {
 		const changes = parseUnifiedHunk(par.diff);
 		if (!changes.length) throw ("Patch contains no valid hunks");
@@ -222,37 +273,33 @@ const Patch = {
 			changes
 		}, ctx, conv);
 	},
-
-	renderer(ctx, frozen, tc) {
-		const par = getToolParameters(ctx, tc);
-		const chunks = parseUnifiedHunk(par.diff).filter(i => i.search !== i.replace);
-		return <div>{chunks.map(({search, replace}) => <TextDiff oldText={search} newText={replace} strip={true} />)}</div>
-	},
-
 	parameters: {
 		type: "object",
 		properties: {
-			path: { type: "string", description: "文件路径" },
-			diff: {
-				type: "string",
-				description: "Unified diff block"
-			},
+			path: { type: "string" },
+			diff: { type: "string" },
 		},
 		required: ["path", "diff"]
 	}
 };
 
+const editDiffHandler = ({search, replace}) => {
+	if (search != null && replace != null && search !== replace) {
+		return makeDiff(search, replace);
+	}
+}
+
 /** @type {AiChat.FunctionTool} */
 const Edit = {
 	name: "Edit",
 	description:
-		"Find and replace text within a file." +
+		"Atomically find and replace text within a file." +
 		" Use optional 1-based inclusive `startLine` and `endLine` to narrow the range (search/replace scope)." +
 		" When `replaceAll` is true, replaces all occurrences in that range." +
-		" when `replaceAll` is false, it must occur exactly once in that range.",
+		" When `replaceAll` is false, it must occur exactly once in that range.",
 	script: fileAccess("edit"),
-	title: prefixTitle("修改"),
-	interactive: false,
+	title: diffTitleRenderer("修改", editDiffHandler),
+	renderInput: diffContentRenderer(editDiffHandler),
 
 	fix(par) {
 		const keys = Object.keys(par);
@@ -270,11 +317,6 @@ const Edit = {
 				delete par[res[0]];
 			}
 		}
-	},
-
-	renderer(ctx, frozen, tc) {
-		const {search, replace} = getToolParameters(ctx, tc);
-		return search != null && replace != null && search !== replace ? <TextDiff oldText={search} newText={replace} strip={true} /> : undefined;
 	},
 
 	parameters: {
@@ -440,12 +482,14 @@ b.txt
  */
 const Mount = {
 	name: "Mount",
-	description: "Ask the user to mount a new VFS to ~/\`subdir\`.",
-	//interactive: true,
+	description: "Mount a new VFS.",
 	parameters: {
 		type: "object",
 		properties: {
-			subdir: {type: "string",},
+			subdir: {
+				type: "string",
+				description: "pathname hint"
+			},
 			label: {
 				type: "string",
 				description: "Short human-readable instruction telling the user which folder to provide.",
@@ -455,12 +499,18 @@ const Mount = {
 	},
 	title: prefixTitle("挂载", 'subdir'),
 
-	script({subdir, label}, resp, conv) {
+	async script({subdir, label}, resp, conv) {
 		if (/[~/]/.test(subdir)) throw 'path contains invalid character';
 
+		const opt = { fs_label: label };
+		await createFileSystem(opt);
+
+		const fsBase = opt.fs_base;
+		if (fsBase && !fsBase.includes("/")) subdir = fsBase;
+
 		resp.subdir = subdir;
-		(conv.mnt || (conv.mnt = {}))[subdir] = { fs_label: label };
-		return "Mounted on ~/"+subdir;
+		(conv.mnt || (conv.mnt = {}))[subdir] = opt;
+		return "New VFS mounted on ~/"+(subdir);
 	},
 	undo(resp, conv, tc) {
 		const mnt = conv.mnt;
@@ -509,7 +559,7 @@ const Mount = {
  */
 const LsMount = {
 	name: "LsMount",
-	description: "List VFS mount points",
+	description: "List all VFS",
 	title: () => "列出文件系统",
 
 	script(_, resp, conv) {
@@ -635,6 +685,19 @@ const Shell = {
 	interactive: "secure",
 	script: execTracker("shell"),
 	title: prefixTitle("执行命令:", "explanation"),
+	renderInput(ctx, box, tc) {
+		const args = getToolParameters(ctx, tc);
+		let str = '';
+		if (args.cwd) str += "CWD="+JSON.stringify(args.cwd)+"\n";
+		if (args.timeout) str += "TIMEOUT="+args.timeout+"\n";
+		if (args.async) box.previousElementSibling.append(" (异步)");
+
+		const code = str+args.command;
+		box.innerText = code;
+		loadLanguage('bash').then(name => {
+			box.innerHTML = lightSync(code, name);
+		})
+	},
 
 	parameters: {
 		type: "object",
@@ -883,7 +946,7 @@ registerToolset(
 registerToolset(
 	"Files",
 	"Read, write, search and delete files in the workspace." +
-	" Execute native programs and shell commands if permitted by the user, otherwise run JavaScript files in sandbox.",
+	" Execute native programs and shell commands if permitted by the user, otherwise run JavaScript code in sandbox.",
 	fileSystemTools,
 	{
 		default: true,
@@ -904,7 +967,8 @@ registerToolset(
 			let auxPrompt = conv[FILESYSTEM_AUX_PROMPT] || '';
 			if (!auxPrompt) {
 				if (fsType === 'api') auxPrompt += await shellPrompt(conv);
-				try {
+				// 子代理不读取
+				if (!conv.owner) try {
 					const text = await readFile({ path: "AGENTS.md", noTruncate: true }, null, conv);
 					if (text) {
 						let tag = 'project-context';

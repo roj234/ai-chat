@@ -1,21 +1,23 @@
 import {$foreach, $state, $watch, AS_IS, unconscious} from "unconscious";
 import {createMarkdownStream, renderMarkdownToElement} from "/src/markdown/markdown.js";
-import {callOnLoadHandler} from "/src/hooks.js";
 import {openJsonEditor} from "/src/json_editor/jsonEditorProxy.js";
 import {highlightJsonLike} from "/src/markdown/highlight.js";
 import {sseFetch} from "/common/openai-api-utils.js";
 import "/src/database.js";
 import {requestBackend} from "/src/database/remoteDB.js";
-import {config} from "/src/states.js";
+import {config, EVENT_BUS} from "/src/states.js";
 import {downloadFile} from "/src/utils/utils.js";
 import {writeJPEG, writePNG} from "/common/imate.js";
 import {base64Encode} from "unconscious/common/Base64.js";
+import {kvListDel, kvListGet, kvListSet} from "/src/database.js";
 
 const API_PREFIX = 'cards/';
 const currentPage = $state(1);
 const pages = $state();
 const cards = $state();
 const limit = 10;
+
+const CHAR_TYPE = "st|char";
 
 const loadHash = () => {
 	const s = location.hash.substring(1);
@@ -179,24 +181,28 @@ function goPage(p) {
 }
 
 async function showEditModal(name) {
-	const data = await requestBackend(API_PREFIX + name, undefined);
+	const data = await kvListGet(CHAR_TYPE, name);
 
 	const [_, onClose] = openJsonEditor("usci/"+name, () => {
 		return JSON.stringify(data, null, 2);
 	}, (v) => {
 		const card = JSON.parse(v);
-		requestBackend(API_PREFIX + name, {method: 'POST', body: v}).then(loadCards);
+		kvListSet(card, CHAR_TYPE);
 	})
 }
 
 
 async function saveCard(name) {
-	const card = await requestBackend(API_PREFIX + name, undefined);
-	const buf = card.image && await (await fetch(config.db_server+`/blob/${card.image.hash}`)).arrayBuffer();
+	const card = await kvListGet(CHAR_TYPE, name);
+	card.type = CHAR_TYPE;
+
+	const buf = card.image && await card.image.arrayBuffer();
 
 	if (!buf) {
 		downloadFile(new File([JSON.stringify(card)], name+".json"));
 	} else {
+		delete card.image;
+
 		const imageData =  new Uint8Array(buf);
 		const embeddedImage = imageData[0] === 0xFF
 			? writeJPEG(imageData, JSON.stringify({ chara: card }))
@@ -207,7 +213,7 @@ async function saveCard(name) {
 }
 
 async function showDetail(name) {
-	const {creator, image, tags, time, ...card} = await requestBackend(API_PREFIX + name, undefined);
+	const {creator, image, tags, time, ...card} = await kvListGet(CHAR_TYPE, name);
 
 	const html = <>
 		<h2>{name} {creator && <small style="color:#78909c">by {creator}</small>}
@@ -240,10 +246,11 @@ async function showDetail(name) {
 
 function confirmDelete(name) {
 	if (!confirm('确定删除 "' + name + '"？此操作不可恢复。')) return;
-	requestBackend(API_PREFIX + name, {method: 'DELETE'}).then(loadCards);
+	kvListDel(CHAR_TYPE, name);
 }
 
 const el = document.getElementById("app");
 el.replaceChildren(...APP);
-callOnLoadHandler(el);
-loadCards();
+await EVENT_BUS.fire(['load']);
+await EVENT_BUS.fire(['loaded']);
+EVENT_BUS.on(['kvs', CHAR_TYPE], e => loadCards());

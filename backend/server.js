@@ -1,19 +1,23 @@
-import "./utils/log-hook.js";
-import "./utils/fetch-hook.js";
 import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs/promises';
 import {watch} from 'node:fs';
+import path from "node:path";
 import {parseArgs} from 'node:util';
+
+import {WebSocketServer} from "unconscious/common/ws2/src/index.js";
+import {ZipReader} from "unconscious/common/zip-io.js";
+
+import "./utils/log-hook.js";
+import "./utils/fetch-hook.js";
+
+import {INTERACTIVE_LOGIN, PAT_SERVER_SALT, reload, SERVER_BASE_ADDR, WEBSOCKET_SYNC_ENABLE} from "./config.js";
+import {PROTOCOL_VERSION} from "./sync.js";
+
 import {createRouter} from './init.js';
 import {createSyncManager, createSyncValidateMiddleware} from "./syncServer.js";
-import {WebSocketServer} from "unconscious/common/ws2/src/index.js";
-import {INTERACTIVE_LOGIN, PAT_SERVER_SALT, reload, SERVER_BASE_ADDR, WEBSOCKET_SYNC_ENABLE} from "./config.js";
 import {createZipRouter} from "./utils/zipRouter.js";
 import {closeAllConnections} from "./utils/UserManager.js";
-import {PROTOCOL_VERSION} from "./sync.js";
-import {ZipReader} from "unconscious/common/zip-io.js";
-import path from "node:path";
 
 const options = {
 	addr: { type: 'string', short: 'a', default: '127.0.0.1' },

@@ -22,7 +22,6 @@
     --ok: #3fb950;
     --ok-bg: rgb(63 185 80 / 0.15);
     --user: #2563eb;
-    --assistant: oklch(0.545 0.022 80.03);
     --system: oklch(0.323 0.059 168.518);
 
     /* 新增：间距、圆角、阴影 */
@@ -116,7 +115,6 @@
         --ok: #16a34a;
         --ok-bg: rgb(22 163 74 / 0.15);
         --user: #1d4ed8;
-        --assistant: oklch(0.72 0.04 80);
         --system: oklch(0.45 0.06 168);
 
         /* 亮色阴影 */
@@ -398,7 +396,6 @@ body._fileUI .hide-human {
         gap: var(--spacing-sm);
 
         .user & { border-right: 6px solid var(--user); }
-        .assistant & { border-left: 6px solid var(--assistant); }
         .system & { border-left: 6px solid var(--system); }
 
         /* 修复溢出问题 */
@@ -458,11 +455,6 @@ body._fileUI .hide-human {
 .error-text {
     margin-top: var(--spacing-sm);
     color: var(--error-text-color); white-space: pre-wrap; word-break: break-word;
-}
-
-.tool-call.tool-error {
-    border-left: 4px solid var(--error);
-    border-radius: 0;
 }
 
 .katex-error {
