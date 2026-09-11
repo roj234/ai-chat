@@ -11,13 +11,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import {LLM_COST_SCALE} from "../sync.js";
 import {getProxyAgent} from "../utils/socks5-agent.js";
+import {exclusiveLock} from "../utils/lock.js";
 
 /**
  * @param {AiChatBackend.Router} router
  * @param {string} rootPath
  */
 export function registerDatabaseRoutes(router, rootPath) {
-	router.delete('/database', async (ctx) => {
+	router.delete('/database', exclusiveLock(async (ctx) => {
 		const processLog = (async () => {
 			const logs = await ctx.logDB;
 			const changes = new Map;
@@ -68,14 +69,14 @@ export function registerDatabaseRoutes(router, rootPath) {
 		await processLog;
 
 		ctx.send(200, { success: true });
-	});
+	}));
 
-	router.post('/database/fetch', async (ctx) => {
+	router.post('/database/fetch', exclusiveLock(async (ctx) => {
 		let sync = 0;
 		let zenmuxToken, zenmuxProxy;
 
 		const logs = await ctx.logDB;
-		const records = await logs.findByTime(Date.now() - 86400000, Date.now());
+		const records = await logs.findByTime(Date.now() - 7 * 86400000, Date.now());
 		if (records) {
 			const changes = new Map;
 			for (let i = records.firstId; i <= records.lastId; i++) {
@@ -127,5 +128,5 @@ export function registerDatabaseRoutes(router, rootPath) {
 		}
 
 		ctx.send(200, { updated: sync });
-	});
+	}, true));
 }

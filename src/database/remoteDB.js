@@ -353,10 +353,16 @@ export const kvListSet = async (value, type, name) => {
 	let diff;
 	if (prev) {
 		const prevName = prev.name;
-		if (prevName !== name) kvsCache.delete(type+":"+prevName);
+		if (prevName !== name) {
+			kvsCache.delete(type+":"+prevName);
+			await kvListDel(type, prevName);
+			prev.name = name;
+			diff = rep(value);
+		} else {
+			diff = delta(prev, value, KVLIST_IGNORE_KEYS);
+			if (!diff) return true;
+		}
 
-		diff = delta(prev, value, KVLIST_IGNORE_KEYS);
-		if (!diff) return true;
 		value[DIFF_SNAPSHOT] = patch(prev, structuredClone(diff));
 	} else {
 		diff = rep(value);

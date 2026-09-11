@@ -17,7 +17,26 @@ import {runTools} from "/src/toolset.js";
 
 const ID = 'my/storyTurn';
 
-/** @type {OpenAI.ObjectSchema} */
+// 假设最新消息为index 0
+// 1. [0, summaryDepth) 发送完整的 story 字段
+// 2. [summaryDepth, ) 发送 summary 字段
+// 3. 更长部分应该通过支持召回的上下文管理策略实现，例如主动或被动向文件系统总结
+// 其中 第二部分每当属于它的消息索引可以整除 summaryInterval 时才会更新前缀
+//
+// 变量更新完全是实验性的，也许应该通过DM主代理方案。
+// 不使用命令的话如何通过代码调用SchemaRole？
+// 如何JSX解析甚至让LLM自己编写SchemaRole？
+const memoryConfig = {
+	// 到该对话深度开始使用 summary 字段，根据模型上下文和你的输出字数调
+	summaryDepth: 20,
+	// 深度达标之后，间隔多少条消息更新 summary 前缀状态，这会导致缓存失效
+	summaryInterval: 20,
+};
+
+/**
+ * 兄弟，这不比预设牛逼？
+ * @type {OpenAI.ObjectSchema}
+ */
 const schema = {
 	type: "object",
 	properties: {
@@ -64,6 +83,11 @@ const schema = {
 			type: "string",
 			description: "200字以内描述本回合发生了什么"
 		},
+
+		/*variable_update_analysis: {
+			type: 'string',
+			description: `Describe which variables need update.`,
+		},*/
 
 		variables: {
 			type: "array",
@@ -234,12 +258,12 @@ const composer = (msg, output, _, index, length, conversation) => {
 		$update(updateMessageUI);
 	}
 
-	// 删掉思考过程
+	// 删掉思考过程、变量更新等字段
 	const {reasoning, variables, ...data} = content;
-	// 5轮对话后只保留摘要
-	const is_last_nth = length - index > 10;
-	if (is_last_nth) delete data.summary;
-	else delete data.story;
+
+	const alignedSummaryLength = Math.floor(length / memoryConfig.summaryInterval) * memoryConfig.summaryInterval;
+	if (alignedSummaryLength - index >= memoryConfig.summaryDepth) delete data.story;
+	else delete data.summary;
 
 	output.push({
 		role: "assistant",

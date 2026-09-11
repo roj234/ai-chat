@@ -9,12 +9,11 @@ import {
 	setKV,
 	updateConversation
 } from "/src/database.js";
-import {config, conversations, selectedConversation} from "/src/states.js";
-import {CREATE, createWebFileSystem, resolveDirectory} from "./WebFileSystem.js";
+import {conversations, selectedConversation} from "/src/states.js";
+import {createWebFileSystem, resolveDirectory} from "./WebFileSystem.js";
 import {$update, unconscious} from "unconscious";
 import {NestedMap, NODE_VALUE} from "unconscious/common/NestedMap.js";
 import {serializeJSON} from "/src/utils/marshal.js";
-import {DI_settings} from "/src/hooks.js";
 
 const BLACKLIST_CHARS = new RegExp('[| &=?#{}<>:,]', 'g');
 const SOME = {};
@@ -195,8 +194,6 @@ for (const type of kvsTypes) {
 	CFG_ROOTS.set([".", "kvs", fileEscape(type)], handler);
 }
 
-
-
 const convHandler = {
 	async read(convObj) {
 		await getMessagesCacheFirst(convObj);
@@ -291,42 +288,14 @@ CFG_ROOTS.set([".", "conversations"], {
 	}
 });
 
-export const getTempDirectory = async () => (await resolveDirectory(await navigator.storage.getDirectory(), "tmp/"+selectedConversation.id, CREATE));
-export const deleteTempDirectory = async() => {
-	try {
-		const parent = (await navigator.storage.getDirectory()).getDirectoryHandle("tmp");
-		await parent.removeEntry(String(selectedConversation.id), { recursive: true });
-	} catch {}
-}
-
-const TEMP_DIRECTORY = {};
-Object.defineProperty(TEMP_DIRECTORY, "handle", { get: getTempDirectory });
-CFG_ROOTS.set([".", "tmp"], TEMP_DIRECTORY);
-
-CFG_ROOTS.set([".", "config.json"], {
-	read(name) {
-		const {endpoint, accessToken, db_server, db_pat, ...val} = unconscious(config);
-		return JSON.stringify(val, null, 2);
-	},
-	write(name, data) {
-		const {endpoint, model, accessToken, db_server, db_pat} = unconscious(config);
-		config.value = JSON.parse(data);
-		config.endpoint = endpoint;
-		config.accessToken = accessToken;
-		config.db_server = db_server;
-		config.db_pat = db_pat;
-		DI_settings.sync();
-	},
-});
-
-const root = new VirtualDirectory(CFG_ROOTS);
+const configFS_root = new VirtualDirectory(CFG_ROOTS);
 
 /**
  * 基于应用配置数据库的虚拟文件系统
  * @param {string} base - 根路径约束（如 "conversations"）
  * @returns {AiChat.FileSystemInstance}
  */
-export const createConfigFileSystem = async base => createWebFileSystem(await resolveDirectory(root, base || ""));
+export const createConfigFileSystem = async base => createWebFileSystem(await resolveDirectory(configFS_root, base || ""), {});
 
 /**
  *

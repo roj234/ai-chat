@@ -1,10 +1,11 @@
 import {decompressMessage, deserializeRow} from "../utils/compression.js";
+import {exclusiveLock} from "../utils/lock.js";
 
 /**
  * @param {AiChatBackend.Router} router
  */
 export function registerSearchRoutes(router) {
-	router.get('/search', async (ctx) => {
+	router.get('/search', exclusiveLock(async (ctx) => {
 		// mode = [semantic, keyword, null]
 		const {keyword, mode} = ctx.query;
 		if (!keyword) return ctx.send(400, { error: 'keyword required' });
@@ -142,5 +143,5 @@ export function registerSearchRoutes(router) {
 		}
 
 		ctx.send(200, Array.from(conversations.values()));
-	});
+	}, true));
 }

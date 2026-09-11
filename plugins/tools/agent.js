@@ -3,6 +3,7 @@ import {inputText, messages, selectedConversation, updateMessageUI} from "/src/s
 import {$state, $update, $watch, debugSymbol, unconscious} from "unconscious";
 import {AskUser} from "./rp_kit/AskUser.js";
 import {
+	BACKEND_SERVER_KVLIST_ID,
 	callFileSystemFunc,
 	createFileSystem,
 	fileAccess,
@@ -22,11 +23,12 @@ import {COMMAND_REGISTRY} from "/src/commands.js";
 import {prettyTime} from "unconscious/common/Utils.js";
 import {DiffHeader, HighlightBox, makeDiff, TextDiff} from "/src/components/TextDiff.jsx";
 import {createAsyncQueue} from "/common/pure-utils.js";
-import {getCombinedPreset, markMessageDirty} from "/src/database.js";
+import {getCombinedPreset, kvListGet, markMessageDirty} from "/src/database.js";
 import {trackProcess} from "./apiFsEvents.js";
 import {lightSync, loadLanguage} from "/src/markdown/highlight.js";
 import {compileGrepPattern} from "/common/fs-common.js";
 import "./GrepCard.css";
+import {normalizePath} from "unconscious/common/path-utils.js";
 
 const DIFF_CACHE = debugSymbol("Diff");
 /**
@@ -840,9 +842,9 @@ const shellFallbackTools = [RunJS, SearchModules];
 
 async function shellPrompt(conv) {
 	let shellType = '';
-	const [url, pat] = conv.fs_server;
+	const {uri, pat} = await kvListGet(BACKEND_SERVER_KVLIST_ID, conv.fs_server);
 	const base = conv.fs_base;
-	let endpoint = url+'env';
+	let endpoint = uri+'fs/env';
 	if (base) endpoint += '?root='+encodeURIComponent(base);
 
 	let data;
@@ -1139,21 +1141,36 @@ registerToolset(
 
 COMMAND_REGISTRY['fsync'] = [
 	async (arg) => {
-		const list = fileAccess('list');
 		const conv = unconscious(selectedConversation);
 		const lastTime = messages.at(-1).time;
 		if (null == lastTime) return;
-		const result = await list({
+
+		const list = fileAccess('list');
+		const readFiles = new Map;
+		messages.forEach(m => {
+			const tr = m.tool_responses;
+			const tc = m.tool_calls;
+			if (tr) for (let i = 0; i < tr.length; i++) {
+				const fn = tc[i].function.name;
+				if (fn === "Read" || fn === "Edit" || fn === "Write" || fn === "Append" || fn === "Patch" || fn === "Stat") {
+					const arg = getToolParameters(tr[i], tc[i], true);
+					readFiles.set(normalizePath(arg.path).join('/'), 1);
+				}
+			}
+		});
+
+		const result = (await list({
 			pattern: '**',
 			json: true,
 			modifiedSince: lastTime
-		}, {}, conv);
+		}, {}, conv)).filter(item => readFiles.has(item[0]));
 		if (!result.length) return;
+
 		messages.push({
 			role: 'user',
 			time: Date.now(),
-			content: '<system-remainder>Some files have changed:\n```\n'+result.map(([name, type, size, time]) => {
-				return name+'\t'+prettyTime(Date.parse(time+"+00:00"));
+			content: '<system-remainder>\nThese files were changed:\n```\n'+result.map(([name, type, size, time]) => {
+				return name+'\t'+prettyTime(time);
 			}).join('\n')+'\n```\n</system-remainder>',
 			label: "文件系统变更"
 		});

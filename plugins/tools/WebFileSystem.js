@@ -79,6 +79,7 @@ export const createWebFileSystem = (rootHandle, config) => {
 	/** @type {IgnoreMatcher} */
 	let ignored;
 	const loadIgnore = async () => {
+		if ((ignored = config.fs_ACL)) return;
 		let text = '';
 
 		for (const name of ['.ignore', '.gitignore']) {
@@ -301,8 +302,8 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 				if (handle.kind === 'file') {
 					const file = await handle.getFile();
 					if (file.lastModified > modSince) {
-						const item = [displayPath, "file", formatSize(file.size)];
-						if (showModified || modSince) item.push(new Date(file.lastModified).toISOString().slice(0, -5)+'Z');
+						const item = [displayPath, "file", json ? file.size : formatSize(file.size)];
+						if (showModified || modSince) item.push(json ? file.lastModified : new Date(file.lastModified).toISOString().slice(0, -5)+'Z');
 						result.push(item);
 					}
 				} else if ((showDir != null ? showDir : !modSince)) {
@@ -311,7 +312,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 				}
 			}
 
-			if (modSince) result.sort((a, b) => b[3].localeCompare(a[3]));
+			if (modSince) result.sort((a, b) => b[3] - a[3]);
 
 			if (json) return result;
 			return result.length ? prefix+result.map(item => item.join("\t")).join("\n") : "[No result]";

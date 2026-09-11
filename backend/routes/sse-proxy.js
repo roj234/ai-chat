@@ -17,6 +17,7 @@ import {createJsonStream} from "../../common/StreamJsonSerializer.js";
 import {deepEntries} from "unconscious/common/json-schema-utils.js";
 import {isLanAddress} from "../../common/isLanAddress.js";
 import {getProxyAgent} from "../utils/socks5-agent.js";
+import {BLOB_HASH_REGEX} from "./blob-storage.js";
 
 const log = (str, ...args) => console.log(`[SSE Proxy] `+str, ...args);
 
@@ -92,7 +93,7 @@ async function processMessageRefs(messages, blobDir) {
 	for (const [val, own, key] of deepEntries(output)) {
 		if (val?.$ === 'BlobH') {
 			const hash = val.hash;
-			const filePath = path.join(blobDir, hash.slice(0, 2).toLowerCase(), hash);
+			const filePath = new RegExp(BLOB_HASH_REGEX).test(hash) && path.join(blobDir, hash.slice(0, 2).toLowerCase(), hash);
 
 			tasks.push(fs.access(filePath).then(() => openAsBlob(filePath).then((blob) => own[key] = blob), e => {
 				throw new Error("附件 "+(val.name || hash)+" 丢失或损坏");
@@ -490,9 +491,13 @@ export function registerSSEProxyRoutes(router, dataPath) {
 
 	finishedRequests = new LRUCache(SSE_RESUME_CACHE_SIZE, SSE_RESUME_TTL ? { ttlMode: "update" } : null);
 
-	router.post("/models/wipe_cache", (ctx) => {
-		messageCache.clear();
+	// 调试用
+	router.get("/trace", (ctx) => {
+		ctx.send(200, { generating: [...activeRequests.keys()], finished: [...finishedRequests.keys()] });
+	});
+	router.delete("/cache", (ctx) => {
 		modelCache.clear();
+		finishedRequests.clear();
 		ctx.send(200, { success: true });
 	});
 
@@ -540,7 +545,7 @@ export function registerSSEProxyRoutes(router, dataPath) {
 	router.post('/resume/:id', (ctx) => {
 		const {id} = ctx.params;
 		const state = activeRequests.get(id) ?? finishedRequests.get(id);
-		if (!state) return ctx.send(404, { error: "no such session" });
+		if (!state) return ctx.send(404, { error: "not found" });
 
 		ctx.res.setHeader('Content-Type', 'text/event-stream');
 
@@ -574,17 +579,6 @@ export function registerSSEProxyRoutes(router, dataPath) {
 			}
 			return ctx.send(200, { success: true });
 		}
-		ctx.send(404, { error: "no such session" });
-	});
-
-	router.get('/trace/:id', (ctx) => {
-		const {id} = ctx.params;
-		const state = activeRequests.get(id) ?? finishedRequests.get(id);
-		if (state) return ctx.send(200, state);
-
-		ctx.send(404, { error: "no such session" });
-	});
-	router.get("/trace/list", (ctx) => {
-		ctx.send(200, { active: [...activeRequests.keys()], finished: [...finishedRequests.keys()] });
+		ctx.send(404, { error: "not found" });
 	});
 }

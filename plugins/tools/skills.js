@@ -83,7 +83,8 @@ Available skills:
 
 		await finish();
 
-		sortable.sort((a, b) => a.name.localeCompare(b.name)).forEach(metadata => {
+		const intl = new Intl.Collator;
+		sortable.sort((a, b) => intl.compare(a.name, b.name)).forEach(metadata => {
 			prompt += metadata.name+":\n"+metadata.description+"\n\n";
 		});
 

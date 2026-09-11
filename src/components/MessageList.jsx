@@ -496,6 +496,7 @@ const buttonHandler = (e) => {
 		}
 		break;
 		case "regen": {
+			if (!clickTwice(btn)) return;
 			const callback = (mode) => {
 				if (mode) {
 					if (!selectedConversation.bm_leaf) {

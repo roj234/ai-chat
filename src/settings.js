@@ -164,10 +164,12 @@ export const SETTINGS = [
 		_tab: "model",
 		_group: 'model',
 		name: "助手消息预填充 (Assistant Prefill)",
-		title: "当回复因长度限制等原因中断时，让模型从中断处继续生成，而不是重新开始。\n部分提供商不支持。",
+		title: "当回复因长度限制等原因中断时，让模型从中断处继续。\n几乎所有云端推理商都不支持思考模型的预填充。",
 		type: "radio",
+		required: true,
 		choices: {
-			"API支持预填充": true
+			"不支持": false,
+			"支持": true
 		}
 	},
 	{
@@ -523,9 +525,9 @@ export const SETTINGS = [
 		type: "radio",
 		required: true,
 		choices: {
-			"每次询问": null,
-			"覆盖回复": false,
-			"创建分支": true
+			"询问": null,
+			"覆盖": false,
+			"分支": true
 		}
 	},
 	{
@@ -589,7 +591,7 @@ export const SETTINGS = [
 		name: "模型自主调用工具的最长轮数 0 为全自动",
 		type: "number",
 		min: 0,
-		max: 30,
+		max: 50,
 		step: 1,
 		default: 1
 	},

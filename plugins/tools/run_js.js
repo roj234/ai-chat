@@ -7,8 +7,8 @@ import {normalizePath} from "unconscious/common/path-utils.js";
 import {getToolParameters, runTools} from "/src/toolset.js";
 import {formatSize} from "unconscious/common/Utils.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
-import {stringify} from "/common/json5-stringify.js";
-import {HighlightBox} from "../../src/components/TextDiff.jsx";
+import {HighlightBox} from "/src/components/TextDiff.jsx";
+import {inspect} from "unconscious/common/inspect.js";
 
 const sandboxInstances = new Map;
 
@@ -326,7 +326,7 @@ export const RunJS = {
 			let start = 1;
 
 			if (Object.keys(rest).length) {
-				const lines = stringify(rest).split('\n').map(s=> "// "+s);
+				const lines = inspect(rest).split('\n').map(s=> "// "+s);
 				start -= lines.length;
 				code = lines.join("\n")+'\n' + code;
 			}

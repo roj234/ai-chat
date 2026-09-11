@@ -1,74 +1,219 @@
 
-.fs-protocols {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    text-align: left;
+:root[data-theme='light'] .fa-modal .list .icon {
+    background: var(--bg) !important;
+}
 
-    & > div {
+.fa-modal {
+    /* 头部 & 搜索 */
+    .search {
+        position: relative;
+        display: flex;
+        align-items: center;
+        margin: 10px 0;
+
+        & .icon {
+            position: absolute;
+            left: 10px;
+            width: 18px;
+            height: 18px;
+            color: var(--muted);
+            pointer-events: none;
+        }
+
+        & .text-input { padding-left: 32px; }
+    }
+
+    /* 筛选标签条 */
+    & .tabs {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    /* 列表区域 */
+    & .list {
+        overflow-y: auto;
+
+        &.xl .icon {
+            width: 34px;
+            height: 34px;
+            font-size: 20px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+    }
+
+    & .ri-box-3-line {
+        background: rgba(0, 188, 242, 0.15) !important;
+        color: rgba(0, 188, 242);
+    }
+    & .ri-folder-open-line {
+        background: rgba(255, 214, 121, 0.15) !important;
+        color: rgba(255, 214, 121);
+    }
+    & .ri-cloud-fill {
+        background: rgba(255, 255, 255, 0.15) !important;
+    }
+    & .ri-brackets-line {
+        background: rgba(52, 168, 83, 0.15) !important;
+        color: rgb(52, 168, 83);
+    }
+    & .ri-chrome-fill {
+        background: rgba(66, 133, 244, 0.15) !important;
+        color: rgb(66, 133, 244);
+    }
+
+    & .desc {
+        color: var(--muted);
+        font-size: 14px;
+    }
+
+    & li {
+        display: flex;
+        padding: 4px 8px;
+        transition: all 0.15s ease;
+        border: 1px solid transparent;
+
+        &:hover {
+            background: var(--chip-bg);
+            border-color: rgba(255, 255, 255, 0.04);
+        }
+
+        &.active {
+            border-color: var(--focus) !important;
+        }
+
+        /* 悬浮显示操作，提升空间清爽度 */
+        &:hover .buttons,
+        &:focus-within .buttons {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        /* 图标盒子 */
+        & .icon {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            user-select: none;
+        }
+    }
+
+    & .list:not(.xl) > li:not(:last-child) {
+        border-bottom-color: var(--border);
+    }
+
+    & .left {
         display: flex;
         align-items: center;
         gap: 12px;
+        min-width: 0;
+        flex: 1;
+    }
 
+    & .info {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+    }
+
+    & .title {
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    /* 按钮组与微交互 */
+    & .buttons {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        opacity: 0;
+        transform: translateX(4px);
+        transition: all 0.18s ease;
+        margin-left: 12px;
+    }
+
+    & .ri-pushpin-line {
+        color: var(--muted);
+        cursor: pointer;
+    }
+    & li:not(:hover) .ri-pushpin-line {
+        display: none;
+    }
+
+    & .ri-pushpin-fill {
+        color: #fbbf24;
+        cursor: pointer;
+    }
+
+    /* 列表底部状态栏 */
+    & .empty {
+        padding: 13px 0;
+        text-align: center;
+        color: var(--muted);
+    }
+
+    & .paths {
         & > span {
-            color: var(--text-muted);
+            color: var(--muted);
             font-size: 14px;
-            line-height: 1.5;
+            user-select: none;
+            cursor: pointer;
+
+            &:hover {
+                color: var(--text);
+            }
+
+            &:not(:first-child):before {
+                content: " > ";
+            }
+        }
+    }
+
+    & .btn1 {
+        color: var(--muted);
+        width: 28px;
+        height: 28px;
+        transition: all 0.15s ease;
+
+        &:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text);
         }
 
-        & > button {
-            padding: 8px 16px;
-            font-weight: 700;
-            color: var(--text-on-accent);
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: box-shadow 0.2s;
-
-            &.api {
-                background: #4a90d9;
-                box-shadow: 0 0 12px rgba(74, 144, 217, 0.6);
-            }
-            &.local {
-                background: #27ae60;
-                box-shadow: 0 0 12px rgba(39, 174, 96, 0.6);
-            }
-            &.config {
-                background: #8e44ad;
-                box-shadow: 0 0 12px rgba(142, 68, 173, 0.6);
-            }
-            &.opfs {
-                background: #e67e22;
-                box-shadow: 0 0 12px rgba(230, 126, 34, 0.6);
-            }
-            &.db {
-                background: #16a085;
-                box-shadow: 0 0 12px rgba(22, 160, 133, 0.6);
-            }
-
-            &:disabled {
-                background: #555;
-                cursor: not-allowed;
-                box-shadow: none;
-            }
+        &.delete:hover {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--danger);
         }
     }
 }
 
-.agent-popup button:hover {
-    transform: translateY(-1px);
+/* 动画辅助 */
+.item-removing {
+    opacity: 0 !important;
+    transform: scale(0.95) !important;
+    transition: all 0.2s ease !important;
 }
 
-.fs-options {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
+/* 移动端适配 */
+@media (max-width: 640px) {
+    .fa-modal {
 
-    & .option > button {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        overflow-wrap: anywhere;
+        /* 移动端常驻展示操作按钮，保持透明度柔和 */
+        & .buttons {
+            opacity: 0.8;
+            transform: none;
+        }
+        & .btn1 {
+            width: 32px;
+            height: 32px;
+        }
     }
 }

@@ -67,14 +67,14 @@ jobs:
         working-directory: packages/ai-chat
 
       - name: Upload Android assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: android-assets
           path: packages/ai-chat/dist-app/
           if-no-files-found: error
 
       - name: Upload Android config
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: android-config
           path: packages/ai-chat/misc/android-config/
@@ -119,10 +119,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Setup Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Download frontend package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: dist
           path: .
@@ -152,25 +152,25 @@ jobs:
 
     steps:
       - name: Download release package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: release
           path: release-files
 
       - name: Download frontend package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: dist
           path: release-files
 
       - name: Download APK
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: ${{ needs.build-apk.outputs.apk_artifact_name }}
           path: release-files
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.tag_name || format('v{0}', github.run_number) }}
           name: ${{ github.event.inputs.tag_name || format('b{0}', github.run_number) }}

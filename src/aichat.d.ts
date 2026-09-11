@@ -1,8 +1,10 @@
 import {OpenAI} from "./openai";
 
 declare namespace AiChat {
+    type FSType = 'db' | 'api' | 'local' | 'config' | 'opfs' | 'vfs';
+
     type Mount = {
-        fs_type: 'db' | 'api' | 'local' | 'config' | 'opfs' | 'vfs';
+        fs_type: FSType;
         fs_base?: string;
         fs_server?: string | string[];
         fs_builtin?: string;
@@ -39,6 +41,7 @@ declare namespace AiChat {
         bm_leaf?: number;
 
         mnt?: Record<string, Mount>;
+        fs_readonly?: boolean;
 
         /** 覆盖全局配置，高于 config 优先级 */
         presets?: string | string[];
@@ -195,6 +198,7 @@ declare namespace AiChat {
     type AgentFSPreset = {
         fs_trashCan: boolean;
         fs_autoMount: boolean;
+        fs_ACL?: import("../common/ignore.js").IgnoreMatcher;
     }
 
     type ManualOverridePreset = {

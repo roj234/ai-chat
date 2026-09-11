@@ -1,21 +1,48 @@
 
 .blob-manager {
-    & table { width: 100%; border-collapse: collapse; line-height: 1.4 }
-    & th, & td { text-align: center; padding: 6px }
+    & table { width: 100%; border-collapse: collapse; }
+    & th, & td { text-align: left; padding: 6px }
+    & td {
+        height: 85px;
+        font-size:14px;
+    }
     & img {
-        max-width: 15vw; max-height: 10vh; object-fit: cover; cursor: pointer; border: 1px solid var(--border);
+        max-width: 150px;
+        max-height: 100%;
+        object-fit: cover;
+        border: 1px solid var(--border);
+        cursor: zoom-in;
 
         &:hover {
             border-color: var(--accent);
+            transform: scale(1.05);
         }
     }
     & tr { border-bottom: 1px solid var(--border); }
     & tr:hover { background: var(--chip-hover); }
 
-    & .btns {
+    & input[type="checkbox"] {
+        width: 1rem;
+        height: 1rem;
+    }
+
+    & ._pv {
+        text-align: center;
+    }
+
+    & ._info {
+        text-align:left;
+        word-break:break-all;
         display: flex;
-        gap: 0.25rem;
-        align-items: center;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    & .hash {
+        padding: 6px;
+        font-family: var(--code-font);
+        background: var(--bg);
+        border: 1px solid var(--border);
     }
 }
 

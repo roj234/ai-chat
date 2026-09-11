@@ -11,7 +11,14 @@ import {ZipReader} from "unconscious/common/zip-io.js";
 import "./utils/log-hook.js";
 import "./utils/fetch-hook.js";
 
-import {INTERACTIVE_LOGIN, PAT_SERVER_SALT, reload, SERVER_BASE_ADDR, WEBSOCKET_SYNC_ENABLE} from "./config.js";
+import {
+	FS_SERVICE_PAT,
+	INTERACTIVE_LOGIN,
+	PAT_SERVER_SALT,
+	reload,
+	SERVER_BASE_ADDR,
+	WEBSOCKET_SYNC_ENABLE
+} from "./config.js";
 import {PROTOCOL_VERSION} from "./sync.js";
 
 import {createRouter} from './init.js';
@@ -98,8 +105,14 @@ try {
 	process.exit(1);
 }
 
-if (!INTERACTIVE_LOGIN && !isLanAddress(addr))
-	throw new Error("监听地址不是内网，必须开启 INTERACTIVE_LOGIN");
+if (!isLanAddress(addr)) {
+	if (workspace) {
+		if (!FS_SERVICE_PAT)
+			throw new Error("监听地址不是内网，必须配置 FS_SERVICE_PAT");
+	} else if (!INTERACTIVE_LOGIN) {
+		throw new Error("监听地址不是内网，必须配置 INTERACTIVE_LOGIN");
+	}
+}
 
 const router = await createRouter(DATA_PATH, "api", workspace);
 

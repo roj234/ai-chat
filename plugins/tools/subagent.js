@@ -332,18 +332,24 @@ const createSubagentWrapper = async (ctx, par, conv) => {
 	}
 };
 
-const subagentLoop = async conversation => {
-	const messages = await getMessagesCacheFirst(conversation);
-	if (conversation.sa_terminated) return { id: -1, error: true, content: TERMINATED_MESSAGE };
+const subagentLoop = async agent => {
+	const messages = await getMessagesCacheFirst(agent);
+	if (agent.sa_terminated) return { id: -1, error: true, content: TERMINATED_MESSAGE };
 
 	let lastMessage = messages.at(-1);
 	let finishReason = lastMessage.finish_reason;
 	let loop_finish_reason;
 
+	// 重试脚本
+	if (agent.sa_pending) {
+		loop_finish_reason = false;
+		agent.sa_notify = lastMessage.id-1;
+	}
+
 	let locked;
 	try {
 		while (loop_finish_reason !== false && (lastMessage.role !== 'assistant' || finishReason === 'tool_calls')) {
-			if (conversation[LOCKED] === "DELETED") {
+			if (agent[LOCKED] === "DELETED") {
 				return {
 					id: Infinity,
 					error: true,
@@ -353,11 +359,11 @@ const subagentLoop = async conversation => {
 
 			if (!locked) {
 				locked = true;
-				DI[DID_SYNC_LOCK]?.(conversation.id);
+				DI[DID_SYNC_LOCK]?.(agent.id);
 				$update(updateMessageUI);
 			}
 
-			loop_finish_reason = await agentLoop(conversation, messages);
+			loop_finish_reason = await agentLoop(agent, messages);
 			lastMessage = messages.at(-1);
 			finishReason = lastMessage.finish_reason;
 		}
@@ -367,10 +373,10 @@ const subagentLoop = async conversation => {
 			markMessageDirty(lastMessage);
 		}
 	} finally {
-		if (locked) DI[DID_SYNC_UNLOCK]?.(conversation.id);
+		if (locked) DI[DID_SYNC_UNLOCK]?.(agent.id);
 	}
 
-	await updateConversation(conversation, messages);
+	await updateConversation(agent, messages);
 
 	const error = finishReason !== 'stop';
 	let id = lastMessage.id;
@@ -418,7 +424,7 @@ export const subagentLoopWrapper = ctx => {
 		if (lastNotify >= resp.id) return;
 		agent.sa_notify = resp.id;
 
-		const promises = [updateConversation(agent)];
+		const promises = [];
 
 		const redir = agent.sa_redirect;
 
@@ -441,6 +447,7 @@ export const subagentLoopWrapper = ctx => {
 					}
 					break injectMessage;
 					case "javascript": {
+						agent.sa_pending = true;
 						let p = RunJS.script({
 							path: redir.path,
 							env: {
@@ -464,6 +471,9 @@ export const subagentLoopWrapper = ctx => {
 								time: Date.now(),
 								content: prettyError(e.message),
 							}).then(() => subagentLoopWrapper(ctx))
+						}).finally(() => {
+							delete agent.sa_pending;
+							return updateConversation(agent);
 						}));
 					}
 					break injectMessage;
@@ -481,6 +491,7 @@ export const subagentLoopWrapper = ctx => {
 			}));
 		}
 
+		promises.push(updateConversation(agent));
 		return Promise.all(promises);
 	});
 	promise.finally(() => { delete agent[EVAL_AGENT_SYM]; });
@@ -775,7 +786,8 @@ Available agent definitions:
 		}
 		await finish();
 
-		sortable.sort((a, b) => a.name.localeCompare(b.name)).forEach(metadata => {
+		const intl = new Intl.Collator;
+		sortable.sort((a, b) => intl.compare(a.name, b.name)).forEach(metadata => {
 			prompt += metadata.name+":\n"+metadata.description+"\n\n";
 		});
 

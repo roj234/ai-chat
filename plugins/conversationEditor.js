@@ -7,7 +7,7 @@ import {getMessagesCacheFirst, markMessageDirty, updateConversation} from "/src/
 import {parseJson5} from "unconscious/common/Json.js";
 import {enableBranches} from "/src/utils/BranchManager.js";
 import {DI_settings, onLoad} from "/src/hooks.js";
-import {stringify} from "/common/json5-stringify.js";
+import {inspect} from "unconscious/common/inspect.js";
 import {cloneNamed} from "../src/utils/utils.js";
 
 onLoad(() => {
@@ -26,7 +26,7 @@ onLoad(() => {
 
 			const mapping = new Map;
 			await encodeObjects(obj, mapping);
-			jsonText = stringify(obj, mapping.size ? (_, value) => mapping.get(value) ?? value : null, 2);
+			jsonText = inspect(obj, mapping.size ? (_, value) => mapping.get(value) ?? value : null, 2);
 			update?.();
 		};
 		await updatePromise();

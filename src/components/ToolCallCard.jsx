@@ -175,7 +175,8 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
     const is_success = true === success;
 
     const secure = getToolInteractiveLevel(resp, tool, conv);
-    const pending = !!(tool_name && secure !== true && !is_running && null == success);
+    const is_current_generating = !tool_name && idx === message.tool_responses.length-1;
+    const pending = tool_name && secure !== true && !is_running && null == success;
     const is_secure_pending = !!(pending && secure);
 
     // 清空状态类并打上当前唯一确定的状态 Class
@@ -184,11 +185,11 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
     classList.toggle("running", is_running);
     classList.toggle("t-error", is_errored);
     classList.toggle("secure", is_secure_pending);
-    classList.toggle("pending", pending);
+    classList.toggle("pending", pending || is_current_generating);
     classList.toggle("t-success", is_success);
 
     const needApproval = "need-approval";
-    if (message.finish_reason && pending && !classList.contains(needApproval)) {
+    if (message.finish_reason && tool_name && pending && !classList.contains(needApproval)) {
         classList.add(needApproval);
 
         let rejectReasonText;
