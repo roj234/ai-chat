@@ -6,9 +6,9 @@
 
 body.taskbar-open { --taskbar: 1; }
 
-.chat, .sidebar, .toasts {
-    bottom: calc(var(--taskbar-height) * var(--taskbar));
-    transition: bottom 0.25s ease;
+.app {
+    height: calc(100vh - var(--taskbar-height) * var(--taskbar));
+    transition: height 0.25s ease;
 }
 
 .taskbar {
@@ -21,7 +21,7 @@ body.taskbar-open { --taskbar: 1; }
     height: var(--taskbar-height);
 
     display: flex;
-    background-color: var(--panel);
+    background: var(--bg);
 
     user-select: none;
     transition: transform 0.25s ease;
@@ -29,36 +29,41 @@ body.taskbar-open { --taskbar: 1; }
     transform: translateY(calc(var(--taskbar-height) * (1 - var(--taskbar))));
 
     & .item {
+        position: relative;
         display: flex;
         align-items: center;
         min-width: 0;
-        padding: 4px;
-        border: 1px solid transparent;
+        max-width: max(15vw, 150px);
+        padding: 0 8px;
+        border-bottom: 1.5px solid transparent;
         color: var(--muted);
 
         &:hover {
-            background-color: var(--chip-bg);
+            background: var(--chip-hover);
             color: var(--text);
         }
 
         &.active {
-            background-color: var(--chip-active);
+            background: var(--chip-active);
             border-color: var(--chip-active-border);
             color: var(--text);
         }
 
         &.minimized {
-            opacity: 0.55;
+            & .icon, & .label {
+                opacity: 0.55;
+            }
         }
 
         gap: 2px;
     }
 
-    & .icon {}
+    & .icon:first-child {
+        width: 20px;
+        height: 20px;
+    }
 
     & .label {
-        flex: 1 1 auto;
-        min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -66,7 +71,6 @@ body.taskbar-open { --taskbar: 1; }
     }
 
     & .ri-close-line {
-        position: absolute;
         right: 4px;
         padding: 0;
         transition: color 0.15s, background-color 0.15s;
@@ -77,8 +81,13 @@ body.taskbar-open { --taskbar: 1; }
             background: var(--error-bg);
         }
     }
+}
 
-    & :not(.item:hover) .ri-close-line { display: none; }
+@media (hover: hover) {
+    .taskbar {
+        & .ri-close-line { position: absolute; }
+        & :not(.item:hover) .ri-close-line { display: none; }
+    }
 }
 
 .window {
@@ -107,19 +116,19 @@ body.taskbar-open { --taskbar: 1; }
         & .win-resize { display: none; }
     }
 
-    &.minimized {
-        opacity: 0;
-        transform: translateY(24px) scale(0.92);
-        pointer-events: none;
-        visibility: hidden;
+    &.minimized:not(.closing) {
+        display: none;
     }
 
     &.dragging .win-header { cursor: grabbing; }
 
     /* —— 正文 —— */
     & .win-body {
+        display: flex;
+        flex-direction: column;
         min-height: 0;
         overflow: auto;
+        height: 100%;
     }
 
     /* —— 右下角缩放手柄 —— */
@@ -131,6 +140,7 @@ body.taskbar-open { --taskbar: 1; }
         height: 16px;
         z-index: 1;
         cursor: nwse-resize;
+        touch-action: none;
 
         &::after {
             content: '';
@@ -165,17 +175,16 @@ body.taskbar-open { --taskbar: 1; }
     gap: 4px;
     padding: 0 6px;
     flex: 0 0 auto;
-    background-color: var(--panel);
+    background-color: var(--bg);
     border-bottom: 1px solid var(--border);
 
     & > * {
         padding: 6px 0;
     }
 
-    & .icon {
+    & > .icon:first-child {
         display: flex;
         align-items: center;
-        color: var(--accent);
         font-size: 16px;
         flex: 0 0 auto;
     }
@@ -190,11 +199,14 @@ body.taskbar-open { --taskbar: 1; }
         font-size: 14px;
         font-weight: 600;
         cursor: grab;
+        touch-action: none;
     }
 
     & .controls {
         display: flex;
         gap: 2px;
+        flex-shrink: 0;
+        align-items: center;
 
         & button {
             padding: 3px;

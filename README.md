@@ -1,4 +1,4 @@
-# AiChat - 爱聊天
+# Aint - Aichat Is Not a Toy
 
 现代化的高性能纯 Web 多用途 AI 前端，基于 [Unconscious](https://github.com/Roj234/unconscious) 响应式框架。
 
@@ -88,7 +88,7 @@
 ## 快速开始
 
 ![preview](media/preview.jpg)
-> 截图版本 2.20.0
+> 截图版本 4.0.0-alpha
 
 [在线体验](https://roj234.github.io/ai-chat/) 静态版本，或从 [Release](https://github.com/Roj234/ai-chat/releases) 页面下载构建产物：
 

@@ -1,0 +1,144 @@
+:root {
+	--accent-purple: #8b5cf6;
+}
+
+/* 工具栏 (Branch/Overlay Switcher & Search) */
+.vcs-header {
+	padding: 6px 20px;
+	background: var(--card);
+	border-bottom: 1px solid var(--border);
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+
+	& .icon {
+		width: 18px;
+		height: 18px;
+	}
+
+	& .btn {
+		border-bottom-left-radius: 0;
+		border-top-left-radius: 0;
+
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		height: 34px;
+
+		& select {
+			background: var(--bg);
+			border: none;
+			padding: 2px;
+			outline: none;
+		}
+	}
+
+	.target-select, .input {
+		background: var(--bg);
+		border: 1px solid var(--border);
+		padding: 4px;
+		min-width: 80px;
+		border-radius: 6px;
+		font-size: 13px;
+		outline: none;
+		cursor: pointer;
+		transition: all 0.15s;
+
+		&:hover {
+			border-color: var(--chip-active-border);
+			background: var(--panel);
+		}
+	}
+
+	.input {
+		padding: 4px 10px;
+		display: flex;
+		gap: 8px;
+	}
+
+	& li {height: 30px;}
+}
+
+/* 主内容区（双栏布局） */
+.vcs-body {
+	flex: 1;
+	display: grid;
+	grid-template-columns: min(25vw, 300px) 1fr;
+	overflow: hidden;
+}
+
+/* 左侧文件变动列表 (Status) */
+.vcs-file-pane {
+	background: var(--bg);
+	border-right: 1px solid var(--border);
+	display: flex;
+	flex-direction: column;
+
+	& input {
+		border-radius: 0;
+		&:not(:focus) { border-bottom: 1px solid var(--border); }
+	}
+
+	& ul {
+		flex: 1;
+		overflow-y: auto;
+		list-style: none;
+		margin: 0;
+		padding: 0;
+
+		& > li {
+			height: 30px;
+			padding: 0 12px;
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			border-left: 2px solid transparent;
+			transition: all 0.15s;
+
+			&:hover {
+				background: var(--chip-bg);
+			}
+			&.active {
+				background: var(--chip-active);
+				border-left-color: var(--accent);
+			}
+
+			color: var(--text);
+			font-size: 13px;
+			&.modify { color: var(--warning-accent); }
+			&.add, &.dir { color: var(--ok); }
+			&.del { color: var(--error); }
+			&:not(:hover) .btn {
+				display: none;
+			}
+		}
+
+		& .btn {
+			color: var(--muted);
+			border-radius: 100%;
+			padding: 4px;
+
+			&:hover {
+				color: var(--error-text-color);
+				background: var(--error-bg);
+			}
+		}
+	}
+}
+
+/* 右侧 Diff 详情预览 */
+.vcs-diff-pane {
+	& > .textDiff {
+		padding: 0;
+		border-radius: 0;
+		border: none;
+	}
+	& > .row {
+		padding: 8px 12px;
+		background: var(--code-bg);
+		border-bottom: 1px solid var(--border);
+		font-family: var(--code-font);
+		font-size: 12px;
+	}
+}

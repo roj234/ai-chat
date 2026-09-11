@@ -1,4 +1,10 @@
-import {compressGeneric, decompressGeneric, deserializeRow} from "../utils/compression.js";
+import {
+	compressGeneric,
+	compressKVS,
+	decompressGeneric,
+	decompressorKVS,
+	deserializeRow
+} from "../utils/compression.js";
 import {patch} from "unconscious/common/deepEqual.js";
 
 /**
@@ -24,11 +30,11 @@ export function registerKVRoutes(batcher) {
 	};
 
 	batcher["kvs"] = (type, {db}) => {
-		return db.prepare('SELECT name FROM kvs WHERE type = ?').all(type);
+		return db.prepare('SELECT name, meta FROM kvs WHERE type = ?').all(type).map(item => deserializeRow(item, decompressorKVS(type)));
 	};
 
 	batcher["kvs/values"] = (type, {db}) => {
-		return (type === '*' ? db.prepare('SELECT * from kvs').all() : db.prepare('SELECT * FROM kvs WHERE type = ?').all(type)).map(item => deserializeRow(item));
+		return (type === '*' ? db.prepare('SELECT * from kvs').all() : db.prepare('SELECT * FROM kvs WHERE type = ?').all(type)).map(item => deserializeRow(item, decompressorKVS(type)));
 	};
 
 	batcher["kvs/value"] = ([type, name], {db}) => {
@@ -37,26 +43,41 @@ export function registerKVRoutes(batcher) {
 		const row = db.prepare('SELECT * FROM kvs WHERE type = ? AND name = ?').get(type, name);
 		if (!row) return { error: `${type} ${JSON.stringify(name)} not found` };
 
-		return deserializeRow(row);
+		return deserializeRow(row, decompressorKVS(type));
 	};
 
 	batcher["kvs/upsert"] = async ({ type, name, ...diff }, {db}) => {
 		if (!type || !name) return { error: 'type and name required' };
 
+		let meta;
+		let updateBigBlob = true;
 		if (diff.$ === '=') {
 			diff = diff.v;
 		} else {
-			const row = db.prepare('SELECT * FROM kvs WHERE type = ? AND name = ?').get(type, name);
+			const keys = Object.keys(diff);
+			updateBigBlob = keys.length > 1 || keys[0] !== 'meta';
+
+			const row = db.prepare(`SELECT ${updateBigBlob?"data,":""} meta FROM kvs WHERE type = ? AND name = ?`).get(type, name);
 			if (!row) return { error: `${type} ${JSON.stringify(name)} not found` };
 
-			diff = patch(deserializeRow(row), diff);
+			diff = patch(deserializeRow(row, decompressorKVS(type)), diff);
 		}
 		if (typeof diff !== 'object') return { error: 'data must be object' };
 		if ("error" in diff) return { error: '"error" in data' };
+
+		meta = diff.meta;
 		delete diff.type;
 		delete diff.name;
+		delete diff.meta;
 
-		db.prepare('REPLACE INTO kvs (type, name, data) VALUES (?, ?, ?)').run(type, name, await compressGeneric(diff));
+		const metaBytes = meta == null ? null : await compressGeneric(meta);
+		if (metaBytes?.length > 255) return { error: '"meta" too big, exceeds 255B limit' }
+
+		if (updateBigBlob) {
+			db.prepare('REPLACE INTO kvs (type, name, meta, data) VALUES (?, ?, ?, ?)').run(type, name, metaBytes, await compressKVS(diff, type));
+		} else {
+			db.prepare('UPDATE kvs SET meta = ? WHERE type = ? AND name = ?').run(metaBytes, type, name);
+		}
 		return true;
 	};
 

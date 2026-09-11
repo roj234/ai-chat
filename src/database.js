@@ -16,7 +16,7 @@ const MESSAGE_IS_CLEAN = debugSymbol("Clean");
 export const DONE = Promise.resolve();
 
 export const databaseError = err => {
-	showToast("数据库错误!\n"+prettyError(err)+"\n更改可能丢失，建议从设置导出当前对话", 'error', 0);
+	showToast("数据库错误!\n"+prettyError(err)+"\n建议导出(备份)当前对话", 'error');
 };
 
 export const isIDB = DB_MODE === 'local' || config.db_server === ':idb:';
@@ -62,7 +62,7 @@ export const {
 	 * @param {Object & AiChat.IDBKVList} value
 	 * @param {string=} type
 	 * @param {string=} name
-	 * @returns {Promise<number>}
+	 * @returns {Promise<void>}
 	 */
 	kvListSet,
 	/**
@@ -192,9 +192,22 @@ const DIFF_IGNORE_KEYS = new Set(["id", "ready"]);
 export const updateConversation = async (conversation, messages, keepTime) => {
 	if (config.incognito || conversation[LOCKED]) return;
 
-	const prevUpdate = conversation[PENDING_UPDATE];
-	if (prevUpdate) await prevUpdate;
-
+	// 串行化
+	let promise = conversation[PENDING_UPDATE] || DONE;
+	promise = promise.then(() => updateConversation_(conversation, unconscious(messages), keepTime), databaseError);
+	promise.finally(() => {
+		if (conversation[PENDING_UPDATE] === promise)
+			delete conversation[PENDING_UPDATE];
+	});
+	return promise;
+};
+/**
+ * @param {AiChat.Conversation} conversation
+ * @param {AiChat.Message[]|false=} messages
+ * @param {boolean=} keepTime
+ * @returns {Promise<*>}
+ */
+const updateConversation_ = async (conversation, messages, keepTime) => {
 	let promises = [];
 	let changed = (diff) => {
 		changed = null;
@@ -209,6 +222,8 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 		conversation[MESSAGES_SNAPSHOT] = new Map;
 		const {ready, ...rest} = conversation;
 		conversation.id = null;
+		//调用方会传时间，而且要考虑从备份导入的问题
+		//conversation.time = Date.now();
 		const promise = changed(rest).then(id => {
 			conversation.id = id;
 		});
@@ -218,6 +233,16 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 
 	if (messages) {
 		if (conversation[BRANCH_MANAGER]) messages = conversation[BRANCH_MANAGER].messages;
+
+		if (import.meta.env.DEV) {
+			if (messages !== conversation[MESSAGES_CACHE] && undefined !== conversation[MESSAGES_CACHE]) {
+				showToast("传入的消息数组不正确", "error");
+				console.error(messages, conversation[MESSAGES_CACHE]);
+			}
+		}
+
+		if (undefined === conversation[MESSAGES_CACHE]) conversation[MESSAGES_CACHE] = messages;
+		//else messages = conversation[MESSAGES_CACHE];
 
 		/**
 		 * @type {Map<number, AiChat.Message>}
@@ -240,6 +265,14 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 
 				if (!message[MESSAGE_IS_CLEAN]) {
 					diff = isIDB ? !deepEqual(snapshot, message, DIFF_IGNORE_KEYS) : delta(snapshot, message, DIFF_IGNORE_KEYS);
+				} else {
+					if (import.meta.env.DEV) {
+						const diff = delta(snapshot, message, DIFF_IGNORE_KEYS);
+						if (undefined !== diff) {
+							showToast("database diff error\nmissing markDirty call", "error");
+							console.error(snapshot, structuredClone(message), diff);
+						}
+					}
 				}
 				if (!diff) {
 					message[MESSAGE_IS_CLEAN] = true;
@@ -254,40 +287,32 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 			if (!keepTime) conversation.time = Date.now();
 
 			let snapshot = structuredClone(message);
-			if (id) messagesInMemory.set(id, snapshot);
 
 			// 后面会写 owner 字段，浅拷贝
 			if (typeof diff !== 'object') diff = {...snapshot};
 
-			function save() {
-				if (message.id > 0) diff.id = message.id;
-				else delete diff.id;
-				diff.owner = conversation.id;
+			if (message.id > 0) diff.id = message.id;
+			else delete diff.id;
+			diff.owner = conversation.id;
 
-				const savedState = structuredClone(message);
-				message[MESSAGE_IS_CLEAN] = true;
+			// 必须先设置再回滚，因为这是异步的，如果请求过程中有修改，后续会再调用一次updateConversation
+			message[MESSAGE_IS_CLEAN] = true;
 
-				return db.upsertMessage(diff).then((id) => {
-					snapshot = savedState;
-					message.id = snapshot.id = id;
-					conversation[MESSAGES_SNAPSHOT].set(id, snapshot);
-
-					// 消息在RTT内又修改了，重新更新
-					if (!message[MESSAGE_IS_CLEAN]) {
-						diff = delta(snapshot, message, DIFF_IGNORE_KEYS);
-						if (diff) return save();
-					}
-				});
-			}
-			promises.push(save().finally(() => {
-				// 如果新消息保存失败，不要阻止后续保存
+			promises.push(db.upsertMessage(diff).then((id) => {
+				message.id = snapshot.id = id;
+				conversation[MESSAGES_SNAPSHOT].set(id, snapshot);
+			}, (err) => {
+				// 回滚
+				delete message[MESSAGE_IS_CLEAN];
 				if (message.id === -2) delete message.id;
+
+				throw err;
 			}));
 		}
 
 		if (messagesInDB.size) {
 			if (!keepTime) conversation.time = Date.now();
-			messagesInDB.forEach((value, id) => promises.push(db.deleteMessage(id, conversation)));
+			messagesInDB.forEach((value, id) => promises.push(db.deleteMessage(id/*, conversation*/)));
 		}
 
 		conversation[MESSAGES_SNAPSHOT] = messagesInMemory;
@@ -299,10 +324,7 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 		changed(convDiff);
 	}
 
-	const wait = Promise.all(promises).catch(databaseError);
-	conversation[PENDING_UPDATE] = wait;
-	await wait;
-	delete conversation[PENDING_UPDATE];
+	return Promise.all(promises);
 };
 
 /**
@@ -313,7 +335,8 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 export const deleteConversation = conversation => {
 	if (config.incognito) return DONE;
 	conversation[LOCKED] = "DELETED"; // 忽略后续的数据库写入
-	return db.deleteConversation(conversation.id);
+	const id = conversation.id;
+	return db.deleteConversation(id).then(() => EVENT_BUS.post(['conversationDeleted', id], conversation));
 };
 
 /**
@@ -339,6 +362,7 @@ export const getCombinedPreset = async (conv) => {
 	const overrides = conv.overrides;
 	if (!overrides && !presets) return globalPreset;
 
+	// FIXME 在 kvList preset 自身更新时，这些数据不会改变
 	let combined = conv[MERGED_CONFIG];
 	if (!combined || combined[CONFIG_VERSION] !== globalPreset[CONFIG_VERSION]) {
 		combined = conv[MERGED_CONFIG] = {...globalPreset};

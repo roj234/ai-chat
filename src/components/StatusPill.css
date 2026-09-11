@@ -107,5 +107,5 @@
 
 @keyframes ap-zap {
 	0%, 100% { transform: scale(1); opacity: 0.9; }
-	50% { transform: scale(1.15); opacity: 1; filter: drop-shadow(0 0 3px var(--ap-accent-generating)); }
+	50% { transform: scale(1.15); opacity: 1; filter: drop-shadow(0 0 3px var(--ap-accent-generate)); }
 }

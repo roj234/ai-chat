@@ -2,14 +2,17 @@ import {searchMessages} from "../src/database.js";
 
 import "./search.css";
 import {formatDate} from "unconscious/common/Utils.js";
-import {conversations, isMobile, selectedConversation, switchToConversation} from "../src/states.js";
+import {conversations, selectedConversation, switchToConversation} from "../src/states.js";
 import {onLoad} from "../src/hooks.js";
 import {renderMarkdownToElement} from "../src/markdown/markdown.js";
+import {showToast} from "../src/components/Toast.js";
+import {openWindow} from "../src/components/Windows.jsx";
+import {Icon_search} from "../src/components/Icons.jsx";
 
-const searchBtn = <button className={"ri-search-line btn ghost"} title={"搜索对话"} onClick={() => {
+const searchBtn = <button className={"ri- btn ghost"} title={"搜索对话"} onClick={() => {
 	searchBtn.replaceWith(searchInput);
 	searchInput.firstElementChild.focus();
-}}></button>;
+}}><Icon_search/></button>;
 
 const searchInput = <div style={"position:absolute;z-index:1;background:var(--bg);width:calc(100% - 20px)"} className="input-warp">
 	<input className="text-input" type="text" placeholder="关键词或语义描述" onBlur={() => {
@@ -19,28 +22,17 @@ const searchInput = <div style={"position:absolute;z-index:1;background:var(--bg
 		const str = target.value;
 		target.value = "";
 
-		searchMessages(str).then(convs => {
-			const handleClose = () => {
-				element.remove();
-			};
-			const element = (
-				<div className="modal-overlay" style={"background:transparent;pointer-events:none"}>
-					<div className="modal" style={"pointer-events:all;"+(isMobile?"":"max-width:60vw")}
-						 onClick={(e) => e.stopPropagation()}>
-						<div className="header">
-							<b>{str}的搜索结果</b>
-							<div className={"spacer"} />
-							<button className="ri-close-line btn ghost" onClick={handleClose} title={"关闭"}/>
-						</div>
-						<div style={"padding:0;overflow:auto"}>
-							{convs?.length ? convs.map(AccordionItem) :
-								<div className="no-results">没有找到相关对话</div>}
-						</div>
-					</div>
-				</div>
-			);
+		searchMessages(str).then(results => {
+			if (!results.length) {
+				showToast("未找到有关对话");
+				return;
+			}
 
-			document.body.append(element);
+			openWindow({
+				id: "searchResult",
+				title: str + " 的搜索结果",
+				element: results.map(AccordionItem)
+			});
 		});
 
 		target.blur();
@@ -80,6 +72,7 @@ function AccordionItem(item) {
 					{simPercent !== null ? (
 						<span className="similarity">{simPercent}% 匹配</span>
 					) : null}
+					<span className="spacer" />
 					<button className={"btn ghost"} onClick.stop={() => {
 						if (selectedConversation.id !== item.id) {
 							const value = conversations.find(it => it.id === item.id);

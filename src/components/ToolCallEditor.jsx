@@ -1,10 +1,10 @@
 import './ToolCallCard.css';
 import {$state, $update, $watch, appendChildren, isPureObject, unconscious} from "unconscious";
 import {JsonEditor} from "./JsonEditor.jsx";
-import {runTools, TOOL_NAME, toolInfo, toolScriptRegistry} from "../toolset.js";
+import {runTools, toolInfo, toolScriptRegistry} from "../toolset.js";
 import {validateAndShowError} from "unconscious/common/json-schema-utils.js";
 import {EVENT_BUS, selectedConversation, updateMessageUI} from "../states.js";
-import {stringify} from "/common/json5-stringify.js";
+import {inspect} from "unconscious/common/inspect.js";
 
 /**
  *
@@ -22,7 +22,7 @@ export function ToolCallEditor(props) {
 
     const formatJson = (s) => {
         try {
-            return stringify(typeof s === "string" ? JSON.parse(s) : s, null, 2);
+            return inspect(typeof s === "string" ? JSON.parse(s) : s);
         } catch {
             return s;
         }
@@ -125,11 +125,8 @@ export function ToolCallEditor(props) {
                         message.tool_responses[index()] = outputValue ? {
                             success: true,
                             time: Date.now(),
-                            content: outputValue,
-                            [TOOL_NAME]: fn.name
-                        } : {
-                            [TOOL_NAME]: fn.name
-                        };
+                            content: outputValue
+                        } : { };
 
                         base.open = false;
                     }}>

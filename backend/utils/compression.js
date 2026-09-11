@@ -76,19 +76,69 @@ const log_schema = [
 	["currency", null, ["USD", "CNY"]],
 	"usage"
 ];
+const provider_kvs_schema = [
+	"provider",
+	"endpoint",
+	"accessToken",
+	"streamDuplex",
+	"useRefs",
+	"sessionIdField",
+	"userIdField",
+	"userId",
+	"model",
+	"mode",
+	"template",
+	"max_completion_tokens",
+	"modalities",
+	"forceThink",
+	"imageLongLimit",
+	"imageSizeLimit",
+	"reasoning",
+	"canPrefill",
+	"prefillPath",
+	"stripCoT",
+	"reasoningPath",
+	"reasoningEffortPath",
+	"jsonSupport",
+	"additionalBody",
+	"maxContext",
+	"temperature",
+	"top_p",
+	"top_k",
+	"min_p",
+	"frequency_penalty",
+	"presence_penalty",
+	"stop",
+	"antiSlop",
+	"logit_bias"
+];
 
 bakeSchema(conversation_schema);
 bakeSchema(message_schema);
 bakeSchema(log_schema);
+bakeSchema(provider_kvs_schema);
+
+export const KNOWN_KVS = {
+	'provider': provider_kvs_schema
+}
 
 const LOG_RESP_DICT = ['chatcmpl-', 'gen-', 'resp_'];
 
 export function deserializeRow(row, decompression = decompressGeneric) {
-	const {data, ...rest} = row;
-	const v = decompression(data);
-	for (const key of Object.keys(rest)) {
-		if (null == v[key]) v[key] = rest[key];
+	const {data, meta, ...rest} = row;
+	let v;
+
+	if (data == null) {
+		v = rest;
+	} else {
+		v = decompression(data);
+		for (const key of Object.keys(rest)) {
+			if (null == v[key]) v[key] = rest[key];
+		}
 	}
+
+	if (meta != null) v.meta = decompressGeneric(meta);
+
 	return v;
 }
 
@@ -169,6 +219,9 @@ export const decompressMessage = (data) => {
 export const compressConversation = (data) => compressIfEnabled(data, conversation_schema);
 /** @param {Uint8Array|Object} data */
 export const decompressConversation = (data) => decompressIfNeeded(data, conversation_schema);
+
+export const compressKVS = (data, key) => compressIfEnabled(data, KNOWN_KVS[key]);
+export const decompressorKVS = key => data => decompressIfNeeded(data, KNOWN_KVS[key]);
 
 export const compressLog = (data) => {
 	const reqId = data.request_id;

@@ -4,7 +4,7 @@ import "./TextDiff.css";
 import {VirtualList} from "unconscious/common/VirtualList.js";
 import {selectableVirtualListMixin} from "unconscious/common/selectableVirtualListMixin.js";
 import {lightAsync, loadLanguage, splitMultilineHTML} from "../markdown/highlight.js";
-import {fastObjectMap} from "/common/pure-utils.js";
+import {immutableObjectMap} from "unconscious/common/Utils.js";
 
 /**
  *
@@ -27,7 +27,7 @@ export const DiffHeader = ({diff}) => {
 	return <>{count.add && <span style={"color:var(--ok)"}>+{count.add}</span>} {count.del && <span style={"color:var(--error)"}>-{count.del}</span>}</>;
 };
 
-const TYPE_STR_MAP = fastObjectMap({
+const TYPE_STR_MAP = immutableObjectMap({
 	add: '+ ',
 	del: '- ',
 	same: '  ',
@@ -42,9 +42,10 @@ const TYPE_STR_MAP = fastObjectMap({
  */
 export const TextDiff = ({ start, diff, filename = '' }) => {
 	const hasLines = start.length;
-	let ls = 0;
+	let ls;
 
-	if (hasLines && !diff.at(-1).line) {
+	if (hasLines && !(ls = diff.at(-1).line)) {
+		ls = 0;
 		let addLine = start[0];
 		let delLine = addLine;
 		let prevHunk;

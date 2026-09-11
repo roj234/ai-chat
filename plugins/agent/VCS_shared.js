@@ -1,0 +1,3 @@
+
+export const VCS_LIST_BRANCHES = 0, VCS_SWITCH = 1, VCS_COMMIT = 2, VCS_REVERT = 3, VCS_DIFF = 4, VCS_QUERY = 5, VCS_DELETE_BRANCH = 6;
+export const VCS_BASE_BRANCH = 'base';

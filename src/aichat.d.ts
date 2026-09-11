@@ -1,12 +1,36 @@
 import {OpenAI} from "./openai";
 
 declare namespace AiChat {
+    type FSType = 'db' | 'api' | 'local' | 'config' | 'opfs' | 'vfs';
+
+    type GlobSegment = {
+        t: 0,
+        re: RegExp,
+    } | { t: 1 } | {
+        t: 2,
+        branches: GlobSegment[]
+    };
+
+    type GlobNFA = {
+        re: RegExp[];
+        masks: Uint32Array;
+        match: number;
+        carry: number;
+        start: number;
+        suffix: number;
+    };
+
     type Mount = {
-        fs_type: 'db' | 'api' | 'local' | 'config' | 'opfs' | 'vfs';
+        fs_type: FSType;
         fs_base?: string;
-        fs_server?: string | string[];
+        fs_server?: string;
         fs_builtin?: string;
         fs_events?: Object[];
+        fs_readonly?: boolean;
+
+        // only available for local/opfs/vfs
+        fs_ACL?: { ignore?: string, acl?: string };
+        fs_branch?: string;
     }
 
     export type Conversation = Mount & {
@@ -39,16 +63,28 @@ declare namespace AiChat {
         bm_leaf?: number;
 
         mnt?: Record<string, Mount>;
+        fs_readonly?: boolean;
 
         /** 覆盖全局配置，高于 config 优先级 */
         presets?: string | string[];
         /** 覆盖全局配置，高于 presets 优先级 */
         overrides?: Partial<LocalPreset>;
 
-        /** 子代理宿主 */
-        owner?: number;
         /** pending消息缓存 */
         pendingMessages?: Message[];
+
+        fs_secrets?: Record<string, { value: string, domain: string }>;
+    }
+
+    export type SubagentConversation = Conversation & {
+        /** 子代理宿主 */
+        owner: number;
+
+        sa_maxTurns?: number;
+        sa_terminated?: true;
+        sa_pending?: true;
+        sa_redirect?: Object;
+        sa_notify?: number;
     }
 
     export type Message = BaseMessage | AssistantMessage;
@@ -193,8 +229,8 @@ declare namespace AiChat {
     }
 
     type AgentFSPreset = {
-        fs_trashCan: boolean;
         fs_autoMount: boolean;
+        fs_secrets?: Record<string, { value: string, domain: string }>;
     }
 
     type ManualOverridePreset = {
@@ -327,6 +363,11 @@ declare namespace AiChat {
         reentrant?: FunctionToolReentrantMode;
 
         /**
+         * 是否允许并行执行（true=总体并行, same=单工具并行）
+         */
+        parallel?: boolean | 'same';
+
+        /**
          * 生成工具调用标题
          * @param request
          * @param context
@@ -344,7 +385,7 @@ declare namespace AiChat {
          * @param response 工具响应（任意对象），可以存入工具调用结果，以及renderer函数需要的数据
          * @param global_storage 全局状态存储
          */
-        script: (parameters: Record<string, any>, response: ToolResponse & Payload, global: Conversation) => any | Promise<any>;
+        script: (parameters: Record<string, any>, response: ToolResponse & Payload, global: Conversation, toolName: string) => any | Promise<any>;
         /**
          * 撤销script造成的更改
          * reentrant=true 时建议指定 undo，除非*你真的知道你在做什么*
@@ -399,7 +440,8 @@ declare namespace AiChat {
 
     type IDBKVList = {
         type?: IDBValidKey,
-        name?: IDBValidKey
+        name?: IDBValidKey,
+        meta?: any
     }
 
     type LLMRequestContext = {
@@ -417,14 +459,7 @@ declare namespace AiChat {
         trusted?: boolean
     }
 
-    type FileSystemInstance = {
-        read_image({path: string}): Promise<Blob>,
-        mkdir({path: string}): Promise<string>,
-        copy({src: string, dest: string, move: boolean}): Promise<string>,
-        stat({path: string}): Promise<string>,
-        delete({path: string}): Promise<string>,
-        list({path: string, glob: string}): Promise<string>,
-    }
+    type FileSystemInstance = {};
 
     namespace DnD {
         //region 酒馆类型定义

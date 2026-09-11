@@ -6,7 +6,7 @@ import {webviewSetUserAgent} from "/vendor/jsBridge.js";
 import {onLoad} from "./hooks.js";
 import {toolScriptRegistry} from "./toolset.js";
 
-const defaultSystemPrompt = `You are a helpful assistant.
+const defaultSystemPrompt = `You are {{model}}, a helpful assistant.
 {{think}}
 {{tools}}
 <markdown-format>
@@ -57,7 +57,6 @@ export const SETTINGS = [
 	{
 		id: "generateTitle",
 		name: "标题生成模式",
-		_group: "title",
 		type: "radio",
 		required: true,
 		choices: {
@@ -73,17 +72,8 @@ export const SETTINGS = [
 	{
 		id: "titleModel",
 		name: "标题总结模型",
-		_group: "title",
 		type: "input",
-		placeholder: "留空使用对话模型, 用 : 前缀引用其它预设"
-	},
-	{
-		id: "titlePrompt",
-		name: "标题总结提示词",
-		title: "要求输出带title字段的JSON",
-		_group: "title",
-		type: "textbox",
-		placeholder: defaultTitlePrompt
+		placeholder: "点击打开下拉菜单"
 	},
 	{
 		name: "© 2025-2026 Roj234, Made with ❤",
@@ -97,34 +87,100 @@ export const SETTINGS = [
 	},
 	//model
 	{
+		_tab: "provider",
+		_group: "provider",
+		id: "provider",
+		name: "供应商名称",
+		type: "input",
+		placeholder: "示例: 猫娘中转站",
+		title: "留空使用API域名。",
+		pattern: /^[^\x00-\x1F\x7F|<>"*?:]{1,24}$/,
+		warning: "不能超过24字符或包含特殊字符"
+	},
+	{
+		_tab: "provider",
+		_group: "provider",
 		id: "endpoint",
-		_tab: "model",
 		name: "API 地址 (OpenAI 兼容)",
 		type: "input",
 		pattern: /^(@|\/|https?:\/\/)/,
 		warning: "请输入正确的API地址",
 		placeholder: "https://api.openai.com/v1",
-		_group: 'model'
 	},
 	{
+		_tab: "provider",
+		_group: "provider",
 		id: "accessToken",
-		_tab: "model",
 		name: "API 密钥",
 		type: "secret",
 		placeholder: "sk-...",
-		_group: 'model'
+	},
+
+	{
+		_tab: "provider",
+		_group: "provider",
+		name: "请求优化",
+		type: "multiple",
+		choices: {
+			"流式序列化": "streamDuplex",
+			"消息引用": "useRefs"
+		},
+		title: {
+			"流式序列化": "流式发送请求，避免在JS中构造超大的JSON字符串\n傻逼谷歌只支持HTTP/2否则我就常开了还做什么选项",
+			"消息引用": "需要 SSE 代理后端\n引用服务端缓存的消息节省流量\n在标准OpenAI兼容后端上启用会报错"
+		},
 	},
 	{
-		id: "model",
+		_tab: "provider",
+		_group: "provider",
+		id: "sessionIdField",
+		name: "对话标识字段",
+		type: "input",
+		placeholder: "示例: x-opencode-session",
+		title: "在受支持 API （如OpenRouter/OCG）中维护缓存亲和与滥用防范\n"
+			+ "请求头注入：输入请求头名称\n请求体注入：输入以/开头的JSONPointer路径\n"
+			+ "session_id = sha256(user_id+'\\x00'+first_message_id)[0:8]\n",
+	},
+	{
+		_tab: "provider",
+		_group: "provider",
+		id: "userIdField",
+		name: "用户标识字段 (规则同上)",
+		type: "input",
+		placeholder: "示例: /user",
+	},
+	{
+		_tab: "provider",
+		_group: "provider",
+		id: "userId",
+		name: "用户标识",
+		type: "input",
+		placeholder: "留空以随机生成",
+	},
+	// model
+	{
 		_tab: "model",
+		_group: 'model',
+		id: "model",
 		name: "模型 ID",
 		type: "input",
 		placeholder: "支持从提供商补全",
-		_group: 'model'
+		pattern: /^[^\x00-\x1F\x7F|<>"*?]+$/,
+		warning: "不能包含特殊字符"
 	},
 	{
-		id: "mode",
 		_tab: "model",
+		_group: 'model',
+		id: "name",
+		name: "显示名称",
+		placeholder: "留空使用 ID",
+		type: "input",
+		inline: true,
+	},
+	{
+		_tab: "model",
+		_group: 'model',
+		id: "mode",
 		name: "工作模式",
 		type: "radio",
 		choices: {
@@ -136,12 +192,11 @@ export const SETTINGS = [
 			"文本补全": "/completions\n弃用，仅用于推理调试\n只支持纯文本输入",
 		},
 		required: true,
-		_group: 'model'
 	},
 	{
-		id: "template",
 		_tab: "model",
 		_group: 'model',
+		id: "template",
 		name: "聊天模板 (Chat Template)",
 		title: "将消息对象数组转换为字符串的 JavaScript 函数，类似 chat_template.jinja。",
 		type: "textbox",
@@ -149,9 +204,9 @@ export const SETTINGS = [
 		warning: "要求：返回字符串的函数，参数为 messages: [{role: 'user' | 'assistant' | 'system', content: string}] 数组"
 	},
 	{
-		id: "max_completion_tokens",
 		_tab: "model",
 		_group: 'model',
+		id: "max_completion_tokens",
 		name: "最大回复长度 (Max Tokens)",
 		title: "单次回复的最大 token 数量。过小会导致回答被截断。\n设为 0 表示无限制（不推荐）。",
 		type: "number",
@@ -160,46 +215,10 @@ export const SETTINGS = [
 		default: 20000
 	},
 	{
-		id: "canPrefill",
 		_tab: "model",
 		_group: 'model',
-		name: "助手消息预填充 (Assistant Prefill)",
-		title: "当回复因长度限制等原因中断时，让模型从中断处继续生成，而不是重新开始。\n部分提供商不支持。",
-		type: "radio",
-		choices: {
-			"API支持预填充": true
-		}
-	},
-	{
-		id: "prefillPath",
-		_tab: 'model',
-		_group: 'model',
-		name: "(高级) 预填充路径",
-		title: "配置 API 请求体中的预填充字段和值。\n格式：JSON指针路径,启用值 (默认 true)",
-		pattern: /^[a-z_/]+(,.+)?$/,
-		placeholder: "如 /prefix",
-		warning: "请输入有效的 JSON Pointer",
-		type: "input"
-	},
-	{
-		id: "forceThink",
-		_tab: "model",
-		_group: 'model',
-		name: "推理能力",
-		type: "radio",
-		choices: {
-			"显示按钮": null,
-			"隐藏按钮": 0,
-			"强制关": false,
-			"强制开": true,
-		},
-		required: true,
-	},
-	{
 		id: "modalities",
-		_tab: "model",
-		_group: 'model',
-		name: "多模态能力",
+		name: "能力",
 		type: "multiple",
 		choices: {
 			"图像": 'image',
@@ -209,63 +228,48 @@ export const SETTINGS = [
 		}
 	},
 	{
-		id: "jsonSupport",
 		_tab: "model",
 		_group: 'model',
-		name: "JSON响应能力",
+		id: "forceThink",
+		name: "推理开关",
 		type: "radio",
-		required: true,
 		choices: {
-			"无": 0,
-			"对象": 1,
-			"Schema (严格)": 2,
-			"Schema (完全)": 3
-		}
+			"可开关": null,
+			"仅开": true,
+			"仅关": false,
+		},
+		required: true,
+		inline: true,
 	},
 	{
 		_tab: "model",
-		name: "请求优化",
-		type: "multiple",
-		choices: {
-			"流式序列化": "streamDuplex",
-			"消息引用": "useRefs"
-		},
-		title: {
-			"流式序列化": "流式发送请求，避免在JS中构造超大的JSON字符串\n傻逼谷歌只支持HTTP/2否则我就常开了还做什么选项",
-			"消息引用": "需要 SSE 代理后端\n引用服务端缓存的消息节省流量\n在标准OpenAI兼容后端上启用会报错"
-		},
-		_group: 'model'
-	},
-	{
-		id: "additionalBody",
-		_tab: 'model',
 		_group: 'model',
-		name: "自定义请求体",
-		title: "以 JSON 格式添加额外请求体参数，将覆盖任何内置设置。",
-		type: "textbox",
-		placeholder: "{\n  \"stream_options\": { \"include_usage\": true },\n}",
-		pattern(value) {
-			let data = parseJson5(value);
-			if (!isPureObject(data)) return "必须是JSON对象";
-			return [data];
-		},
-		load: (obj) => obj && JSON.stringify(obj, null, 2),
-	},
-	// model
-	// prompt
-	{
-		id: "systemPrompt",
-		_tab: 'prompt',
-		_group: 'prompt',
-		name: "系统提示词",
-		title: "留空使用默认提示词。填写 \"---\n---\" 以完全禁用。",
-		type: "textbox",
-		placeholder: defaultSystemPrompt
+		id: "imageLongLimit",
+		name: "图像长边限制 (px)",
+		type: "number",
+		min: 0,
+		max: 4096,
+		step: 256,
+		default: 2048,
+		title: "自动缩小读取的图片，0禁用。"
 	},
 	{
+		_tab: "model",
+		_group: 'model',
+		id: "imageSizeLimit",
+		name: "图像大小限制 (MiB)",
+		type: "number",
+		min: 0,
+		max: 10,
+		step: 0.1,
+		default: 0.5,
+		title: "自动压缩读取的图片，0禁用。",
+		inline: true,
+	},
+	{
+		_tab: "model",
+		_group: 'model',
 		id: "reasoning",
-		_tab: 'prompt',
-		_group: 'model',
 		name: "推理预算",
 		type: "radio",
 		choices: {
@@ -287,7 +291,118 @@ export const SETTINGS = [
 			"超高": "~95% of max_tokens",
 			"最高": "~99% of max_tokens",
 		},
+		default: "high",
 		required: true
+	},
+	// model2
+	{
+		_tab: "model2",
+		_group: 'model',
+		id: "canPrefill",
+		name: "助手消息预填充 (Assistant Prefill)",
+		title: "在回复因长度限制等原因中断时继续。\n云端一般不支持思考模型的预填充。",
+		type: "radio",
+		required: true,
+		choices: {
+			"不支持": false,
+			"支持": true
+		}
+	},
+	{
+		_tab: "model2",
+		_group: 'model',
+		id: "prefillPath",
+		name: "预填充参数映射",
+		title: "格式：<JSON Pointer>[,启用值] (缺省 true)",
+		pattern: /^[a-z_/]+(,.+)?$/,
+		placeholder: "/prefix",
+		warning: "请输入有效的 JSON Pointer",
+		type: "input",
+		inline: true,
+	},
+	{
+		id: "stripCoT",
+		_tab: 'model2',
+		_group: 'model',
+		name: "清理历史消息中的思维链",
+		title: "不影响数据，只控制如何发送到API",
+		type: "radio",
+		required: true,
+		choices: {
+			"不移除": null,
+			"移除手动 CoT": 'm',
+			"移除所有": true
+		}
+	},
+	{
+		_tab: 'model2',
+		_group: 'model',
+		id: "reasoningPath",
+		name: "推理开关参数映射",
+		title: "格式：<JSON Pointer>,<启用值>,<禁用值>",
+		pattern: /^([a-z_/])+(,[^,]+,[^,]+)?$/,
+		placeholder: "/reasoning/enabled,true,false",
+		warning: "请输入有效的 JSON Pointer",
+		type: "input"
+	},
+	{
+		_tab: 'model2',
+		_group: 'model',
+		id: "reasoningEffortPath",
+		name: "推理预算参数映射",
+		title: "格式：<JSON Pointer>,<数据类型: i 为整数(tokens) | s 为字符串(级别)>",
+		pattern: /^[a-z_/]+(,[si])?$/,
+		placeholder: "/reasoning_effort,s",
+		warning: "请输入有效的 JSON Pointer",
+		type: "input"
+	},
+	{
+		_tab: "model2",
+		_group: 'model',
+		id: "jsonSupport",
+		name: "结构化JSON输出能力",
+		type: "radio",
+		required: true,
+		choices: {
+			"无": 0,
+			"对象": 1,
+			"Schema 严格": 2,
+			"Schema 完全": 3
+		}
+	},
+	{
+		_tab: 'model2',
+		_group: 'model',
+		id: "additionalBody",
+		name: "自定义请求体",
+		title: "追加额外 JSON 请求体，覆盖软件默认值。",
+		type: "textbox",
+		placeholder: "{\n  \"stream_options\": { \"include_usage\": true },\n}",
+		pattern(value) {
+			let data = parseJson5(value);
+			if (!isPureObject(data)) return "必须是JSON对象";
+			return [data];
+		},
+		load: (obj) => obj && JSON.stringify(obj, null, 2),
+	},
+	// model
+	// prompt
+	{
+		id: "systemPrompt",
+		_tab: 'prompt',
+		_group: 'prompt',
+		name: "系统提示词",
+		title: "留空使用默认提示词。不影响子代理会话。",
+		type: "textbox",
+		placeholder: defaultSystemPrompt
+	},
+	{
+		id: "titlePrompt",
+		name: "标题总结提示词",
+		title: "要求输出带title字段的JSON",
+		_tab: "prompt",
+		type: "textbox",
+		placeholder: defaultTitlePrompt
 	},
 	{
 		id: "CoTPrompt",
@@ -297,41 +412,6 @@ export const SETTINGS = [
 		title: "在系统提示词中通过 {{think}} 占位符引用此处输入的文本。\n在手动推理模式下且推理开关打开时注入，否则被替换为空字符串。",
 		type: "textbox",
 		placeholder: defaultCoTPrompt
-	},
-	{
-		id: "stripCoT",
-		_tab: 'prompt',
-		name: "清理历史消息中的思维链",
-		title: "不影响数据库，只控制发送到API的消息",
-		type: "radio",
-		required: true,
-		choices: {
-			"不移除": null,
-			"仅移除手动 CoT": 'm',
-			"移除所有": true
-		}
-	},
-	{
-		id: "reasoningPath",
-		_tab: 'prompt',
-		_group: 'model',
-		name: "(高级) 推理开关路径",
-		title: "配置 API 请求体中的推理开关字段和值。\n格式：JSON指针路径,启用值,禁用值",
-		pattern: /^([a-z_/])+(,[^,]+,[^,]+)?$/,
-		placeholder: "/reasoning/enabled,true,false",
-		warning: "请输入有效的 JSON Pointer",
-		type: "input"
-	},
-	{
-		id: "reasoningEffortPath",
-		_tab: 'prompt',
-		_group: 'model',
-		name: "(高级) 推理预算路径",
-		title: "配置 API 请求体中的推理预算字段和值。\n格式：JSON指针路径,类型 (整数 i 或字符串 s)",
-		pattern: /^[a-z_/]+(,[si])?$/,
-		placeholder: "/reasoning_effort,s",
-		warning: "请输入有效的 JSON Pointer",
-		type: "input"
 	},
 	// prompt
 	// sampling
@@ -412,7 +492,7 @@ export const SETTINGS = [
 		_tab: 'sampling',
 		_group: 'sampling',
 		name: "停止序列",
-		title: "生成过程中遇到这些字符立即停止。填写 JSON 数组格式。",
+		title: "生成过程中遇到这些字符立即停止。填写 JSON 数组。",
 		type: "input",
 		default: "",
 		placeholder: "[\"\\n\", \"User: \", \"###\"]",
@@ -433,7 +513,7 @@ export const SETTINGS = [
 		_tab: 'sampling',
 		_group: 'sampling',
 		name: "AntiSlop采样",
-		title: "通过正则表达式禁止模型生成特定文本。填写 JSON 格式。\n比 logit_bias 更强大，支持递归回退。\n通常仅支持 vLLM / llama.cpp 等本地后端。\n暂不支持工具调用。",
+		title: "通过正则表达式禁止模型生成特定文本。填写 JSON 对象。\n比 logit_bias 更强大，支持递归回退。\n通常仅支持 vLLM / llama.cpp 等本地后端。\n暂不支持工具调用。",
 		type: "textbox",
 		placeholder: "{\n\"(?:不是|不再是|不再|并非|没有)[^，。！？]{1,10}，而是\": 1.0\n}",
 		pattern(value) {
@@ -523,9 +603,9 @@ export const SETTINGS = [
 		type: "radio",
 		required: true,
 		choices: {
-			"每次询问": null,
-			"覆盖回复": false,
-			"创建分支": true
+			"询问": null,
+			"覆盖": false,
+			"分支": true
 		}
 	},
 	{
@@ -561,8 +641,7 @@ export const SETTINGS = [
 		type: "multiple",
 		choices: {
 			"基本": "basic",
-			"样式 (style)": "style",
-			"脚本 (script)": "script"
+			"样式": "style"
 		}
 	},
 	// customize
@@ -589,7 +668,7 @@ export const SETTINGS = [
 		name: "模型自主调用工具的最长轮数 0 为全自动",
 		type: "number",
 		min: 0,
-		max: 30,
+		max: 50,
 		step: 1,
 		default: 1
 	},
@@ -642,66 +721,26 @@ export const SETTINGS = [
 		load: (obj) => obj && obj.join(" ")
 	},
 	{
-		id: "imageLongLimit",
+		id: "fs_secrets",
 		_tab: "tools",
-		_group: "model",
-		name: "图像长边限制 (px)",
-		type: "number",
-		min: 0,
-		max: 4096,
-		step: 256,
-		default: 2048,
-		title: "限制向模型发送的图像的长边（按比例缩小），0禁用。跟随模型配置"
-	},
-	{
-		id: "imageSizeLimit",
-		_tab: "tools",
-		_group: "model",
-		name: "图像大小限制 (MiB)",
-		type: "number",
-		min: 0,
-		max: 10,
-		step: 0.1,
-		default: 0.5,
-		title: "限制向模型发送的图像的数据大小（降低质量），0禁用。跟随模型"
+		name: "RunJS秘密",
+		placeholder: "介绍待做",
+		type: "textbox",
+		pattern(value) {
+			let data = parseJson5(value);
+
+			if (!isPureObject(data)) return "只接受对象";
+			for (const k in data) {
+				const v = data[k];
+				if (typeof v !== "object" || !v.domain || !v.value)
+					return "值必须是 { domain: string, value: string }";
+			}
+
+			return [data];
+		},
+		load: (obj) => obj && JSON.stringify(obj, null, 2),
 	},
 	// logs
-	{
-		id: "provider",
-		name: "供应商标识",
-		type: "input",
-		_tab: ["model", "data"],
-		placeholder: "示例: 猫娘中转站",
-		title: "仅用于数据统计, 留空使用API域名。跟随模型配置",
-		_group: "model"
-	},
-	{
-		id: "sessionIdField",
-		name: "对话标识字段",
-		type: "input",
-		_tab: "model",
-		placeholder: "示例: x-opencode-session",
-		title: "在受支持 API （如OpenRouter/OCG）中维护缓存亲和与滥用防范\n"
-			+ "请求头注入：输入请求头名称\n请求体注入：输入以/开头的JSONPointer路径\n"
-			+ "session_id = sha256(user_id+'\\x00'+first_message_id)[0:8]\n",
-		_group: "model"
-	},
-	{
-		id: "userIdField",
-		name: "用户标识字段 (规则同上)",
-		type: "input",
-		_tab: "model",
-		placeholder: "示例: /user",
-		_group: "model"
-	},
-	{
-		id: "userId",
-		name: "用户标识",
-		type: "input",
-		_tab: ["model", "data"],
-		placeholder: "留空以随机生成，跟随模型配置",
-		_group: "model"
-	},
 ];
 
 // 数据库
@@ -785,6 +824,7 @@ if (isMobile) {
 		_tab: "customize",
 		name: "侧边栏宽度（像素）",
 		type: "number",
+		default: 300,
 		min: 200,
 		max: 1000,
 		step: 50
@@ -794,35 +834,62 @@ if (isMobile) {
 export const BODY_PARAMETERS = SETTINGS.filter(({id = "", _tab}) => (id !== 'antiSlop' && _tab === "sampling" || id === "max_completion_tokens"));
 BODY_PARAMETERS.forEach(item => item.body_id = item.id);
 
-export const presetKeysAlways = ["name"];
-export const presetKeys = {};
+export const PRIVATE_CONFIG_KEY = `theme
+checkUpdate
+width
+sidebarWidth
+sound
+expandThinkBlock
+expandToolCall
+backgroundFit
+db_server
+db_pat
+_new`.split("\n");
+
+export const presetCategories = {};
 for (const [k, v] of [
-	["title", "标题生成参数"],
-	["model", "模型API和配置"],
-	["prompt", "系统提示词"],
-	["sampling", "采样参数"]
+	["provider", "提供商"],
+	["model", "模型"],
+	["sampling", "采样参数"],
+	["prompt", "系统提示"],
 ]) {
-	presetKeys[k] = {
+	presetCategories[k] = {
 		id: k,
 		name: v,
-		keys: [...presetKeysAlways]
+		keys: [],
+		values: []
 	}
 }
 
 // 删除过时的配置项
 onLoad(() => {
 	const keys = new Set(Object.keys(config));
-	["name", "think", "_new"].forEach(name => keys.delete(name));
+	["name", "think", "_new", "_dirty"].forEach(name => keys.delete(name));
 
-	SETTINGS.forEach(({id, _group, type, choices}) => {
+	SETTINGS.forEach((item) => {
+		const {id, _group, type, choices} = item;
+		if (undefined === item.default) {
+			if (type === 'textbox' || type === "input") {
+				item.default = "";
+			} else if (type === "radio" && choices) {
+				item.default = Object.values(choices)[0];
+			}
+		}
+
 		if (!id) {
 			if (_group) {
 				if (typeof _group !== "string") {
 					for (const [k, v] of Object.entries(_group)) {
-						presetKeys[v].keys.push(k);
+						presetCategories[v].keys.push(k);
+						presetCategories[v].values.push(item);
 					}
 				} else {
-					presetKeys[_group].keys.push(id);
+					if (type === "multiple") {
+						Object.values(choices).forEach(k => {
+							presetCategories[_group].keys.push(k);
+							presetCategories[_group].values.push(item);
+						});
+					}
 				}
 			}
 
@@ -831,7 +898,8 @@ onLoad(() => {
 			}
 		} else {
 			if (_group) {
-				presetKeys[_group].keys.push(id);
+				presetCategories[_group].keys.push(id);
+				presetCategories[_group].values.push(item);
 			}
 			keys.delete(id);
 		}

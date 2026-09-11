@@ -3,6 +3,7 @@ import {$state, unconscious} from "unconscious";
 import "./SafeImage.css";
 import {isLanAddress} from "/common/isLanAddress.js";
 import {loadingBlock} from "../utils/utils.js";
+import {EVENT_BUS} from "../states.js";
 
 const whiteList = new Set([
 	"img.shields.io",
@@ -17,7 +18,7 @@ const whiteList = new Set([
 	"avatars.githubusercontent.com"
 ]);
 
-export function SafeImage({src, title = ""}) {
+export function SafeImage({src, title = "", external}) {
 	const state = $state("");
 	let image;
 
@@ -34,6 +35,22 @@ export function SafeImage({src, title = ""}) {
 
 			if (!state.value) {
 				let safe = url.startsWith("blob:") || url.startsWith("data:");
+				if (!external && !safe && !/^https?:\/\//i.test(url)) {
+					const tmp = EVENT_BUS.post(['resolveUrl'], url);
+					if (tmp instanceof Promise) {
+						tmp.then(
+							([first]) => {
+								state.value = "loading";
+								src = first
+							},
+							() => state.value = 'error'
+						);
+						return loadingBlock("图像加载中……");
+					} else if (tmp) {
+						safe = true;
+						url = tmp;
+					}
+				}
 
 				if (!safe) {
 					// normalize

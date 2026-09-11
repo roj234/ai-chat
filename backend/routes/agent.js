@@ -4,12 +4,16 @@ import {spawn} from 'node:child_process';
 import {readBOM} from "../../common/chardet.js";
 import iconv from "iconv-lite";
 import {getEnvironmentPrompt} from "../utils/checkEnv.js";
-import {compileGlobPattern, createTextFileEditHelper, GREP_MAX_COLUMNS} from "../../common/fs-common.js";
-import {IGNORED_ERROR_MESSAGE, IgnoreMatcher} from "../../common/ignore.js";
+import {createTextFileEditHelper, GREP_MAX_COLUMNS} from "../../common/fs-common.js";
+import {ACL} from "../../common/ACL.js";
 import {createReadStream, createWriteStream} from 'node:fs';
 import {pipeline} from "node:stream/promises";
 import {createHash} from 'node:crypto';
 import {formatSize} from "unconscious/common/Utils.js";
+import {LRUCache} from "../../common/LRUCache.js";
+import {compileGlobPattern, emptyAsyncGenerator, generateGlobCode} from "../../common/fs-glob.js";
+// noinspection ES6UnusedImports
+import {mpscScheduler} from "../../common/pure-utils.js";
 
 /**
  * 路径校验
@@ -21,7 +25,7 @@ export const pathFilter = (relPath, ctx) => {
 	const root = ctx.fsRoot;
 	const targetPath = path.resolve(root, relPath);
 	// allow path like /tmp/... or C:/tmp/
-	if (!globalThis.AIChatArgs.noSandbox && !targetPath.startsWith(root) && !/^(?:[a-zA-Z]:)?[\\/]tmp(?:\/|$)/.test(targetPath)) {
+	if (!globalThis.AIChatArgs.noSandbox && !(targetPath+"\\").startsWith(root) && !/^(?:[a-zA-Z]:)?[\\/]tmp(?:\/|$)/.test(targetPath)) {
 		const err = new Error('Path Traversal');
 		err.statusCode = 403;
 		throw err;
@@ -34,9 +38,9 @@ async function pathFilterWithIgnore(ctx, relPath, isDir) {
 
 	const root = ctx.fsRoot;
 	const processedRelPath = targetPath.slice(root.length+1).replaceAll(path.sep, '/');
-	const ignore = await getIgnoreMatcher(root, targetPath);
-	if (ignore.test(processedRelPath, isDir)) {
-		const err = new Error(IGNORED_ERROR_MESSAGE);
+	const acl = await getACL(root, targetPath);
+	if (acl.denyList(processedRelPath, isDir)) {
+		const err = new Error(`This path is readonly`);
 		err.statusCode = 403;
 		throw err;
 	}
@@ -171,20 +175,17 @@ function killProcess(child) {
 	}, 3000);
 }
 
-const matcherCache = new Map;
+const matcherCache = new LRUCache(255);
 /**
  *
  * @param {string} root
  * @param {string} targetDir
- * @returns {Promise<IgnoreMatcher>}
+ * @returns {Promise<ACL>}
  */
-const getIgnoreMatcher = async (root, targetDir) => {
+const getACL = async (root, targetDir) => {
 	let matcher = matcherCache.get(root);
 	if (!matcher) {
-		if (matcherCache.size > 1000)
-			matcherCache.delete(matcherCache.keys().next().value);
-
-		matcher = new IgnoreMatcher();
+		matcher = new ACL();
 
 		/*let current = targetDir;
 		do {
@@ -193,7 +194,7 @@ const getIgnoreMatcher = async (root, targetDir) => {
 
 		for (const name of ['.ignore', '.gitignore']) {
 			try {
-				matcher.parse(await fs.readFile(path.join(root, name), 'utf-8'));
+				matcher.parseIgnore(await fs.readFile(path.join(root, name), 'utf-8'));
 				break;
 			} catch {}
 		}
@@ -203,6 +204,19 @@ const getIgnoreMatcher = async (root, targetDir) => {
 
 	return matcher;
 };
+
+async function glob(pattern, path, showHidden, acl, exclude) {
+	const result = compileGlobPattern(pattern, path, exclude);
+	const handle = result.path;
+
+	try {
+		await fs.access(handle);
+	} catch {
+		return emptyAsyncGenerator();
+	}
+
+	return eval(generateGlobCode(true));
+}
 
 /**
  * @param {AiChatBackend.Router} router
@@ -224,114 +238,53 @@ export async function registerFsRoutes(router, allowExec) {
 		modifiedSince = 0,
 		showDir = null,
 		showModified = false,
-		showHidden = false,
+		exclude = [],
+		showHidden,
 	}, ctx) => {
 		pattern = pattern || '*';
 		// 行为一致，顺便给AI擦屁股
 		if (pattern.startsWith("*.") && !pattern.includes('/')) pattern = "**/"+pattern;
 
 		const safePath = pathFilter(filePath, ctx);
-		const ignored = await getIgnoreMatcher(ctx.fsRoot, safePath);
+		const acl = await getACL(ctx.fsRoot, safePath);
 
-		let entries;
 		if (!(await fs.stat(safePath)).isDirectory()) throw new Error("Path is not a directory");
 
-		const glob = compileGlobPattern(pattern, safePath);
-		const segments = glob.segments;
-		const base = glob.path;
-
-		async function* walk(base, relDir, segIdx) {
-			const seg = segments[segIdx];
-			const nextIdx = segIdx + 1;
-			const isLast = nextIdx >= segments.length;
-
-			if (seg === '**') {
-				if (isLast) {
-					yield* yieldDescendants(base, relDir);
-				} else {
-					yield* walk(base, relDir, nextIdx);
-					for (const entry of await fs.readdir(base, { withFileTypes: true })) {
-						const name = entry.name;
-						const childPath = relDir ? relDir + '/' + name : name;
-						if (entry.isDirectory() && !ignored.test(childPath, true)) {
-							yield* walk(path.join(entry.parentPath, entry.name), childPath, segIdx);
-						}
-					}
-				}
-				return;
-			}
-
-			for (const entry of await fs.readdir(base, { withFileTypes: true })) {
-				const name = entry.name;
-				if (name[0] === '.' && !showHidden) continue;
-
-				if (!seg.test(name)) continue;
-
-				const entryPath = relDir ? relDir + '/' + name : name;
-				const isDir = entry.isDirectory();
-
-				if (isLast) {
-					if (!ignored.test(entryPath, isDir)) {
-						yield entry;
-					}
-				} else if (isDir && !ignored.test(entryPath, true)) {
-					yield* walk(path.join(entry.parentPath, entry.name), entryPath, nextIdx);
-				}
-			}
-		}
-
-		async function* yieldDescendants(base, relDir) {
-			for (const entry of await fs.readdir(base, { withFileTypes: true })) {
-				const name = entry.name;
-				const entryPath = relDir ? relDir + '/' + name : name;
-				const isDir = entry.isDirectory();
-
-				const ignore = ignored.test(entryPath, isDir);
-				if (ignore || (name[0] === '.' && !showHidden)) {
-					if (ignore === 'dir') yield entry;
-					continue;
-				}
-
-				yield entry;
-				if (isDir) yield* yieldDescendants(path.join(entry.parentPath, entry.name), entryPath);
-			}
-		}
-
-		entries = walk(base, glob.prefix, 0);
-
 		let prefix = '';
-		let items = 0;
 		let modSince = modifiedSince ? +new Date(modifiedSince) : 0;
 		if (!isFinite(modSince)) throw 'Invalid date';
 
+		if (null == showHidden) showHidden = /(?:^|\/)\.[^./]/.test(pattern);
+
 		const result = [];
-		for await (const entry of entries) {
+		for await (const entry of await glob(pattern, safePath, showHidden, acl, exclude)) {
 			const parentPath = entry.parentPath.slice(safePath.length+1).replaceAll(path.sep, '/');
 			const displayPath = pattern !== '*' && parentPath ? parentPath+'/'+entry.name : entry.name;
 			const isDir = entry.isDirectory();
 
-			if (items >= limit) {
+			if (!json && result.length >= limit) {
 				prefix = `[TRUNCATED to ${limit} entries, use a more specific path or pattern]\n`;
 				break;
 			}
-			if (!json) items++;
+
+			const fullPath = path.join(entry.parentPath, entry.name);
+			const stats = await fs.stat(fullPath);
 
 			if (!isDir) {
-				const fullPath = path.join(entry.parentPath, entry.name);
-				const stats = await fs.stat(fullPath);
-
 				if (stats.mtimeMs > modSince) {
-					const item = [displayPath, "file", formatSize(stats.size)];
-					if (showModified || modSince) item.push(stats.mtime.toISOString().slice(0, -5));
+					const item = [displayPath, "file", json ? stats.size : formatSize(stats.size)];
+					if (showModified || modSince) item.push(json ? stats.mtimeMs : stats.mtime.toISOString().slice(0, -5));
 					result.push(item);
 				}
 			} else if (displayPath && (showDir != null ? showDir : !modSince)) {
-				const ignore = ignored.test(displayPath, true);
-				result.push([displayPath,  ignore === 'dir' ? "dir (descents skipped)" : "dir"]);
+				const ignore = acl.denyList(displayPath, true);
+				const arr = [displayPath, ignore === 'skip' ? "dir (descents skipped)" : "dir"];
+				if (showModified) arr.push(0, json ? stats.mtimeMs : stats.mtime.toISOString().slice(0, -5));
+				result.push(arr);
 			}
 		}
 
-		if (modSince) result.sort((a, b) => b[3].localeCompare(a[3]));
+		if (modSince) result.sort((a, b) => b[3] - a[3]);
 
 		if (json) return result;
 		return result.length ? prefix+result.map(item => item.join("\t")).join("\n") : "[No result]";

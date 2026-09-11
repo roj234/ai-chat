@@ -2,6 +2,8 @@ import {
 	SYNC_CONFLICT,
 	SYNC_CONVERSATION,
 	SYNC_CONVERSATION_DEL,
+	SYNC_DM,
+	SYNC_DM_QUERY,
 	SYNC_ERROR,
 	SYNC_INIT,
 	SYNC_KV,
@@ -18,11 +20,17 @@ import {
 	SYNC_SEND_TO_OWNER,
 	SYNC_UNLOCKED
 } from "./sync.js";
-import {ALLOW_USER_NAMES, INTERACTIVE_LOGIN, RESPONSE_USE_MSGPACK_SCHEMA, RESTRICT_USER_CREATION} from "./config.js";
+import {
+	ALLOW_USER_NAMES,
+	ENABLE_CHATROOM,
+	INTERACTIVE_LOGIN,
+	RESPONSE_USE_MSGPACK_SCHEMA,
+	RESTRICT_USER_CREATION
+} from "./config.js";
 import {checkPAT} from "./utils/PAT.js";
 import {loadUserData} from "./utils/UserManager.js";
 import {decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
-import {msgpack_schema} from "../common/MsgpackSchema.js";
+import {msgpack_schema} from "../common/wire-compression-schema.js";
 
 /**
  *
@@ -136,14 +144,6 @@ export function createSyncManager(wss) {
 			for (const [id, writeLock] of myLocked.entries()) {
 				if (writeLock) onUnlock(id);
 			}
-
-			/*const allClientIds = [...clients].map(x => x.id);
-			for (let client of clients) {
-				client.ws.send(encode([
-					SYNC_CLIENTS,
-					allClientIds
-				]));
-			}*/
 		});
 
 		function updateReaderCount(id) {
@@ -222,11 +222,11 @@ export function createSyncManager(wss) {
 			}
 		}
 
-		function broadcastExcludeSelf(data) {
+		function broadcastExcludeSelf(data, target = clients) {
 			if (data[1] === 0) return;
 
 			const body = encode(data);
-			for (const client of clients) {
+			for (const client of target) {
 				if (client !== self) client.ws.send(body);
 			}
 		}
@@ -235,7 +235,40 @@ export function createSyncManager(wss) {
 			try {
 				const [type, data] = isBinary ? decodeMsg(message, {schema: msgpack_schema}) : JSON.parse(message.toString());
 				switch (type) {
-					default: throw new Error("unknown message type");
+					default: throw new DOMException("unknown message from client "+clientId);
+
+					case SYNC_DM_QUERY: {
+						if (!ENABLE_CHATROOM) return;
+						const target = users.get(data);
+						ws.send(encode([
+							SYNC_DM_QUERY,
+							!target ? [] : [...target[0]].map(x => x.id)
+						]));
+					}
+					break;
+					case SYNC_DM: {
+						if (!ENABLE_CHATROOM) return;
+						let [toUser, message, toClientId] = data;
+						const target = users.get(toUser);
+						if (!target) {
+							ws.send(encode([
+								SYNC_DM,
+								[null, Date.now(), { code: 1, error: "user offline" }]
+							]));
+							return;
+						}
+
+						let c;
+						for (let client of target[0]) {
+							c = client;
+							if (client.id === toClientId) break;
+						}
+						c.ws.send(encode([
+							SYNC_DM,
+							[userId, Date.now(), message]
+						]));
+					}
+					break;
 
 					case SYNC_RPC: {
 						const [targetClientId, payload] = data;
@@ -395,7 +428,7 @@ export function createSyncManager(wss) {
 				break;
 				case 'kvs/upsert':
 					code = SYNC_KVS;
-					body = [body.type, body.name];
+					body = [body.type, body.name, body.$ === '=' ? body.v.meta : body.meta];
 				break;
 				case 'kvs/delete':
 					code = SYNC_KVS_DEL;

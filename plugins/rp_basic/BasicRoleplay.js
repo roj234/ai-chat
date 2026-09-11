@@ -33,7 +33,6 @@ import {Dropdown} from "/src/components/Dropdown.jsx";
 import {createTab} from "/src/components/SettingDialog.jsx";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {_CharacterEditor, _LorebookEditor, _PresetEditor, markDirty} from "./PresetPanel.jsx";
-import {createPanel} from "./CreatePanel.jsx";
 import {convertSTCharacter, convertSTLorebook, convertSTPreset, normalizeCRLF} from "./convert.js";
 import {
 	applyMacro,
@@ -47,14 +46,15 @@ import {LorebookList, PresetList} from "./TagList.jsx";
 import schema from "./schema.json";
 import {compileSchema, validateAndShowError} from "unconscious/common/json-schema-utils.js";
 import {onLoad} from "/src/hooks.js";
-import {openJsonEditor} from "/src/json_editor/jsonEditorProxy.js";
+import {openJsonEditor} from "/src/json_editor/JsonEditDialog.js";
 import {base64DecodeToString} from "unconscious/common/Base64.js";
 import {LorebookMatcher} from "./LorebookMatcher.js";
-import {VirtualDirectory} from "../tools/VirtualFileSystem.js";
+import {createFileSystemAsync, createVirtualFileSystem} from "../agent/index.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
-import {FS_INSTANCE} from "../tools/fileAccess.js";
-import {createWebFileSystem} from "../tools/WebFileSystem.js";
 import {PROMISE_CATCH} from "/common/pure-utils.js";
+
+import {closeWindow, openWindow} from "/src/components/Windows.jsx";
+import {Icon_save} from "/src/components/Icons.jsx";
 
 compileSchema(schema);
 
@@ -79,9 +79,9 @@ const INST = debugSymbol("CharacterInstance");
 function showOverwriteConfirm(item, typeStr, callback) {
 	if (item._dirty) {
 		SimpleModal({
-			title: "当前" + typeStr + "已修改",
+			title: `${typeStr} ${JSON.stringify(item.name)} 已修改`,
 			message: "点击确定丢弃修改，或取消并自行保存。",
-			onConfirm: callback
+			onConfirm: callback,
 		})
 	} else {
 		callback();
@@ -98,151 +98,268 @@ const storeOptions = {
  *
  * @param {string} typeId - ID st|preset
  * @param {Function} editorConstructor
+ * @param {Object} defaultValue
  * @return {[
  *     element: import("unconscious").Renderable,
- *     open: function(): void,
  *     items: import("unconscious").Reactive<(Object & AiChat.IDBKVList)[]>,
  *     item: import("unconscious").Reactive<Object & AiChat.IDBKVList>,
- *     onImported: function(id: number, name: string): void,
+ *     openEditor: function(string): void,
  * ]}
  */
-function createSchemaEditColumn(typeId, editorConstructor) {
+function createSchemaEditColumn(typeId, editorConstructor, defaultValue = {}) {
 	/** @type {import("unconscious").Reactive<AiChat.IDBKVList[]>} */
 	const items = $state([]);
 	/** @type {import("unconscious").Reactive<IDBKVList>} */
 	const selectedItem = $store(typeId, undefined, storeOptions);
 	if (typeId !== 'st|preset' && !selectedItem._dirty) selectedItem.value = undefined;
 
-	let {open: _openPanel, close: _closePanel} = createPanel(editorConstructor);
-	const openEditor = () => _openPanel(selectedItem);
+	let handle;
+
+	const doSave = (name) => {
+		delete selectedItem._dirty;
+		kvListSet(unconscious(selectedItem), typeId, name).then(() => {
+			dropdown.setSelection(name);
+		}, e => {
+			selectedItem._dirty = '*';
+		});
+	};
+	const doExport = async data => {
+		const {_dirty, ...value} = await data;
+		value.type = typeId;
+		let filename = definition[typeId][0] + ' ' + value.name;
+		if (_dirty) filename += " (已修改)";
+
+		downloadFile(new File([JSON.stringify(value)], filename + ".json", {lastModified: value.time}));
+	};
+
+	const openEditor = () => {
+		if (handle) return;
+
+		let element = editorConstructor(selectedItem);
+		const chi = element.firstElementChild;
+		chi.append(
+			<button className={"ri- btn primary"} disabled={() => !selectedItem._dirty} onClick={() => {
+				if (typeId === "st|char") return doSave(selectedItem.name);
+
+				SimpleModal({
+					type: "input",
+					title: "输入" + typeStr + "名称 【当前：" + selectedItem.name + "】",
+					placeholder: "重命名就在这填新名字，否则直接确认",
+					onConfirm(name) {
+						name ||= selectedItem.name;
+						if (!name) return false;
+						doSave(name);
+					}
+				})
+			}} title="保存"><Icon_save/></button>,
+			<button className="ri-download-line btn ghost" title="导出"
+					onClick={() => doExport(unconscious(selectedItem))}/>
+		);
+
+		handle = openWindow({
+			id: "panel-" + typeId,
+			icon: typeStr[0],
+			title: () => unconscious(selectedItem)?.name || "unknown",
+			dock: "right",
+			width: 400,
+			element,
+			actions: chi
+		});
+
+		const _off = EVENT_BUS.onoff(['closeWindow', handle.id], () => {
+			_off();
+
+			handle = null;
+			const classList = editBtn.classList;
+			classList.remove("primary");
+			classList.add("ghost");
+		});
+
+		const classList = editBtn.classList;
+		classList.remove("ghost");
+		classList.add("primary");
+	};
+	const _closePanel = () => {
+		if (handle) closeWindow(handle);
+	};
 
 	const typeStr = definition[typeId][0];
 
 	const dropdown = <Dropdown
 		items={items}
 		selection={$computed(() => (selectedItem._dirty || "") + (selectedItem.name || ""))}
-		onChanged={(type, index) => {
-			const name = items[index].name;
+		actions={() => <i className="ri-download-line" title="导出"></i>}
+		add={(name) => {
+			showOverwriteConfirm(selectedItem, typeStr, () => {
+				SimpleModal({
+					type: "input",
+					title: "输入新" + typeStr + "名",
+					value: name,
+					onConfirm(name) {
+						if (!name) return false;
+						const obj = structuredClone(defaultValue);
+						obj.name = name;
+						selectedItem.value = obj;
+						dropdown.setSelection(name);
+						openEditor();
+					},
+					onCancel() {
+						_closePanel();
+						setTimeout(() => {
+							selectedItem.value = undefined;
+							dropdown.setSelection(null);
+						}, 170);
+					}
+				})
+			});
+		}}
+		onChanged={(type, name, e) => {
 			if (type === 'd') {
 				kvListDel(typeId, name);
 			} else {
+				if (e.target.tagName === "I") {
+					e.stopPropagation();
+					doExport(kvListGet(typeId, name));
+					return;
+				}
+
 				showOverwriteConfirm(selectedItem, typeStr, () => kvListGet(typeId, name).then(value => {
 					selectedItem.value = value;
 					delete selectedItem._dirty;
 					$update(selectedItem);
-					dropdown.setSelection(index);
+					dropdown.setSelection(name);
 				}));
 			}
 		}}/>;
 
-	const element = <>
-		<div className={"choice-scroll"}>
-			<button className={"btn ghost"} onClick={() => {
-				const closePanel = _closePanel();
-				showOverwriteConfirm(selectedItem, typeStr, () => {
-					SimpleModal({
-						type: "input",
-						title: "输入新"+typeStr+"的名称",
-						onConfirm(name) {
-							if (!name) return false;
-							selectedItem.value = {name};
-							dropdown.setSelection(name);
-							openEditor();
-						},
-						onCancel() {
-							return closePanel.then(() => {
-								selectedItem.value = undefined;
-								dropdown.setSelection(null);
-							});
-						}
-					})
-				});
-			}}>新建
-			</button>
-			<button className={"btn ghost"} onClick={openEditor}
-					disabled={() => !unconscious(selectedItem)}
-					onContextMenu.prevent={e => {
-						const key = typeId + ":" + selectedItem.name;
+	const editBtn = <button className={"ri-edit-2-line btn ghost"} onClick={openEditor}
+		disabled={() => !unconscious(selectedItem)} title="编辑"
+		onContextMenu.prevent={e => {
+			const key = typeId + ":" + selectedItem.name;
 
-						let skipNext;
-						const [updateValue, onClose] = openJsonEditor(key, () => {
-							const { name, type, time, _dirty, ...rest } = unconscious(selectedItem);
-							return JSON.stringify(rest, null, 2);
-						}, (v) => {
-							const obj = JSON.parse(v);
-							obj.name = selectedItem.name;
-							obj.type = selectedItem.type;
-							markDirty(obj);
-							selectedItem.value = obj;
-							skipNext = true;
-						});
-						const syncToEditor = () => {
-							if (skipNext) skipNext = false;
-							else updateValue();
-						};
+			let skipNext;
+			const [updateValue, onClose] = openJsonEditor(key, () => {
+				const {name, type, time, _dirty, ...rest} = unconscious(selectedItem);
+				return JSON.stringify(rest, null, 2);
+			}, (obj) => {
+				obj.name = selectedItem.name;
+				obj.type = selectedItem.type;
+				markDirty(obj);
+				selectedItem.value = obj;
+				skipNext = true;
+			});
+			const syncToEditor = () => {
+				if (skipNext) skipNext = false;
+				else updateValue();
+			};
 
-						$watch(selectedItem, syncToEditor, false);
-						onClose(() => $unwatch(selectedItem, syncToEditor));
-					}}
-			>
-				编辑
-				<span className={"tooltip"}>{isMobile?"长按":"右键单击在独立窗口中"}编辑原始数据</span>
-			</button>
-			<button className={"btn ghost"} disabled={() => !selectedItem._dirty} onClick={() => {
-				SimpleModal({
-					type: "input",
-					title: "输入"+typeStr+"名称 【当前："+selectedItem.name+"】",
-					placeholder: "重命名就在这填新名字，否则直接确认",
-					onConfirm(name) {
-						name ||= selectedItem.name;
-						if (!name) return false;
-
-						delete selectedItem._dirty;
-						kvListSet(unconscious(selectedItem), typeId, name).then(() => {
-							dropdown.setSelection(name);
-						}, e => {
-							selectedItem._dirty = '*';
-						});
-					}
-				})
-			}}>保存
-			</button>
-			<button className={"btn ghost"} disabled={() => !selectedItem.value}
-					onClick={() => {
-						const value = structuredClone(unconscious(selectedItem));
-						const dirty = value._dirty;
-						delete value._dirty;
-						value.type = typeId;
-						let filename = definition[typeId][0] + ' ' + value.name;
-						if (dirty) filename += " (已修改)";
-
-						downloadFile(new File([JSON.stringify(value)], filename+".json", {lastModified: value.time}));
-					}}>
-				导出
-			</button>
-			{dropdown}
-		</div>
-	</>;
+			$watch(selectedItem, syncToEditor, false);
+			onClose(() => $unwatch(selectedItem, syncToEditor));
+		}}>
+		<span className={"tooltip"}>{isMobile ? "长按" : "右击"}编辑原始数据</span>
+	</button>;
 
 	return [
-		element,
-		openEditor,
+		<div className={"choice-scroll"}>{dropdown}{editBtn}</div>,
 		items,
 		selectedItem,
+		(name) => {
+			showOverwriteConfirm(selectedItem, typeStr, () => kvListGet(typeId, name).then(value => {
+				selectedItem.value = value;
+				delete selectedItem._dirty;
+				$update(selectedItem);
+				openEditor();
+				dropdown.setSelection(name);
+			}));
+		},
 	];
 }
+
 //endregion
 
-const [presetBar, openPresetPanel, presetList, currentPreset] = createSchemaEditColumn("st|preset", _PresetEditor);
-const [charBar, openCharPanel, characterList, currentCharacter] = createSchemaEditColumn("st|char", _CharacterEditor);
-const [lorebookBar, openLorebookPanel, lorebookList, currentLorebook] = createSchemaEditColumn("st|lorebook", _LorebookEditor);
+const [presetBar, presetList, currentPreset] = createSchemaEditColumn("st|preset", _PresetEditor, {
+	prompts: [
+		{
+			name: "系统提示",
+			enabled: true,
+			role: "system",
+			content: `Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.`,
+		},
+		{
+			name: "默认模板",
+			enabled: true,
+			role: "system",
+			content: `
 
-charBar[0].append(<button className={"btn ghost"} disabled={() => {
+{{worldInfoBefore}}
+
+---
+
+用户 {{user}} 信息：
+
+{{personaDescription}}
+
+角色 {{char}} 信息：
+
+{{description}}
+
+{{personality}}
+
+{{scenario}}
+
+---
+
+{{worldInfoAfter}}
+
+---
+
+{{dialogueExamples}}`,
+		},
+		{
+			name: "对话历史",
+			enabled: true,
+			role: "system",
+			content: "chatHistory",
+			attr: "marker"
+		}
+	]
+});
+const [charBar, characterList, currentCharacter, openCharacterEditor] = createSchemaEditColumn("st|char", _CharacterEditor);
+const [lorebookBar, lorebookList, currentLorebook] = createSchemaEditColumn("st|lorebook", _LorebookEditor);
+
+export const exportForCV_openCharacterEditor = openCharacterEditor;
+
+//region 从角色卡新建对话
+charBar.append(<button className={"ri-book-open-line btn ghost"} disabled={() => {
 	const chr = unconscious(currentCharacter);
 	return !chr?.name || !unconscious(characterList).find(item => item.name === chr.name);
 }} onClick={() => {
-	createConversation(unconscious(currentCharacter));
-}}>创建故事</button>);
+	exportForCV_createConversation(unconscious(currentCharacter));
+}} title="以选中角色开始故事"><span className="tooltip">以选中角色开始故事</span></button>);
+/**
+ * 从角色新建对话
+ * @param {AiChat.DnD.MyCharacter} char
+ * @return {Promise<void>}
+ */
+export async function exportForCV_createConversation(char) {
+	await importConversationData({
+		title: "[Char] "+char.name,
+		time: Date.now(),
+	}, [
+		{
+			role: "st|char",
+			content: {
+				name: char.name,
+				// ""为嵌入世界书（若存在）保留
+				lorebookNames: [""],
+				greeting: 0
+			}
+		}
+	]);
+
+	showToast("已创建 "+char.name+" 的新对话", "ok");
+}
+//endregion
 
 createTab("character", "角色", "ri-user-heart-line");
 SETTINGS.filter((item) => item._id === "import").forEach((item) => {
@@ -303,10 +420,12 @@ SETTINGS.push(
 	{
 		id: "st_postProcess",
 		name: "提示词后处理",
-		title: "现代LLM后端的普遍规范: 系统提示只能在开头，末尾至多一条助手消息。\n角色对话的提示构造完全由预设控制，有问题请修改预设\n靠后处理兜底可能产生怪异行为",
+		title: "现代LLM普遍规范: 0-1条系统消息在开头，末尾0-1条助手消息。\n建议选择【合并同角色消息】\n但提示构造由预设完全控制，靠后处理兜底可能产生怪异行为",
 		type: "radio",
+		required: true,
 		_tab: "character",
 		choices: {
+			"无": 0,
 			"单系统消息": 1,
 			"合并同角色消息": 2,
 			"交替对话": 3
@@ -327,6 +446,23 @@ SETTINGS.push(
 );
 
 onLoad(() => {
+	if (!isMobile && !IS_ANDROID_BUILD) {
+		charBar.append(<button className={"ri- btn ghost"} onClick={async () => {
+			openWindow({
+				id: "cardViewer",
+				title: "橘色卡管理器",
+				element: (await import("./page/characterViewer.js")).createCharacterViewer()
+			});
+		}} title="橘色卡管理器">
+			<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor">
+				<rect x="3" y="3" width="18" height="18" rx="2" stroke-width="2"/>
+				<line x1="14" y1="3" x2="14" y2="21" stroke-width="2"/>
+				<rect x="6" y="6" width="5.5" height="7" rx="1" fill="#f97316" stroke="none"/>
+				<line x1="6" y1="16" x2="11" y2="16" stroke-width="1.5" stroke-linecap="round"/>
+			</svg>
+		</button>);
+	}
+
 	kvListGetKeys("st|preset", presetList);
 	kvListGetKeys("st|char", characterList);
 	kvListGetKeys("st|lorebook", lorebookList);
@@ -360,7 +496,7 @@ onLoad(() => {
 		}
 	});
 
-	EVENT_BUS.on(['createAgent', 'character'], (conv, messages, data, path) => {
+	EVENT_BUS.on(['createAgent', 'character'], (conv, path, messages, data) => {
 		messages.unshift({
 			role: "st|char",
 			content: {
@@ -536,8 +672,6 @@ const checkJSON = (json, batch, fileName, imageBlob) => {
 	}
 };
 
-registerDataImportHandler("application/json", checkJSON);
-
 const imageLoader = async (file, batch) => {
 	const imageData = new Uint8Array(await file.arrayBuffer());
 	const im = await parseImageMeta(imageData, { text: true, strip: true });
@@ -556,35 +690,9 @@ const imageLoader = async (file, batch) => {
 	if (result) return await result;
 };
 
+registerDataImportHandler("application/json", checkJSON);
 registerDataImportHandler("image/png", imageLoader);
 registerDataImportHandler("image/jpeg", imageLoader);
-
-//endregion
-//region 从角色卡新建对话
-/**
- * 从角色新建对话
- * @param {AiChat.DnD.MyCharacter} char
- * @return {Promise<boolean>}
- */
-async function createConversation(char) {
-	await importConversationData({
-		title: "[Char] "+char.name,
-		time: Date.now(),
-	}, [
-		{
-			role: "st|char",
-			content: {
-				name: char.name,
-				// ""为嵌入世界书（若存在）保留
-				lorebookNames: [""],
-				greeting: 0
-			}
-		}
-	]);
-
-	showToast("已创建 "+char.name+" 的新对话", "ok");
-	return true;
-}
 //endregion
 //region UI组件
 MessageRoles["st|char"] = {
@@ -669,10 +777,11 @@ MessageRoles["st|char"] = {
 					}
 				}
 
-				lorebookCaches.vfs = vfs = createWebFileSystem(new VirtualDirectory(map));
+				lorebookCaches.vfs = vfs = {};
+				createFileSystemAsync(vfs, createVirtualFileSystem(map));
 			}
 
-			(conv.mnt || (conv.mnt = {})).lorebook = { [FS_INSTANCE]: vfs };
+			(conv.mnt || (conv.mnt = {})).lorebook = vfs;
 		} else {
 
 			delete conv.mnt?.lorebook;

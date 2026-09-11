@@ -2,7 +2,7 @@ import {config, EVENT_BUS} from "../states.js";
 import {decodeObjects, encodeObjects, serializeJSON} from "../utils/marshal.js";
 import {initSync} from "./syncClient.js";
 import {decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
-import {msgpack_schema, msgpack_schema_version} from "/common/MsgpackSchema.js";
+import {msgpack_schema, msgpack_schema_version} from "/common/wire-compression-schema.js";
 import {SHA256} from "unconscious/common/SHA256.js";
 import {base64Encode} from "unconscious/common/Base64.js";
 import {prettyError, requestIdleCallback, resolveDBRelativeURL} from "../utils/utils.js";
@@ -289,14 +289,18 @@ const u_getKVListKeys = batched("kvs");
 export const kvListGetKeys = (type, val) => {
 	let promise = u_getKVListKeys(type);
 	if (val) promise.then(results => {
-		EVENT_BUS.on(['kvs', type], (name, path) => {
-			const idx = unconscious(val).findIndex(item => item.name === name);
+		EVENT_BUS.on(['kvs', type], (name, path, meta) => {
+			const raw = unconscious(val);
+			const idx = raw.findIndex(item => item.name === name);
 			if (path[2] === 'del') {
-				if (idx >= 0) val.splice(idx, 1);
+				if (idx < 0) return;
+				raw.splice(idx, 1);
 			} else if (idx < 0) {
-				val.unshift({name});
-				//val.sort()
+				raw.push({name, meta});
+			} else {
+				raw[idx].meta = patch(raw[idx].meta, meta);
 			}
+			$update(val);
 		});
 		val.value = results;
 	});
@@ -330,6 +334,7 @@ export const kvListGet = async (type, name) => {
 			delete val.type;
 			val[DIFF_SNAPSHOT] = structuredClone(val);
 			kvsCache.set(cacheKey, val);
+			EVENT_BUS.post(['kvsGot', type, name], val);
 		}
 	}
 	return val;
@@ -349,27 +354,41 @@ export const kvListSet = async (value, type, name) => {
 
 	const cacheKey = type+":"+name;
 
+	let p1;
 	const prev = value[DIFF_SNAPSHOT];
 	let diff;
 	if (prev) {
 		const prevName = prev.name;
-		if (prevName !== name) kvsCache.delete(type+":"+prevName);
+		if (prevName !== name) {
+			kvsCache.delete(type+":"+prevName);
+			p1 = kvListDel(type, prevName);
+			prev.name = name;
+			diff = rep(value);
+		} else {
+			diff = delta(prev, value, KVLIST_IGNORE_KEYS);
+			if (!diff) return;
+		}
 
-		diff = delta(prev, value, KVLIST_IGNORE_KEYS);
-		if (!diff) return true;
 		value[DIFF_SNAPSHOT] = patch(prev, structuredClone(diff));
 	} else {
 		diff = rep(value);
 		value[DIFF_SNAPSHOT] = structuredClone(value);
 	}
 
-	kvsCache.set(cacheKey, value);
-
-	return u_upsertKVList({
+	const p2 = u_upsertKVList({
 		type,
 		name,
 		...diff
-	}).then(() => EVENT_BUS.post(['kvs', type, 'set'], name));
+	});
+	return (p1 ? Promise.all([p1, p2]) : p2).then(
+		() => {
+			EVENT_BUS.post(['kvs', type, 'set'], name);
+			kvsCache.set(cacheKey, value);
+		},
+		(e) => {
+			value[DIFF_SNAPSHOT] = prev;
+			throw e;
+		});
 };
 
 export const kvListDel = (type, name) => u_deleteKVList([type, name]).then(() => EVENT_BUS.post(['kvs', type, 'del'], name));
@@ -426,6 +445,7 @@ _FakeBlob.prototype = {
 };
 
 const u_getBlobInfo = batched("blob");
+export const u_deleteBlob = batched("blob/del");
 
 let maxBlobSize;
 
@@ -439,6 +459,9 @@ export const uploadBlob = async blob => {
 	if (existingHash) return existingHash;
 
 	const hash = await blobHash(blob);
+	if (blob.hash === hash) return hash;
+	blob.hash = hash;
+
 	try {
 		await u_getBlobInfo(hash);
 	} catch {
@@ -460,7 +483,8 @@ export const uploadBlob = async blob => {
 		}
 		if (!res.ok) throw await res.text();
 	}
-	return blob.hash = hash;
+
+	return hash;
 };
 
 /**

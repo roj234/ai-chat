@@ -1,159 +1,5 @@
 import {createAsyncQueue} from "./pure-utils.js";
 import {LRUCache} from "./LRUCache.js";
-import {normalizePath} from "unconscious/common/path-utils.js";
-
-// ────────────────────────────────── Glob‑to‑Regex (ported from Globs.java) ──────────────────────────
-
-const REGEX_META_CHARS = new Set('.^$+{}[]|()');
-const GLOB_META_CHARS = new Set('\\*?[{');
-
-const EOL = undefined;
-const next = (glob, i) => i < glob.length ? glob[i] : EOL;
-
-/**
- * Converts a glob pattern (Unix style) to a RegExp pattern string.
- * Ported from Globs.toRegexPattern with isDos = false.
- */
-function globToRegexPattern(globPattern) {
-	let inGroup = false;
-	const regex = ['^'];
-
-	let i = 0;
-	while (i < globPattern.length) {
-		let c = globPattern[i++];
-		switch (c) {
-			case '\\': {
-				if (i === globPattern.length)
-					throw new Error(`No character to escape at position ${i - 1}`);
-				const nextChar = globPattern[i++];
-				if (GLOB_META_CHARS.has(nextChar) || REGEX_META_CHARS.has(nextChar)) regex.push('\\');
-				regex.push(nextChar);
-				break;
-			}
-			case '/': {
-				regex.push('/');
-				break;
-			}
-			case '[': {
-				regex.push('[');
-				if (next(globPattern, i) === '^') {
-					regex.push('\\^');
-					i++;
-				} else {
-					if (next(globPattern, i) === '!') {
-						regex.push('^');
-						i++;
-					}
-					if (next(globPattern, i) === '-') {
-						regex.push('-');
-						i++;
-					}
-				}
-				let hasRangeStart = false;
-				let last = 0;
-				while (i < globPattern.length) {
-					c = globPattern[i++];
-					if (c === ']') break;
-					if (c === '/') throw new Error(`Explicit 'name separator' in class at ${i - 1}`);
-					if (c === '\\' || c === '[') regex.push('\\');
-					regex.push(c);
-					if (c === '-') {
-						if (!hasRangeStart) throw new Error(`Invalid range at ${i - 1}`);
-						c = next(globPattern, i);
-						if (c === EOL) break;
-						if (c === ']') { i++; break; }
-						if (c < last) throw new Error(`Invalid range at ${i - 3}`);
-						if (c === '\\' || c === '[') regex.push('\\');
-						regex.push(c);
-						i++;
-						hasRangeStart = false;
-					} else {
-						hasRangeStart = true;
-						last = c;
-					}
-				}
-				if (c !== ']') throw new Error('Missing \']\'');
-				regex.push(']');
-				break;
-			}
-			case '{': {
-				if (inGroup) throw new Error(`Cannot nest groups at ${i - 1}`);
-				regex.push('(?:(?:');
-				inGroup = true;
-				break;
-			}
-			case '}': {
-				if (inGroup) {
-					regex.push('))');
-					inGroup = false;
-				} else {
-					regex.push('\\}');
-				}
-				break;
-			}
-			case ',': {
-				if (inGroup) {
-					regex.push(')|(?:');
-				} else {
-					regex.push(',');
-				}
-				break;
-			}
-			case '*': {
-				if (next(globPattern, i) === '*') {
-					regex.push('.*');
-					i++;
-				} else {
-					regex.push('[^/]*');
-				}
-				break;
-			}
-			case '?': {
-				regex.push('[^/]');
-				break;
-			}
-			default: {
-				if (REGEX_META_CHARS.has(c)) regex.push('\\');
-				regex.push(c);
-				break;
-			}
-		}
-	}
-
-	if (inGroup) throw new Error(`Missing '}' at ${i - 1}`);
-
-	regex.push('$');
-	return regex.join('');
-}
-
-const LITERAL_PREFIX = /^(?:\.\/)?([^.^$+{[\]|()*?\/]+\/)+/;
-
-/**
- *
- * @param {string} pattern
- * @param {string} path
- * @return {undefined | {path: string, prefix: string, segments: ('**'|RegExp)[]}}
- */
-export function compileGlobPattern(pattern, path) {
-	let prefix = '';
-
-	const match = pattern.match(LITERAL_PREFIX);
-	if (match) {
-		prefix = match[0].slice(0, -1);
-		path += '/' + prefix;
-		pattern = pattern.slice(match[0].length);
-	}
-
-	const segments = normalizePath(pattern).map((segment) => {
-		if (segment === '**') return segment;
-		return new RegExp(globToRegexPattern(segment), 'iu');
-	});
-
-	// 处理空pattern
-	if (!segments.length) return;
-
-	return { path, prefix, segments };
-}
 
 // ────────────────────────────────── Grep and TextFileEditHelper ──────────────────────────
 
@@ -173,7 +19,14 @@ export function compileGrepPattern(pattern) {
 		flag += 'g';
 		pattern = pattern.slice(flag.length + 2);
 	}
-	return new RegExp(pattern, flag);
+	try {
+		return new RegExp(pattern, flag);
+	} catch (e) {
+		if (flag === 'ug') {
+			return new RegExp(pattern, 'g');
+		}
+		throw e;
+	}
 }
 
 /**
@@ -197,7 +50,10 @@ export function createTextFileEditHelper(fs) {
 
 		let cached = cache.get(absPath);
 		const mtime = await fs.mtime(absPath, ctx);
-		if (cached && Math.abs(mtime - cached.mtime) < 500) return cached;
+		if (cached && Math.abs(mtime - cached.mtime) < 100) {
+			cached.mtime = mtime;
+			return cached;
+		}
 
 		const str = await fs.read(absPath, ctx);
 		const lines = str.split(/\r?\n/);
@@ -568,12 +424,11 @@ totalLines: ${lines.length + delta} (${delta >= 0 ? '+': ''}${delta})`;
 				break check;
 			}
 
-			// 有必要吗？
-			if (!overwrite) throw 'File exists and you never access it, Read or Delete and try again.';
+			if (!overwrite) throw 'File exists but you have never read, Read or Delete it.';
 
 			let cached = cache.get(absPath);
 			// TODO 搞一个 Diff 工具返回本地文件系统和缓存的差异，这样fsync也可以用上了
-			if (cached && cached.mtime < mtime) throw "File was modified since last operation.";
+			if (cached && cached.mtime < mtime - 150) throw "File modified externally, Read it.";
 		}
 		await fs.write(absPath, content, ctx, 1);
 
@@ -585,7 +440,7 @@ totalLines: ${lines.length + delta} (${delta >= 0 ? '+': ''}${delta})`;
 
 	const del = filePath => cache.delete(filePath);
 
-	const grep = async ({ pattern, path = ".", glob = "**", maxFiles = 50, maxMatchesPerFile = 10, context = 0 }, ctx) => {
+	const grep = async ({ pattern, path = "", glob = "**", maxFiles = 50, maxMatchesPerFile = 10, context = 0 }, ctx) => {
 		const regExp = compileGrepPattern(pattern);
 
 		let results = '';

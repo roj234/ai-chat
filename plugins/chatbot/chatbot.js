@@ -1,5 +1,5 @@
 // 聊天软件接口
-import {registerToolset, runTools, TOOL_NAME, toolInfo, toolScriptRegistry, toolset} from "/src/toolset.js";
+import {getToolName, registerToolset, runTools, toolInfo, toolScriptRegistry, toolset} from "/src/toolset.js";
 import {SETTINGS} from "/src/settings.js";
 import {config, conversations, messages} from "/src/states.js";
 import {agentLoop} from "/src/api-request.js";
@@ -9,8 +9,8 @@ import {showToast} from "/src/components/Toast.js";
 import {throttled} from "/common/pure-utils.js";
 import {getMessagesCacheFirst} from "/src/database.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
-import {fileAccess} from "../tools/fileAccess.js";
-import {onLoad} from "../../src/hooks.js";
+import {fileAccess} from "../agent/index.js";
+import {onLoad} from "/src/hooks.js";
 
 /** @type {AiChat.FunctionTool} */
 const SendMessage = {
@@ -198,7 +198,7 @@ class Chatbot {
 					for (let i = 0; i < toolCalls.length; i++){
 						const tc = toolCalls[i];
 						const ctx = am.tool_responses[i];
-						let name = ctx[TOOL_NAME];
+						let name = getToolName(ctx, tc);
 						const secure = toolScriptRegistry[name]?.interactive === 'secure';
 						try {
 							const title = toolScriptRegistry[name]?.title?.(tc, ctx);

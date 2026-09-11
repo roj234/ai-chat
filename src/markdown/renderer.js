@@ -83,7 +83,7 @@ export function createMarkdownRenderer(root, options = {}) {
 					parent = parent.appendChild(
 						options.noHighlight ? <pre /> :
 						(<pre className="code-block">
-							<div className={"sticky"} style={"top:0"}>
+							<div className={"sticky"} style={"top:var(--bar-height)"}>
 							<div className="code-header">
 								<span></span>
 								<span className="buttons">
@@ -232,7 +232,7 @@ export function createMarkdownRenderer(root, options = {}) {
 
 			if (!options.trusted) {
 				if (name === fastmd.SRC && !options.noImage) {
-					node.replaceWith(unconscious(<SafeImage src={value} title={node.title} />));
+					node.replaceWith(unconscious(<SafeImage src={value} title={node.title} external={options.external} />));
 					return;
 				}
 
@@ -240,8 +240,12 @@ export function createMarkdownRenderer(root, options = {}) {
 					if (value.toLowerCase().startsWith("javascript:")) return;
 
 					if (value[0] !== '#') {
-						node.target = "_blank";
-						node.rel = "noopener noreferrer";
+						if (/^https?:\/\//i.test(name)) {
+							node.target = "_blank";
+							node.rel = "noopener noreferrer";
+						} else {
+							return;
+						}
 					}
 				}
 

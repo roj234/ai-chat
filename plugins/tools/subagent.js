@@ -4,7 +4,6 @@ import {
 	parseFrontmatter,
 	prefixTitle,
 	registerToolset,
-	TOOL_NAME,
 	toolScriptRegistry,
 } from "/src/toolset.js";
 import {
@@ -28,18 +27,15 @@ import {
 	switchToConversation,
 	updateMessageUI
 } from "/src/states.js";
-import {fileAccess} from "./fileAccess.js";
+import {fileAccess, getSkillCache, JS_HOST_MODULES, RunJS} from "../agent/index.js";
 import {compileSchema, validateAndShowError} from "unconscious/common/json-schema-utils.js";
 import "./subagent.css";
-import {showToast} from "/src/components/Toast.js";
 import {cloneNamed, prettyError} from "/src/utils/utils.js";
 import {DI, DID_SYNC_LOCK, DID_SYNC_UNLOCK} from "/src/hooks.js";
 import {injectMessages} from "/src/inject-message.js";
 import {SETTINGS} from "/src/settings.js";
 import {createAsyncQueue} from "/common/pure-utils.js";
-import schema from "./agent_definition_schema.json";
-import {getSkillCache} from "./skills.js";
-import {JS_HOST_MODULES, RunJS} from "./run_js.js";
+import schema from "./subagent_schema.json";
 
 compileSchema(schema);
 
@@ -127,6 +123,8 @@ const hasLoop = async (start) => {
  * @returns {Promise<AiChat.Conversation>}
  */
 async function createSubagent(par, response, conv, tools) {
+	if (await nestDepth(conv) > config.subagentDepth) throw "Agent recursion limit reached: "+config.subagentDepth;
+
 	/**
 	 * @type {AiChat.Conversation}
 	 */
@@ -159,7 +157,7 @@ async function createSubagent(par, response, conv, tools) {
 	let _async = par.background;
 	let hasFileSystem;
 	let systemPrompt = '';
-	let _skills, _kind;
+	let _skills;
 
 	const promptType = par.promptType;
 	let promptValue = par.prompt;
@@ -183,12 +181,8 @@ async function createSubagent(par, response, conv, tools) {
 		if (error) throw "Agent definition format error:\n"+error;
 
 		if (model !== 'inherit') {
-			try {
-				const preset = await kvListGet("preset", model);
-				Object.assign(agent.overrides, preset);
-			} catch (e) {
-				showToast("无子代理配置【"+model+"】，回落到 inherit", "", 30000);
-			}
+			const preset = await kvListGet("preset", model);
+			Object.assign(agent.overrides, preset);
 		}
 
 		if (mounts) {
@@ -261,7 +255,7 @@ async function createSubagent(par, response, conv, tools) {
 
 		if (kind !== 'basic') {
 			const promises = await EVENT_BUS.post(["createAgent", kind], agent, messages, info);
-			if (!promises.length) throw "Unknown kind "+kind;
+			if (!promises?.length) throw "Unknown kind "+kind;
 		}
 
 		_skills = skills;
@@ -324,26 +318,43 @@ const createSubagentWrapper = async (ctx, par, conv) => {
 	if (promise) return promise;
 
 	if (!ctx.agentId) {
-		if (await nestDepth(conv) > config.subagentDepth) throw "Agent recursion limit reached: "+config.subagentDepth;
-
 		const promise = ctx[INIT_AGENT_SYM] = createSubagent(par, ctx, conv, par.tools || conv.tools);
 		promise.finally(() => delete ctx[INIT_AGENT_SYM]);
 		return promise;
 	}
 };
 
-const subagentLoop = async conversation => {
-	const messages = await getMessagesCacheFirst(conversation);
-	if (conversation.sa_terminated) return { id: -1, error: true, content: TERMINATED_MESSAGE };
+/**
+ * @param {AiChat.SubagentConversation} agent
+ * @return {Promise<{id: number, error: boolean, content: string}|{id: number, error: boolean, content: string | OpenAI.ContentPart[]}>}
+ */
+const subagentLoop = async agent => {
+	const messages = await getMessagesCacheFirst(agent);
+	if (agent.sa_terminated) return { id: -1, error: true, content: TERMINATED_MESSAGE };
 
 	let lastMessage = messages.at(-1);
 	let finishReason = lastMessage.finish_reason;
 	let loop_finish_reason;
 
+	// 重试脚本
+	if (agent.sa_pending) {
+		loop_finish_reason = false;
+		agent.sa_notify = lastMessage.id-1;
+	}
+
 	let locked;
 	try {
 		while (loop_finish_reason !== false && (lastMessage.role !== 'assistant' || finishReason === 'tool_calls')) {
-			if (conversation[LOCKED] === "DELETED") {
+			const saMaxTurns = agent.sa_maxTurns;
+			if (saMaxTurns != null && messages.length >= saMaxTurns) {
+				return {
+					id: Infinity,
+					error: true,
+					content: `Max turn reached (${saMaxTurns}).`
+				}
+			}
+
+			if (agent[LOCKED] === "DELETED") {
 				return {
 					id: Infinity,
 					error: true,
@@ -353,11 +364,11 @@ const subagentLoop = async conversation => {
 
 			if (!locked) {
 				locked = true;
-				DI[DID_SYNC_LOCK]?.(conversation.id);
+				DI[DID_SYNC_LOCK]?.(agent.id);
 				$update(updateMessageUI);
 			}
 
-			loop_finish_reason = await agentLoop(conversation, messages);
+			loop_finish_reason = await agentLoop(agent, messages);
 			lastMessage = messages.at(-1);
 			finishReason = lastMessage.finish_reason;
 		}
@@ -367,10 +378,10 @@ const subagentLoop = async conversation => {
 			markMessageDirty(lastMessage);
 		}
 	} finally {
-		if (locked) DI[DID_SYNC_UNLOCK]?.(conversation.id);
+		if (locked) DI[DID_SYNC_UNLOCK]?.(agent.id);
 	}
 
-	await updateConversation(conversation, messages);
+	await updateConversation(agent, messages);
 
 	const error = finishReason !== 'stop';
 	let id = lastMessage.id;
@@ -418,7 +429,7 @@ export const subagentLoopWrapper = ctx => {
 		if (lastNotify >= resp.id) return;
 		agent.sa_notify = resp.id;
 
-		const promises = [updateConversation(agent)];
+		const promises = [];
 
 		const redir = agent.sa_redirect;
 
@@ -441,6 +452,7 @@ export const subagentLoopWrapper = ctx => {
 					}
 					break injectMessage;
 					case "javascript": {
+						agent.sa_pending = true;
 						let p = RunJS.script({
 							path: redir.path,
 							env: {
@@ -464,6 +476,9 @@ export const subagentLoopWrapper = ctx => {
 								time: Date.now(),
 								content: prettyError(e.message),
 							}).then(() => subagentLoopWrapper(ctx))
+						}).finally(() => {
+							delete agent.sa_pending;
+							return updateConversation(agent);
 						}));
 					}
 					break injectMessage;
@@ -481,6 +496,7 @@ export const subagentLoopWrapper = ctx => {
 			}));
 		}
 
+		promises.push(updateConversation(agent));
 		return Promise.all(promises);
 	});
 	promise.finally(() => { delete agent[EVAL_AGENT_SYM]; });
@@ -660,11 +676,11 @@ const NotifyAgent = {
 		const par = getToolParameters(ctx, req);
 		return "向子代理 #"+par.agentId+" 发送 "+par.message.slice(0, 50);
 	},
-	async script(par, resp, conv) {
+	async script(par, resp, conv, toolName) {
 		const agent = await findOwnAgent(par, conv);
 
 		const state = runningConversations.get(par.agentId);
-		const isTerminate = resp[TOOL_NAME] === TerminateAgent.name;
+		const isTerminate = toolName === TerminateAgent.name;
 		if (!state) {
 			subagentLoopWrapper(par);
 
@@ -775,7 +791,8 @@ Available agent definitions:
 		}
 		await finish();
 
-		sortable.sort((a, b) => a.name.localeCompare(b.name)).forEach(metadata => {
+		const intl = new Intl.Collator;
+		sortable.sort((a, b) => intl.compare(a.name, b.name)).forEach(metadata => {
 			prompt += metadata.name+":\n"+metadata.description+"\n\n";
 		});
 

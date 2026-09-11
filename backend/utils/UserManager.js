@@ -1,6 +1,7 @@
 import {ENABLE_FILE_TRANSFER, MAX_OPEN_DATABASES, SEMANTIC_SEARCH_ENABLE, STARTUP_SQL} from "../config.js";
 import {VectorDB} from "../rag/VectorDB.js";
 import {DatabaseSync} from "node:sqlite";
+import fs from "node:fs";
 import {cachePreparedSql} from "./sqliteUtils.js";
 import {compressLog, compressMessage, decompressLog} from "./compression.js";
 import {NULL_OWNER, TSDB} from "../tsdb/index.js";
@@ -46,9 +47,10 @@ function _once(obj, key, cacheKey, fn) {
  *
  * @param {string} dbPath
  * @param {string} userId
+ * @param {boolean} [creationAllowed]
  * @param {AiChatBackend.RouteContext} ctx
  */
-export function loadUserData(dbPath, userId, ctx) {
+export function loadUserData(dbPath, userId, ctx, creationAllowed) {
 	if (databases?.capacity !== MAX_OPEN_DATABASES) {
 		databases?.clear();
 		databases = new LRUCache(MAX_OPEN_DATABASES, closeConnection);
@@ -66,6 +68,12 @@ export function loadUserData(dbPath, userId, ctx) {
 	}
 
 	_once(ctx, 'db', userId+":db", () => {
+		if (dbPath && !creationAllowed && !fs.existsSync(dbPath+"/"+userId+".db")) {
+			const err = new Error("User not exist");
+			err.status = 404;
+			throw err;
+		}
+
 		const db = new DatabaseSync(dbPath ? dbPath+"/"+userId+".db" : ":memory:");
 
 		const { user_version } = db.prepare('PRAGMA user_version').get();
@@ -108,6 +116,11 @@ PRAGMA user_version = `+DB_VERSION);
 
 				db.exec("DROP TABLE logs");
 			}
+
+			if (user_version <= 4) {
+				db.exec(`ALTER TABLE kvs ADD COLUMN meta BLOB NULL DEFAULT NULL`);
+			}
+
 			console.log("更新成功");
 			db.exec(`PRAGMA user_version = `+DB_VERSION);
 		}
@@ -125,7 +138,7 @@ PRAGMA user_version = `+DB_VERSION);
 }
 
 // 数据库版本号
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 const createConversations = `
 	CREATE TABLE conversations (
@@ -156,6 +169,7 @@ const createKVS = `
 	CREATE TABLE kvs (
 		type TEXT NOT NULL,
 		name TEXT NOT NULL,
+		meta BLOB NULL DEFAULT NULL,
 		data BLOB NOT NULL,
 		PRIMARY KEY (type, name)
 	) WITHOUT ROWID;

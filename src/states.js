@@ -1,7 +1,4 @@
-import {$asyncState, $computed, $state, $store, $watch, debugSymbol, unconscious} from 'unconscious';
-import {deepEqual} from "unconscious/common/deepEqual.js";
-import {jsonFetch} from "../common/openai-api-utils.js";
-import {resolveDBRelativeURL} from "./utils/utils.js";
+import {$computed, $state, $store, $watch, debugSymbol, unconscious} from 'unconscious';
 import {EventBus} from "./utils/EventBus.js";
 
 export const PAGE_TITLE = document.title;
@@ -30,6 +27,20 @@ if (!IS_ANDROID_BUILD) {
 		isMobile = isMobileQuery.matches;
 	};
 	isMobileQuery.onchange = cb;
+	cb();
+}
+
+/**
+ * @type {boolean}
+ */
+export let noPointer;
+
+{
+	const noPointerQuery = matchMedia('(any-pointer: none)');
+	const cb = () => {
+		noPointer = noPointerQuery.matches;
+	};
+	noPointerQuery.onchange = cb;
 	cb();
 }
 
@@ -159,42 +170,6 @@ export const switchToConversation = (conv) => {
 export const findConversation = (id) => {
 	const conv = unconscious(selectedConversation);
 	return conv?.id !== id ? unconscious(conversations).find(item => item.id === id) : conv;
-};
-
-/**
- * @type {import("unconscious").Reactive<{}>}
- * @private
- */
-const _modelEndpoint = $state();
-
-/**
- * @type {boolean}
- */
-export let isLlamaCppBackend, isMyLlamaCppBackend;
-
-export const setIsLlamaCppBackend = (b, b2) => {
-	isLlamaCppBackend = b;
-	isMyLlamaCppBackend = b2;
-};
-
-/**
- * @type {import("unconscious").ReactivePromise<AiChat.ApiModel[]>}
- */
-export const models = $asyncState(endpoint => {
-	return endpoint?.url ? jsonFetch(resolveDBRelativeURL(endpoint.url) + "/models", {key: endpoint.key}).then(({data}) => data) : [];
-}, _modelEndpoint);
-
-/**
- * @param {boolean=} force
- * @return {import("unconscious").ReactivePromise<AiChat.ApiModel[]>}
- */
-export const updateModels = force => {
-	const value = {
-		url: resolveDBRelativeURL(config.endpoint),
-		key: config.accessToken
-	};
-	if (force || !deepEqual(value, _modelEndpoint.value)) _modelEndpoint.value = value;
-	return models;
 };
 
 /**

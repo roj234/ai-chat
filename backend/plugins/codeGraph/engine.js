@@ -458,11 +458,11 @@ export async function buildGraph(dir, baseDir, opts = {}) {
 		ignore = await readFile(path.join(dir, '.gitignore'), 'utf-8');
 	} catch {}
 
-	let ignoreMatcher;
+	let matcher;
 	if (ignore) {
-		ignoreMatcher = new globalThis.AiChatAPI.IgnoreMatcher();
-		ignoreMatcher.parse(ignore);
-		ignoreMatcher.compile();
+		matcher = new globalThis.AiChatAPI.ACL();
+		matcher.parseIgnore(ignore);
+		matcher.compile();
 	}
 
 	const prefixLength = baseDir.length+1;
@@ -479,7 +479,7 @@ export async function buildGraph(dir, baseDir, opts = {}) {
 			const relativePath = fullPath.slice(prefixLength).replaceAll("\\", "/");
 
 			// .ignore rules
-			if (ignoreMatcher?.test(relativePath, entry.isDirectory())) continue;
+			if (matcher?.test(relativePath, entry.isDirectory())) continue;
 
 			// Default skips
 			if (entry.name.startsWith('.')) continue;

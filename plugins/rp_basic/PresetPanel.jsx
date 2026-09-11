@@ -19,7 +19,7 @@ function handleDelete(virtualList, item, dirtyHandle) {
 	if (start < 0) return;
 	virtualList.items.splice(start, 1);
 	markDirty(dirtyHandle);
-	virtualList.render();
+	virtualList.setItems(virtualList.items);
 }
 
 //region 各种虚拟列表
@@ -354,11 +354,9 @@ function createTextList(handler, textFieldName) {
 /**
  * 预设编辑面板
  * @param {import("unconscious").Reactive<AiChat.DnD.MyPreset>} preset
- * @param {import("unconscious").Reactive<boolean>} isOpen
- * @param {Function} close
  * @return {import("unconscious").Renderable}
  */
-export function _PresetEditor(preset, isOpen, close) {
+export function _PresetEditor(preset) {
 	const [promptEL, promptVL] = createList(preset, [
 		{
 			name: "名称(给人看)",
@@ -451,26 +449,21 @@ export function _PresetEditor(preset, isOpen, close) {
 
 	const showRegexp = $state();
 	return (
-		<div className={`preset-panel`} class:open={() => isOpen.value}>
-			<div className="header">
-				<h2 className="title" title={() => preset.name}>{() => preset.name}</h2>
-				<div style={"display:flex;gap:0.5rem"}>
-					<button className={() => (unconscious(showRegexp) ? "ri-toggle-fill" : "ri-toggle-line")+" btn ghost"}
-							title={"切换提示词/正则编辑"}
-							onClick={() => {
-								showRegexp.value ^= true;
-							}}>
-						{() => unconscious(showRegexp) ? ' 正则' : ' 提示'}
-					</button>
-					<button className="ri-add-line btn ghost" title={"在开头增加一项"} onClick={() => {
-						const vl = unconscious(showRegexp) ? regexpVL : promptVL;
-						vl.items.unshift({});
-						vl.render();
-					}}>
-					</button>
-					<button className="ri-sidebar-unfold-fill btn ghost" title={"关闭编辑面板"}
-							onClick={close}></button>
-				</div>
+		<div className="preset-panel">
+			<div className="row">
+				<button className={() => (unconscious(showRegexp) ? "ri-toggle-fill" : "ri-toggle-line") + " btn ghost"}
+						title={"切换提示词/正则编辑"}
+						onClick={() => {
+							showRegexp.value ^= true;
+						}}>
+					{() => unconscious(showRegexp) ? ' 正则' : ' 提示'}
+				</button>
+				<button className="ri-add-line btn ghost" title={"增加一项"} onClick={() => {
+					const vl = unconscious(showRegexp) ? regexpVL : promptVL;
+					vl.items.push({});
+					vl.scrollToBottom();
+				}}>
+				</button>
 			</div>
 			{() => unconscious(showRegexp) ? regexpEL : promptEL}
 		</div>
@@ -480,11 +473,9 @@ export function _PresetEditor(preset, isOpen, close) {
 /**
  * 角色卡编辑面板
  * @param {import("unconscious").Reactive<AiChat.DnD.MyCharacter>} char
- * @param {import("unconscious").Reactive<boolean>} isOpen
- * @param {Function} close
  * @return {import("unconscious").Renderable}
  */
-export function _CharacterEditor(char, isOpen, close) {
+export function _CharacterEditor(char) {
 	const config = [
 		{
 			name: "显示名称",
@@ -606,35 +597,30 @@ export function _CharacterEditor(char, isOpen, close) {
 	const vls = [, lorebookVL, expMsgVL, greetingVL, autoMessageVL];
 
 	return (
-		<div className={`preset-panel`} class:open={() => isOpen.value}>
-			<div className="header">
-				<h2 className="title" title={() => char.name}>{() => char.name}</h2>
-				<div style={"display:flex;gap:0.5rem"}>
-					{() => {
-						return panel.value ?
-							<button className="ri-add-line btn ghost" title={"在开头增加一项"}
-									onClick={() => {
-										const value = panel.value;
-										const vl = vls[value];
+		<div className="preset-panel">
+			<div className="row">
+				{() => {
+					return unconscious(panel) ?
+						<button className="ri-add-line btn ghost" title={"增加一项"}
+								onClick={() => {
+									const selectedPanel = unconscious(panel);
+									const vl = vls[selectedPanel];
 
-										vl.items.unshift(value === 1 ? lorebookTemplate() : newItem(value === 3 ? greetingListener : expMsgListener, ""));
-										vl.render();
-
-									}} /> : null;
-					}}
-					<select onChange={({target}) => {
-						panel.value = target.selectedIndex;
-					}}>
-						<option value={0}>角色信息</option>
-						<option value={1}>嵌入世界书</option>
-						<option value={2}>示例对话</option>
-						<option value={3}>开场白</option>
-						<option value={4}>背景消息</option>
-					</select>
-					<button className="ri-sidebar-unfold-fill btn ghost" title={"关闭编辑面板"} onClick={close}></button>
-				</div>
+									vl.items.push(selectedPanel === 1 ? lorebookTemplate() : newItem(selectedPanel === 3 ? greetingListener : expMsgListener, ""));
+									vl.scrollToBottom();
+								}}/> : null;
+				}}
+				<select onChange={({target}) => {
+					panel.value = target.selectedIndex;
+				}}>
+					<option value={0}>角色信息</option>
+					<option value={1}>嵌入世界书</option>
+					<option value={2}>示例对话</option>
+					<option value={3}>开场白</option>
+					<option value={4}>背景消息</option>
+				</select>
 			</div>
-			{() => els[panel.value]}
+			{() => els[unconscious(panel)]}
 		</div>
 	);
 }
@@ -649,11 +635,9 @@ function lorebookTemplate() {
 /**
  * 世界书编辑面板构造器
  * @param {import("unconscious").Reactive<AiChat.DnD.MyLorebook>} lorebook
- * @param {import("unconscious").Reactive<boolean>} isOpen
- * @param {Function} close
  * @return {import("unconscious").Renderable}
  */
-export function _LorebookEditor(lorebook, isOpen, close) {
+export function _LorebookEditor(lorebook) {
 	const [itemEL, itemVL] = createLorebookList(lorebook);
 
 	$watchWithCleanup($computed(() => lorebook.value), () => {
@@ -663,17 +647,14 @@ export function _LorebookEditor(lorebook, isOpen, close) {
 	});
 
 	return (
-		<div className={`preset-panel`} class:open={() => isOpen.value}>
-			<div className="header">
-				<h2 className="title" title={() => lorebook.name}>{() => lorebook.name}</h2>
-				<div style={"display:flex;gap:0.5rem"}>
-					<button className="ri-add-line btn ghost" title={"在开头增加一项"} onClick={() => {
-						itemVL.items.unshift(lorebookTemplate());
-						itemVL.render();
-					}}>
-					</button>
-					<button className="ri-sidebar-unfold-fill btn ghost" title={"关闭编辑面板"} onClick={close}></button>
-				</div>
+		<div className="preset-panel">
+			<div className="row">
+				<button className="ri-add-line btn ghost" title={"在开头增加一项"} onClick={() => {
+					itemVL.items.unshift(lorebookTemplate());
+					itemVL.render();
+				}}>
+				</button>
+				<button className="ri-sidebar-unfold-fill btn ghost" title={"关闭编辑面板"} onClick={close}></button>
 			</div>
 			{itemEL}
 		</div>

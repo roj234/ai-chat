@@ -6,11 +6,11 @@ import FontFilter from "unconscious/postcss/font-filter.js";
 import OklchToRgb from "unconscious/postcss/oklch-to-rgb.js";
 import InlineVars from "unconscious/postcss/inline-vars.js";
 import {viteFontMinify} from 'unconscious/vite/font-minify.js';
-import {minifyJsString} from 'unconscious/vite/minJs.js';
 
 import packageInfo from "./package.json";
 
 import fs from 'node:fs';
+import {globMacroPlugin} from "./common/fs-glob.js";
 
 const LOADING_TEMPLATE = fs.readFileSync('./loading.html', 'utf-8').match(/<!--START-->(.+)<!--END-->/s)[1]
     .replaceAll(/[\r\n]|^[ \t]+|<!--.+?-->|\/\*.+?\*\//gm, '')
@@ -44,7 +44,7 @@ export default {
             ]
         }),
         viteFontMinify(),
-        minifyJsString(),
+        globMacroPlugin(),
         {
             name: 'inject-build-time',
             transformIndexHtml(html) {

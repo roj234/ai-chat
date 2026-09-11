@@ -1,13 +1,12 @@
 import {duplicateConversation} from "/src/data-exchange.js";
-import {openJsonEditor} from "/src/json_editor/jsonEditorProxy.js";
+import {openJsonEditor} from "/src/json_editor/JsonEditDialog.js";
 import {messages, selectedConversation, updateConversationListUI, updateMessageUI} from "/src/states.js";
 import {$unwatch, $update, $watch, unconscious} from "unconscious";
 import {decodeObjects, encodeObjects} from "/src/utils/marshal.js";
 import {getMessagesCacheFirst, markMessageDirty, updateConversation} from "/src/database.js";
-import {parseJson5} from "unconscious/common/Json.js";
 import {enableBranches} from "/src/utils/BranchManager.js";
 import {DI_settings, onLoad} from "/src/hooks.js";
-import {stringify} from "/common/json5-stringify.js";
+import {inspect} from "unconscious/common/inspect.js";
 import {cloneNamed} from "../src/utils/utils.js";
 
 onLoad(() => {
@@ -26,7 +25,7 @@ onLoad(() => {
 
 			const mapping = new Map;
 			await encodeObjects(obj, mapping);
-			jsonText = stringify(obj, mapping.size ? (_, value) => mapping.get(value) ?? value : null, 2);
+			jsonText = inspect(obj, mapping.size ? (_, value) => mapping.get(value) ?? value : null);
 			update?.();
 		};
 		await updatePromise();
@@ -34,8 +33,8 @@ onLoad(() => {
 		let skipNext;
 		[update, onclose] = openJsonEditor("conversation",
 			() => jsonText,
-			async (v) => {
-				const {messages: changedMessage, ...conversation} = await decodeObjects(parseJson5(v));
+			async (obj) => {
+				const {messages: changedMessage, ...conversation} = await decodeObjects(obj);
 
 				const conv = unconscious(selectedConversation);
 				if (conv?.id !== conversation.id) {

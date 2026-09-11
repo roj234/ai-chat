@@ -5,7 +5,7 @@ import {createMarkdownParser} from "fastmd";
 
 import "./markdown.css";
 
-const tags = {
+export const HTMLTagKinds = {
 	basic: [
 		"details", "summary",
 		"b", "i", "u", "p", "br", "em", "kbd", "q", "strong", "code", "ruby", "rp", "rt", "sup", "sub", "small", "center",
@@ -16,11 +16,10 @@ const tags = {
 		"img", "a",
 	],
 	style: ["style"],
-	script: ["script"]
 };
 
 const mdParserOptions = {
-	allowedTags: tags.basic,
+	allowedTags: HTMLTagKinds.basic,
 	parseQuotes: true,
 	preserveLineBreaks: true,
 	allowNestedCodeFence3: true
@@ -33,7 +32,7 @@ const mdParserOptions = {
 export const setAllowHTMLTags = (tagTypes) => {
 	const arr = [];
 	if (tagTypes) for (let type of tagTypes) {
-		arr.push(...tags[type]);
+		arr.push(...HTMLTagKinds[type]);
 	}
 	mdParserOptions.allowedTags = arr;
 }
@@ -150,7 +149,12 @@ const rendererOptions = { stream: true };
  * @param [options]
  * @return {import("fastmd").Parser}
  */
-export const createStreamingMarkdownParser = (output, options) => {return createMarkdownParser(createMarkdownRenderer(output, rendererOptions), {...mdParserOptions, ...options});};
+export const createStreamingMarkdownParser = (output, options) => {
+	return createMarkdownParser(
+		createMarkdownRenderer(output, rendererOptions),
+		{...mdParserOptions, stream: true, ...options}
+	);
+};
 
 export const createMarkdownStream = () => {
 	let parser;

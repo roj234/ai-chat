@@ -1,4 +1,4 @@
-import {ContentPart, registerToolset} from "/src/toolset.js";
+import {ContentPart, getToolParameters, registerToolset} from "/src/toolset.js";
 import complete from "/media/complete.js";
 import {SETTINGS} from "/src/settings.js";
 import {config} from "/src/states.js";
@@ -11,8 +11,10 @@ import {DI_settings, onLoad} from "/src/hooks.js";
 import {parseJson5} from "unconscious/common/Json.js";
 
 import {compressImage, limitMaxSide} from "/common/imate.js";
-import {getCombinedPreset} from "../../src/database.js";
-import {fileAccess} from "./fileAccess.js";
+import {getCombinedPreset} from "/src/database.js";
+import {fileAccess} from "../agent/index.js";
+import {TemplateFormatter} from "/common/template-formatter.js";
+import {normalizePath} from "unconscious/common/path-utils.js";
 
 /**
  * 将 ComfyUI 流程模板发送至服务器并获取生成的图像 Blob
@@ -22,12 +24,11 @@ import {fileAccess} from "./fileAccess.js";
  * @returns {Promise<Blob[]>} - 返回图像的 Blob 对象
  */
 const callComfyAPI = (endpoint, template, params) => {
-	for (const name in params) {
-		template = template.replaceAll("{{"+name+"}}", JSON.stringify(params[name]));
-	}
+	for (const name in params) params[name] = JSON.stringify(params[name]);
+	const prompt = JSON.parse(TemplateFormatter.format(template, params));
 
-	const clientId = crypto.randomUUID(); // 生成唯一客户端 ID
-	const ws = new WebSocket(endpoint.replace("http", "ws")+`/ws?clientId=${clientId}`);
+	const client_id = crypto.randomUUID();
+	const ws = new WebSocket(endpoint.replace("http", "ws")+`/ws?clientId=${client_id}`);
 	ws.binaryType = 'blob';
 
 	const promise = new Promise((resolve, reject) => {
@@ -35,7 +36,7 @@ const callComfyAPI = (endpoint, template, params) => {
 
 		ws.onopen = () => {
 			jsonFetch(`${endpoint}/prompt`, {
-				body: JSON.stringify({ prompt: JSON.parse(template), client_id: clientId })
+				body: JSON.stringify({ prompt, client_id })
 			}).then(data => {
 				promptId = data.prompt_id;
 			}).catch(reject);
@@ -137,77 +138,86 @@ const Draw = {
 		properties: {
 			prompt: {
 				type: "string",
-				//example: "Young Chinese woman in red Hanfu, intricate embroidery. Impeccable makeup, red floral forehead pattern. Elaborate high bun, golden phoenix headdress, red flowers, beads. Holds round folding fan with lady, trees, bird. Neon lightning-bolt lamp (⚡️), bright yellow glow, above extended left palm. Soft-lit outdoor night background, silhouetted tiered pagoda (西安大雁塔), blurred colorful distant lights.",
 				description: "高度详细的自然语言提示词，包含主体、环境、构图、光影及艺术风格等。建议至少250字",
-				//example: "a fantasy creature girl with draconic features, standing in a mystical forest at twilight. her body is partially translucent with iridescent scales in shades of violet and gold, glowing faintly with bioluminescent patterns. long, flowing hair made of woven vines and glowing moss, eyes with vertical pupils glowing crimson. wearing a cloak woven from shadow and starlight, with a belt of enchanted gemstones. the environment features towering trees with glowing mushrooms, a moonlit sky with auroras, and a stream of liquid light. the lighting is soft and ethereal, with ambient glow from magical flora and fauna. the scene is detailed with textures of organic materials, glowing textures, and surreal elements. \"Mystic Guardian\" written in glowing runes on a floating stone tablet above her, positioned at the center of the frame, using a font with intricate, flowing characters",
 			},
 			aspectRatio: {
 				type: "string",
 				pattern: "^\\d{1,2}:\\d{1,2}$",
-				example: ["1:2", "3:4", "16:9"],
-				//enum: ["1:1", "3:2", "2:3", "3:4", "4:3", "16:9", "9:16"],
+				example: ["1:1", "4:3", "16:9"],
 			},
 			longEdge: {
 				type: "integer",
 				minimum: 512,
 				maximum: 2048,
+			},
+			saveTo: {
+				type: "string",
+				description: "保存目录。省略时只展示给用户和你，不落磁盘",
+			},
+			options: {
+				type: "object",
+				description: "根据要求附加。"
 			}
 		},
 		required: ["prompt", "aspectRatio", "longEdge"]
 	},
 
-	script: ({ prompt, negativePrompt, aspectRatio, longEdge }, context, conv) => {
+	script: ({ prompt, aspectRatio, longEdge, options, saveTo }, context, conv) => {
 		const [width, height] = calculateResolution(aspectRatio, longEdge);
 
-		context.prompt = prompt;
-
 		const seed = parseInt(Math.random().toString(36).slice(2), 36);
+
 		return generateImage(config.mg_img_api, {
 			sampler_name: "Euler",
-			cfg_scale: negativePrompt ? 4 : 1,
+			cfg_scale: 1,
 			steps: 8,
+			negativePrompt: '',
 			seed,
 			prompt,
-			negativePrompt,
+			longEdge,
 			width,
 			height,
+			...options
 		}).then(async images => {
 			complete();
+
+			// TODO 如果保存到文件，就不要再留一份Blob
 			context.images = images;
 
-			let basePath = ".generated/"+Math.random().toString(36).slice(3, 10);
+			let basePath = saveTo && normalizePath(saveTo+'/'+Math.random().toString(36).slice(3, 10)).join('/');
 			const result = new ContentPart();
+			const blob = images[0];
 
 			if (images.length > 1) {
 				await Promise.all(images.map((blob, i) => binaryWrite({
-					path: basePath+i+".png",
+					path: `${basePath}-${i}.png`,
 					content: blob
 				}, context, conv)));
-				result.text("All "+images.length+" images saved to directory `"+basePath+"/`");
+				result.text("All "+images.length+" images saved to `"+basePath+"-N.png`");
 			} else {
 				basePath += ".png";
-				const blob = images[0];
 				await binaryWrite({
 					path: basePath,
 					content: blob
 				}, context, conv);
 				result.text("Image saved to `"+basePath+"`");
-				const cfg = await getCombinedPreset(conv);
-				if (cfg.modalities.includes("image")) result.image(await compressImage(blob, cfg));
 			}
+
+			const cfg = await getCombinedPreset(conv);
+			if (cfg.modalities.includes("image")) result.image(await compressImage(blob, cfg));
 
 			return result;
 		});
 	},
 
-	renderer(context, is_frozen) {
-		if (context.success === false) {
+	renderer(ctx, is_frozen, tc) {
+		if (ctx.success === false) {
 
-		} else if (context.images) {
+		} else if (ctx.images) {
 			return (
 				<div className="generated-image">
-					<img src={context.images[0].toUrl()} />
-					<div className="hint">{context.prompt}</div>
+					<img src={ctx.images[0].toUrl()} />
+					<div className="hint">{getToolParameters(ctx, tc).prompt}</div>
 					<div>{/* padding */}</div>
 				</div>
 			);
@@ -327,79 +337,12 @@ const DesignVoice = {
 	}
 }
 
-/**
- * @type {AiChat.FunctionTool}
- */
-const Sing = {
-	name: "Sing",
-	description: "Create song from lyric and tags",
-	parameters: {
-		type: "object",
-		properties: {
-			duration: {
-				type: "integer",
-				description: "duration in seconds",
-				minimum: 15,
-				maximum: 300
-			},
-			bpm: {
-				type: "integer",
-			},
-			tags: {
-				type: "string",
-				example: "Cyberpunk, Synthwave, Dark Ambient, Futuristic, Cinematic Electronics, Wide Soundstage, Echo, Reverb, Industrial, Sci-fi ending"
-			},
-			keyScale: {
-				type: "string",
-				example: [
-					"C major",
-					"Gb major",
-					"F# minor"
-				]
-			},
-			lyric: {
-				type: "object",
-				description: "Omit for instrumental",
-				properties: {
-					language: {
-						enum: ["en", "ja", "zh"],
-					},
-					text: {
-						type: "string",
-					}
-				},
-				required: true
-			}
-		},
-		required: ["duration", "bpm", "tags", "keyScale"]
-	},
-
-	script: ({ duration, bpm, tags, keyScale, lyric }, context) => {
-		const seed = parseInt(Math.random().toString(36).slice(2), 36);
-		return generateImage(config.mg_img_api, {
-			duration,
-			bpm,
-			tags,
-			keyScale,
-			lyrics: lyric?.text || "",
-			language: lyric?.language || "en",
-			sampler_name: "Euler",
-			cfg_scale: 4,
-			seed,
-		}).then(images => {
-			complete();
-			context.images = images;
-			return "Song generated";
-		});
-	},
-}
-
 export const registerMultimediaGeneration = () => {
 	const DATALIST_ID = "DL-imageApiProvider";
 	SETTINGS.push({
 		id: "mg_img_api",
 		_tab: "tools",
-		name: "[MultimediaGeneration] v2.0\n\n图像生成API",
+		name: "[MultimediaGeneration] v2.0 (弃用)\n\n图像生成API",
 		type: "input",
 		pattern: /^https?:\/\/.+(?:\/sdapi\/v1|\/prompt)$/,
 		placeholder: "SD 兼容或 ComfyUI prompt API"
@@ -435,6 +378,7 @@ sampler_name cfg_scale steps
 		"Generate image, audio and speech from text instructions.",
 		[Draw, ListVoices, DesignVoice, Say],
 		{
+			depend: ['Files'],
 			systemPrompt(conv) {
 				let fsType = conv.fs_type;
 				const tools = conv.tools;
@@ -450,7 +394,7 @@ sampler_name cfg_scale steps
 					imageGenTools.forEach(addTools);
 				} else {
 					imageGenTools.forEach(removeTools);
-					prompt += "Image generation API was not configured by user yet.\n";
+					prompt += "Image generation: not configured.\n";
 				}
 
 				const hasVoiceGen = config.mg_tts_api;
@@ -459,7 +403,7 @@ sampler_name cfg_scale steps
 					voiceGenTools.forEach(addTools);
 				} else {
 					voiceGenTools.forEach(removeTools);
-					prompt += "TTS API was not configured by user yet.\n";
+					prompt += "TTS: not configured.\n";
 				}
 
 				return prompt && ("<AIGC-info>\n"+prompt+"</AIGC-info>");

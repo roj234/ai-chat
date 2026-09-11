@@ -1,4 +1,5 @@
 import {
+	EVENT_BUS,
 	messages,
 	onConversationLoaded,
 	onConversationSwitchOut,
@@ -23,10 +24,18 @@ export const TOOL_IS_RUNNING = debugSymbol("Running");
 const TOOL_PARAM = debugSymbol("ToolArgumentCache");
 
 /**
- * @type {Record<string, string | function(): string>}
+ * @type {Record<string, string | function(AiChat.Conversation): Promise<string>>}
  */
 export const PLACEHOLDERS = {};
 export const TEMPORARY_PLACEHOLDER = debugSymbol("PlaceholderOnConversation");
+/**
+ *
+ * @param {AiChat.Conversation} conv
+ * @param {string} key
+ * @param {string} val
+ * @return {string}
+ */
+export const setPlaceholder = (conv, key, val) => (conv[TEMPORARY_PLACEHOLDER] || (conv[TEMPORARY_PLACEHOLDER] = {}))[key] = val;
 
 /**
  * 常开模块
@@ -91,9 +100,10 @@ toolScriptRegistry["Use"] = {
 		response.newTools = newToolNames;
 
 		try {
+			const bak = new Set(activatedModules);
 			for (const moduleName of modules) {
-				if (!toolset[moduleName] || activatedModules.has(moduleName))
-					throw "Tool schema validation error:\n$.modules: value("+JSON.stringify(moduleName)+") must in "+JSON.stringify(listUsableToolset(activatedModules));
+				if (!toolset[moduleName] || bak.has(moduleName))
+					throw "Tool schema validation error:\n$.modules: value("+JSON.stringify(moduleName)+") must in "+JSON.stringify(listUsableToolset(bak));
 
 				let {tools: toolArr, onActivated, depend} = toolset[moduleName];
 
@@ -225,8 +235,10 @@ export const getAvailableTools = async (conversation) => {
 			outputTools.push(tool);
 		}
 	}
+
+	const intl = new Intl.Collator();
 	return [outputTools.sort((a, b) => {
-		return a.function.name.localeCompare(b.function.name);
+		return intl.compare(a.function.name, b.function.name);
 	}), systemPrompt.filter(Boolean).join("\n")];
 };
 
@@ -240,7 +252,7 @@ const YAML_BLOCK = /^[>|][+-]?$/;
  * YAML？我不知道什么是 112KB 的 js-yaml，这个函数只有几百字节，也只应该几百字节。
  * 它不支持类型转换锚点引用嵌套列表JSON文档分隔符……但够用
  * @param {string} content
- * @return {[{}, string, number]}
+ * @return {[Record<string, any>, string, number]}
  */
 export const parseFrontmatter = content => {
 	const metadata = {};
@@ -303,6 +315,7 @@ export const parseFrontmatter = content => {
 
 		if (line.startsWith('- ')) {
 			if (null == container) {
+				ctx[0] = indent;
 				ctx[1] = container = [];
 			} else if (!Array.isArray(container)) {
 				throw new Error("Cannot mix list and object");
@@ -370,7 +383,8 @@ const NO_PARAMETERS = {
  *     onActivated?: function(AiChat.Conversation): AiChat.FunctionTool[],
  *     onDeactivated?: function(AiChat.Conversation),
  *     hidden?: boolean | 'manual',
- *     systemPrompt: string | function(AiChat.Conversation): string | Promise<string>,
+ *     depend?: string[],
+ *     systemPrompt?: string | function(AiChat.Conversation): string | Promise<string>,
  *     default?: boolean,
  *     data?: any
  * }} extra
@@ -523,11 +537,19 @@ onConversationSwitchOut((conv) => delete conv[CONV_REACTIVE_MAP]);
  *
  * @param {AiChat.ToolResponse} ctx
  * @param {OpenAI.ToolCall} tool
+ * @return {string}
+ */
+export const getToolName = (ctx, tool) => ctx?.[TOOL_NAME] ?? tool.function.name;
+
+/**
+ *
+ * @param {AiChat.ToolResponse} ctx
+ * @param {OpenAI.ToolCall} tool
  * @param {AiChat.Conversation} conv
  * @return {"secure" | boolean}
  */
 export const getToolInteractiveLevel = (ctx, tool, conv) => {
-	let secure = toolScriptRegistry[ctx[TOOL_NAME]]?.interactive;
+	let secure = toolScriptRegistry[getToolName(ctx, tool)]?.interactive;
 	let tp;
 	if (typeof secure === "function" && (tp = getToolParameters(ctx, tool, true)))
 		secure = secure(tp, conv);
@@ -607,7 +629,7 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 
 			if (msg?.success != null) {
 				if (forceRerun !== i) return;
-				if (msg.success) fn?.undo?.(msg, conv, tc);
+				if (msg.success) await fn?.undo?.(msg, conv, tc);
 			}
 
 			msg = tool_responses[i] = { [TOOL_NAME]: name };
@@ -664,8 +686,10 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 				throw customRejectText||UNSAFE_TOOL_DENY_MESSAGE;
 			}
 
+			await EVENT_BUS.post(['beforeToolCall', name], parameters, msg, conv);
+
 			msg[TOOL_IS_RUNNING] = true;
-			let result = fn.script(parameters, msg, conv);
+			let result = fn.script(parameters, msg, conv, name);
 			if (result instanceof Promise) {
 				$update(updateMessageUI);
 				// 这太危险了，可能导致无法撤销的副作用
@@ -698,9 +722,30 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 	};
 
 	if (typeof forceRerun === "number") await callTool(forceRerun);
-	else for (let i = 0; i < tool_calls.length; i++) {
-		if (signal?.aborted) return -1;
-		await callTool(i);
+	else {
+		let prevName;
+		const waitList = [];
+		for (let i = 0; i < tool_calls.length; i++) {
+			if (signal?.aborted) return -1;
+
+			const p = callTool(i);
+
+			const currName = tool_calls[i].function.name;
+			const parallel = toolScriptRegistry[currName]?.parallel;
+			if (!parallel || (parallel === 'same' && prevName && prevName !== currName)) {
+				if (waitList.length) {
+					await Promise.all(waitList);
+					waitList.length = 0;
+					prevName = null;
+				}
+				await p;
+			} else {
+				prevName = currName;
+				waitList.push(p);
+			}
+		}
+
+		if (waitList.length) await Promise.all(waitList);
 	}
 
 	return flags;
@@ -730,7 +775,7 @@ export const undoToolCalls = (global, messages, first, reentrantOnly) => {
 						详情: {prettyError(e)}<br/>
 						参数: <div dangerouslySetInnerHTML={highlightJsonLike(tc.function.arguments)}></div><br/>
 						响应: <div dangerouslySetInnerHTML={highlightJsonLike(tr)}></div>
-					</div>, 'error', 60000);
+					</div>, 'error', 30000);
 				}
 			}
 		}
@@ -749,16 +794,15 @@ export const redoToolCalls = (global, messages, first, includeTrue) => {
 		const {tool_calls, tool_responses} = messages[i];
 		if (tool_calls) {
 			for (let i = 0; i < tool_calls.length; i++) {
-				const {name, arguments: args} = tool_calls[i].function;
+				const tc = tool_calls[i];
+				const {name, arguments: args} = tc.function;
 
 				const impl = toolScriptRegistry[name];
-				const toolResponse = tool_responses?.[i];
-				if (toolResponse) toolResponse[TOOL_NAME] = name;
-
+				const toolResponse = tool_responses[i];
 				const reentrant = impl?.reentrant;
 				if (reentrant && (includeTrue || reentrant === 'stateless')) {
 					try {
-						impl.script(JSON.parse(args), toolResponse, global);
+						impl.script(JSON.parse(args), toolResponse, global, toolResponse ? getToolName(toolResponse, tc) : name);
 					} catch (e) {
 						console.error("Redo tool "+name, e);
 					}
@@ -854,4 +898,4 @@ export const updateConversationState = (conv, name, value) => {
  * @param {string} key
  * @return {function(*, *): string}
  */
-export const prefixTitle = (prefix, key = 'path') => (req, ctx) => prefix + ' ' + getToolParameters(ctx, req)[key];
+export const prefixTitle = (prefix, key = 'path') => (req, ctx) => prefix + ' ' + (getToolParameters(ctx, req)[key]||'');

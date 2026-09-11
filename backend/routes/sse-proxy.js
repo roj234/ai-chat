@@ -17,6 +17,7 @@ import {createJsonStream} from "../../common/StreamJsonSerializer.js";
 import {deepEntries} from "unconscious/common/json-schema-utils.js";
 import {isLanAddress} from "../../common/isLanAddress.js";
 import {getProxyAgent} from "../utils/socks5-agent.js";
+import {blobDB} from "./blob-storage.js";
 
 const log = (str, ...args) => console.log(`[SSE Proxy] `+str, ...args);
 
@@ -92,11 +93,14 @@ async function processMessageRefs(messages, blobDir) {
 	for (const [val, own, key] of deepEntries(output)) {
 		if (val?.$ === 'BlobH') {
 			const hash = val.hash;
-			const filePath = path.join(blobDir, hash.slice(0, 2).toLowerCase(), hash);
+			const hashBuf = Buffer.from(hash, 'base64url');
+			const row = blobDB.prepare('SELECT name, type FROM blobs WHERE hash = ?').get(hashBuf);
 
-			tasks.push(fs.access(filePath).then(() => openAsBlob(filePath).then((blob) => own[key] = blob), e => {
-				throw new Error("附件 "+(val.name || hash)+" 丢失或损坏");
-			}));
+			const err = () => {throw new Error("附件 "+(val.name || row?.name || hash)+" 丢失或损坏");};
+			if (!row) err();
+
+			const filePath = path.join(blobDir, hash.slice(0, 2).toLowerCase(), hash);
+			tasks.push(openAsBlob(filePath, { type: row.type }).then((blob) => own[key] = blob, err));
 		}
 	}
 	await Promise.all(tasks);
@@ -161,7 +165,7 @@ const ONCE_KEYS = [
 	'object',
 	'model',
 	'system_fingerprint',
-	//'created'
+	'created'
 ];
 
 /**
@@ -243,7 +247,8 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 
 	const extraHeaders = {};
 	for (let key in ctx.req.headers) {
-		if (key.startsWith("x-")) {
+		/// for OpenRouter attribution and/or DSH fake
+		if (key.startsWith("x-") || key === "http-referer") {
 			extraHeaders[key] = ctx.req.headers[key];
 		}
 	}
@@ -338,29 +343,33 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 
 			const {choices, text, ...rest} = chunk;
 			if (choices) {
-				let out_choices = completion.choices || (completion.choices = []);
+				let compChoices = completion.choices || (completion.choices = []);
 				for (let i = 0; i < choices.length; i++){
 					const {delta, ...rest} = choices[i];
-					if (!out_choices[i]) out_choices[i] = { delta: {} };
+					let compChoice = compChoices[i];
+					if (!compChoice) compChoice = compChoices[i] = { delta: {} };
+
+					const reasoning = delta.reasoning;
 
 					// reasoning end
 					const resumable = completion.resumable;
-					if (null == resumable.ft && (delta.content || delta.reasoning || delta.reasoning_details || delta.reasoning_content || delta.tool_calls)) {
+					if (null == resumable.ft && (delta.content || reasoning || delta.reasoning_details || delta.reasoning_content || delta.tool_calls)) {
 						resumable.now = resumable.ft = now;
 						chunk.resumable = resumable;
 					}
 
-					if (delta.reasoning && delta.reasoning === delta.reasoning_content) {
-						delete delta.reasoning;
-					}
+					if (reasoning && reasoning === delta.reasoning_content) delete delta.reasoning;
+
+					const role = delta.role;
+					if (role && role === compChoice.delta.role) delete delta.role;
 
 					if (null == resumable.re && delta.content) {
 						resumable.now = resumable.re = now;
 						chunk.resumable = resumable;
 					}
 
-					Object.assign(out_choices[i], rest);
-					applyDelta(out_choices[i].delta, delta);
+					Object.assign(compChoice, rest);
+					applyDelta(compChoice.delta, delta);
 				}
 			} else {
 				completion.text = (completion.text || "") + text;
@@ -490,9 +499,13 @@ export function registerSSEProxyRoutes(router, dataPath) {
 
 	finishedRequests = new LRUCache(SSE_RESUME_CACHE_SIZE, SSE_RESUME_TTL ? { ttlMode: "update" } : null);
 
-	router.post("/models/wipe_cache", (ctx) => {
-		messageCache.clear();
+	// 调试用
+	router.get("/trace", (ctx) => {
+		ctx.send(200, { generating: [...activeRequests.keys()], finished: [...finishedRequests.keys()] });
+	});
+	router.delete("/cache", (ctx) => {
 		modelCache.clear();
+		finishedRequests.clear();
 		ctx.send(200, { success: true });
 	});
 
@@ -540,27 +553,32 @@ export function registerSSEProxyRoutes(router, dataPath) {
 	router.post('/resume/:id', (ctx) => {
 		const {id} = ctx.params;
 		const state = activeRequests.get(id) ?? finishedRequests.get(id);
-		if (!state) return ctx.send(404, { error: "no such session" });
-
-		ctx.res.setHeader('Content-Type', 'text/event-stream');
+		if (!state) return ctx.send(404, { error: "not found" });
 
 		const {data, event, isFinished} = state;
 
-		const onData = (text) => {ctx.res.write(`data: ${text}\n\n`);};
-		const onEnd = () => {
-			ctx.res.write(`data: [DONE]\n\n`);
-			ctx.res.end();
+		const res = ctx.res;
+		if (!ctx.req.headers['accept']?.includes("text/event-stream")) {
+			res.writeHead(400, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify(data));
+			return;
 		}
+
+		const onData = (text) => res.write(`data: ${text}\n\n`);
+		const onEnd = () => res.end(`data: [DONE]\n\n`);
 
 		// 如果是多线程，这里可能需要加锁，但是JS是谦让式协程，所以没什么好担心的
 		if (!data.resumable.end) data.resumable.now = Date.now();
+
+		res.writeHead(200, { 'Content-Type': 'text/event-stream' });
 		onData(JSON.stringify(data));
+
 		if (isFinished) { onEnd(); return; }
 
 		event.on('data', onData);
 		event.once('end', onEnd);
 
-		ctx.res.on('close', () => {event.off('data', onData);});
+		res.on('close', () => event.off('data', onData));
 	});
 	router.post('/abort/:id', (ctx) => {
 		const {id} = ctx.params;
@@ -574,17 +592,6 @@ export function registerSSEProxyRoutes(router, dataPath) {
 			}
 			return ctx.send(200, { success: true });
 		}
-		ctx.send(404, { error: "no such session" });
-	});
-
-	router.get('/trace/:id', (ctx) => {
-		const {id} = ctx.params;
-		const state = activeRequests.get(id) ?? finishedRequests.get(id);
-		if (state) return ctx.send(200, state);
-
-		ctx.send(404, { error: "no such session" });
-	});
-	router.get("/trace/list", (ctx) => {
-		ctx.send(200, { active: [...activeRequests.keys()], finished: [...finishedRequests.keys()] });
+		ctx.send(404, { error: "not found" });
 	});
 }

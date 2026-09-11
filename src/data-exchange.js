@@ -13,7 +13,7 @@ import SimpleModal from "./components/SimpleModal.jsx";
 import {ZipReader, ZipWriter} from "unconscious/common/zip-io.js";
 import {$computed, $state, $update, unconscious} from "unconscious";
 import {decodeObjects, serializeJSON} from "./utils/marshal.js";
-import {SETTINGS} from "./settings.js";
+import {PRIVATE_CONFIG_KEY, SETTINGS} from "./settings.js";
 import {DI_settings} from "./hooks.js";
 import {createJsonParser} from "unconscious/common/Json.js";
 
@@ -32,9 +32,35 @@ export const importConversationData = async (conv, messages_, batch) => {
 	if (typeof conv.title !== "string") conv.title = "";
 
 	if (messages_) {
-		messages_.forEach(message => {
-			delete message.id;
-		});
+		for (let i = 0; i < messages_.length;) {
+			const msg = messages_[i];
+			delete msg.id;
+			if (msg.role === 'tool') {
+				(messages_[i-1].tool_responses ??= []) .push({
+					success: true,
+					content: msg.content
+				});
+				messages_.splice(i, 1);
+			} else {
+				if (msg.role === 'assistant') {
+					if (msg.reasoning_content) {
+						msg.think = {
+							format: "rc",
+							content: msg.reasoning_content,
+						}
+					} else if (msg.reasoning) {
+						msg.think = {
+							format: "r",
+							content: msg.reasoning,
+						}
+					} else if (msg.reasoning_details) {
+						msg.think = { format: "rd", };
+					}
+				}
+
+				i++;
+			}
+		}
 	}
 
 	await updateConversation(conv, messages_, true);
@@ -250,7 +276,10 @@ export const exportConversation = async (type, _conv) => {
 	if (type&2) {
 		const compression = {compression: true};
 
-		await zw.add("config.json", JSON.stringify(config), compression);
+		const copyConfig = {...unconscious(config)};
+		PRIVATE_CONFIG_KEY.forEach(key => delete copyConfig[key]);
+
+		await zw.add("config.json", JSON.stringify(copyConfig), compression);
 
 		const kvList = await kvListGetValues(type&4 ? "*" : "preset");
 		const jsonData = await serializeJSON(kvList, 0, zw);
@@ -309,7 +338,7 @@ SETTINGS.push(
 		_order: -3,
 		name: "导入对话、预设、备份及更多格式",
 		element: <div className={"choice-scroll"}>
-			<label className="btn ghost">导入
+			<label className="btn ghost" tabIndex={0} role={"button"}>导入
 				<input type="file" accept="application/zip,application/json,image/png,image/jpeg" style="display:none;" multiple onChange={importConversation}/>
 			</label>
 		</div>

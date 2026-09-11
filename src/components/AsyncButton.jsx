@@ -2,21 +2,21 @@
 
 /**
  * @param {string} text
- * @param {string} pendingText
- * @param {string} okText
- * @param {string} failText
- * @param {string} className
+ * @param {string} [pendingText]
+ * @param {string} [okText]
+ * @param {string} [failText]
+ * @param {string} [className]
  * @param {function(HTMLButtonElement): Promise<any>} onClick
  * @constructor
  */
-export const AsyncButton = ({ pendingText, okText, failText = '操作失败', onClick, className = 'btn ghost' }, text) => {
+export const AsyncButton = ({ pendingText, okText, failText, onClick, className = 'btn ghost' }, text) => {
 	return <button className={className} onClick={({target}) => {
-		target.textContent = pendingText;
+		target.textContent = pendingText ?? text+"中";
 		target.disabled = true;
 		onClick(target).then(() => {
-			target.textContent = okText;
+			target.textContent = okText ?? text+"成功";
 		}, () => {
-			target.textContent = failText;
+			target.textContent = failText ?? text+"失败";
 		}).finally(() => setTimeout(() => {
 			target.textContent = text;
 			target.disabled = false;

@@ -8,6 +8,9 @@ import {applyDelta, sseFetch} from "/common/openai-api-utils.js";
 import {highlightJsonLike} from "/src/markdown/highlight.js";
 import {AsyncButton} from "/src/components/AsyncButton.jsx";
 import {renderMarkdownToElement} from "/src/markdown/markdown.js";
+import {$unwatch, $watch, unconscious} from "unconscious";
+import {models, updateModels} from "/src/presets.js";
+import {showToast} from "/src/components/Toast.js";
 
 const EMPTY_WAV = `UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=`;
 const EMPTY_BMP = `Qk06AAAAAAAAADYAAAAoAAAAAQAAAAEAAAABABgAAAAAAAQAAAATCwAAEwsAAAAAAAAAAAAA/wAAAA==`;
@@ -326,64 +329,88 @@ async function checkModelCapability() {
 	return results.map((item, i) => title[i]+": "+(i>=9?item:(item?"支持":"不支持"))).join('\n');
 }
 
-onLoad(() => {
-	const target = DI_settings.byId("mode");
-	target.append(<div className={"spacer"}></div>)
-	target.append(<AsyncButton pendingText={"测试中"} okText={"成功"} failText={"失败"} className={"btn primary"} onClick={(target) => new Promise((resolve, reject) => {
-		streamFlag = false;
-		const isLegacyCompletionMode = config.mode !== "chat";
-		const check = () => {
-			test(isLegacyCompletionMode ? {
-				prompt: "Hi",
-			} : {
-				messages: [{role: "user", content: "Hi"}],
-			}, 2).then((msg) => {
-				if (isLegacyCompletionMode) return resolve();
+const testModel = () => new Promise((resolve, reject) => {
+	streamFlag = false;
+	const isLegacyCompletionMode = config.mode !== "chat";
+	const check = () => {
+		test(isLegacyCompletionMode ? {
+			prompt: "Hi",
+		} : {
+			messages: [{role: "user", content: "Hi"}],
+		}, 2).then((msg) => {
+			if (isLegacyCompletionMode) return resolve();
 
-				const {content, ...rest} = msg;
+			const {content, ...rest} = msg;
 
-				SimpleModal({
-					title: "连接成功",
-					message: <>响应：
-						{renderMarkdownToElement(<div className={"md"} />, content)}
-						<div dangerouslySetInnerHTML={highlightJsonLike(rest)} />
-						{`点击确认测试模型能力并自动配置软件
+			SimpleModal({
+				title: "连接成功",
+				message: <>响应：
+					{renderMarkdownToElement(<div className={"md"} />, content || "")}
+					<div dangerouslySetInnerHTML={highlightJsonLike(rest)} />
+					{`点击确认测试模型能力并自动配置软件
 潜在花费：输入 300-3000 token (根据模型能力), 输出 ~300 token`}</>,
-					onConfirm() {
-						checkModelCapability().then((res) => {
-							SimpleModal({
-								title: "能力探测完成",
-								message: "数据已经保存\n" + res,
-								onConfirm: null,
-								onCancel: resolve
-							})
-						});
-					},
-					onCancel: resolve
-				})
-			}).catch(err => {
-				console.error(err);
-				err = prettyError(err);
-				if (streamFlag) {
-					SimpleModal({
-						title: "连接失败",
-						message: <div dangerouslySetInnerHTML={highlightJsonLike(err)}/>,
-						onCancel: reject
+				onConfirm() {
+					checkModelCapability().then((res) => {
+						SimpleModal({
+							title: "能力探测完成",
+							message: "数据已经保存\n" + res,
+							onConfirm: null,
+							onCancel: resolve
+						})
 					});
+				},
+				onCancel: resolve
+			})
+		}).catch(err => {
+			console.error(err);
+			let title = "测试失败";
+			let disableRetry = streamFlag;
+			const httpStatus = err.status;
+			if (typeof httpStatus === 'number') {
+				err = err.message;
+				if (httpStatus === 402) {
+					title = "没钱啦！";
+					disableRetry = true;
 				} else {
-					SimpleModal({
-						title: "连接失败\n但不排除是提供商不支持非流响应或过短的max_completion_tokens",
-						message: <div dangerouslySetInnerHTML={highlightJsonLike(err)}/>,
-						confirmMessage: "以兼容模式重试",
-						onConfirm() {
-							streamFlag = true;
-							check();
-						},
-						onCancel: reject
-					})
+					title += ` (${httpStatus})`;
 				}
+			}
+			const errstr = prettyError(err);
+
+			SimpleModal({
+				title: title,
+				message: <div dangerouslySetInnerHTML={highlightJsonLike(errstr)}/>,
+				confirmMessage: disableRetry ? undefined : "以兼容模式重试",
+				onConfirm: disableRetry ? undefined : () => {
+					streamFlag = true;
+					check();
+				},
+				onCancel: reject
 			});
-		};
-		check();
-	})}>测试</AsyncButton>);
+		});
+	};
+	check();
+});
+
+const testProvider = () => new Promise((resolve, reject) => {
+	updateModels(true);
+	const cb = () => {
+		if (models.loading) return;
+		$unwatch(models, cb);
+		const error = models.error;
+		if (error) {
+			reject(error);
+			showToast("未能拉取模型\n"+prettyError(error), "error");
+		} else {
+			resolve();
+			showToast("成功拉取 "+models.length+" 个模型", "ok");
+		}
+	};
+	$watch(models, cb, false);
+});
+
+onLoad(() => {
+	const target = DI_settings.byId("provider");
+	const tab = DI_settings.byId("providerTab");
+	target.insertBefore(<AsyncButton className={"btn ghost"} onClick={(target) => unconscious(tab)[0] === '/' ? testModel() : testProvider()}>测试</AsyncButton>, target.lastElementChild);
 })

@@ -1,3 +1,7 @@
+/* 当用户消息内部包含代码块时，强制占满可用宽度 */
+.msg.user:has(.code-block) {
+    width: 100%;
+}
 
 .code-block {
     position: relative; /* 为右上角悬浮做绝对定位基准 */

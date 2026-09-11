@@ -16,7 +16,7 @@ import {bind} from "../utils/utils.js";
 import {$computed, $state, $update, $watch, unconscious} from "unconscious";
 import {handleCommand} from "../commands.js";
 import SimpleModal from "./SimpleModal.jsx";
-import {getBlob} from "../database.js";
+import {getBlob, getCombinedPreset} from "../database.js";
 import {webviewUploadImage} from "/vendor/jsBridge.js";
 import {Recorder} from "/plugins/voiceInput/Recorder.jsx";
 
@@ -72,11 +72,11 @@ export const createUserInputComposer = (scroller) => {
 				display: "flex",
 				alignItems: "flex-end",
 			}}>
-				{() => config.name || <span><span className='ri-ai' style='font-size:40px'></span>Chat</span>}
+				{() => (config._dirty||'') + (config.name || config.model || "你好")}
 				<div className={"tooltip"}>{() => config.model}</div>
 			</span>
 		</div>
-		<button className={"ri-arrow-down-s-line chip back"} style={"display:none"} ref={backToBottomBtn}
+		<button className={"ri-arrow-down-line chip back"} style={"display:none"} ref={backToBottomBtn}
 				onClick={() => {
 					scroller.scrollTop = scroller.scrollHeight;
 				}} title={"返回底部"}/>
@@ -98,7 +98,7 @@ export const createUserInputComposer = (scroller) => {
 			></textarea>
 			{AttachmentGallery(attachments)}
 			<div className="controls">
-				<div className="controls hide-human">{CUSTOM_CONTROLS}</div>
+				<div className="row hide-human">{CUSTOM_CONTROLS}</div>
 				<div className="spacer"></div>
 				<div className="dropdown">
 					<button className="ri-attachment-2 btn ghost" title="添加附件" onClick={isMobile ? undefined : () => fileInput.click()}></button>
@@ -186,11 +186,29 @@ export const createUserInputComposer = (scroller) => {
 			return;
 		}
 
-		if (!selectedConversation.ready) {
-			if (unconscious(selectedConversation)) return;
-		}
+		const conv = unconscious(selectedConversation);
+		if (conv && !conv.ready) return;
 
 		const text = inputText.trim();
+
+		if (text) {
+			const prevprev = messages.at(-1);
+			if (prevprev?.role === 'assistant' && (prevprev.error || prevprev.finish_reason === 'interrupt' || prevprev.finish_reason === 'length')) {
+				const options = [];
+
+				if (!prevprev.error && await getCombinedPreset(conv).canPrefill)
+					options.push("清空输入框并点击右下角【继续】");
+				options.push("点击上条消息的【重新生成】按钮");
+				options.push("在上上条消息处【分支】");
+
+				SimpleModal({
+					title: "无法在异常响应后追加数据",
+					message: "以下是可用的解决方案：\n"+options.join('\n')
+				});
+				return;
+			}
+		}
+
 		inputText.value = '';
 		userInput.style.height = '';
 
@@ -295,13 +313,9 @@ export const createUserInputComposer = (scroller) => {
 		submitUserChatMessage(true);
 	}
 
-	const backToBottomBtnShowHide = () => {
-		const top = scroller.scrollTop;
-		const b = scroller.scrollHeight - scroller.offsetHeight - top > 250;
-		backToBottomBtn.style.display = b && messages.length ? "" : "none";
-	};
+	const io = new IntersectionObserver(([entry]) => {
+		backToBottomBtn.style.display = !entry.isIntersecting ? "" : "none";
+	});
 
-	scroller.addEventListener("scroll", backToBottomBtnShowHide);
-
-	return [element, backToBottomBtnShowHide];
+	return [element, io];
 }

@@ -24,7 +24,7 @@ function registerCardStorageRoutes(router) {
 			const chr = decompressGeneric(item.data);
 			return {
 				name: item.name,
-				image_hash: chr.image?.hash,
+				image: chr.image,
 				tags: chr.tags,
 				description: chr.description,
 				time: chr.time,
@@ -46,7 +46,7 @@ function registerCardStorageRoutes(router) {
 		if (search) {
 			const q = String(search).toLowerCase();
 			cards = cards.filter(c => {
-				return Object.values(c).some(f => f != null && String(f).toLowerCase().includes(q));
+				return [c.name, c.tags, c.description, c.creator, c.creatorNotes].some(f => f != null && String(f).toLowerCase().includes(q));
 			});
 		}
 

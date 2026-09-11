@@ -33,7 +33,7 @@ export const createJsonSerializer = (replacer) => {
 
 		const constructor = val?.constructor;
 		if (constructor === Blob || constructor === File) {
-			if (val.size === 0) throw "文件"+val.name+"的数据不完整或已损坏。请尝试重新上传";
+			if (val.size <= 0) throw new Error("附件 "+(val.name||val.hash)+" 丢失或损坏");
 
 			let isAudio;
 			if (key === 'url' || (isAudio = key === 'data')) {
@@ -49,16 +49,20 @@ export const createJsonSerializer = (replacer) => {
 
 				if (!be) be = createBase64Encoder();
 
-				while (true) {
-					const { done, value } = await reader.read();
-					if (done) break;
+				try {
+					while (true) {
+						const { done, value } = await reader.read();
+						if (done) break;
 
-					for (const chunk of be.encode(value)) {
-						yield chunk.slice();
+						for (const chunk of be.encode(value)) {
+							yield chunk.slice();
+						}
 					}
+				} catch (e) {
+					throw new Error("附件 "+(val.name||val.hash)+" 丢失或损坏");
 				}
 
-				yield be.finish();
+				yield be.finish().slice();
 				yield symbols[QUOTE];
 			} else {
 				// maybe text, video is not supported yet.

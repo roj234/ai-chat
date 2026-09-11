@@ -19,13 +19,28 @@ export class EventBus {
 		if (!set) this.#events.set(event, set = new Set);
 		set.add(handler);
 	}
+
+	/**
+	 *
+	 * @param {string | string[]} event
+	 * @param {function(data: Object, evt: string[]): void | Promise<void>} handler
+	 * @return {Function}
+	 */
+	onoff(event, handler) {
+		this.on(event, handler);
+		return () => this.off(event, handler);
+	}
+
 	/**
 	 *
 	 * @param {string | string[]} event
 	 * @param {function(data: Object, evt: string[]): void | Promise<void>} handler
 	 */
 	off(event, handler) {
-		this.#events.get(event)?.delete(handler);
+		const h = this.#events.get(event);
+		if (!h) return;
+		h.delete(handler);
+		if (!h.size) this.#events.delete(event, true);
 	}
 	/**
 	 *
@@ -45,30 +60,32 @@ export class EventBus {
 	/**
 	 *
 	 * @param {string[]} event
-	 * @param {Object} [data]
+	 * @param {Object} first
+	 * @param {Object} [rest]
 	 */
-	post(event, ...data) {
+	post(event, first, ...rest) {
 		const x = [];
 
-		const initEvent = [...event];
-		while (event.length) {
-			let set = this.#events.get(event);
+		const stack = [...event];
+		while (stack.length) {
+			let set = this.#events.get(stack);
 			if (set) for (const fn of set) {
 				try {
-					const res = fn.call(null, ...data, initEvent);
+					const res = fn.call(null, first, event, ...rest);
 					if (res instanceof Promise)
 						x.push(res);
-					else if (res === false)
-						return false;
+					else if (res != null)
+						return res;
 				} catch (e) {
+					console.error(e);
 					showToast("事件发送失败\n"+prettyError(e), 'error');
 				}
 			}
 
-			event.pop();
+			stack.pop();
 		}
 
-		return Promise.all(x);
+		return x.length ? Promise.all(x) : undefined;
 	}
 
 	fire(event, data) {

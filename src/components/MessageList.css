@@ -28,7 +28,7 @@
     font-variant-numeric: tabular-nums; /* 防止数字切换时抖动 */
 }
 
-.stats {
+.llm-stats {
     position: absolute;
     bottom: 4px;
     right: 4px;
@@ -51,6 +51,8 @@
         transition: color 0.3s;
     }
 
+    .popover {display: none;}
+
     &:hover {
         max-height: 75vh;
         max-width: 200px;
@@ -62,15 +64,9 @@
         & i {
             color: var(--text);
         }
+
+        & .popover {display: block;}
     }
-}
-
-.stats-popover {
-    display: none;
-}
-
-.stats:hover .stats-popover {
-    display: block;
 }
 
 .stats-row {
@@ -83,29 +79,29 @@
         margin-bottom: 0;
         border-bottom: none;
     }
-}
 
-.stats-row-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 4px;
-    color: var(--stats-overlay-text-dim);
-}
+    .row-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 4px;
+        color: var(--stats-overlay-text-dim);
+    }
 
-.stats-row-bottom {
-    display: flex;
-    font-family: 'Cascadia Code', monospace;
-    flex-direction: column;
-    color: var(--stats-overlay-text);
-    margin-bottom: 2px;
-}
+    .row-bottom {
+        display: flex;
+        font-family: 'Cascadia Code', monospace;
+        flex-direction: column;
+        color: var(--stats-overlay-text);
+        margin-bottom: 2px;
 
-.stats-row-bottom b { color: var(--text); font-weight: normal; }
+        & b { color: var(--text); font-weight: normal; }
+    }
 
-.tps {
-    color: var(--stats-overlay-accent);
-    font-weight: bold;
+    .tps {
+        color: var(--stats-overlay-accent);
+        font-weight: bold;
+    }
 }
 
 /* 文本附件 */

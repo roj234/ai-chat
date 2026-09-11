@@ -6,8 +6,8 @@ import {ITEM_KEY, VirtualList} from "unconscious/common/VirtualList.js";
 import {$cleanup} from "unconscious";
 import {selectableVirtualListMixin} from "unconscious/common/selectableVirtualListMixin.js";
 import {VOID_TAGS} from "fastmd";
-import {stringify} from "/common/json5-stringify.js";
 import json5 from "/common/json5-highlight.js";
+import {inspect} from "unconscious/common/inspect.js";
 
 hljs.registerLanguage('json5', json5);
 
@@ -110,13 +110,7 @@ const getOrCreateVL = node => {
 export const highlight = (code, language, node, is_finished) => {
 	if (!code) return true;
 	if (!node.className) node.className = "hljs";
-
-	if (is_finished) {
-		requestAnimationFrame(() => {
-			node.scrollTop = node.scrollHeight;
-		});
-		node.dataset.finished = '1';
-	}
+	if (is_finished) node.dataset.finished = '1';
 
 	const callback = (code) => {
 		if (is_finished) {
@@ -126,23 +120,22 @@ export const highlight = (code, language, node, is_finished) => {
 				const canScroll = node.scrollHeight > node.offsetHeight;
 				if (!canScroll) { node.innerHTML = value; return; }
 				node.style.height = node.offsetHeight + 'px';
+				//const scrollTop = node.scrollTop;
 
 				const lines = code.split('\n');
 				node._value = code;
 
 				const virtualList = getOrCreateVL(node);
 				node.replaceChildren(virtualList.dom);
-				virtualList.attach(node);
+				virtualList.attach(node/*, true*/);
 				// noinspection JSPrimitiveTypeWrapperUsage
 				virtualList.items = splitMultilineHTML(value, []).map(s => new String(s));
 
 				selectableVirtualListMixin(virtualList, (line) => lines[line]);
 
-				virtualList.scrollToBottom();
-				requestAnimationFrame(() => {
-					virtualList.scrollToBottom()
-					virtualList.render();
-				});
+				virtualList._visible = true;
+				virtualList.resize();
+				node.scrollTop = 1e9;
 			}, () => !node.isConnected);
 			return;
 		}
@@ -263,7 +256,7 @@ export const highlightJsonLike = (obj, maxChars = 10000, maxStringLen = 1000) =>
 				return value;
 			});
 		}
-		if (typeof obj === 'object') str += stringify(obj, null, 2);
+		if (typeof obj === 'object') str += inspect(obj);
 		else str += obj;
 	} catch {
 		str += String(obj) || "/* 空字符串 */";

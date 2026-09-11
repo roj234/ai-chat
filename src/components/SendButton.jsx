@@ -13,11 +13,11 @@ import {getToolInteractiveLevel} from "../toolset.js";
 import "./ContextUsage.css";
 import {getContextStrokeColor} from "./contextColor.js";
 import {DI, DID_SEND_BUTTON} from "../hooks.js";
-import {fastObjectMap} from "/common/pure-utils.js";
+import {immutableObjectMap} from "unconscious/common/Utils.js";
 
 const x = ["发送", "中止", "继续", "重试", "执行工具", "取消中"];
 const y = ["ri-send-plane-fill", "ri-square-fill", "ri-play-large-fill", "ri-loop-right-line", "ri-function-ai-line", "ri-square-fill spin"];
-const stateMap = fastObjectMap({
+const stateMap = immutableObjectMap({
 	//stop: 0,
 	interrupt: 2,
 	length: 2,
@@ -47,16 +47,16 @@ export function ContextRing(sendBtn) {
 	</div>;
 
 	bar.style.strokeDasharray = CIRCUMFERENCE;
-	const mc = $computed(() => config.maxContext);
-	const cu = $computed(() => selectedConversation.contextUsage);
-	$watchWithCleanup([updateConversationUI, cu, mc], () => {
-		let pct = selectedConversation.contextUsage / config.maxContext;
+	const max = $computed(() => config.maxContext);
+	const used = $computed(() => selectedConversation.contextUsage);
+	$watchWithCleanup([updateConversationUI, used, max], () => {
+		let pct = unconscious(used) / unconscious(max);
 		tooltipDiv.style.display = isNaN(pct) ? 'none' : '';
 		if (pct > 1) pct = 1;
 
 		bar.style.strokeDashoffset = CIRCUMFERENCE * (1 - (pct || 0));
 		bar.style.stroke = getContextStrokeColor(pct);
-		usageText.value = (pct * 100).toFixed(2) + "%\n" + `${selectedConversation.contextUsage} / ${config.maxContext}`;
+		usageText.value = (pct * 100).toFixed(2) + "%\n" + `${unconscious(used)} / ${unconscious(max)}`;
 	});
 	return root;
 }

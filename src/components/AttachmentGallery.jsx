@@ -1,10 +1,9 @@
-import {indexInParent} from "../utils/utils.js";
+import {indexInParent, showImageZoomView} from "../utils/utils.js";
 import {$foreach} from "unconscious";
 import {showToast} from "./Toast.js";
 import {config} from "../states.js";
 import {readAsString} from "/common/chardet.js";
 import {formatSize} from "unconscious/common/Utils.js";
-import SimpleModal from "./SimpleModal.jsx";
 
 /**
  * @param {File} file
@@ -90,12 +89,7 @@ export const AttachmentGallery = (attachments) => {
 					const file = att.image_url.url;
 					const src = typeof file === 'string' ? file : file.toUrl();
 					return (
-						<div className="attachment image-part" title={(file.name || '图片附件')+"\n点击放大"} onClick={e => {
-							SimpleModal({
-								title: "图像预览",
-								message: <img src={src} />
-							})
-						}}>
+						<div className="attachment image-part" title={(file.name || '图片附件')+"\n点击放大"} onClick={e => showImageZoomView(src, file.name)}>
 							<img src={src} alt="预览"/>
 							{DeleteBtn}
 						</div>

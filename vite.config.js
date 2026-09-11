@@ -5,7 +5,6 @@ import FontFilter from "unconscious/postcss/font-filter.js";
 import OklchToRgb from "unconscious/postcss/oklch-to-rgb.js";
 import InlineVars from "unconscious/postcss/inline-vars.js";
 import {viteFontMinify} from 'unconscious/vite/font-minify.js';
-import {minifyJsString} from 'unconscious/vite/minJs.js';
 
 import packageInfo from "./package.json";
 import serverPackageInfo from './backend/package.json' with {type: 'json'};
@@ -50,13 +49,12 @@ export default defineConfig(async ({mode}) => {
             ],
             plugins: [
                 nodeResolve({basePath: __dirname}),
+                (await import("file://"+__dirname+"/common/fs-glob.js")).globMacroPlugin(),
                 {
                     name: 'fix-import-meta-dirname',
                     transform(code, id) {
                         code = code.replaceAll("IS_ANDROID_BUILD", "false");
-                        if (code.includes('import.meta.dirname')) {
-                            code = code.replace(/import\.meta\.dirname/g, JSON.stringify(path.dirname(id)));
-                        }
+                        code = code.replace(/import\.meta\.dirname/g, JSON.stringify(path.dirname(id)));
                         return {
                             code,
                             map: null
@@ -66,16 +64,19 @@ export default defineConfig(async ({mode}) => {
             ],
         });
         await bundle.write({file: SERVER_BUNDLE, format: 'esm'});
-    }return {
+    }
 
-    define: {
+    const define = {
         APP_NAME: JSON.stringify(packageInfo.name),
         APP_VERSION: JSON.stringify(packageInfo.version),
         DB_MODE: JSON.stringify('mixed'), // local remote mixed
         RESUME_TIMEOUT: JSON.stringify(3600000),
         IS_ANDROID_BUILD: JSON.stringify(false),
         BUILD_NUMBER: JSON.stringify(process.env.BUILD_NUMBER || "0"),
-    },
+    };
+
+    return {
+    define,
 
     plugins: [
         unconscious({
@@ -92,9 +93,8 @@ export default defineConfig(async ({mode}) => {
                 'my/storyTurn'
             ]
         }),
-        minifyJsString(),
         viteFontMinify(),
-        ...(mode === 'production' ? [] : [(await import("file://"+SERVER_BUNDLE)).serverDevPlugin()]),
+        ...(mode === 'production' ? [(await import("file://"+__dirname+"/common/fs-glob.js")).globMacroPlugin()] : [(await import("file://"+SERVER_BUNDLE)).serverDevPlugin()]),
         {
             name: 'inject-build-time',
             transformIndexHtml(html) {
@@ -151,8 +151,6 @@ export default defineConfig(async ({mode}) => {
             input: {
                 main: 'index.html',
                 logViewer: 'log_viewer.html',
-                jsonEditorPage: 'json_editor.html',
-                characterViewer: 'characters.html',
                 docViewer: 'docs.html',
                 markdownPreview: 'markdown.html',
                 sw: "sw.js",

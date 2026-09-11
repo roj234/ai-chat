@@ -1,14 +1,15 @@
 import {sendToSyncServer} from "/src/database/syncClient.js";
 import {SYNC_RPC, SYNC_SEND_TO_OWNER} from "/backend/sync.js";
 import {config, conversations, inputText, isMobile, selectedConversation, switchToConversation} from "/src/states.js";
-import {$state, $update, $watch, unconscious} from "unconscious";
+import {$state, $update, $vforeach, $watch, unconscious} from "unconscious";
 import {showToast} from "/src/components/Toast.js";
 import {DI, DID_RMI, DID_SEND_BUTTON, onLoad} from "/src/hooks.js";
 import {delta, patch, rep} from "unconscious/common/deepEqual.js";
 import {prettyError} from "/src/utils/utils.js";
-import {VirtualList} from "unconscious/common/VirtualList.js";
 import {SETTINGS} from "../src/settings.js";
 import {ContextRing} from "../src/components/SendButton.jsx";
+
+//let sendToSyncServer;
 
 // 消息类型常量
 const NO_SUCH_CLIENT = -1;
@@ -117,6 +118,7 @@ const RMI = {
 		}
 
 		const fakeInputBox = <textarea
+			className="userInput"
 			placeholder="有事尽管问我"
 			disabled={rpcBusy} value={() => clientState.text}
 			onInput={() => {
@@ -138,13 +140,6 @@ const RMI = {
 			onClick={() => serialRPC(SUBMIT)}
 		/>;
 
-		const vl = new VirtualList({
-			data: unconscious(conversations).filter(conv => conv.id > 0),
-			renderer: data => <li
-				className={"ellipsis" + (data === unconscious(selectedConversation) ? " selected" : "")}
-				_conv={data} title={data.title}>{data.title || "#" + data.id}</li>
-		});
-
 		const changeConversation = <div className="pretty-select preset-switch up">
 			<div className="input" onClick.stop={() => changeConversation.classList.toggle("open")}>切换远程会话<span
 				className="arrow-icon ri-arrow-down-s-line"></span></div>
@@ -153,10 +148,11 @@ const RMI = {
 				const conv = e.delegateTarget._conv;
 				serialRPC(SWITCH_TO, conv.id).then(() => switchToConversation(conv));
 			}}>
-				{vl.dom}
+				{$vforeach(unconscious(conversations).filter(conv => conv.id > 0), data => <li
+					className={"ellipsis" + (data === unconscious(selectedConversation) ? " selected" : "")}
+					_conv={data} title={data.title}>{data.title || "#" + data.id}</li>)}
 			</ul>
 		</div>;
-		vl.attach(changeConversation.querySelector(".dropdown"));
 
 		const fakeQuery = <div className="query rc">
 			{fakeInputBox}

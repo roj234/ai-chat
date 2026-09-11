@@ -25,6 +25,7 @@ if (DB_MODE !== 'local' && swc) {
 		min: 10,
 		max: 500,
 		step: 10,
+		default: 100,
 		_tab: "data"
 	});
 

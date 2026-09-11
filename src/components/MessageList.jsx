@@ -1,6 +1,16 @@
 import {ThinkBlock} from "./ThinkBlock.jsx";
 import {ToolCallCard} from "./ToolCallCard.jsx";
-import {$computed, $foreach, $state, $update, $watch, AppendObserver, debugSymbol, unconscious} from "unconscious";
+import {
+	$computed,
+	$foreach,
+	$state,
+	$update,
+	$watch,
+	AppendObserver,
+	debugSymbol,
+	hasListener,
+	unconscious
+} from "unconscious";
 import {formatDate, formatSize, prettyTime} from "unconscious/common/Utils.js";
 import {copyCodeEventHandler, renderMarkdownToElement, renderMarkdownToString} from "../markdown/markdown.js";
 import {
@@ -24,11 +34,12 @@ import {
 	getTextContent,
 	MORPH_CHILD_FUNCTION,
 	MORPH_CHILD_HANDLER,
-	prettyError
+	prettyError,
+	showImageZoomView
 } from "../utils/utils.js";
 import "./MessageList.css";
 import "./TimelineDivider.css";
-import {getToolParameters, toolScriptRegistry, undoToolCalls} from "../toolset.js";
+import {getToolName, getToolParameters, toolScriptRegistry, undoToolCalls} from "../toolset.js";
 import {markMessageDirty} from "../database.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
 import {
@@ -155,14 +166,9 @@ const chunkRenderer = m => {
 			}
 			case "images":
 				return <div className="gallery">{item.images.map(part => {
-					const blob = part.image_url?.url;
-					const src = blob.toUrl?.() || blob;
-					return blob && <img src={src} alt={blob.name || '图片'} onClick={e => {
-						SimpleModal({
-							title: "图像预览",
-							message: <img src={src} />
-						})
-					}} />;
+					const file = part.image_url.url;
+					const src = typeof file === "string" ? file : file.toUrl();
+					return <img src={src} alt={file.name || '图片'} onClick={() => showImageZoomView(src, file.name)} />;
 				})}</div>;
 			case "think":
 				return <ThinkBlock message={item} edit={isEditing(m.key)}/>;
@@ -271,9 +277,9 @@ const chunkGather = (message, chunks, index, messages) => {
 				message,
 				idx: j
 			});
-			const name = tool.function.name;
+			const response = message.tool_responses[j];
+			const name = getToolName(response, tool);
 			const fn = toolScriptRegistry[name];
-			const response = message.tool_responses?.[j];
 			if (fn?.renderer && response && (null != fn.interactive || response.time) && getToolParameters(response, tool, true)) {
 				chunks.push({
 					type: "tool_ui",
@@ -387,7 +393,7 @@ const orderedButtons = [editBtn, saveBtn, branchBtn, insertThinkBtn, insertToolB
 
 /**
  * 更新悬浮按钮
- * @param {AiChat.Message} m
+ * @param {AiChat.MessageListItem} m
  * @param {HTMLSpanElement} container
  */
 function updateButtons(m, container) {
@@ -401,7 +407,8 @@ function updateButtons(m, container) {
 
 	if (!container) return;
 
-	const {index, end_index, content, role, key} = m;
+	const {index, end_index, content, key} = m;
+	const role = key.role;
 
 	const buttons = [];
 	const notGenerating = !unconscious(abortCompletion);
@@ -421,14 +428,14 @@ function updateButtons(m, container) {
 		if (notGenerating && mayChange) {
 			// 最后一条助手消息，而不是最后一条消息，只有助手消息才有end_index
 			if (end_index) {
-				if (end_index !== 1) buttons.push(regenBtn);
 				if (isLast && isComposite) buttons.push(undoBtn);
+				else if (end_index !== 1) buttons.push(regenBtn);
 			}
 			buttons.push(deleteBtn);
 		}
 	} else {
 		buttons.push(saveBtn);
-		if (m.role === "assistant") {
+		if (role === "assistant") {
 			if (!key.think) {
 				buttons.push(insertThinkBtn);
 			}
@@ -496,6 +503,7 @@ const buttonHandler = (e) => {
 		}
 		break;
 		case "regen": {
+			if (!clickTwice(btn)) return;
 			const callback = (mode) => {
 				if (mode) {
 					if (!selectedConversation.bm_leaf) {
@@ -632,7 +640,7 @@ function deleteMessage(start, end) {
 }
 
 const TIMEOUT = debugSymbol("_btnTimeout");
-// 移动端需要点两下
+// 点两下
 function clickTwice(btn) {
 	if (!btn.classList.toggle("danger")) {
 		clearTimeout(btn[TIMEOUT]);
@@ -662,65 +670,80 @@ function getBranchChunk(message, chunks) {
 	}
 }
 
-const combinedMessages = $computed((oldMessages) => {
-	const byIndex = new Map;
-	if (oldMessages) {
-		for (const oldMessage of oldMessages) {
-			byIndex.set(oldMessage.key, oldMessage);
+class MessageListItem {
+	#list;
+	/** @type {import("unconscious").Reactive<AiChat.ResponseContentPart[]>} */
+	#content = $state([]);
+	#dirty = true;
+	/** @type {number} */
+	index;
+	/** @type {number} */
+	//end_index;
+
+	/**
+	 * @param {AiChat.Message[]} messageList
+	 * @param {AiChat.Message} message
+	 */
+	constructor(messageList, message) {
+		this.#list = messageList;
+		this.key = message;
+	}
+
+	get content() {
+		if (this.#dirty) {
+			this.#updateContent();
+		}
+		return this.#content;
+	}
+
+	/**
+	 *
+	 * @param {number} startIndex
+	 * @param {number} endIndex
+	 */
+	markDirty(startIndex, endIndex) {
+		this.index = startIndex;
+		//this.end_index = endIndex;
+
+		if (hasListener(this.#content)) {
+			this.#updateContent();
+		} else {
+			this.#dirty = true;
 		}
 	}
 
-	const out = [];
+	#updateContent() {
+		const messages = this.#list;
+		const ref = this;
+		let message = ref.key;
+		let i = ref.index;
 
-	const arr = unconscious(messages);
-	for (let i = 0; i < arr.length;) {
-		let message = arr[i];
-		if (message.hidden) { i++; continue; }
-
-		const oldMessage = byIndex.get(message);
-		if (oldMessage) oldMessage.index = i;
-
-		/** @type {AiChat.ResponseContentPart[]} */
 		const chunks = [];
-		/** @type {AiChat.MessageListItem} */
-		const ref = oldMessage || {
-			key: message,
-			index: i,
-			role: message.role,
-			label: message.label,
-			content: chunks,
-		};
-
-		const initSize = chunks.length;
-		chunkGather(message, chunks, i, arr);
-
-		i++;
-		out.push(ref);
+		chunkGather(message, chunks, i, messages);
 
 		/** @type {boolean} */
 		let generationEnded;
 
 		if (message.role === "assistant") {
 			if (config.combineToolCalls) {
-				const maxSize = initSize + CTC_BASE_COUNT + (message[CTC_EXPAND_COUNT] ?? 0);
+				const maxSize = CTC_BASE_COUNT + (message[CTC_EXPAND_COUNT] ?? 0);
 
-				for (; i < arr.length; i++) {
-					if (!message.tool_calls || isEditing(arr[i]) || arr[i].role !== "assistant") break;
-					message = arr[i];
-					chunkGather(message, chunks, i, arr);
+				for (i++; i < messages.length; i++) {
+					if (!message.tool_calls || isEditing(messages[i]) || messages[i].role !== "assistant") break;
+					message = messages[i];
+					chunkGather(message, chunks, i, messages);
 				}
 
 				const removeCount = chunks.length - maxSize;
 				if (removeCount > 0) {
-					chunks.splice(initSize, removeCount, {
+					chunks.splice(0, removeCount, {
 						type: "divider",
 						steps: removeCount
 					});
 				}
 			}
 
-			ref.model = ref.key.model;
-			ref.time = ref.key.time;
+			ref.model = message.model;
 			ref.end_index = i;
 
 			generationEnded = message.finish_reason !== '';
@@ -730,7 +753,7 @@ const combinedMessages = $computed((oldMessages) => {
 			else {
 				// 手动添加的消息不显示usage
 				if (message.finish_reason) chunks.push({type: "usage"});
-				getBranchChunk(arr[ref.index], chunks);
+				getBranchChunk(messages[ref.index], chunks);
 			}
 		} else {
 			// 自定义消息角色
@@ -738,37 +761,27 @@ const combinedMessages = $computed((oldMessages) => {
 			getBranchChunk(message, chunks);
 
 			ref[PINNED] = isEditing(message);
-			ref.time = ref.key.time;
 		}
 
-		if (oldMessage) {
-			let prevChunks = oldMessage.content;
+		let prevChunks = this.#content;
 
-			// 如果这个markdown已经被流式渲染了，那么就不要再重新渲染一遍了（key变化）
-			// 为了保证其它地方的修改能被正常应用，这里依赖了很多隐式条件，比如上面几行的usage和branch，还有用这个-1节省时间而不是findLast
-			if (generationEnded && i === arr.length) {
-				const lastType = prevChunks.at(-1)?.type;
-				if (lastType !== 'usage' && lastType !== 'branch') {
-					const old = prevChunks.findLast(item => item.text != null);
-					const now = chunks.findLast(item => item.text === message.content);
-					if (old && now && old.text !== now.text) {
-						now.trick = old.text;
-					}
+		// 如果这个markdown已经被流式渲染了，那么就不要再重新渲染一遍了（跳过本次key变化）
+		// 为了保证其它地方的修改能被正常应用，这里依赖了很多隐式条件，比如上面几行的usage和branch，还有用这个-1节省时间而不是findLast
+		if (generationEnded && i === messages.length) {
+			const lastType = prevChunks.at(-1)?.type;
+			if (lastType !== 'usage' && lastType !== 'branch') {
+				const old = prevChunks.findLast(item => item.text != null);
+				const now = chunks.findLast(item => item.text === message.content);
+				if (old && now && old.text !== now.text) {
+					now.trick = old.text;
 				}
 			}
-
-			// 因为用虚拟列表了，不会有多大开销的，大部分都没有渲染，没有监听器
-			prevChunks.value = chunks;
-		} else {
-			ref.content = $state(chunks);
 		}
-	}
+		prevChunks.value = chunks;
 
-	return out;
-}, [
-	messages, updateMessageUI,
-	$computed(() => config.combineToolCalls),
-]);
+		this.#dirty = false;
+	}
+}
 
 $watch([messages, updateMessageUI, abortCompletion], () => {
 	if (hoveringElement?.isConnected) updateButtons(hoveringMessage, hoveringElement);
@@ -780,50 +793,88 @@ $watch([messages, updateMessageUI, abortCompletion], () => {
 
 /**
  *
- * @param {AiChat.Message} m
+ * @param {AiChat.MessageListItem} m
  * @return {string}
  */
 function roleName(m) {
-	if (m.role === "user") return m.label || "你";
-	if (m.role === "system") return "系统提示";
-
-	return MessageRoles[m.role]?.name || m.model || "AI";
+	const msg = m.key;
+	const role = msg.role;
+	if (role === "user") return msg.label || "你";
+	if (role === "system") return "系统";
+	return MessageRoles[role]?.name || msg.model || "AI";
 }
 
 const roleSelection = ["system", "user", "assistant"];
 
-export function MessageList() {
+/**
+ *
+ * @param {import("unconscious").Reactive<AiChat.Message[]>} messages
+ * @return {AppendObserver}
+ * @constructor
+ */
+export function MessageList({messages}) {
+	const blocks = $computed((oldBlocks) => {
+		const out = [];
+
+		let pos = 0;
+		const lim = oldBlocks?.length ?? 0;
+
+		const arr = unconscious(messages);
+		for (let i = 0; i < arr.length;) {
+			const start = i;
+
+			let message = arr[i++];
+			if (message.hidden) continue;
+
+			/** @type {MessageListItem} */
+			let item;
+			while (pos < lim && oldBlocks[pos].key !== message) pos++;
+			item = pos < lim ? oldBlocks[pos++] : new MessageListItem(arr, message);
+
+			if (config.combineToolCalls) {
+				for (; i < arr.length; i++) {
+					if (!message.tool_calls || isEditing(arr[i]) || arr[i].role !== "assistant") break;
+					message = arr[i];
+				}
+			}
+
+			item.markDirty(start, i);
+			out.push(item);
+		}
+
+		return out;
+	}, [
+		messages, updateMessageUI,
+		$computed(() => config.combineToolCalls),
+	]);
+
 	/**
-	 *
-	 * @param {AiChat.Message} m - CombinedMessage
+	 * @param {AiChat.MessageListItem} m
 	 * @return {JSX.Element}
 	 */
-	const renderer = (m) => {
+	const renderBlock = (m) => {
 		let buttons;
-		const {role, time} = m;
+		const msg = m.key;
 
 		const callback = () => updateButtons(m, buttons);
 		const buttonDiv = <div className={"btn-line"}><span ref={buttons}></span></div>;
-		const isAI = !selectedConversation.noAI;
-		const div = <div onMouseEnter={callback} onTouchStart.passive={callback} className={`msg ${role}`} _identity={m}>
+		const isNormalConversation = !selectedConversation.noAI;
+		const div = <div onMouseEnter={callback} onTouchStart.passive={callback} className={`msg ${msg.role}`} _identity={m}>
 			<div className={"role"}>
-				{isEditing(m.key) && isAI && roleSelection.includes(m.role) ? <select onChange={e => {
-					const realMessage = m.key;
-					const role = m.role = realMessage.role = e.target.selectedOptions[0].value;
+				{isNormalConversation && isEditing(msg) && roleSelection.includes(msg.role) ? <select onChange={e => {
+					const role = msg.role = e.target.selectedOptions[0].value;
 					const isAssistant = role==='assistant';
 					if (!isAssistant) {
-						delete realMessage.think;
-						delete realMessage.tool_calls;
-						delete realMessage.tool_responses;
+						delete msg.think;
+						delete msg.tool_calls;
+						delete msg.tool_responses;
 					}
 					vl.setItem(vl.findIndex(m), m);
 					$update(updateMessageUI);
 				}}>
-					{roleSelection.map(name =>
-						<option selected={m.role === name} value={name}>{name}</option>)
-					}
+					{roleSelection.map(name => <option selected={msg.role === name} value={name}>{name}</option>)}
 				</select> : <b className={"stroke"}>{roleName(m)}</b>}
-				<span className='time stroke'>{formatDate('Y-m-d H:i:s', time??null)}</span>
+				<span className='time stroke'>{formatDate('Y-m-d H:i:s', msg.time??null)}</span>
 				<span className='spacer'></span>
 			</div>
 			{isMobile ? null : buttonDiv}
@@ -845,20 +896,18 @@ export function MessageList() {
 			if (key !== b[0]) return false;
 			if (time === b[1]) return true;
 			if (key.role === "assistant" && key === messages.at(-1)) {
-				morphdom(el.querySelector(".role"), renderer(el._identity).children[0]);
+				morphdom(el.querySelector(".role"), renderBlock(el._identity).children[0]);
 				return true;
 			}
 			return false;
 		},
-		renderer
+		renderer: renderBlock
 	});
 
 	vl.dom.addEventListener("click", buttonHandler);
 	vl.dom.addEventListener("click", copyCodeEventHandler);
 
-	$watch(combinedMessages, () => {
-		vl.setItems(combinedMessages.value);
-	});
+	$watch(blocks, () => {vl.setItems(unconscious(blocks));});
 
 	return new AppendObserver(self => {
 		const wrapper = self.closest(".chat");
@@ -870,7 +919,6 @@ export function MessageList() {
 			requestAnimationFrame(() => {
 				vl._visible = true;
 				vl.scrollToBottom();
-				vl.render();
 			});
 		};
 		wrapper.vl = vl;

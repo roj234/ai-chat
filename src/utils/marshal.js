@@ -1,6 +1,7 @@
 import {getBlob, uploadBlob} from "../database.js";
 import {deepEntries} from "unconscious/common/json-schema-utils.js";
 import {showToast} from "../components/Toast.js";
+import {prettyError} from "./utils.js";
 
 let uploadingHashes = 0;
 let closeToast;
@@ -75,29 +76,39 @@ export const encodeObjects = (input, replacer, zipWriter) => {
 		switch (fn) {
 			case Blob:
 			case File:
-				promises.push(zipWriter ? val.arrayBuffer().catch(e => {
-					showToast("附件"+JSON.stringify(val.name??val.hash)+"读取失败，它将被替换为空文件", 'error');
-					return new ArrayBuffer(0);
-				}).then(ab => {
-					const blobIndex = zipWriter.fileCount().toString(36);
+				if (zipWriter) {
+					promises.push(val.arrayBuffer().catch(e => {
+						showToast("附件" + JSON.stringify(val.name ?? val.hash) + "读取失败，它将被替换为空文件", 'error');
+						return new ArrayBuffer(0);
+					}).then(ab => {
+						const blobIndex = zipWriter.fileCount().toString(36);
 
-					replacer.set(val, {
-						$: "Blob",
-						type: val.type,
-						lastModified: val.lastModified,
-						name: val.name,
-						index: blobIndex
-					});
+						replacer.set(val, {
+							$: "Blob",
+							type: val.type,
+							lastModified: val.lastModified,
+							name: val.name,
+							index: blobIndex
+						});
 
-					return zipWriter.add("blobs/"+blobIndex, new Uint8Array(ab));
-				}): beforeUpload(uploadBlob(val)).then(hash => {
-					replacer.set(val, {
-						$: "BlobH",
-						hash,
-						name: val.name
+						return zipWriter.add("blobs/" + blobIndex, new Uint8Array(ab));
+					}));
+				} else {
+					const p = beforeUpload(uploadBlob(val)).then(hash => {
+						replacer.set(val, {
+							$: "BlobH",
+							hash,
+							name: val.name
+						});
+						afterUpload();
 					});
-				}).finally(afterUpload));
-			break;
+					promises.push(p);
+					p.catch(err => {
+						afterUpload();
+						showToast(`附件 ${val.name} 上传失败\n`+prettyError(err), 'error', 30000);
+					});
+				}
+				break;
 			case Map:
 			case Set:
 				replacer.set(val, {

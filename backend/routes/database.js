@@ -1,23 +1,26 @@
 import {LOG_HOOK} from "../config.js";
 import {
 	compressConversation,
+	compressKVS,
 	compressLog,
 	compressMessage,
 	decompressConversation,
 	decompressLog,
-	decompressMessage
+	decompressMessage,
+	decompressorKVS
 } from "../utils/compression.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {LLM_COST_SCALE} from "../sync.js";
 import {getProxyAgent} from "../utils/socks5-agent.js";
+import {exclusiveLock} from "../utils/lock.js";
 
 /**
  * @param {AiChatBackend.Router} router
  * @param {string} rootPath
  */
 export function registerDatabaseRoutes(router, rootPath) {
-	router.delete('/database', async (ctx) => {
+	router.delete('/database', exclusiveLock(async (ctx) => {
 		const processLog = (async () => {
 			const logs = await ctx.logDB;
 			const changes = new Map;
@@ -56,26 +59,26 @@ export function registerDatabaseRoutes(router, rootPath) {
 			if (Buffer.compare(row.data, result)) updateMessage.run(result, row.id);
 		}
 
-		/*const kv = ctx.db.prepare(`SELECT key, value FROM "kv"`).all();
-		const updateKV = ctx.db.prepare(`UPDATE "kv" SET value = ? WHERE key = ?`);
-		for (const row of messages) {
-			const data = decompressGeneric(row.value);
-			updateMessage.run(await compressGeneric(data), row.key);
-		}*/
+		const kvs = ctx.db.prepare(`SELECT type, name, data FROM "kvs"`).all();
+		const updateKVS = ctx.db.prepare(`UPDATE "kvs" SET data = ? WHERE type = ? AND name = ?`);
+		for (const {type, data, name} of kvs) {
+			const bytes = decompressorKVS(type)(data);
+			updateKVS.run(await compressKVS(bytes, type), type, name);
+		}
 
 		db.exec(`COMMIT; VACUUM; PRAGMA wal_checkpoint(TRUNCATE);`);
 
 		await processLog;
 
 		ctx.send(200, { success: true });
-	});
+	}));
 
-	router.post('/database/fetch', async (ctx) => {
+	router.post('/database/fetch', exclusiveLock(async (ctx) => {
 		let sync = 0;
 		let zenmuxToken, zenmuxProxy;
 
 		const logs = await ctx.logDB;
-		const records = await logs.findByTime(Date.now() - 86400000, Date.now());
+		const records = await logs.findByTime(Date.now() - 7 * 86400000, Date.now());
 		if (records) {
 			const changes = new Map;
 			for (let i = records.firstId; i <= records.lastId; i++) {
@@ -127,5 +130,5 @@ export function registerDatabaseRoutes(router, rootPath) {
 		}
 
 		ctx.send(200, { updated: sync });
-	});
+	}, true));
 }

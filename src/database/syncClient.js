@@ -22,6 +22,8 @@ import {
 	SYNC_CONFLICT,
 	SYNC_CONVERSATION,
 	SYNC_CONVERSATION_DEL,
+	SYNC_DM,
+	SYNC_DM_QUERY,
 	SYNC_ERROR,
 	SYNC_INIT,
 	SYNC_KV,
@@ -40,7 +42,7 @@ import {
 import {clearMessageDirty, DIFF_SNAPSHOT, listConversations, MESSAGES_CACHE} from "../database.js";
 import {deepEqual, patch} from "unconscious/common/deepEqual.js";
 import {decodeMsg} from "unconscious/common/msgpack.js";
-import {msgpack_schema} from "/common/MsgpackSchema.js";
+import {msgpack_schema} from "/common/wire-compression-schema.js";
 import {highlightJsonLike} from "../markdown/highlight.js";
 import {prettyError} from "../utils/utils.js";
 import {initialize, serializeMsgpack, serverAcceptMsgpack} from "./remoteDB.js";
@@ -87,7 +89,7 @@ const showReadonlyUI = (id) => {
 
 	lockedToastOwner = id;
 
-	const div = <button className={"ri-arrow-left-right-line warning"} style={"margin-left:8px"} onClick={() => {
+	const div = <button className={"ri-arrow-left-right-line warning"} style={"margin-left:8px;flex-shrink:0"} onClick={() => {
 		sendToSyncServer(SYNC_RESOLVE, id);
 	}}>只读
 		<div className={"tooltip down"}>{"对话被其它客户端打开\n接管控制权可能导致未保存的数据丢失"}</div>
@@ -140,10 +142,13 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 				ws.send(`[${SYNC_PING}]`);
 			}
 		}, 60000);
+
+		EVENT_BUS.post(['syncBegin'], sendToSyncServer);
 	};
 	ws.onclose = () => {
 		reject();
 		RMI?.close();
+		EVENT_BUS.post(['syncEnd']);
 		lockedToast?.();
 		lockedToast = null;
 		stateListener = null;
@@ -193,6 +198,9 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 		let [type, data] = typeof buf === 'string' ? JSON.parse(buf) : decodeMsg(new DataView(buf), { schema: msgpack_schema });
 		data = await decodeObjects(data);
 		switch (type) {
+			case SYNC_DM_QUERY: EVENT_BUS.post(['dm-query'], data); break;
+			case SYNC_DM: EVENT_BUS.post(['dm', data[0]], data); break;
+
 			case SYNC_RPC: RMI?.handle(data); break;
 			case SYNC_ERROR: serverError = data; break;
 			// 状态更新
@@ -219,7 +227,7 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 				}
 
 				if (selectedConversation[LOCKED]) {
-					showReadonlyUI(selectedConversation.id, RMI);
+					showReadonlyUI(selectedConversation.id);
 				}
 			}
 			break;
@@ -242,7 +250,7 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 			case SYNC_RESOLVE: {
 				setLockStatus(data, true);
 				if (data === selectedConversation.id) {
-					showReadonlyUI(data, RMI);
+					showReadonlyUI(data);
 				}
 			}
 			break;
@@ -250,6 +258,7 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 				setLockStatus(data, false);
 				if (data === selectedConversation.id) {
 					selectedConversation.ready = false;
+					$update(updateMessageUI);
 				}
 				hideReadonlyUI(data);
 			}
@@ -305,6 +314,10 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 				try {
 					conv = patch(conv, data);
 				} catch {
+					if (conv === undefined) {
+						showToast(`对话数据 ${convId} 不同步`, "error");
+						return;
+					}
 					// 有可能失败，因为不一定所有的客户端都拿到了完整的对话对象，可能只有list时的 id time title 三项
 				}
 
@@ -347,7 +360,8 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 				}
 				else if (isCurrent) {
 					showToast("当前对话已被其它客户端删除", 'error', 0);
-					resetConversation();
+					setLockStatus(convId, "DELETED");
+					showReadonlyUI(convId);
 				}
 			}
 			break;
@@ -360,8 +374,8 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 			case SYNC_KVS:
 			case SYNC_KVS_DEL: {
 				clientCounts[0]++;
-				const [kvsType, name] = data;
-				EVENT_BUS.post(['kvs', kvsType, type === SYNC_KVS ? 'set': 'del'], name);
+				const [kvsType, name, meta] = data;
+				EVENT_BUS.post(['kvs', kvsType, type === SYNC_KVS ? 'set': 'del'], name, meta);
 			}
 			break;
 		}

@@ -9,6 +9,7 @@ export const
 	SYNC_READERS = 6,
 	SYNC_PING = 7,
 	SYNC_ERROR = 8,
+
 	SYNC_CONVERSATION = 9,
 	SYNC_CONVERSATION_DEL = 10,
 	SYNC_MESSAGE = 11,
@@ -16,9 +17,13 @@ export const
 	SYNC_KV = 13,
 	SYNC_KVS = 14,
 	SYNC_KVS_DEL = 15,
+
 	SYNC_RPC = 16,
 	SYNC_SEND_TO_OWNER = 17,
-	SYNC_CLIENTS = 18
+
+	SYNC_DM_QUERY = 18,
+	SYNC_DM = 29
+
 ;
 
 export const PROTOCOL_VERSION = 5;

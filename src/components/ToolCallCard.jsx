@@ -1,8 +1,8 @@
 import './ToolCallCard.css';
-import {getToolInteractiveLevel, runTools, TOOL_IS_RUNNING, TOOL_NAME, toolScriptRegistry} from "../toolset.js";
-import {config, messages, selectedConversation} from "../states.js";
+import {getToolInteractiveLevel, getToolName, runTools, TOOL_IS_RUNNING, toolScriptRegistry} from "../toolset.js";
+import {config, LOCKED, messages, selectedConversation} from "../states.js";
 import {$state, $update, $watch, appendChildren, debugSymbol, isReactive, unconscious} from "unconscious";
-import {MORPH_CHILD_FUNCTION} from "../utils/utils.js";
+import {MORPH_CHILD_FUNCTION, showImageZoomView} from "../utils/utils.js";
 import morphdom from "morphdom";
 import {highlight, highlightJsonLike} from "../markdown/highlight.js";
 import SimpleModal from "./SimpleModal.jsx";
@@ -12,9 +12,9 @@ import {BorderSpinner} from "./BorderSpinner.jsx";
 const RESP_SYMBOL = debugSymbol("ToolResponseUpdate");
 
 const formatDuration = ms => {
-    if (!ms) return '—';
-    if (ms >= 1000) return (ms / 1000).toFixed(2) + 's';
-    return ms + 'ms';
+    if (!ms) return '';
+    if (ms >= 1000) return `(${(ms / 1000).toFixed(2)}s)`;
+    return `(${ms}ms)`;
 }
 
 /**
@@ -29,9 +29,9 @@ const formatDuration = ms => {
 export function ToolCallCard(props) {
     const { tool, message, idx } = props;
 
-    const name = message.tool_responses?.[idx]?.[TOOL_NAME] || tool.function.name;
-    const reactiveResponse = $state();
     let toolResponse = message.tool_responses[idx];
+    const name = getToolName(toolResponse, tool);
+    const reactiveResponse = $state();
 
     const initializeHtml = () => {
         base[RESP_SYMBOL] = reactiveResponse;
@@ -85,7 +85,7 @@ export function ToolCallCard(props) {
 
             $watch(reactiveResponse, () => {
                 toolResponse = message.tool_responses[idx];
-                duration.value = toolResponse && ("("+formatDuration(toolResponse.duration)+")");
+                duration.value = toolResponse && formatDuration(toolResponse.duration);
                 const isRunning = toolResponse?.[TOOL_IS_RUNNING];
 
                 if (toolResponse && renderOutput && !base.classList.contains("pending")) {
@@ -108,8 +108,9 @@ export function ToolCallCard(props) {
                         if (part.type === 'text') {
                             elements.push(part.text);
                         } else if (part.type === 'image_url') {
-                            const url = part.image_url?.url;
-                            url && elements.push(<img title={url.name} src={typeof url === "string" ? url : url.toUrl()}/>);
+                            const file = part.image_url.url;
+                            const src = typeof file === "string" ? file : file.toUrl();
+                            elements.push(<img title={file.name} onClick={() => showImageZoomView(src, file.name)} src={src}/>);
                         } else {
                             elements.push(<div dangerouslySetInnerHTML={highlightJsonLike(tmpContent)} />);
                         }
@@ -167,15 +168,18 @@ export function ToolCallCard(props) {
  */
 const morphToolCallCard = ({tool, message, idx}, element) => {
     const conv = unconscious(selectedConversation);
+    const isFinished = message.tool_responses.length;
     const resp = message.tool_responses[idx] || {};
-    const {success, content, [TOOL_NAME]: tool_name} = resp;
+    const {success, content} = resp;
 
+    const tool_name = getToolName(resp, tool);
+    const is_readonly = !!conv[LOCKED];
     const is_running = !!resp[TOOL_IS_RUNNING];
     const is_errored = false === success;
     const is_success = true === success;
 
     const secure = getToolInteractiveLevel(resp, tool, conv);
-    const pending = !!(tool_name && secure !== true && !is_running && null == success);
+    const pending = !is_readonly && isFinished && true !== secure && !is_running && null == success;
     const is_secure_pending = !!(pending && secure);
 
     // 清空状态类并打上当前唯一确定的状态 Class
@@ -184,11 +188,12 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
     classList.toggle("running", is_running);
     classList.toggle("t-error", is_errored);
     classList.toggle("secure", is_secure_pending);
-    classList.toggle("pending", pending);
+    classList.toggle("pending", pending || (!isFinished && idx === message.tool_calls.length-1));
+    classList.toggle("generating", !isFinished);
     classList.toggle("t-success", is_success);
 
     const needApproval = "need-approval";
-    if (message.finish_reason && pending && !classList.contains(needApproval)) {
+    if (pending && !classList.contains(needApproval)) {
         classList.add(needApproval);
 
         let rejectReasonText;
@@ -243,7 +248,7 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
 
     const updateResponse = element[RESP_SYMBOL];
     if (updateResponse) {
-        updateResponse.value = content ?? !resp[TOOL_IS_RUNNING];
+        updateResponse.value = content ?? !is_running;
     } else {
         if (message === messages.at(-1) && is_errored) {
             element.open = true;

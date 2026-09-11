@@ -14,7 +14,7 @@ import {prettyError} from "../utils/utils.js";
 export const UsageBlock = (m) => {
 	const logData = $state("加载中");
 
-	return (<div className="stats" onMouseEnter.once={() => {
+	return (<div className="llm-stats" onMouseEnter.once={() => {
 		Promise.all(messages.slice(m.index, m.end_index).map(m => m.log || getBillingLog(m.id))).then((logs) => {
 			let totalInput = 0;
 			let totalCacheRead = 0;
@@ -72,7 +72,7 @@ export const UsageBlock = (m) => {
 		});
 	}}>
 		<i className="ri-information-line"></i>
-		<div className="stats-popover">
+		<div className="popover">
 			{() => {
 				const item = unconscious(logData);
 				if (typeof item !== 'object') return <div className="stats-row">
@@ -85,14 +85,14 @@ export const UsageBlock = (m) => {
 				] = item;
 
 				return <div className="stats-row">
-					<div className="stats-row-top">
+					<div className="row-top">
 						<span className="tps">{tps ? tps.toFixed(2) + " TPS" : finish_reason}</span>
 						&nbsp;
 						<span className="timestamp" title={`开始于: ${formatDate('Y-m-d H:i:s', time)}\n首字延迟: ${latency.toFixed(2)}s`}>
 							{duration.toFixed(2)}s
 						</span>
 					</div>
-					<div className="stats-row-bottom">
+					<div className="row-bottom">
 						{input_tokens ? <span>↑ <b>{input_tokens}{cached_tokens ? ` (+${cached_tokens})` : null}</b> Tok</span> : null}
 						{output_tokens ? <span title={"缓存写入: " + cache_write_tokens}>↓ <b>{output_tokens}{reasoning_tokens ? ` (${reasoning_tokens} 思考)` : null}</b> Tok</span> : null}
 						{cost ? (<span>价格: <b>{currency === 'CNY' ? '¥' : '$'}{cost.toFixed(6)}</b></span>) : null}

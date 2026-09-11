@@ -1,37 +1,52 @@
-import {$foreach, $state, $watch, AS_IS, unconscious} from "unconscious";
-import {createMarkdownStream, renderMarkdownToElement} from "/src/markdown/markdown.js";
-import {openJsonEditor} from "/src/json_editor/jsonEditorProxy.js";
-import {highlightJsonLike} from "/src/markdown/highlight.js";
+import {$asyncState, $foreach, $state, $update, unconscious} from "unconscious";
+import {createMarkdownStream, HTMLTagKinds, renderMarkdownToElement} from "/src/markdown/markdown.js";
 import {sseFetch} from "/common/openai-api-utils.js";
 import "/src/database.js";
 import {requestBackend} from "/src/database/remoteDB.js";
 import {config, EVENT_BUS} from "/src/states.js";
-import {downloadFile} from "/src/utils/utils.js";
+import {deleteWithDrawback, downloadFile, showImageZoomView} from "/src/utils/utils.js";
 import {writeJPEG, writePNG} from "/common/imate.js";
 import {base64Encode} from "unconscious/common/Base64.js";
-import {kvListDel, kvListGet, kvListSet} from "/src/database.js";
+import {isIDB, kvListDel, kvListGet, kvListGetKeys} from "/src/database.js";
+import "./characterViewer.css";
+import {openWindow} from "/src/components/Windows.jsx";
+import {exportForCV_createConversation, exportForCV_openCharacterEditor} from "../BasicRoleplay.js";
+import {Icon_search} from "../../../src/components/Icons.jsx";
 
 const API_PREFIX = 'cards/';
+const limit = 8;
+let mayUseBackend = !isIDB;
+
 const currentPage = $state(1);
 const pages = $state();
-const cards = $state();
-const limit = 10;
+const searchTerm = $state();
+
+const cards = $asyncState(async page => {
+	let term = unconscious(searchTerm);
+	if (mayUseBackend) {
+		try {
+			const data = await requestBackend(API_PREFIX+'?page=' + page + '&limit=' + limit + (term ? '&search=' + encodeURIComponent(term) : ''), undefined);
+			pages.value = Math.ceil(data.total / limit);
+			return data.data;
+		} catch (e) {
+			mayUseBackend = false;
+		}
+	}
+
+	let data = await Promise.all(characters.map(item => kvListGet(CHAR_TYPE, item.name)));
+
+	if (term) {
+		term = term.toLowerCase();
+		data = data.filter(c => {
+			return [c.name, c.tags, c.description, c.creator, c.creatorNotes].some(f => f != null && String(f).toLowerCase().includes(term));
+		});
+	}
+
+	pages.value = Math.ceil(data.length / limit);
+	return data.slice((page - 1) * limit, page * limit);
+}, currentPage, []);
 
 const CHAR_TYPE = "st|char";
-
-const loadHash = () => {
-	const s = location.hash.substring(1);
-	const page = parseInt(s);
-	if (isFinite(page) && unconscious(currentPage) !== page) {
-		currentPage.value = page;
-		loadCards();
-	}
-};
-loadHash();
-addEventListener("hashchange", loadHash);
-$watch(currentPage, () => {
-	location.hash = "#"+unconscious(currentPage);
-});
 
 /**
  * 翻译指定HTML元素中的英文文本（流式输出）
@@ -44,7 +59,6 @@ $watch(currentPage, () => {
  * @param {AbortSignal} [options.signal] - 用于取消请求的 AbortSignal
  */
 async function translateElement(element, options = {}) {
-	if (!translationEnabled.checked) return;
 	// 合并配置
 	const {
 		text,
@@ -105,92 +119,7 @@ Only output the translation result, no explanations, no additional text.`,
 	return accumulated;
 }
 
-let searchInput;
-async function loadCards() {
-	const search = searchInput.value;
-	const data = await requestBackend(API_PREFIX+'?page=' + currentPage + '&limit=' + limit + (search ? '&search=' + encodeURIComponent(search) : ''), undefined);
-	cards.value = data.data;
-	pages.value = Math.ceil(data.total / limit);
-}
-
-let translationEnabled;
-let modalContent, modalOverlay;
-
-const APP = <>
-	<div className="header">
-		<h1>角色卡管理</h1>
-		<div className="toolbar">
-			<input type="text" ref={searchInput} placeholder="搜索名称 / 作者 / 标签..." onInput={() => {
-				currentPage.value = 1;
-				loadCards();
-			}}/>
-			<label><input type={"checkbox"} ref={translationEnabled} />翻译</label>
-		</div>
-	</div>
-	<div className="grid">{$foreach(cards, c => {
-		const div = <div className={"md"} />;
-		const text =  c.creatorNotes || c.description;
-		if (text) renderMarkdownToElement(div, text.slice(0, 1000));
-
-		return <div className="card" onClick={() => showDetail(c.name)}>
-			<div className="card-img">
-				{c.image_hash ? <img src={config.db_server+`/blob/${c.image_hash}`} alt={c.name}/> : <div className="no-img">&#x1F3AD;</div>}
-			</div>
-			<div className="card-body">
-				<h3>{c.name}</h3>
-				{c.creator && <div class="creator">by {c.creator}</div>}
-				{div}
-				{c.tags && <div class="tags">{c.tags.join(", ")}</div>}
-			</div>
-			<div className="card-actions">
-				<button className="btn btn-secondary btn-sm"
-						onClick.stop={() => saveCard(c.name)}>导出
-				</button>
-				<button className="btn btn-secondary btn-sm"
-						onClick.stop={() => showEditModal(c.name)}>编辑
-				</button>
-				<button className="btn btn-danger btn-sm"
-						onClick.stop={() => confirmDelete(c.name)}>删除
-				</button>
-			</div>
-		</div>;
-	}, JSON.stringify)}</div>
-	<div className="pagination">
-		<button className="btn btn-secondary btn-sm"
-				onClick={() => goPage(unconscious(currentPage) - 1)}
-				disabled={() => unconscious(currentPage) <= 1}>&laquo; 上一页
-		</button>
-		<span>{currentPage} / {pages}</span>
-		<button className="btn btn-secondary btn-sm"
-				onClick={() => goPage(unconscious(currentPage) + 1)}
-				disabled={() => unconscious(currentPage) >= unconscious(pages)}>下一页 &raquo;
-		</button>
-	</div>
-
-	<div className="modal-overlay" ref={modalOverlay} style="display:none" onClick={(e) => {
-		modalOverlay.style.display = 'none';
-		modalContent.replaceChildren();
-	}}>
-		<div className="modal" ref={modalContent} onClick.stop={AS_IS}></div>
-	</div>
-</>;
-
-function goPage(p) {
-	currentPage.value = p;
-	loadCards();
-}
-
-async function showEditModal(name) {
-	const data = await kvListGet(CHAR_TYPE, name);
-
-	const [_, onClose] = openJsonEditor("usci/"+name, () => {
-		return JSON.stringify(data, null, 2);
-	}, (v) => {
-		const card = JSON.parse(v);
-		kvListSet(card, CHAR_TYPE);
-	})
-}
-
+const showEditModal = name => exportForCV_openCharacterEditor(name);
 
 async function saveCard(name) {
 	const card = await kvListGet(CHAR_TYPE, name);
@@ -212,45 +141,96 @@ async function saveCard(name) {
 	}
 }
 
-async function showDetail(name) {
-	const {creator, image, tags, time, ...card} = await kvListGet(CHAR_TYPE, name);
+const allowedTags = new Set([...HTMLTagKinds.basic, ...HTMLTagKinds.style]);
 
-	const html = <>
-		<h2>{name} {creator && <small style="color:#78909c">by {creator}</small>}
-		</h2>
-		{image && <img src={config.db_server+`/blob/${image.hash}`}
-							style="max-width:100%;max-height:300px;border-radius:8px;margin-bottom:16px;display:block"/>}
-		{tags?.length && <div className="form-group"><label>标签</label>
-			<p>{tags.join(', ')}</p>
-		</div>}
-		{time && <div className="form-group"><label>修改时间</label><p>{new Date(time).toLocaleString()}</p></div>}
-		{Object.entries(card).map(([key, value]) => {
-			let container = <div className={"md"} />;
-			if (typeof value !== "object") {
-				renderMarkdownToElement(container, String(value));
-				translateElement(container, { text: String(value) });
-			} else {
-				container.innerHTML = highlightJsonLike(value);
-			}
-			return <div className="form-group"><label>{key}</label>{container}</div>;
-		})}
-		<div className="form-actions">
-			<button className="btn btn-secondary" onClick={() => showEditModal(name)}>编辑</button>
-			<button className="btn btn-danger" onClick={() => confirmDelete(name, name)}>删除</button>
-		</div>
-	</>;
+async function showDetail(c) {
+	const text = c.creatorNotes || c.description;
+	if (!text) return;
+	const {name, creator} = c;
 
-	modalContent.replaceChildren(...html.filter(AS_IS));
-	modalOverlay.style.display = '';
+	openWindow({
+		id: "charCard-"+name,
+		icon: "卡",
+		title: name+(creator ? " by "+creator : ""),
+		element: () => renderMarkdownToElement(<div className="md"/>, text, { external: true, allowedTags })
+	})
 }
 
 function confirmDelete(name) {
-	if (!confirm('确定删除 "' + name + '"？此操作不可恢复。')) return;
-	kvListDel(CHAR_TYPE, name);
+	deleteWithDrawback("角色 "+JSON.stringify(name), () => {
+		kvListDel(CHAR_TYPE, name).then(() => {
+			const idx = cards.findIndex(s => s.name === name);
+			if (idx >= 0) $update(currentPage);
+		});
+	}, () => {});
 }
 
-const el = document.getElementById("app");
-el.replaceChildren(...APP);
-await EVENT_BUS.fire(['load'], el);
-EVENT_BUS.fire(['loaded']).then(loadCards);
-EVENT_BUS.on(['kvs', CHAR_TYPE], e => loadCards());
+const characters = $state([]);
+await kvListGetKeys(CHAR_TYPE, characters);
+
+EVENT_BUS.on(['kvs', CHAR_TYPE], (name) => {
+	const idx = unconscious(characters).findIndex(item => item.name === name);
+	if (idx >= 0) $update(currentPage);
+});
+
+export function createCharacterViewer() {
+	currentPage.value = 1;
+	$update(currentPage);
+
+	return <div className="cardList">
+		<div className="toolbar">
+			<div className="fa-search">
+				<Icon_search/>
+				<input className="text-input" value={searchTerm} placeholder="搜索角色名称 / 作者 / 标签..." onInput={(e) => {
+					currentPage.value = 1;
+					searchTerm.value = e.target.value;
+					$update(currentPage);
+				}} />
+			</div>
+
+			<div className="pagination">
+				<button className="btn ghost sm"
+						onClick={() => currentPage.value = unconscious(currentPage) - 1}
+						disabled={() => unconscious(currentPage) <= 1}>&laquo; 上一页
+				</button>
+				<span>{currentPage} / {pages}</span>
+				<button className="btn ghost sm"
+						onClick={() => currentPage.value = unconscious(currentPage) + 1}
+						disabled={() => unconscious(currentPage) >= unconscious(pages)}>下一页 &raquo;
+				</button>
+			</div>
+		</div>
+
+		<div className="cards-wrapper">
+			<div className="cards">{$foreach(cards, c => {
+				const div = <div className={"card-desc md"}/>;
+				const text = c.creatorNotes || c.description;
+				if (text) renderMarkdownToElement(div, text.slice(0, 1000));
+
+				const src = c.image && (config.db_server + `blob/${c.image.hash}`);
+
+				return <div className="card">
+					<div className="cover">
+						{src ? <img src={src} alt={c.name} loading="lazy" onClick={() => showImageZoomView(src, c.name)} /> : <div className="no-img">&#x1F3AD;</div>}
+						<button className="card-quick-launch" onClick.stop={() => exportForCV_createConversation(c)}>创建对话</button>
+					</div>
+
+					<div className="card-body" onClick={() => showDetail(c)}>
+						<div className="col">
+							<span className="card-title" title={c.name}>{c.name}</span>
+							{c.creator && <span className="card-author">by {c.creator}</span>}
+						</div>
+						<div className="card-tags">{c.tags?.map(t => <span className="tag">{t}</span>)}</div>
+						{div}
+					</div>
+
+					<div className="card-actions">
+						<button className="btn" title="导出角色卡数据" onClick={() => saveCard(c.name)}>导出</button>
+						<button className="btn" title="编辑人设" onClick={() => showEditModal(c.name)}>编辑</button>
+						<button className="btn delete" title="删除角色卡" onClick={() => confirmDelete(c.name)}>删除</button>
+					</div>
+				</div>
+			}, JSON.stringify)}</div>
+		</div>
+	</div>;
+}

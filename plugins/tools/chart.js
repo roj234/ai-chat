@@ -3,7 +3,7 @@ import {getToolParameters, registerToolset} from "/src/toolset.js";
 import {$asyncState, $computed, $watch, debugSymbol} from "unconscious";
 import {selectedConversation} from "/src/states.js";
 import {errorBlock, loadingBlock} from "/src/utils/utils.js";
-import {fileAccess} from "./fileAccess.js";
+import {fileAccess} from "../agent/index.js";
 import {readAsString} from "/common/chardet.js";
 import {parseCsv} from "/common/loadCsv.js";
 

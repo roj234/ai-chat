@@ -1,5 +1,106 @@
 import {ONCE_EVENT} from "unconscious/shared.js";
 
+/**
+ * MPSC（多生产者-单消费者）调度器：为异步遍历（如 glob）提供背压与任务移交。
+ *
+ * @param {number} lowWater 水位下限：队列长度低于该值时开始移交待执行任务
+ * @param {number} highWater 水位上限：队列积压达到该值后 push() 开始背压
+ */
+export function mpscScheduler(lowWater, highWater) {
+	const tasks = [];
+	let queue = [];
+	let head = 0, tail = 0;
+
+	let notifyConsumer;
+	let running = 0, lowThres = 0;
+	let error;
+
+	const doSubmit = (fn) => {
+		running++;
+		fn().catch(e => {
+			if (!error) error = e;
+		}).finally(() => {
+			if (--running <= lowThres) {
+				notifyConsumer?.();
+				lowThres = 0;
+			}
+		});
+	}
+
+	function push(item) {
+		if (error) throw error;
+
+		const size = tail - head;
+		queue[tail++] = item;
+
+		if (size >= highWater) {
+			return new Promise((r, c) => tasks.push([r, c]));
+		}
+
+		if (!size) notifyConsumer?.();
+	}
+
+	function submit(cb) {
+		if (error) throw error;
+
+		// 启发式限制，几乎可以消除等待 push() 的必要
+		if (tail - head + tasks.length + running >= highWater) {
+			const p = new Promise((r, c) => tasks.push([r, c, cb, doSubmit]));
+			notifyConsumer?.();
+			return p;
+		}
+
+		doSubmit(cb);
+	}
+
+	async function* drain() {
+		try {
+			let threshold;
+			while (true) {
+				for(;;) {
+					if (error) throw error;
+
+					threshold = running;
+
+					let queueSize = tail - head;
+					if (queueSize <= lowWater) {
+						const task = tasks.shift();
+						if (task) {
+							task[0]();
+
+							const data = task[2];
+							if (data) task[3](data);
+						}
+					}
+
+					const item = queue[head];
+					if (item == null) break;
+
+					queue[head++] = undefined;
+
+					if (head === tail) { head = tail = 0; }
+					else if (head > highWater) { queue = queue.slice(head); tail -= head; head = 0; }
+
+					yield item;
+				}
+
+				if (!running && !tasks.length) break;
+
+				lowThres = threshold;
+				await new Promise(r => notifyConsumer = r);
+			}
+		} catch (e) {
+			if (!error) error = e;
+			throw e;
+		} finally {
+			if (!error) error = new DOMException("Aborted", "AbortError");
+			tasks.forEach(c => c[1](error));
+		}
+	}
+
+	return { push, submit, drain };
+}
+
 export const createAsyncQueue = (concurrency = 6) => {
 	const taskQueue = new Set;
 
@@ -36,13 +137,6 @@ export const abortable = (promise, signal) => {
 };
 
 /**
- * @template T
- * @param {T} input
- * @return {Readonly<T>}
- */
-export const fastObjectMap = input => Object.freeze(Object.assign(Object.create(null), input));
-
-/**
  * 节流函数，保证最终一定会以最新的参数调用一次
  * @template {Function} T
  * @param {T} fn
@@ -69,6 +163,33 @@ export const throttled = (fn, wait = 300) => {
 	return again;
 };
 
+/**
+ * Promise节流函数
+ * @template {Function} T
+ * @param {T} fn
+ * @return {T}
+ */
+export const throttledPromiseLast = (fn) => {
+	let p;
+	let latestArgs;
+
+	const invoke = (argArray) => {
+		p = fn(...argArray).finally(() => {
+			if (latestArgs) {
+				invoke(latestArgs);
+				latestArgs = null;
+			} else {
+				p = null;
+			}
+		})
+	};
+
+	return (...args) => {
+		if (!p) invoke(args);
+		else latestArgs = args;
+	};
+};
+
 export const once = callback => {
 	let result;
 	return () => {
@@ -79,74 +200,3 @@ export const once = callback => {
 		return result;
 	}
 };
-
-/**
- * @param {Object} obj
- * @param {string|symbol} prop
- * @param {(ret: any, ...args: any[]) => any} callback
- * @returns {Function}
- */
-export function hook(obj, prop, callback) {
-	const original = obj[prop];
-	if (typeof original !== "function") throw new TypeError(`hook: obj.${String(prop)} 不是一个函数`);
-
-	obj[prop] = function (...args) {
-		const ret = original.apply(this, args);
-		const modified = callback.call(this, ret, ...args);
-		return modified === undefined ? ret : modified;
-	};
-
-	// 方便恢复
-	obj[prop].__original = original;
-	return original;
-}
-
-/**
- * 根据字符串和其中的索引计算所在行 / 列，并返回带定位箭头的多行字符串。
- * @param {string} string
- * @param {number} index
- * @returns {string}
- */
-export function locate(string, index) {
-	if (!Number.isSafeInteger(index) || index < 0) throw new TypeError("locate: index 必须是非负整数");
-
-	// 1. 计算 line / lineStart / column
-	let line = 1;
-	let lineStart = 0;
-	const limit = Math.min(index, string.length);
-	for (let i = 0; i < limit; i++) {
-		if (string.charCodeAt(i) === 10 /* \n */) {
-			line++;
-			lineStart = i + 1;
-		}
-	}
-	const column = index - lineStart;
-
-	// 2. 取出当前行内容
-	let lineEnd = lineStart;
-	while (lineEnd < string.length && string.charCodeAt(lineEnd) !== 10) {
-		lineEnd++;
-	}
-	const lineContent = string.substring(lineStart, lineEnd);
-
-	// 3. 终端显示宽度（CJK / 全角符号占 2 列）
-	const wideRe =
-		/[\u1100-\u115F\u2329-\u232A\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/;
-	const getStringWidth = (s) => {
-		let w = 0;
-		for (const ch of s) w += wideRe.test(ch) ? 2 : 1;
-		return w;
-	};
-	const digitCount = (n) => String(n).length;
-
-	let k = `第${line}行: `;
-	if (column < 0 || column > lineContent.length || lineContent.length > 220) {
-		k += `列: ${column}`;
-	} else {
-		k += lineContent + "\n";
-		const off = 6 + digitCount(line) + getStringWidth(lineContent.substring(0, column));
-		k += "-".repeat(off) + "^";
-	}
-	k += `\n总偏移: ${index}`;
-	return k;
-}

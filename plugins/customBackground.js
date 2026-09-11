@@ -62,7 +62,7 @@ onLoad(() => {
 
 SETTINGS.push({
 	type: "element",
-	_tab: "appearance",
+	_tab: "customize",
 	name: "聊天背景",
 	element: <div className={"choice-scroll"}>
 		<label className={"btn ghost"}>
@@ -82,7 +82,7 @@ SETTINGS.push({
 },{
 	type: "radio",
 	required: true,
-	_tab: "appearance",
+	_tab: "customize",
 	id: "backgroundFit",
 	name: "背景图契合模式",
 	choices: {
@@ -94,7 +94,7 @@ SETTINGS.push({
 	},
 },{
 	type: "element",
-	_tab: "appearance",
+	_tab: "customize",
 	name: "聊天字体",
 	element: <div className={"choice-scroll"}>
 		<label className={"btn ghost"}>

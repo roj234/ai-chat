@@ -11,8 +11,7 @@
 		padding: 4px;
 		border-radius: 8px;
 
-		& > li {
-			padding: 6px;
+		& li {
 			border-radius: 6px;
 			cursor: pointer;
 		}

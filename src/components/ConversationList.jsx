@@ -18,6 +18,8 @@ import SimpleModal from "./SimpleModal.jsx";
 import {exportConversation} from "../data-exchange.js";
 import {onLoad} from "../hooks.js";
 import "/plugins/rp_basic/TagList.css";
+import {showToast} from "./Toast.js";
+import {deleteWithDrawback, prettyError} from "../utils/utils.js";
 
 let PINNED_ITEMS = new Set;
 
@@ -67,6 +69,8 @@ const groupConversations = () => {
 
 	// idb sorted this
 	conversations.forEach(conv => {
+		if (conv[DELETING]) return;
+
 		let groupName;
 
 		if (PINNED_ITEMS.has(conv.id)) {
@@ -111,6 +115,7 @@ export const setConversationTitle = (conv, title, skipSync) => {
 };
 
 const SELECTED = debugSymbol("SelectedInConversationList");
+const DELETING = debugSymbol("DeletePending");
 
 /**
  * 渲染对话列表，按时间分组，支持选择、编辑标题、删除。
@@ -125,10 +130,10 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 	const prependMultiselectControl = () => {
 		groupAndConvArr.unshift(<div className={"multiselect-bar"}>
 			<button className={"btn ghost"} onClick={e => {
-				conversations.forEach(item => item[SELECTED] ^= 1);
+				conversations.forEach(item => item[SELECTED] = 0);
 				vl.dom.replaceChildren();
 				vl.render();
-			}}>反选
+			}}>清空
 			</button>
 			<button className={"btn danger"} onClick={e => {
 				const ids = conversations.filter(item => item[SELECTED]);
@@ -195,33 +200,37 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 				case "export":
 					exportConversation(1, conv);
 				return;
-				case "delete":
-					SimpleModal({
-						message: '确认删除"'+conv.title+'"#'+conv.id+'？',
-						accent: 'danger',
-						confirmMessage: '删除',
-						onConfirm() {
-							let id = vl.findIndex(conv);
-							const prev = groupAndConvArr[id-1];
-							const next = groupAndConvArr[id+1];
-							if (null == prev.id && null == next?.id) {
-								groupAndConvArr.splice(id-1, 2);
-							} else {
-								groupAndConvArr.splice(id, 1);
-							}
-							vl.resize();
+				case "delete": {
+					const pos = conversations.indexOf(conv);
+					if (pos < 0) return;
 
-							const start = conversations.indexOf(conv);
-							if (start >= 0) {
-								conversations.splice(start, 1);
-								deleteConversation(conv);
-							}
+					conv[DELETING] = true;
+					$update(conversations);
 
-							if (unconscious(selectedConversation) === conv) {
-								resetConversation();
-							}
-						}
-					});
+					let isOpened;
+					if (unconscious(selectedConversation) === conv) {
+						isOpened = true;
+						resetConversation();
+					}
+
+					deleteWithDrawback(`${conv.title||'无标题'} (#${conv.id})`, () => {
+						deleteConversation(conv).then(() => {
+							const noUpdate = unconscious(conversations);
+							const pos = noUpdate.indexOf(conv);
+							if (pos >= 0) noUpdate.splice(pos, 1);
+						}, err => {
+							showToast("删除失败\n"+prettyError(err), "error");
+							delete conv[DELETING];
+							$update(conversations);
+						});
+					}, () => {
+						if (isOpened && unconscious(selectedConversation) == null)
+							switchToConversation(conv);
+
+						delete conv[DELETING];
+						$update(conversations);
+					})
+				}
 				return;
 			}
 		}
@@ -241,13 +250,13 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 		hoverConversationIndex.value = closest._conv.id;
 
 		hoverMenu.style.left = e.pageX+"px";
-		hoverMenu.style.top = e.pageY+"px";
+		hoverMenu.style.top = Math.min(innerHeight - 180, e.pageY)+"px";
 		e.target.append(hoverMenu);
 		e.stopPropagation();
 	};
 	const keyFunc = conv => conv.textContent ?? [conv.id, conv.title, conv[LOCKED]];
 
-	const list = <div className="sidebar-list scroll" onClick={eventHandler}></div>;
+	const list = <div className="sidebar-list scroll" onClick={eventHandler} role="list" />;
 	const groupAndConvArr = [];
 	const vl = new VirtualList({
 		element: list,
@@ -273,6 +282,8 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 				_conv={conv}
 				className={`chat-item ${running?' spin-before' : ''}${unconscious(selectedConversation) === conv ? ' active' : ''}`}
 				title={conv.title+" (#"+conv.id+")\n"+formatDate("Y-m-d H:i:s", conv.time)}
+				tabIndex={0}
+				role="listitem"
 			>
 				{(!running && inSelectionMode) && <input type={"checkbox"} checked={conv[SELECTED]} onClick.stop={e => {
 					conv[SELECTED] = e.target.checked;

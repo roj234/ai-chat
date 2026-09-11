@@ -2,8 +2,9 @@ import {showToast} from "../components/Toast.js";
 import {$watch, debugSymbol, unconscious} from "unconscious";
 import {highlightJsonLike} from "../markdown/highlight.js";
 import {webviewDownloadFile} from "/vendor/jsBridge.js";
-import {config} from "../states.js";
+import {config, noPointer} from "../states.js";
 import {isIDB} from "../database.js";
+import SimpleModal from "../components/SimpleModal.jsx";
 
 export const resolveDBRelativeURL = (url) => {
 	if (url[0] === '@') {
@@ -82,8 +83,9 @@ export const prettyError = error => {
 		}
 	}
 
+	const prefix = (error.name?error.name+": ":"")+(error.message);
 	const stackRegex = /at (.*):(\d+):(\d+)\)$/;
-	const stackTrace = (error.stack||'').split('\n').slice(1)
+	const stackTrace = (error.stack||'').slice(prefix.length).split('\n')
 		.map(line => {
 			const match = line.match(stackRegex);
 			if (match) {
@@ -98,7 +100,7 @@ export const prettyError = error => {
 			}
 			return line;
 		});
-	return (error.name?error.name+": ":"")+(error.message||"")+"\n"+(stackTrace.join("\n"));
+	return prefix+"\n"+(stackTrace.join("\n"));
 };
 
 const TIMER = /* #__PURE__ */ Symbol();
@@ -143,6 +145,39 @@ export const copyButtonAnimation = (data, btn) => {
 		successCallback();
 	}
 };
+
+export const showImageZoomView = (src, title) => {
+	SimpleModal({
+		title: `图像预览 (${title})`,
+		className: "full",
+		message: <img src={src} alt={title || src} />
+	})
+}
+
+export const deleteWithDrawback = (message, confirm, cancel) => {
+	if (noPointer) {
+		SimpleModal({
+			message: '确认删除"'+message+'？',
+			accent: 'danger',
+			confirmMessage: '删除',
+			onConfirm: confirm,
+			onCancel: cancel
+		});
+		return;
+	}
+
+	const closeToast = showToast(<>
+		<span className="dct-label">即将删除</span>
+		<span className="dct-title" title={message}>{message}</span>
+	</>, '', 5000, {
+
+		onClose(byTimer) {
+			if (byTimer == null) confirm();
+			else cancel();
+		},
+		closeBtn: <button className="dct-undo" onClick={() => closeToast(1)}>撤销</button>
+	});
+}
 
 /**
  *
@@ -218,7 +253,7 @@ export const updateOnIntersected = (element, callback) => {
  * @return {{}}
  */
 export const cloneNamed = (obj, names) => {
-	const result = {};
+	const result = Object.create(null);
 	obj = unconscious(obj);
 	for (const name of names) {
 		if (name in obj) result[name] = obj[name];

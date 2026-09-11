@@ -1,14 +1,9 @@
 import {ZipReader} from "unconscious/common/zip-io.js";
-import {MIME_TYPES} from "./mime.js";
 import {pipeline} from 'node:stream/promises';
 import {Readable} from 'node:stream';
 import {createBrotliDecompress, createInflateRaw} from "node:zlib";
+import {getContentType} from "./mime.js";
 
-
-function getContentType(filename) {
-	const ext = (filename.lastIndexOf('.') > 0 ? filename.slice(filename.lastIndexOf('.')) : '').toLowerCase();
-	return MIME_TYPES[ext] || 'application/octet-stream';
-}
 
 // ==================== 路由器工厂函数 ====================
 /**

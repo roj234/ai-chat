@@ -2,6 +2,7 @@ import {$update, debugSymbol, unconscious} from "unconscious";
 import {showToast} from "../components/Toast.js";
 import {BRANCH_MANAGER, EVENT_BUS, messages as reactiveMessages, selectedConversation} from "../states.js";
 import {redoToolCalls, undoToolCalls} from "../toolset.js";
+import {MESSAGES_CACHE} from "../database.js";
 
 const INDEX = debugSymbol("INDEX");
 const CHILDREN = debugSymbol("CHILDREN");
@@ -199,6 +200,7 @@ function createBranchManager(conv, messages) {
 				// 不需要删除 [INDEX] 虽然可以删
 				const rawMessages = messages.slice(1);
 				reactiveMessages.value = rawMessages;
+				conv[MESSAGES_CACHE] = rawMessages;
 				//updateConversation(conv, rawMessages);
 			}
 		}

@@ -8,4 +8,5 @@ export const provider_presets = {
 	"https://api.minimaxi.com/v1": "MiniMax (手动设置请求体 reasoning_split=true)",
 	"https://ollama.com/v1": "Ollama Cloud",
 	"http://127.0.0.1:8080/v1": "本地 llama.cpp",
+	"@sse/v1": "后端 SSE 代理 (若支持)",
 }

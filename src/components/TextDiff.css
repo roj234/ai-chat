@@ -17,7 +17,7 @@
 
     & .hunk {
         background-color: var(--secondary-bg);
-        color: var(--text);
+        color: var(--text, #8b5cf6);
         padding-left: 8px;
     }
 

@@ -1,6 +1,7 @@
 import {config} from "../states.js";
 import "./StatusPill.css";
 import {$computed, unconscious} from "unconscious";
+import {SP_CONNECT, SP_GENERATE, SP_PREFILL, SP_WAIT} from "./StatusPill_state.js";
 
 const phrases = [
 	"正在连接服务器",
@@ -65,12 +66,17 @@ export const StatusPill = ({kind, data}) => {
 	return $computed(() => {
 		switch (unconscious(kind)) {
 			default:
-			case "connect":
+			case SP_CONNECT:
 				return <div className="ai-progress connect">
 					<div className="icon"></div>
 					<loading-motd />
 				</div>;
-			case "prefill":
+			case SP_WAIT:
+				return <div className="ai-progress wait">
+					<div className="icon"></div>
+					<span>正在准备响应...</span>
+				</div>;
+			case SP_PREFILL:
 				return <div className="ai-progress prefill">
 					<svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
 						<path d="M21 12a9 9 0 1 1-6.219-8.56"/>
@@ -81,26 +87,19 @@ export const StatusPill = ({kind, data}) => {
 					</div>
 					<span className="num">{() => (unconscious(data) * 100).toFixed(1)+"%"}</span>
 				</div>;
-
-			case "wait":
-				return <div className="ai-progress wait">
-					<div className="icon"></div>
-					<span>正在准备响应...</span>
-				</div>;
-
-			case "generate":
+			case SP_GENERATE:
 				return <div className="ai-progress generate">
 					<svg className="icon" viewBox="0 0 24 24" fill="currentColor">
 						<path d="M13 2L3 14h7v8l10-12h-7z"/>
 					</svg>
-					{unconscious(data).tps ? <>
+					{unconscious(data).tps != null ? <>
 						<span className="num">{() => data.tps?.toFixed(2)}</span>tps ·
 						<span className="num">{() => data.tokens}</span>tokens ·
 					</> : <>
-						<span className="num">{() => (data.len / ((Date.now() - start) / 1000)).toFixed(2)}</span>cps ·
+						<span className="num">{() => (data.len / ((Date.now() - (data.start||start)) / 1000)).toFixed(2)}</span>cps ·
 						<span className="num">{() => data.len}</span>chars ·
 					</>}
-					<span className="num">{$computed(() => ((Date.now() - start) / 1000).toFixed(2), [data])}</span>s
+					<span className="num">{$computed(() => ((Date.now() - (data.start||start)) / 1000).toFixed(2), [data])}</span>s
 				</div>
 		}
 	}, [kind]);

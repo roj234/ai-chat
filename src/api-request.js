@@ -8,7 +8,6 @@ import {
 	EVENT_BUS,
 	getCurrentTheme,
 	inputText,
-	isLlamaCppBackend,
 	lastScrollDirectionIsUp,
 	LOCKED,
 	MessageRoles,
@@ -29,7 +28,6 @@ import {
 	PLACEHOLDERS,
 	runTools,
 	TEMPORARY_PLACEHOLDER,
-	TOOL_NAME,
 	toolScriptRegistry
 } from "./toolset.js";
 import {$stampLock, $state, $update, $watch, AS_IS, debugSymbol, isReactive, unconscious} from "unconscious";
@@ -61,6 +59,8 @@ import {encodeObjects} from "./utils/marshal.js";
 import {SHA256} from "unconscious/common/SHA256.js";
 import {DONT_PARSE_HTML_IN_THINKING} from "./components/ThinkBlock.jsx";
 import {LLM_COST_SCALE} from "/backend/sync.js";
+import {SP_CONNECT, SP_GENERATE, SP_PREFILL, SP_WAIT} from "./components/StatusPill_state.js";
+import {isLlamaCppBackend, PRESET_KVS_ID} from "./presets.js";
 
 /**
  * @param {boolean} [loop]
@@ -68,7 +68,7 @@ import {LLM_COST_SCALE} from "/backend/sync.js";
  */
 export const submitUserChatMessage = async (loop) => {
 	const conv = unconscious(selectedConversation);
-	if (!EVENT_BUS.post(["loopEntry"], conv)) return;
+	if (false === EVENT_BUS.post(["loopEntry"], conv)) return;
 
 	const messages_ = $stampLock(messages);
 	DI[DID_SYNC_LOCK]?.(conv.id);
@@ -98,6 +98,12 @@ const RETRY_COUNT = debugSymbol("RetryCount");
  */
 export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 	if (runningConversations.has(conversation.id)) throw new Error("Loop already running");
+
+	const abort = $state(new AbortController());
+	runningConversations.set(conversation.id, {
+		abort,
+		messages
+	});
 
 	const convCombined = await getCombinedPreset(conversation);
 	if (cfg) cfg = { ...convCombined, ...cfg };
@@ -129,9 +135,10 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			if (details) {
 				if (!details.classList.contains("m")) {
 					details.classList.add("m");
-					// only update when open
-					details.addEventListener("click", () => render(message));
+					details.addEventListener("click", () => render(message, true));
 				}
+
+				// 只在展开时解析思考块的markdown
 				return;
 			}
 
@@ -172,7 +179,6 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		$update(updateMessageUI);
 	};
 
-	const abort = $state(new AbortController());
 	const isDisplaying = () => selectedConversation.id === conversation.id;
 	/** @type {AiChat.LLMRequestContext} */
 	const context = { isDisplaying };
@@ -187,10 +193,6 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		oldValue = newValue;
 	});
 
-	runningConversations.set(conversation.id, {
-		abort,
-		messages
-	});
 	EVENT_BUS.post(['loopBegin'], conversation);
 
 	if (!IS_ANDROID_BUILD) document.title = `工作中(${runningConversations.size}) - ${PAGE_TITLE}`;
@@ -265,7 +267,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 			let needUpdate;
 			const resumeId = conversation.resumeId;
-			if (finishReason !== 'error' || assistantMessage.error?.trim().endsWith(CANCEL_RESUME)) {
+			if (finishReason !== 'error' || !assistantMessage.error?.trim().endsWith(CANCEL_RESUME)) {
 				if (resumeId) {
 					promises.push(jsonFetch(resolveDBRelativeURL(cfg.endpoint)+"/abort/"+resumeId, {
 						key: cfg.accessToken,
@@ -331,7 +333,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 			if (isDisplaying()) $update(updateMessageUI);
 		} else if (tc) {
-			assistantMessage.tool_responses = tc.map(tc => ({ [TOOL_NAME]: tc.function.name }));
+			assistantMessage.tool_responses = tc.map(() => ({}));
 			// 因为走到这个分支我们一定要停，所以是ok时停
 			if (isSuccess) {
 				finishReason = 'interrupt';
@@ -368,7 +370,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 					isSuccess ? complete() : failure();
 			}
 
-			if (!isDisplaying() && cfg.afkState < 2 && !cfg.disableFinishToast)
+			if (!isDisplaying() && !cfg.disableFinishToast)
 				showToast(`对话 ${conversation.title}(#${conversation.id}) 已结束 (${finishReason})`, tone ?? "error");
 		} else if (cfg.generateTitle !== true) {
 			mayGenerateTitle();
@@ -431,16 +433,16 @@ const generateChatTitle = async (conversation, messages, config) => {
 	let s2 = m&&getTextContent(m).slice(0, 512);
 
 	let titleModel = config.titleModel;
-	if (titleModel?.[0] === ":") {
-		config = {
-			...config,
-			...await kvListGet('preset', titleModel.slice(1))
-		};
-		titleModel = config.titleModel;
+	if (titleModel) {
+		config = (await Promise.all([
+			{...config},
+			kvListGet(PRESET_KVS_ID, titleModel.slice(0, titleModel.indexOf('/'))),
+			kvListGet(PRESET_KVS_ID, titleModel)
+		])).reduce(Object.assign);
 	}
 
 	const body = {
-		model: titleModel || config.model,
+		model: config.model,
 		messages: [{
 			role: "system",
 			content: (config.titlePrompt || defaultTitlePrompt) + `
@@ -457,7 +459,7 @@ Directly output title in JSON \` { "title": <conversation title> } \`, no explai
 	};
 
 	const [reasoningPath, reasoningEnabledValue, reasoningDisabledValue = 'false'] = (config.reasoningPath||"reasoning/enabled").split(",");
-	if (config.forceThink !== 0) jsonEval(body, reasoningPath, "set", JSON.parse(reasoningDisabledValue));
+	if (config.forceThink == null) jsonEval(body, reasoningPath, "set", JSON.parse(reasoningDisabledValue));
 
 	setConversationTitle(conversation, '正在生成标题……', true);
 
@@ -628,10 +630,12 @@ async function sendCompletionRequest(
 		thinkState = assistantMessage.think = {...thinkState};
 	};
 
-	const progressKind = $state("connect");
+	const progressKind = $state(SP_CONNECT);
 	const progressValue = $state({});
 	assistantMessage[PROGRESS_KIND] = progressKind;
 	assistantMessage[PROGRESS_VALUE] = progressValue;
+
+	onProgress?.();
 
 	// Request
 	try {
@@ -642,22 +646,7 @@ async function sendCompletionRequest(
 			key: config.accessToken,
 			signal: abortCompletion.signal
 		}, (json, messageType) => {
-			if (config.logSSE) console.log("SSE response", json);
-
-			const timings = json.timings;
-			if (timings && config.afkState < 2) {
-				const promptProgress = json.prompt_progress;
-				if (promptProgress) {
-					progressKind.value = 'prefill';
-					progressValue.value = promptProgress.processed / promptProgress.total;
-					return;
-				}
-
-				progressValue.value = {
-					tps: timings.predicted_per_second,
-					tokens: timings.predicted_n
-				};
-			}
+			if (config.logSSE) console.log("chunk", json);
 
 			const res = json.resumable;
 			if (res) resumable = res;
@@ -669,7 +658,7 @@ async function sendCompletionRequest(
 					return;
 				}
 
-				progressKind.value = 'wait';
+				progressKind.value = SP_WAIT;
 
 				const {id, model} = json;
 
@@ -682,7 +671,7 @@ async function sendCompletionRequest(
 				if (resumable) {
 					if (!resumable.end && null != conversation.id) {
 						conversation.resumeId = id;
-						updateConversation(conversation, assistantMessage.id > 0 ? null : messages);
+						updateConversation(conversation, assistantMessage.id > 0 ? null : unconscious(messages));
 					} else {
 						delete conversation.resumeId;
 					}
@@ -709,6 +698,24 @@ async function sendCompletionRequest(
 						onProgress?.(MARKDOWN_APPEND, assistantMessage);
 					});
 				}
+			}
+
+			const promptProgress = json.prompt_progress;
+			if (promptProgress) {
+				progressKind.value = SP_PREFILL;
+				const progress = promptProgress.processed / promptProgress.total;
+				if (progress < 1) {
+					progressValue.value = progress;
+					return;
+				}
+			}
+
+			const timings = json.timings;
+			if (timings) {
+				progressValue.value = {
+					tps: timings.predicted_per_second,
+					tokens: timings.predicted_n
+				};
 			}
 
 			/** @type {OpenAI.ChatChoice | OpenAI.TextChoice} */
@@ -757,7 +764,10 @@ async function sendCompletionRequest(
 					let hasNewToolCalls;
 					for (const {index, ...item} of delta.tool_calls) {
 						const dLen = item.function?.arguments?.length;
-						if (dLen) progressValue.len += dLen;
+						if (dLen) {
+							progressValue.start = firstPacketTime;
+							progressValue.len = (progressValue.len || 0) + dLen;
+						}
 
 						if (index === undefined) {
 							toolCalls.push($state(item));
@@ -780,7 +790,7 @@ async function sendCompletionRequest(
 				if (!text) return;
 			}
 
-			progressKind.value = 'generate';
+			progressKind.value = SP_GENERATE;
 
 			if (context.antiSlop?.sample(chunk, assistantMessage)) {
 				throw "retry";
@@ -878,7 +888,7 @@ async function sendCompletionRequest(
 			if (!assistantMessage.tool_calls) {
 				onProgress?.(MARKDOWN_APPEND, assistantMessage);
 				if (null == progressValue.tps) {
-					progressValue.value = { len: content.length + (thinkState?.content.length || 0) };
+					progressValue.value = { start: firstPacketTime, len: content.length + (thinkState?.content.length || 0) };
 				}
 			}
 
@@ -967,10 +977,11 @@ async function buildCompletionPayload(
 	const canPrefill = config.canPrefill || config.mode === 'completions';
 
 	// Prepare request body
-	const headers = {
-		//'HTTP-Referer': 'https://github.com/roj234/ai-chat',
-		//'X-Title': 'AiChat',
-	};
+	const headers = config.accessToken.startsWith("sk-or-") ? {
+		'X-Title': 'Aint',
+		'X-OpenRouter-Categories': 'personal-agent,general-chat',
+		'HTTP-Referer': 'https://github.com/roj234/ai-chat',
+	} : {};
 	let path = '/chat/completions';
 
 	const resumeId = conversation.resumeId;
@@ -1046,6 +1057,7 @@ async function buildCompletionPayload(
 				insideBlock = true;
 			} else if (insideBlock) {
 				json_messages.push({ role: "cache_end" });
+				insideBlock = false;
 			}
 		}
 
@@ -1126,29 +1138,29 @@ async function buildCompletionPayload(
 		}
 
 		const reasoningEffort = config.reasoning;
-		const enableThink = isThinkingEnabled(config) && reasoningEffort;
+		const useModelCoT = isThinkingEnabled(config) && reasoningEffort;
 		const [reasoningPath, reasoningEnabledValue = 'true', reasoningDisabledValue = 'false'] = (config.reasoningPath||"reasoning/enabled").split(",");
 
-		if (config.forceThink !== 0) {
-			jsonEval(body, reasoningPath, "set", JSON.parse(enableThink?reasoningEnabledValue:reasoningDisabledValue));
-			if (enableThink) {
-				const [reasoningEffortPath, reasoningEffortType = 's'] = (config.reasoningEffortPath || "reasoning/effort").split(",");
-				let fieldValue = reasoningEffort;
-				if (reasoningEffortType === 'i') {
-					if (reasoningEffort === "minimal") {
-						fieldValue = 1024;
-					} else {
-						fieldValue = ({
-							"low": 0.2,
-							"medium": 0.5,
-							"high": 0.8,
-							"xhigh": 0.95,
-							"max": 0.99
-						}[reasoningEffort]) * body.max_completion_tokens;
-					}
+		if (config.forceThink == null) {
+			jsonEval(body, reasoningPath, "set", JSON.parse(useModelCoT?reasoningEnabledValue:reasoningDisabledValue));
+		}
+		if (useModelCoT) {
+			const [reasoningEffortPath, reasoningEffortType = 's'] = (config.reasoningEffortPath || "reasoning/effort").split(",");
+			let fieldValue = reasoningEffort;
+			if (reasoningEffortType === 'i') {
+				if (reasoningEffort === "minimal") {
+					fieldValue = 1024;
+				} else {
+					fieldValue = ({
+						"low": 0.2,
+						"medium": 0.5,
+						"high": 0.8,
+						"xhigh": 0.95,
+						"max": 0.99
+					}[reasoningEffort]) * body.max_completion_tokens;
 				}
-				jsonEval(body, reasoningEffortPath, "set", fieldValue);
 			}
+			jsonEval(body, reasoningEffortPath, "set", fieldValue);
 		}
 	}
 
@@ -1319,6 +1331,7 @@ export const buildSystemPrompt = async (config, conversation, prompt, toolPrompt
 				case "htmlTag": {
 					result += config.allowHTMLTags.includes("basic") ? "\n- HTML tags in Markdown are supported, use HTML table for complex tables, details/summary for spoilers, and optional inline styles." : "";
 				}
+				break;
 				case "think":
 					result += isThinkingEnabled(config) && config.reasoning === false ? (config.CoTPrompt || defaultCoTPrompt) : "";
 				break;
@@ -1327,13 +1340,13 @@ export const buildSystemPrompt = async (config, conversation, prompt, toolPrompt
 				break;
 				default:
 					if (id[0] === ':') {
-						const preset = await kvListGet('preset', id.slice(1));
+						const preset = await kvListGet(PRESET_KVS_ID, id);
 						result += preset.systemPrompt;
 					} else {
-						let val = PLACEHOLDERS[id] ?? conversation[TEMPORARY_PLACEHOLDER]?.[id];
+						let val = conversation[TEMPORARY_PLACEHOLDER]?.[id] ?? PLACEHOLDERS[id];
 						if (val != null) {
 							if (typeof val === "function")
-								val = val();
+								val = await val(conversation);
 							result += val;
 						} else if (id[0] !== '#') {
 							throw new Error("未识别的占位符 {{"+id+"}}");

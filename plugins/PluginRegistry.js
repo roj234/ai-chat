@@ -1,8 +1,6 @@
 import {ContentPart, registerToolset} from "/src/toolset.js";
 
 // 预装插件
-// 设置系统提示
-//import "./cmdSetPrompt.js";
 // 记住输入框
 import "./persistInputBox.js";
 // Blob ServiceWorker 缓存
@@ -20,19 +18,22 @@ import "./testConnection.js";
 // 自动补全模型ID
 import "./modelIdCompletion.js";
 // 工具管理器
-import "./managers/SkillManager.js";
+import "./managers/ToolManager.js";
 // 自定义背景和字体
 import "./customBackground.js";
 
-// 预装工具
+// AGENTS.md 支持
+import "./agent/agents-md.js";
+// 文件系统、命令和代码执行
+import "./agent/files.js";
 // 技能
-import "./tools/skills.js";
-// 文件和命令
-import "./tools/agent.js";
+import "./agent/skills.js";
+
+// 预装工具
 // JSON编辑
 import "./tools/json_editor.js";
 // 上下文压缩
-import "./tools/dcp.js";
+import "./tools/subjective_context_compression.js";
 // 任务列表
 import "./tools/task_list.js";
 // 子代理
@@ -44,9 +45,7 @@ import "./tools/followupSuggestions.js";
 // 图表
 import "./tools/chart.js";
 // 角色扮演工具
-import "./tools/rp_kit/interactive_simulation.js";
-// 人类代理
-import "./tools/human_input.js";
+import "./rp_kit/interactive_simulation.js";
 // 预装管线（？）
 import "./rpg/example/Translator.js";
 
@@ -66,8 +65,9 @@ import {registerCodeBlockRenderer, renderMarkdownToElement} from "/src/markdown/
 import {createDragSort} from "/common/DragSort.js";
 import {registerSchemaMessageRole} from "/common/ReactiveJSON.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
-import {GetTime} from "./tools/rp_kit/interactive_simulation.js";
+import {GetTime} from "./rp_kit/interactive_simulation.js";
 import {markMessageDirty} from "/src/database.js";
+import {openWindow} from "../src/components/Windows.jsx";
 
 // 时间工具
 registerToolset("GetTime", "获取时间", [GetTime], {
@@ -163,6 +163,11 @@ if (DB_MODE !== "local") {
 		defaultEnabled: true,
 		load: registerConfigSync
 	});
+	pluginDefinitions.push({
+		name: "私信 (WIP)",
+		description: "与其他用户聊天，使用 /dm <user> 打开界面，需要服务器支持",
+		load: () => import("./DM.js")
+	});
 }
 
 const pluginOrder = (config.pluginOrder?.map(i => pluginDefinitions[i])  || pluginDefinitions.map(item => item.defaultEnabled&&item)).filter(Boolean);
@@ -191,60 +196,38 @@ const setDetails = (plugin, self) => {
 	self.classList.add("active");
 
 	const idx = pluginOrder.indexOf(plugin);
-	const det =
-		<div className="detail">
-			<div className="detail-header">
-				<h2>{plugin.name}</h2>
-				{idx >= 0 ? <span className="status-badge enabled">已启用 (#{idx+1})</span> : <span className="status-badge">未启用</span>}
-			</div>
-			<div className="detail-meta">
-				<div className="meta-item"><span className="label">版本</span> {plugin.version||"内置"}</div>
-				<div className="meta-item"><span className="label">作者</span> {plugin.author||"Roj234"}</div>
-				<div className="meta-item"><span className="label">主页</span> <a href={plugin.url} rel={"noreferrer noopener"}>{plugin.url}</a>
-				</div>
-			</div>
-			{plugin.description && renderMarkdownToElement(<div className="md"/>, plugin.description)}
-		</div>;
+	const det = <main className="detail">
+		<div className="detail-header">
+			<h2>{plugin.name}</h2>
+			{idx >= 0 ? <span className="status-badge enabled">已启用 (#{idx+1})</span> : <span className="status-badge">未启用</span>}
+		</div>
+		<div className="detail-meta">
+			<div className="meta-item"><span className="label">版本</span> {plugin.version||"内置"}</div>
+			<div className="meta-item"><span className="label">作者</span> {plugin.author||"Roj234"}</div>
+			<div className="meta-item"><span className="label">主页</span> <a href={plugin.url} rel={"noreferrer noopener"}>{plugin.url}</a></div>
+		</div>
+		{plugin.description && renderMarkdownToElement(<div className="md"/>, plugin.description)}
+	</main>;
 
 	morphdom(detailPanel, det);
 };
 
-const pluginManager = (
-	<div className={"modal-overlay"}>
-		<div className="modal plugin-manager">
-			<div style={"display:flex;" +
-				"overflow:hidden;" +
-				"flex-direction:column"}>
-				<div className="modal-header">
-					插件管理
-					<span className="badge">启用 {pluginOrder.length} / {pluginDefinitions.length} 插件</span>
-					<span className={"spacer"}></span>
-					<button className={"ri-close-line btn ghost"} onClick={() => pluginManager.remove(true)}></button>
-				</div>
-
-				<div className="interface">
-					<aside className="msidebar" ref={pluginListContainer}>
-						{[...orderedItems].map((item) => {
-							const el = <div className="item" onClick={(e) => setDetails(item, el)} _key={item}>
-								<span className="drag-handle" title="调整加载顺序">⠿</span>
-								<span className="plugin-info">
-							  <b className="plugin-name ellipsis">{item.name}</b>
-							  <span className="plugin-author ellipsis">{item.author || 'Roj234'}</span>
-							</span>
-								<input type={"checkbox"} className="switch" onClick.stop={updatePluginSet} checked={pluginIndexMap.has(item)}/>
-							</div>;
-							return el;
-						})}
-					</aside>
-
-					<main className="detail-panel">
-						<div className="detail" ref={detailPanel}/>
-					</main>
-				</div>
-			</div>
-		</div>
-	</div>
-);
+const pluginManager = (<>
+	<aside className="msidebar" ref={pluginListContainer}>
+		{[...orderedItems].map((item) => {
+			const el = <div className="item" onClick={(e) => setDetails(item, el)} _key={item}>
+				<span className="drag-handle" title="调整加载顺序">⠿</span>
+				<span className="plugin-info">
+					<b className="plugin-name ellipsis">{item.name}</b>
+					<span className="plugin-author ellipsis">{item.author || 'Roj234'}</span>
+				</span>
+				<input type={"checkbox"} className="switch" onClick.stop={updatePluginSet} checked={pluginIndexMap.has(item)}/>
+			</div>;
+			return el;
+		})}
+	</aside>
+	<main className="detail" ref={detailPanel}/>
+</>);
 
 createDragSort(pluginListContainer, {
 	itemSelector: ".item",
@@ -257,7 +240,15 @@ SETTINGS.push({
 	type: "element",
 	element: <div className={"choice-scroll"}>
 		<button className={"btn ghost"} onClick={() => {
-			document.body.append(pluginManager);
+			openWindow({
+				id: "plugin-manager",
+				title: "插件管理器",
+				actions: <span className="pm-badge">启用 {pluginOrder.length} / {pluginDefinitions.length} 插件</span>,
+				element: pluginManager,
+				width: 768,
+				height: 600,
+				reuse: true
+			});
 		}}>插件管理
 		</button>
 	</div>
