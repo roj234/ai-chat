@@ -30,12 +30,12 @@ export function Dropdown({items, selection, onChanged, dir = 'down'}) {
 		options.children[i+1]?.classList.add("selected");
 	};
 
-	const filter = $state("");
+	const filterText = $state("");
 	let options;
 	const main = <div className={"pretty-select "+dir}>
 		<div className="input" onClick.stop={() => {
 			if (main.classList.toggle("open")) {
-				filter.value = "";
+				filterText.value = "";
 			}
 		}}>
 			<span>{() => selection.value ?? "default"}</span>
@@ -58,9 +58,13 @@ export function Dropdown({items, selection, onChanged, dir = 'down'}) {
 			onChanged('s', indexInParent(target)-1);
 		}}>
 			<input className={"text-input"} placeholder={"筛选"} onClick.stop={() => {}} onInput={e => {
-				filter.value = e.target.value;
-			}} value={filter} />
-			{$foreach($computed(() => unconscious(filter) ? items.filter(({name}) => name.includes(unconscious(filter))) : unconscious(items)), (item) =>
+				filterText.value = e.target.value.toLowerCase();
+			}} value={filterText} />
+			{$foreach($computed(() => {
+				const arr = unconscious(items);
+				const filter = unconscious(filterText);
+				return filter ? arr.filter(({name}) => name.toLowerCase().includes(filter)) : arr;
+			}, null, true), (item) =>
 				<li class:selected={selection.value === item.name} title={item.name}>{item.name}
 					<i className={"ri-delete-bin-line"} title={"删除"}></i>
 				</li>, (item) => item.name)}

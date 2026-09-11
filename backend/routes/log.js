@@ -1,12 +1,13 @@
 import {compressLog, decompressLog, deserializeRow} from "../utils/compression.js";
 import {LOG_HOOK} from "../config.js";
+import {exclusiveLock} from "../utils/lock.js";
 
 /**
  * @param {AiChatBackend.Router} router
  * @param {Record<string, function(body: any, ctx: Partial<AiChatBackend.RouteContext>): any>} batcher
  */
 export function registerLogRoutes(router, batcher) {
-	batcher['logs'] = async ([start = 0, end = Date.now(), lastRow], ctx) => {
+	batcher['logs'] = exclusiveLock(async ([start = 0, end = Date.now(), lastRow], ctx) => {
 		if (!Number.isFinite(start) || !Number.isFinite(end) ||(lastRow && !Number.isFinite(lastRow))) return { error: "illegal params" };
 		const tsdb = await ctx.logDB;
 		const range = await tsdb.findByTime(start, end, { lastRow });
@@ -23,7 +24,7 @@ export function registerLogRoutes(router, batcher) {
 		}
 
 		return rows;
-	};
+	}, true);
 
 	batcher['log/by-rowid'] = async (id, ctx) => {
 		if (!Number.isFinite(id)) return { error: "illegal id" };

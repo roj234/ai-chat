@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>AiChat伴侣</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; width: 680px; margin: 24px auto; color: #222; }
+  h1 { font-size: 20px; }
+  h2 { font-size: 15px; margin: 0 0 8px; }
+  .section { border: 1px solid #e2e2e2; border-radius: 8px; padding: 16px; margin-bottom: 16px; background: #fff; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+  .origin-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  input[type=text], textarea { flex: 1; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+  textarea { min-height: 44px; resize: vertical; }
+  button { padding: 6px 12px; border: 1px solid #bbb; border-radius: 4px; background: #f0f0f0; cursor: pointer; font-size: 14px; }
+  button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+  button.danger { background: #dc2626; color: #fff; border-color: #dc2626; padding: 6px 10px; }
+  label { display: flex; align-items: center; gap: 6px; font-size: 14px; margin: 4px 0; }
+  .hint { color: #667; font-size: 13px; margin: 6px 0 0; }
+  .hint code { background: #f1f1f1; padding: 1px 4px; border-radius: 3px; }
+  #status { color: #16a34a; font-weight: 600; margin-left: 8px; }
+  .warnings { background: #fef3c7; border: 1px solid #f59e0b; color: #92400e; border-radius: 6px; padding: 10px 14px; margin-top: 12px; font-size: 13px; }
+  .warnings p { margin: 4px 0; }
+  .badge { background: #e11d48; color: #fff; font-size: 11px; border-radius: 4px; padding: 1px 5px; }
+</style>
+</head>
+<body>
+  <h1>AiChat伴侣</h1>
+
+  <div class="section">
+    <h2>全局</h2>
+    <label><input type="checkbox" id="enabled" /> 启用 CORS 禁用</label>
+    <p class="hint">关闭后不会注入任何 CORS 头。</p>
+  </div>
+
+  <div class="section">
+    <h2>源（可发起跨域请求的页面来源）</h2>
+    <div class="row">
+      <input type="text" id="new-origin" placeholder="http://127.0.0.1:8080" />
+      <button id="add-origin">添加</button>
+    </div>
+    <div id="origins-list"></div>
+    <p class="hint">对每个源，从该源发起的请求会被注入 CORS 头，从而用 <code>fetch()</code> 访问任意网站。</p>
+  </div>
+
+  <div class="section">
+    <h2>高级</h2>
+    <label><input type="checkbox" id="allow-credentials" /> 允许凭据（添加 <code>Access-Control-Allow-Credentials: true</code>）</label>
+    <label><input type="checkbox" id="wildcard-origin" /> 强制用 <code>*</code> 作为 <code>Access-Control-Allow-Origin</code>（单个源时才建议）</label>
+    <div class="row"><label style="min-width:120px">Allow-Methods</label><input type="text" id="allow-methods" value="*" /></div>
+    <div class="row"><label style="min-width:120px">Allow-Headers</label><input type="text" id="allow-headers" value="*" /></div>
+    <div class="row"><label style="min-width:120px">Expose-Headers</label><input type="text" id="expose-headers" value="*" /></div>
+    <div class="row"><label style="min-width:120px">目标域名</label><textarea id="target-domains" placeholder="api.example.com, cdn.example.com（留空表示所有目标）"></textarea></div>
+    <p class="hint">同一主机下配置了多个不同端口的源时，会自动改用 <code>Access-Control-Allow-Origin: *</code> 并在此处给出警告。</p>
+  </div>
+
+  <div class="row">
+    <button class="primary" id="save">保存</button>
+    <span id="status"></span>
+  </div>
+  <div id="warnings" class="warnings" style="display:none"></div>
+
+  <script src="options.js"></script>
+</body>
+</html>

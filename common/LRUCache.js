@@ -1,5 +1,5 @@
 import {clearTimeout as ct, setTimeout as st} from "./heap-timer.js";
-import {fastObjectMap} from "./pure-utils.js";
+import {immutableObjectMap} from "unconscious/common/Utils.js";
 
 export const TYPE_EVICT = 1;
 export const TYPE_REMOVE = 2;
@@ -7,7 +7,7 @@ export const TYPE_REMOVE = 2;
 const IS_NODE = !import.meta.env?.MODE;
 const setTimeout1 = IS_NODE ? setTimeout : st;
 const clearTimeout1 = IS_NODE ? clearTimeout : ct;
-const MODES = fastObjectMap({
+const MODES = immutableObjectMap({
 	'access': 1,
 	'update': 2,
 	'livetime': 3

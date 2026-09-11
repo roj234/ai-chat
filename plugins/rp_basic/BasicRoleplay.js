@@ -98,6 +98,7 @@ const storeOptions = {
  *
  * @param {string} typeId - ID st|preset
  * @param {Function} editorConstructor
+ * @param {Object} defaultValue
  * @return {[
  *     element: import("unconscious").Renderable,
  *     open: function(): void,
@@ -106,7 +107,7 @@ const storeOptions = {
  *     onImported: function(id: number, name: string): void,
  * ]}
  */
-function createSchemaEditColumn(typeId, editorConstructor) {
+function createSchemaEditColumn(typeId, editorConstructor, defaultValue = {}) {
 	/** @type {import("unconscious").Reactive<AiChat.IDBKVList[]>} */
 	const items = $state([]);
 	/** @type {import("unconscious").Reactive<IDBKVList>} */
@@ -145,7 +146,9 @@ function createSchemaEditColumn(typeId, editorConstructor) {
 						title: "输入新"+typeStr+"的名称",
 						onConfirm(name) {
 							if (!name) return false;
-							selectedItem.value = {name};
+							const obj = structuredClone(defaultValue);
+							obj.name = name;
+							selectedItem.value = obj;
 							dropdown.setSelection(name);
 							openEditor();
 						},
@@ -233,7 +236,53 @@ function createSchemaEditColumn(typeId, editorConstructor) {
 }
 //endregion
 
-const [presetBar, openPresetPanel, presetList, currentPreset] = createSchemaEditColumn("st|preset", _PresetEditor);
+const [presetBar, openPresetPanel, presetList, currentPreset] = createSchemaEditColumn("st|preset", _PresetEditor, {
+	prompts: [
+		{
+			name: "系统提示",
+			enabled: true,
+			role: "system",
+			content: `Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.`,
+		},
+		{
+			name: "默认模板",
+			enabled: true,
+			role: "system",
+			content: `
+
+{{worldInfoBefore}}
+
+---
+
+用户 {{user}} 信息：
+
+{{personaDescription}}
+
+角色 {{char}} 信息：
+
+{{description}}
+
+{{personality}}
+
+{{scenario}}
+
+---
+
+{{worldInfoAfter}}
+
+---
+
+{{dialogueExamples}}`,
+		},
+		{
+			name: "对话历史",
+			enabled: true,
+			role: "system",
+			content: "chatHistory",
+			attr: "marker"
+		}
+	]
+});
 const [charBar, openCharPanel, characterList, currentCharacter] = createSchemaEditColumn("st|char", _CharacterEditor);
 const [lorebookBar, openLorebookPanel, lorebookList, currentLorebook] = createSchemaEditColumn("st|lorebook", _LorebookEditor);
 
@@ -303,10 +352,12 @@ SETTINGS.push(
 	{
 		id: "st_postProcess",
 		name: "提示词后处理",
-		title: "现代LLM后端的普遍规范: 系统提示只能在开头，末尾至多一条助手消息。\n角色对话的提示构造完全由预设控制，有问题请修改预设\n靠后处理兜底可能产生怪异行为",
+		title: "现代LLM普遍规范: 0-1条系统消息在开头，末尾0-1条助手消息。\n建议选择【合并同角色消息】\n但提示构造由预设完全控制，靠后处理兜底可能产生怪异行为",
 		type: "radio",
+		required: true,
 		_tab: "character",
 		choices: {
+			"无": 0,
 			"单系统消息": 1,
 			"合并同角色消息": 2,
 			"交替对话": 3

@@ -134,7 +134,7 @@ const APP = <>
 
 		return <div className="card" onClick={() => showDetail(c.name)}>
 			<div className="card-img">
-				{c.image_hash ? <img src={config.db_server+`/blob/${c.image_hash}`} alt={c.name}/> : <div className="no-img">&#x1F3AD;</div>}
+				{c.image_hash ? <img src={config.db_server+`blob/${c.image_hash}`} alt={c.name}/> : <div className="no-img">&#x1F3AD;</div>}
 			</div>
 			<div className="card-body">
 				<h3>{c.name}</h3>
@@ -218,8 +218,8 @@ async function showDetail(name) {
 	const html = <>
 		<h2>{name} {creator && <small style="color:#78909c">by {creator}</small>}
 		</h2>
-		{image && <img src={config.db_server+`/blob/${image.hash}`}
-							style="max-width:100%;max-height:300px;border-radius:8px;margin-bottom:16px;display:block"/>}
+		{image && <img src={config.db_server+`blob/${image.hash}`}
+							style="object-fit:contain;max-height:300px;border-radius:8px"/>}
 		{tags?.length && <div className="form-group"><label>标签</label>
 			<p>{tags.join(', ')}</p>
 		</div>}

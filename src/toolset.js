@@ -225,8 +225,10 @@ export const getAvailableTools = async (conversation) => {
 			outputTools.push(tool);
 		}
 	}
+
+	const intl = new Intl.Collator();
 	return [outputTools.sort((a, b) => {
-		return a.function.name.localeCompare(b.function.name);
+		return intl.compare(a.function.name, b.function.name);
 	}), systemPrompt.filter(Boolean).join("\n")];
 };
 

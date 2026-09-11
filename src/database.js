@@ -62,7 +62,7 @@ export const {
 	 * @param {Object & AiChat.IDBKVList} value
 	 * @param {string=} type
 	 * @param {string=} name
-	 * @returns {Promise<number>}
+	 * @returns {Promise<void>}
 	 */
 	kvListSet,
 	/**

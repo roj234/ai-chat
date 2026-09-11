@@ -42,6 +42,12 @@
         line-height: 1.5;
         font-size: 16px;
 
+
+        & > .filter {
+            background: none;
+            padding: 0;
+        }
+
         /* For input mode, ensure the body has space for the input */
         &:has(.modal-input) {
             min-height: 60px;

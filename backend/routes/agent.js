@@ -21,7 +21,7 @@ export const pathFilter = (relPath, ctx) => {
 	const root = ctx.fsRoot;
 	const targetPath = path.resolve(root, relPath);
 	// allow path like /tmp/... or C:/tmp/
-	if (!globalThis.AIChatArgs.noSandbox && !targetPath.startsWith(root) && !/^(?:[a-zA-Z]:)?[\\/]tmp(?:\/|$)/.test(targetPath)) {
+	if (relPath && !globalThis.AIChatArgs.noSandbox && !targetPath.startsWith(root) && !/^(?:[a-zA-Z]:)?[\\/]tmp(?:\/|$)/.test(targetPath)) {
 		const err = new Error('Path Traversal');
 		err.statusCode = 403;
 		throw err;
@@ -316,22 +316,24 @@ export async function registerFsRoutes(router, allowExec) {
 			}
 			if (!json) items++;
 
-			if (!isDir) {
-				const fullPath = path.join(entry.parentPath, entry.name);
-				const stats = await fs.stat(fullPath);
+			const fullPath = path.join(entry.parentPath, entry.name);
+			const stats = await fs.stat(fullPath);
 
+			if (!isDir) {
 				if (stats.mtimeMs > modSince) {
-					const item = [displayPath, "file", formatSize(stats.size)];
-					if (showModified || modSince) item.push(stats.mtime.toISOString().slice(0, -5));
+					const item = [displayPath, "file", json ? stats.size : formatSize(stats.size)];
+					if (showModified || modSince) item.push(json ? stats.mtimeMs : stats.mtime.toISOString().slice(0, -5));
 					result.push(item);
 				}
 			} else if (displayPath && (showDir != null ? showDir : !modSince)) {
 				const ignore = ignored.test(displayPath, true);
-				result.push([displayPath,  ignore === 'dir' ? "dir (descents skipped)" : "dir"]);
+				const arr = [displayPath, ignore === 'dir' ? "dir (descents skipped)" : "dir"];
+				if (showModified) arr.push(0, json ? stats.mtimeMs : stats.mtime.toISOString().slice(0, -5));
+				result.push(arr);
 			}
 		}
 
-		if (modSince) result.sort((a, b) => b[3].localeCompare(a[3]));
+		if (modSince) result.sort((a, b) => b[3] - a[3]);
 
 		if (json) return result;
 		return result.length ? prefix+result.map(item => item.join("\t")).join("\n") : "[No result]";

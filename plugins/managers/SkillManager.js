@@ -9,7 +9,6 @@ import "./SkillManager.css";
 import "../rp_basic/PresetPanel.css";
 import {ensureActiveConversation, selectedConversation} from "/src/states.js";
 import {CUSTOM_CONTROLS} from "/src/settings.js";
-import {Filter} from "unconscious/common/components/Filter.jsx";
 
 import {createPanel} from "../rp_basic/CreatePanel.jsx";
 import {onLoad} from "/src/hooks.js";
@@ -154,68 +153,67 @@ function openSkillManager(preset, isOpen, close) {
 				<h2 className="title">工具和技能配置</h2>
 				<div style={"display:flex;gap:0.5rem"}>
 					<button className="ri-add-line btn ghost" title={"添加MCP服务器"} onClick={() => {
-						const state = $state({});
-						const filter = <Filter config={[
-							{
-								type: "input",
-								name: "名称",
-								placeholder: "建议 PascalCase",
-								id: "name",
-								pattern(name) {
-									if (!/^[a-zA-Z0-9_-]+$/.test(name)) return "名称只能包含大小写字母数字斜杠下划线";
-									if (mcps.find(mcp => mcp.name === name)) return "名称与现有MCP/工具集重复";
-								},
-								required: true
-							},
-							{
-								type: "radio",
-								id: "prefix",
-								required: true,
-								name: "命名空间",
-								choices: {
-									"无": null,
-									"前缀": true
-								},
-								title: {
-									"前缀": "在MCP工具名称前添加MCP服务器名称"
-								}
-							},
-							{
-								type: "input",
-								name: "服务器地址",
-								placeholder: "支持 Streamable HTTP 和 SSE 协议",
-								id: "url",
-								pattern: /^https?:\/\/.+/,
-								warning: "请输入正确的网址",
-								required: true
-							},
-							{
-								type: "input",
-								name: "API密钥",
-								placeholder: "sk-xxxxxx",
-								id: "key",
-							},
-							{
-								type: "input",
-								name: "简介",
-								placeholder: "Online search",
-								id: "desc"
-							},
-							{
-								type: "radio",
-								id: "hidden",
-								required: true,
-								name: "模型自主激活 (请填写简介)",
-								choices: {
-									"拒绝": 'manual',
-									"允许": null
-								},
-							}
-						]} choices={state}/>;
 						const modal = SimpleModal({
+							type: "filter",
 							title: "添加MCP服务器",
-							message: filter,
-							async onConfirm() {
+							value: [
+								{
+									type: "input",
+									name: "名称",
+									placeholder: "建议 PascalCase",
+									id: "name",
+									pattern(name) {
+										if (!/^[a-zA-Z0-9_-]+$/.test(name)) return "名称只能包含大小写字母数字斜杠下划线";
+										if (mcps.find(mcp => mcp.name === name)) return "名称与现有MCP/工具集重复";
+									},
+									required: true
+								},
+								{
+									type: "radio",
+									id: "prefix",
+									required: true,
+									name: "命名空间",
+									choices: {
+										"无": null,
+										"前缀": true
+									},
+									title: {
+										"前缀": "在MCP工具名称前添加MCP服务器名称"
+									}
+								},
+								{
+									type: "input",
+									name: "服务器地址",
+									placeholder: "支持 Streamable HTTP 和 SSE 协议",
+									id: "url",
+									pattern: /^https?:\/\/.+/,
+									warning: "请输入正确的网址",
+									required: true
+								},
+								{
+									type: "input",
+									name: "API密钥",
+									placeholder: "sk-xxxxxx",
+									id: "key",
+								},
+								{
+									type: "input",
+									name: "简介",
+									placeholder: "Online search",
+									id: "desc"
+								},
+								{
+									type: "radio",
+									id: "hidden",
+									required: true,
+									name: "模型自主激活 (请填写简介)",
+									choices: {
+										"拒绝": 'manual',
+										"允许": null
+									},
+								}
+							],
+							async onConfirm(state) {
 								const client = new MCPClient(state.url, {key: state.key});
 								try {
 									await client.connect();
@@ -231,10 +229,6 @@ function openSkillManager(preset, isOpen, close) {
 								mcps.push(obj);
 							}
 						});
-
-						$watch(state, () => {
-							modal.querySelector(".btn.primary").disabled = !!filter.hasError();
-						})
 					}}>
 					</button>
 					<button className="ri-sidebar-unfold-fill btn ghost" title={"关闭编辑面板"}

@@ -6,8 +6,8 @@ import {ITEM_KEY, VirtualList} from "unconscious/common/VirtualList.js";
 import {$cleanup} from "unconscious";
 import {selectableVirtualListMixin} from "unconscious/common/selectableVirtualListMixin.js";
 import {VOID_TAGS} from "fastmd";
-import {stringify} from "/common/json5-stringify.js";
 import json5 from "/common/json5-highlight.js";
+import {inspect} from "unconscious/common/inspect.js";
 
 hljs.registerLanguage('json5', json5);
 
@@ -263,7 +263,7 @@ export const highlightJsonLike = (obj, maxChars = 10000, maxStringLen = 1000) =>
 				return value;
 			});
 		}
-		if (typeof obj === 'object') str += stringify(obj, null, 2);
+		if (typeof obj === 'object') str += inspect(obj, null, 2);
 		else str += obj;
 	} catch {
 		str += String(obj) || "/* 空字符串 */";

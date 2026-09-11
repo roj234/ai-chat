@@ -6,7 +6,7 @@ import {webviewFetch} from "/vendor/jsBridge.js";
  */
 const networkErrorHandler = (url, err) => {
 	if (err.message === "Failed to fetch")
-		throw ("网络连接失败\n请检查API地址是否正确，连接是否畅通\n"+url);
+		throw ("网络连接失败\n请检查API地址是否正确，连接是否畅通 (以及是否支持CORS)\n"+url);
 	throw err;
 };
 

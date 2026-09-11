@@ -383,6 +383,8 @@ const executeLogin = () => new Promise((resolve, reject) => {
 			requestIdleCallback(() => location.reload());
 		}
 	}).catch((err) => {
+		if (err.status === 429) return setTimeout(executeLogin, Math.trunc(Math.random() * 2000));
+
 		modal?.remove();
 		if (err.name !== 'AbortError')
 			showToast("登录失败\n"+prettyError(err), 'error', err.status ? 30000 : 0);
@@ -470,9 +472,13 @@ addEventListener('afterprint', e => {
 	chat.lastElementChild.lastElementChild.remove();
 });
 
-if (import.meta.env.DEV) addEventListener("unhandledrejection", e => {
-	e.promise.catch(e => {
-		if (typeof e === 'string') return;
-		showToast("未捕获的异常\n"+prettyError(e), 'error', 0);
-	})
-});
+if (import.meta.env.DEV) {
+	addEventListener("unhandledrejection", e => {
+		e.promise.catch(e => {
+			if (typeof e === 'string') return;
+			showToast("未捕获的异常\n"+prettyError(e), 'error', 0);
+		})
+	});
+	if (location.pathname !== '/')
+		location.pathname = "/";
+}

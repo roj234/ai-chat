@@ -1,5 +1,6 @@
 import readline from 'node:readline';
 import {generatePAT} from "../utils/PAT.js";
+import {loadUserData} from "../utils/UserManager.js";
 
 // ---------- 常量 ----------
 const MAX_PENDING = 10;               // 同时等待的最大配对请求数
@@ -73,6 +74,9 @@ function resolvePairing(code, rejectReason) {
 	}
 }
 
+/** @type {number} */
+let lastPairingTime;
+
 /**
  * @returns {string}
  */
@@ -90,8 +94,6 @@ function generatePairingCode() {
  * @returns {[string, Promise<void>, Function]}
  */
 function interactiveLogin(message) {
-	if (pendingMap.size >= MAX_PENDING) throw new Error(`同时配对的人数过多，请稍后再试 (${MAX_PENDING})`);
-
 	initConsole();
 	const code = generatePairingCode();
 
@@ -124,11 +126,18 @@ function interactiveLogin(message) {
 
 /**
  * @param {AiChatBackend.Router} router
+ * @param {string} dataPath
  */
-export function registerPairingRoutes(router) {
+export function registerPairingRoutes(router, dataPath) {
 	router.post('/login', async (ctx) => {
 		const userId = ctx.params.userId;
-		if (!userId) return { error: 'userId required' };
+		if (!userId) return ctx.send(400, "");
+
+		if (pendingMap.size >= MAX_PENDING) ctx.send(429, { error: `服务器繁忙，请稍后再试 (${MAX_PENDING})` });
+
+		const timeLimiter = Math.trunc(Date.now() / 200);
+		if (lastPairingTime === timeLimiter)  ctx.send(429, { error: `服务器繁忙，请稍后再试 (${timeLimiter})` });
+		lastPairingTime = timeLimiter;
 
 		let pairCode, pairPromise, cancel;
 		try {
@@ -143,20 +152,23 @@ UA: ${JSON.stringify(userAgent)}
 			return ctx.send(500, { error: e.message });
 		}
 
-		ctx.res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-		ctx.res.write(`data: ${JSON.stringify({code: pairCode})}\n\n`);
-		ctx.res.on('close', cancel);
+		const res = ctx.res;
+
+		res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+		res.write(`data: ${JSON.stringify({code: pairCode})}\n\n`);
+		res.on('close', cancel);
 
 		try {
 			await pairPromise;
+			loadUserData(dataPath, userId, ctx);
 			const token = generatePAT(ctx, 1);
 			console.log("生成PAT: ****"+token.slice(token.length-4));
-			ctx.res.write(`data: ${JSON.stringify({token})}\n\n`);
+			res.write(`data: ${JSON.stringify({token})}\n\n`);
 		} catch (e) {
-			ctx.res.write(`data: ${JSON.stringify({error: e.message})}\n\n`);
+			res.write(`data: ${JSON.stringify({error: e.message})}\n\n`);
 		}
 
-		ctx.res.write(`data: [DONE]\n\n`);
-		ctx.res.end();
+		res.write(`data: [DONE]\n\n`);
+		res.end();
 	});
 }

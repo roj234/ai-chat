@@ -1,8 +1,10 @@
 import './SimpleModal.css';
+import Filter from "unconscious/common/components/Filter.jsx";
+import {$state} from "unconscious";
 
 /**
  *
- * @param {'info' | 'input'} type
+ * @param {'info' | 'input' | 'filter'} type
  * @param {string} title
  * @param {string} message
  * @param {string} placeholder
@@ -34,12 +36,12 @@ const SimpleModal = ({
 		if (ignoreCancel || false === await onCancel?.(inputValue)) {
 			return;
 		}
-		element.remove();
+		modal.remove();
 	}
 
 	const handleConfirm = async () => {
 		if (false === await onConfirm?.(inputValue)) return;
-		element.remove();
+		modal.remove();
 	};
 
 	let input;
@@ -50,11 +52,20 @@ const SimpleModal = ({
 
 	const self = (h) => {
 		return (e) => {
-			if (e.target === element) h(e);
+			if (e.target === modal) h(e);
 		}
 	};
 
-	const element = (
+	if (type === "filter") {
+		inputValue = $state(placeholder || {});
+		const onChanged = () => queueMicrotask(() => {
+			modal.querySelector(".btn.primary").disabled = !!after.hasError();
+		});
+		after = <Filter config={value} choices={inputValue} onChange={onChanged} />;
+		onChanged();
+	}
+
+	const modal = (
 		<div className="modal-overlay" onContextMenu.self.prevent={handleClose}>
 			<div className="modal" onClick={(e) => e.stopPropagation()}>
 				<div className="header"><b>{title}</b></div>
@@ -83,8 +94,8 @@ const SimpleModal = ({
 		</div>
 	);
 
-	document.body.append(element);
-	return element;
+	document.body.append(modal);
+	return modal;
 };
 
 export default SimpleModal;

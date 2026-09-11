@@ -54,9 +54,7 @@ export default defineConfig(async ({mode}) => {
                     name: 'fix-import-meta-dirname',
                     transform(code, id) {
                         code = code.replaceAll("IS_ANDROID_BUILD", "false");
-                        if (code.includes('import.meta.dirname')) {
-                            code = code.replace(/import\.meta\.dirname/g, JSON.stringify(path.dirname(id)));
-                        }
+                        code = code.replace(/import\.meta\.dirname/g, JSON.stringify(path.dirname(id)));
                         return {
                             code,
                             map: null

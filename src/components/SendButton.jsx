@@ -13,11 +13,11 @@ import {getToolInteractiveLevel} from "../toolset.js";
 import "./ContextUsage.css";
 import {getContextStrokeColor} from "./contextColor.js";
 import {DI, DID_SEND_BUTTON} from "../hooks.js";
-import {fastObjectMap} from "/common/pure-utils.js";
+import {immutableObjectMap} from "unconscious/common/Utils.js";
 
 const x = ["发送", "中止", "继续", "重试", "执行工具", "取消中"];
 const y = ["ri-send-plane-fill", "ri-square-fill", "ri-play-large-fill", "ri-loop-right-line", "ri-function-ai-line", "ri-square-fill spin"];
-const stateMap = fastObjectMap({
+const stateMap = immutableObjectMap({
 	//stop: 0,
 	interrupt: 2,
 	length: 2,
