@@ -1,5 +1,5 @@
 import {getToolParameters, prefixTitle, registerToolset} from "/src/toolset.js";
-import {fileAccess, getChangeableFiles} from "./fileAccess.js";
+import {fileAccess, getChangeableFiles} from "../agent/index.js";
 import {
 	compileSchema,
 	JSON_POINTER_PATTERN,
@@ -22,8 +22,8 @@ const EditJson = {
 	description: `Partially update a JSON file by targeting a specific node via RFC 6901 JSON Pointer.
 
 Modes:
-- **set** (default): Provide \`value\` + pointer to key/index. Missing intermediates are initialized to \`{}\`, explicitly create empty array before push if not exist.
-- **push**: Pointer ends with \`/-\` to append \`value\` to the array.
+- **set** (default): Provide \`value\` + pointer to key/index. Missing intermediates are initialized to \`{}\`.
+- **push**: Pointer ends with \`/-\` to append \`value\` to the array. You must explicitly create non-existent array.
 - **delete**: Omit \`value\` to remove the node. Array elements are spliced (e.g. \`/items/1\` → splice index 1).`,
 	parameters: {
 		type: "object",
@@ -34,7 +34,7 @@ Modes:
 				type: "object",
 				properties: {
 					type: { enum: SCHEMA_VALUES },
-					value: { type: "value" }
+					data: { type: "value" }
 				},
 				required: true
 			},
@@ -60,22 +60,29 @@ Modes:
 
 		const jsonPointer = parseJsonPointer(pointer);
 		let action = value === undefined ? "delete" : "set";
-		if (jsonPointer.at(-1) === '-') {
-			action = "push";
-			jsonPointer.pop();
-		}
-		if (jsonPointer.some(s=>!s))
-			throw "Found empty property key";
 
 		let type;
 		if (value) {
+			if (jsonPointer.at(-1) === '-') {
+				action = "push";
+				jsonPointer.pop();
+			}
+
 			type = value.type;
-			value = value.value;
+			value = value.data;
 
 			const err = validateAndShowError(value, {type});
 			if (err) throw err;
+		} else {
+			if (jsonPointer.at(-1) === '-') {
+				throw "Pop array is not implemented.";
+				//action = "pop";
+				//jsonPointer.pop();
+			}
 		}
 
+		if (jsonPointer.some(s=>!s))
+			throw "Found empty property key";
 		response.undo = jsonEval(obj, jsonPointer, action, value).undo;
 
 		await writeFile({
@@ -89,36 +96,6 @@ Modes:
 	},
 	title: prefixTitle("编辑JSON")
 };
-
-/**
- * @type {AiChat.FunctionTool}
- */
-const WriteJson = {
-	name: "WriteJson",
-	description: "Write a JSON file.",
-	parameters: {
-		type: "object",
-		properties: {
-			path: { type: "string" },
-			content: { description: "Complete JSON object or array that replaces all existing content.", type: ["object", "array"], },
-			indent: { enum: ["", "\t", "  ", "    "], default: "  " }
-		},
-		required: ["path", "content"]
-	},
-
-	async script(par, response, conv) {
-		par = { ...par };
-
-		let changeable = await getChangeableFiles(conv);
-		if (changeable.has(par.path)) par.overwrite = true;
-		par.content = JSON.stringify(par.content, null, par.indent ?? 2);
-
-		const result = await writeFile(par, response, conv);
-		changeable.add(par.path);
-		return result;
-	},
-	title: prefixTitle("写入JSON")
-}
 
 /**
  * @type {AiChat.FunctionTool}
@@ -172,8 +149,8 @@ Returns "valid" on success, or error messages with node path on failure.`,
 
 registerToolset(
 	"JsonEditor",
-	"JSON mutation and validation.",
-	[EditJson, WriteJson, ValidateJson],
+	"JSON patch and validation.",
+	[EditJson, ValidateJson],
 	{
 		default: true,
 		depend: ["Files"]

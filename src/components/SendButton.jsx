@@ -7,17 +7,18 @@ import {
 	updateConversationUI,
 	updateMessageUI
 } from "../states.js";
-import {$computed, $state, $watch, $watchWithCleanup, unconscious} from "unconscious";
+import {$computed, $derived, $state, $watch, $watchWithCleanup, unconscious} from "unconscious";
 import {getToolInteractiveLevel} from "../toolset.js";
 
 import "./ContextUsage.css";
 import {getContextStrokeColor} from "./contextColor.js";
 import {DI, DID_SEND_BUTTON} from "../hooks.js";
-import {fastObjectMap} from "/common/pure-utils.js";
+import {immutableObjectMap} from "unconscious/common/Utils.js";
+import {cannotInsertAfter} from "../inject-message.js";
 
 const x = ["发送", "中止", "继续", "重试", "执行工具", "取消中"];
 const y = ["ri-send-plane-fill", "ri-square-fill", "ri-play-large-fill", "ri-loop-right-line", "ri-function-ai-line", "ri-square-fill spin"];
-const stateMap = fastObjectMap({
+const stateMap = immutableObjectMap({
 	//stop: 0,
 	interrupt: 2,
 	length: 2,
@@ -47,27 +48,27 @@ export function ContextRing(sendBtn) {
 	</div>;
 
 	bar.style.strokeDasharray = CIRCUMFERENCE;
-	const mc = $computed(() => config.maxContext);
-	const cu = $computed(() => selectedConversation.contextUsage);
-	$watchWithCleanup([updateConversationUI, cu, mc], () => {
-		let pct = selectedConversation.contextUsage / config.maxContext;
+	const max = $derived(config.maxContext);
+	const used = $computed(() => selectedConversation.contextUsage, [updateConversationUI, selectedConversation]);
+	$watchWithCleanup([used, max], () => {
+		let pct = unconscious(used) / unconscious(max);
 		tooltipDiv.style.display = isNaN(pct) ? 'none' : '';
 		if (pct > 1) pct = 1;
 
 		bar.style.strokeDashoffset = CIRCUMFERENCE * (1 - (pct || 0));
 		bar.style.stroke = getContextStrokeColor(pct);
-		usageText.value = (pct * 100).toFixed(2) + "%\n" + `${selectedConversation.contextUsage} / ${config.maxContext}`;
+		usageText.value = (pct * 100).toFixed(2) + "%\n" + `${unconscious(used)} / ${unconscious(max)}`;
 	});
 	return root;
 }
 
 /**
  * @param {import("unconscious").Reactive<OpenAI.ContentPart[]>} attachments
- * @param {function(Event): void} onSend
+ * @param {function(Event): void} submitInput
  * @return {JSX.Element}
  */
-export const createSendButton = (attachments, onSend) => {
-	const sendBtn = DI[DID_SEND_BUTTON] = <button onClick={onSend} />;
+export const createSendButton = (attachments, submitInput) => {
+	const sendBtn = DI[DID_SEND_BUTTON] = <button onClick={submitInput} />;
 
 	/** @param {number} state */
 	const setIcon = state => {
@@ -76,11 +77,15 @@ export const createSendButton = (attachments, onSend) => {
 	};
 
 	const checkAuxActions = () => {
+		const last = messages.at(-1);
+
+		const text = unconscious(inputText);
+		if (text) return cannotInsertAfter(last) ? null : setIcon(0);
+
 		const value = unconscious(abortCompletion);
 		setIcon(value ? value.signal.aborted ? 5 : 1 : 0);
 		if (value) return !value.signal.aborted;
 
-		const last = messages.at(-1);
 		if (!last || selectedConversation.noAI) return false;
 
 		if (selectedConversation.resumeId) {

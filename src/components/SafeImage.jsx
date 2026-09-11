@@ -2,7 +2,8 @@ import {$state, unconscious} from "unconscious";
 
 import "./SafeImage.css";
 import {isLanAddress} from "/common/isLanAddress.js";
-import {loadingBlock} from "../utils/utils.js";
+import {loadingBlock, prettyError} from "../utils/utils.js";
+import {EVENT_BUS} from "../states.js";
 
 const whiteList = new Set([
 	"img.shields.io",
@@ -17,9 +18,9 @@ const whiteList = new Set([
 	"avatars.githubusercontent.com"
 ]);
 
-export function SafeImage({src, title = ""}) {
+export function SafeImage({src, title = "", external}) {
 	const state = $state("");
-	let image;
+	let image, error;
 
 	return <div>
 		{() => {
@@ -27,13 +28,32 @@ export function SafeImage({src, title = ""}) {
 
 			if (state.value === "error") {
 				return <div className="my-box error">
-					<span>❌ 图像加载失败</span>
+					<span>❌ {prettyError(error || '图像加载失败')}</span>
 					<button className={"btn ghost"} onClick={() => state.value = "loading"}>重试</button>
 				</div>
 			}
 
 			if (!state.value) {
 				let safe = url.startsWith("blob:") || url.startsWith("data:");
+				if (!external && !safe && !/^https?:\/\//i.test(url)) {
+					const tmp = EVENT_BUS.post(['resolveUrl'], url);
+					if (tmp instanceof Promise) {
+						tmp.then(
+							([first]) => {
+								state.value = "loading";
+								src = first
+							},
+							(e) => {
+								state.value = 'error';
+								error = e;
+							}
+						);
+						return loadingBlock("图像加载中……");
+					} else if (tmp) {
+						safe = true;
+						url = tmp;
+					}
+				}
 
 				if (!safe) {
 					// normalize

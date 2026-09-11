@@ -74,7 +74,7 @@ npm run preview
 ### 开发后端
 
 使用 `npm run dev` 时，Vite 自动启动后端（`backend/server-dev.js`）并挂载到开发服务器。  
-首次启动时，若 `backend/config.js` 不存在，会自动从 `backend/config.example.js` 复制。
+首次启动时，若 `backend/config.js` 不存在，会自动从 `backend/config.default.js` 复制。
 
 ## 构建选项
 

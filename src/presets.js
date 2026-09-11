@@ -1,0 +1,229 @@
+import {DI_settings, onLoad} from "./hooks.js";
+import {kvListDel, kvListGet, kvListGetKeys, kvListSet} from "./database.js";
+import {$asyncState, $computed, $state, $update, debugSymbol, unconscious} from "unconscious";
+import {cloneNamed, prettyError, resolveDBRelativeURL} from "./utils/utils.js";
+import {deepEqual} from "unconscious/common/deepEqual.js";
+import {jsonFetch} from "../common/fetch-utils.js";
+import {config, CONFIG_VERSION, EVENT_BUS, LOCKED} from "./states.js";
+import {showToast} from "./components/Toast.js";
+import {throttledPromiseLast} from "../common/pure-utils.js";
+import {Dropdown} from "./components/Dropdown.jsx";
+import {presetCategories, PROMPT_TEMPLATES} from "./settings.js";
+import SimpleModal from "./components/SimpleModal.jsx";
+
+export const PRESET_KVS_ID = 'preset';
+
+/**
+ * @type {import("unconscious").Reactive<AiChat.IDBKVList[]>}
+ */
+export const presets = $state([]);
+
+const promptTemplates = [];
+
+onLoad(() => {
+	kvListGetKeys(PRESET_KVS_ID, presets);
+	Object.entries(PROMPT_TEMPLATES).forEach(([key, value]) => {
+		promptTemplates.push({
+			name: "\u200C"+key,
+			[LOCKED]: true
+		})
+	})
+});
+
+/**
+ * @type {import("unconscious").Reactive<{}>}
+ * @private
+ */
+const _modelEndpoint = $state();
+
+/**
+ * @type {boolean}
+ */
+export let isLlamaCppBackend, isMyLlamaCppBackend;
+
+export const setIsLlamaCppBackend = (b, b2) => {
+	isLlamaCppBackend = b;
+	isMyLlamaCppBackend = b2;
+};
+
+/**
+ * @type {import("unconscious").ReactivePromise<AiChat.ApiModel[]>}
+ */
+export const models = $asyncState(endpoint => {
+	return endpoint?.url ? jsonFetch(resolveDBRelativeURL(endpoint.url) + "/models", {key: endpoint.key}).then(({data}) => data) : [];
+}, _modelEndpoint);
+
+/**
+ * @param {boolean=} force
+ * @return {import("unconscious").ReactivePromise<AiChat.ApiModel[]>}
+ */
+export const updateModels = force => {
+	const value = {
+		url: resolveDBRelativeURL(config.endpoint),
+		key: config.accessToken
+	};
+	if (force || !deepEqual(value, _modelEndpoint.value)) _modelEndpoint.value = value;
+	return models;
+};
+
+async function applyPreset(name, target) {
+	const isPrompt = name[0] === ':';
+	const isModel = name.indexOf('/');
+	let p = [
+		{},
+		kvListGet(PRESET_KVS_ID, isModel > 0 ? name.slice(0, isModel) : name)
+	];
+	if (isModel > 0) p.push(kvListGet(PRESET_KVS_ID, name));
+	let data = (await Promise.all(p)).reduce(Object.assign);
+	data.name = data.meta;
+
+	for (const category of isPrompt ? ["prompt"] : isModel > 0 ? ["model", "sampling", "provider"] : ["provider"]) {
+		const catData = presetCategories[category];
+		const keys = catData.keys;
+		for (let i = 0; i < keys.length; i++) {
+			const key = keys[i];
+			target[key] = data[key] ?? catData.values[i].default;
+		}
+	}
+}
+
+/**
+ *
+ * @param {string} name
+ * @return {Promise<void>}
+ */
+const setPreset = async name => {
+	const set = unconscious(config);
+	await applyPreset(name, set);
+	delete config._dirty;
+	DI_settings.sync();
+	$update(config);
+
+	instance.setSelection(name);
+};
+
+let instance;
+
+export const loadPreset = name => setPreset(name).then(() => true, (e) => {
+	showToast(`配置 ${name} 加载失败\n` + prettyError(e), 'error');
+});
+
+export function ProviderDropdown({items, selection}) {
+	const doSetSelection = throttledPromiseLast(async name => {
+		const isModel = name.indexOf('/');
+		if (!name.endsWith("\u200C")) {
+			if (!await loadPreset(name)) return;
+			name = items[+(isModel > 0)].name;// = `${isModel > 0 ? '/模型' : '供应商'} (${name})\u200C`;
+		}
+
+		selection.value = name;
+		dropdown.setSelection(name);
+	});
+
+	const dropdownOnChange = (action, name) => {
+		if (action === 'd') {
+			let p = [];
+			p.push(kvListDel(PRESET_KVS_ID, name));
+			if (!name.startsWith('/')) {
+				name += '/';
+				presets.forEach(item => item.name.startsWith(name) && p.push(kvListDel(PRESET_KVS_ID, item.name)));
+			}
+			Promise.all(p).catch((e) => {
+				showToast("部分删除失败\n"+prettyError(e), 'error');
+			});
+		} else if (action === 's') {
+			doSetSelection(name);
+		}
+	};
+
+	const dropdown = <Dropdown items={items} selection={selection} displayName="desc" onChanged={dropdownOnChange} />;
+
+	instance = dropdown;
+
+	return dropdown;
+}
+
+export function PromptDropdown() {
+	const items = $computed(() => {
+		const out = [...promptTemplates];
+		for (const t of presets) {
+			if (t.name[0] === ':') {
+				out.push({ name: t.name.slice(1) });
+			}
+		}
+
+		return out;
+	});
+	let prevName;
+
+	return <Dropdown items={items} selection={"选择……"} dir={'down'}
+		onChanged={(type, name) => {
+			prevName = null;
+
+			if (type === 'd') {
+				kvListDel(PRESET_KVS_ID, ':'+name);
+			} else {
+				if (name.charCodeAt(0) === 0x200C) {
+					const template = PROMPT_TEMPLATES[name.slice(1)];
+					if (template[0] === '\n') config.systemPrompt += template;
+					else config.systemPrompt = template;
+					DI_settings.sync(false, true);
+					return;
+				}
+
+				loadPreset(':'+name).then(() => prevName = name);
+			}
+		}} add={(name) => {
+			SimpleModal({
+				type: 'input',
+				title: "保存提示词",
+				placeholder: '起个名字...',
+				value: name || prevName,
+				onConfirm(value) {
+					if (!value) return false;
+
+					const cfg = cloneNamed(config, presetCategories["prompt"].keys);
+
+					kvListSet(cfg, PRESET_KVS_ID, ":" + value);
+				}
+			});
+	}}/>;
+}
+
+const MERGED_CONFIG = debugSymbol("MergedConfig");
+
+EVENT_BUS.on(['kvs', PRESET_KVS_ID, 'set'], () => {
+	config[CONFIG_VERSION] = (config[CONFIG_VERSION] || 0) + 1;
+});
+
+/**
+ *
+ * @param {AiChat.Conversation} conv
+ * @return {Promise<AiChat.LocalPreset>}
+ */
+export const getCombinedPreset = async (conv) => {
+	const globalPreset = unconscious(config);
+	const presets = conv.presets;
+	const overrides = conv.overrides;
+	if (!overrides && !presets) return globalPreset;
+
+	let combined = conv[MERGED_CONFIG];
+	if (!combined || combined[CONFIG_VERSION] !== globalPreset[CONFIG_VERSION]) {
+		combined = conv[MERGED_CONFIG] = {...globalPreset};
+		if (presets) {
+			if (Array.isArray(presets)) {
+				for (const preset of presets) {
+					await applyPreset(preset, combined);
+				}
+			} else {
+				await applyPreset(presets, combined);
+			}
+		}
+		if (overrides) Object.assign(combined, overrides);
+	}
+	return combined;
+}
+
+export const markCombinedPresetDirty = (conv) => {
+	delete conv[MERGED_CONFIG];
+}

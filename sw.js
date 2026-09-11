@@ -5,10 +5,7 @@
 const CACHE_NAME = 'blob-cache-v1';
 const CACHE_NAME_ASSETS = 'assets-cache-v1';
 const BLOB_URL_PATTERN = /\/api\/v2.*\/blob\/[a-zA-Z0-9\-_]+/;
-const ASSETS_URL_PATTERN = /\/assets\/[a-zA-Z0-9\-_\/]+\.(?:js|mjs|css|png|woff2)$/;
-
-// 每次构建更新，触发activate事件
-self[APP_VERSION+"/"+BUILD_NUMBER];
+const ASSETS_URL_PATTERN = /\/assets\/[a-zA-Z0-9\-_.\/]+\.(?:js|mjs|css|png|woff2)$/;
 
 // ===== 生命周期 =====
 self.addEventListener('install', (event) => {
@@ -26,9 +23,21 @@ self.addEventListener('activate', (event) => {
 // ===== 请求拦截 =====
 self.addEventListener('fetch', (event) => {
 	const request = event.request;
-	if (!IS_ANDROID_BUILD && ASSETS_URL_PATTERN.test(request.url)) {
-		event.respondWith(handleAssetRequest(request, event));
-	} else if (BLOB_URL_PATTERN.test(request.url)) {
+	if (!IS_ANDROID_BUILD) {
+		const url = new URL(request.url);
+		url.search = url.hash = '';
+
+		if (request.mode === 'navigate' && isIndexUrl(url.href)) {
+			event.respondWith(handleIndexRequest(url, request, event));
+			return;
+		}
+		if (ASSETS_URL_PATTERN.test(url.href)) {
+			event.respondWith(handleAssetRequest(request, event));
+			return;
+		}
+	}
+
+	if (BLOB_URL_PATTERN.test(request.url)) {
 		if (request.method === 'GET') {
 			event.respondWith(handleGetBlobRequest(request, event));
 		} else if (request.method === 'POST') {
@@ -56,27 +65,74 @@ const db = new Promise((resolve, reject) => {
 	req.onerror = reject;
 });
 
+// 每次构建更新，触发activate事件
+db[APP_VERSION+"/"+BUILD_NUMBER];
+
+// ===== 首页离线回退 =====
+
+/**
+ * 判断请求是否指向首页（站点根路径或 index.html）
+ * @param {string} url
+ * @returns {boolean}
+ */
+const isIndexUrl = (url) => {
+	const {pathname} = new URL(url);
+	return pathname.endsWith('/') || pathname.endsWith('/index.html');
+};
+
+/**
+ * 首页缓存 network-first
+ * @param {string} key
+ * @param {Request} request
+ * @param {FetchEvent} event
+ * @returns {Promise<Response>}
+ */
+const handleIndexRequest = async (key, request, event) => {
+	const cache = await caches.open(CACHE_NAME_ASSETS);
+
+	const abort = new AbortController();
+	const timer = setTimeout(() => abort.abort(), 3000);
+
+	try {
+		const response = await fetch(key, {
+			cache: 'no-store',
+			redirect: 'follow',
+			signal: abort.signal,
+		});
+		clearTimeout(timer);
+
+		if (response.ok) {
+			event.waitUntil(cache.put(key, response.clone()).catch(() => {}));
+			return response;
+		}
+		console.warn('[SW] Index status ' + response.status + ', fallback to cache');
+	} catch (err) {
+		console.log('[SW] Index fetch failed, fallback to cache', err);
+	}
+
+	return await cache.match(key) || Response.error();
+};
+
 // ===== 缓存核心逻辑 =====
 
 /**
- * 处理匹配的 assets 请求（静态缓存）
+ * 资源缓存 cache-first
  * @param {Request} request
  * @param {FetchEvent} event
  * @returns {Promise<Response>}
  */
 const handleAssetRequest = async (request, event) => {
 	const cache = await caches.open(CACHE_NAME_ASSETS);
-	const cachedResponse = await cache.match(request);
-	if (cachedResponse) return cachedResponse;
+	const cached = await cache.match(request);
+	if (cached) return cached;
 
 	// 浏览器可能发起 opaque 请求，比如背景图
-	const networkResponse = await fetch(request.url, { mode: 'cors' });
-	if (networkResponse.ok) {
-		const clonedResponse = networkResponse.clone();
-		event.waitUntil(cache.put(request, clonedResponse));
+	const response = await fetch(request.url, { mode: 'cors' });
+	if (response.ok) {
+		event.waitUntil(cache.put(request, response.clone()));
 	}
 
-	return networkResponse;
+	return response;
 };
 
 /**

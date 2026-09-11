@@ -1,8 +1,14 @@
-# AiChat - 爱聊天
+# Aint - Aichat Is Not a Toy
 
 现代化的高性能纯 Web 多用途 AI 前端，基于 [Unconscious](https://github.com/Roj234/unconscious) 响应式框架。
 
+![Social](media/social-preview.webp)
+<details>
+<summary>展开旧版简介</summary>
+
 ![Banner](media/banner.webp)
+
+</details>
 
 ## 为什么选它
 
@@ -19,7 +25,7 @@
   - 尽管有的组合可能不尽如人意，*但它可以。*
 - **前端 2MB**，后端加依赖约 600 KB
 - **只需要浏览器**：Chrome (or WebView) 118+，提供有限的 Firefox 支持。
-- **不需要 Docker，不需要编译，不需要 node_modules 和数据库服务**
+- **不需要 Docker，不需要编译，不需要 node_modules，Postgre或者Redis**
   - 哪怕连后端都不想要，你的敌人也只有 CORS
 
 ## 为什么不选它
@@ -81,14 +87,15 @@
 - **请求日志**：每条消息可追溯计费信息，并提供按日期聚合的统计图表
 - **TTS & 文生图**：内置工具，BYOEndpoint，TTS为实验性功能，文生图已稳定可用（需手动开启插件）
 - **暗色主题 & 移动端适配**：手机能用，手机好用，还有安卓版
-- **多端同步（需后端）**：对话和其它数据无缝同步，甚至还能多端同时流式生成，`stream.tee()`！
+- **多端同步（需后端）**：数据无缝同步，多端同步流式渲染！
 - **断线重连（需后端）**：无线连接断开了？后端替你缓存，像大厂 App 一样后台生成！
-- **远程控制（需后端）**：手机控制PC，当然，其他PC也可以；需要在设置中允许远程
+- **远程控制（需后端）**：手机或PC控制另一台PC；需要在设置中允许远程
+- **API代理（需后端）**：把你的Key共享给别人，限制RPM或TPM，简单（可能并不）的小锅饭
 
 ## 快速开始
 
-![preview](media/preview.jpg)
-> 截图版本 2.20.0
+![preview](media/preview.webp)
+> 截图版本 4.0.0
 
 [在线体验](https://roj234.github.io/ai-chat/) 静态版本，或从 [Release](https://github.com/Roj234/ai-chat/releases) 页面下载构建产物：
 

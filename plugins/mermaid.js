@@ -1,6 +1,6 @@
 import {registerCodeBlockRenderer} from "/src/markdown/markdown.js";
 import {getCurrentTheme} from "/src/states.js";
-import {PLACEHOLDERS} from "../src/toolset.js";
+import {PLACEHOLDERS} from "/src/toolset.js";
 
 PLACEHOLDERS['mdfmt'] += `
 - Render mermaid:
@@ -29,6 +29,7 @@ export const registerMermaidRenderer = () => {
 
 		// for [copy code] button
 		node.dataset.text = code;
+		node.textContent = code;
 
 		renderQueue = renderQueue.then(async () => {
 			if (node.isConnected) {

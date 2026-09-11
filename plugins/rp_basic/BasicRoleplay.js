@@ -1,10 +1,11 @@
 import {
+	auxMainlyTouch,
 	config,
 	EVENT_BUS,
-	isMobile,
 	MessageRoles,
 	messages,
 	onConversationLoaded,
+	onConversationSwitchOut,
 	onConversationSwitchTo,
 	selectedConversation,
 	updateMessageUI
@@ -22,7 +23,7 @@ import {
 	debugSymbol,
 	unconscious
 } from "unconscious";
-import {SETTINGS} from "/src/settings.js";
+import {GLOBAL_SETTINGS} from "/src/settings.js";
 
 import {cloneNamed, downloadFile} from "/src/utils/utils.js";
 import {parseImageMeta} from "/common/imate.js";
@@ -33,7 +34,6 @@ import {Dropdown} from "/src/components/Dropdown.jsx";
 import {createTab} from "/src/components/SettingDialog.jsx";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {_CharacterEditor, _LorebookEditor, _PresetEditor, markDirty} from "./PresetPanel.jsx";
-import {createPanel} from "./CreatePanel.jsx";
 import {convertSTCharacter, convertSTLorebook, convertSTPreset, normalizeCRLF} from "./convert.js";
 import {
 	applyMacro,
@@ -47,14 +47,18 @@ import {LorebookList, PresetList} from "./TagList.jsx";
 import schema from "./schema.json";
 import {compileSchema, validateAndShowError} from "unconscious/common/json-schema-utils.js";
 import {onLoad} from "/src/hooks.js";
-import {openJsonEditor} from "/src/json_editor/jsonEditorProxy.js";
+import {openJsonEditor} from "/src/json_editor/JsonEditDialog.js";
 import {base64DecodeToString} from "unconscious/common/Base64.js";
 import {LorebookMatcher} from "./LorebookMatcher.js";
-import {VirtualDirectory} from "../tools/VirtualFileSystem.js";
+import {createFileSystemAsync, createVirtualFileSystem} from "../agent/index.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
-import {FS_INSTANCE} from "../tools/fileAccess.js";
-import {createWebFileSystem} from "../tools/WebFileSystem.js";
 import {PROMISE_CATCH} from "/common/pure-utils.js";
+
+import {closeWindow, openWindow} from "/src/components/Windows.jsx";
+import {Icon_save} from "/src/components/Icons.jsx";
+
+import "./BasicRoleplay.css";
+import {HighlightBox} from "/src/components/TextDiff.jsx";
 
 compileSchema(schema);
 
@@ -79,9 +83,9 @@ const INST = debugSymbol("CharacterInstance");
 function showOverwriteConfirm(item, typeStr, callback) {
 	if (item._dirty) {
 		SimpleModal({
-			title: "当前" + typeStr + "已修改",
+			title: `${typeStr} ${JSON.stringify(item.name)} 已修改`,
 			message: "点击确定丢弃修改，或取消并自行保存。",
-			onConfirm: callback
+			onConfirm: callback,
 		})
 	} else {
 		callback();
@@ -98,161 +102,310 @@ const storeOptions = {
  *
  * @param {string} typeId - ID st|preset
  * @param {Function} editorConstructor
+ * @param {Object} defaultValue
  * @return {[
  *     element: import("unconscious").Renderable,
- *     open: function(): void,
  *     items: import("unconscious").Reactive<(Object & AiChat.IDBKVList)[]>,
  *     item: import("unconscious").Reactive<Object & AiChat.IDBKVList>,
- *     onImported: function(id: number, name: string): void,
+ *     openEditor: function(string): void,
  * ]}
  */
-function createSchemaEditColumn(typeId, editorConstructor) {
+function createSchemaEditColumn(typeId, editorConstructor, defaultValue = {}) {
 	/** @type {import("unconscious").Reactive<AiChat.IDBKVList[]>} */
 	const items = $state([]);
 	/** @type {import("unconscious").Reactive<IDBKVList>} */
 	const selectedItem = $store(typeId, undefined, storeOptions);
 	if (typeId !== 'st|preset' && !selectedItem._dirty) selectedItem.value = undefined;
 
-	let {open: _openPanel, close: _closePanel} = createPanel(editorConstructor);
-	const openEditor = () => _openPanel(selectedItem);
+	let handle;
+
+	const doSave = (name) => {
+		delete selectedItem._dirty;
+		kvListSet(unconscious(selectedItem), typeId, name).then(() => {
+			dropdown.setSelection(name);
+		}, e => {
+			selectedItem._dirty = '*';
+		});
+	};
+	const doExport = async data => {
+		const {_dirty, ...value} = await data;
+		value.type = typeId;
+		let filename = definition[typeId][0] + ' ' + value.name;
+		if (_dirty) filename += " (已修改)";
+
+		downloadFile(new File([JSON.stringify(value)], filename + ".json", {lastModified: value.time}));
+	};
+
+	const openEditor = () => {
+		if (handle) return;
+
+		let element = editorConstructor(selectedItem);
+		const chi = element.firstElementChild;
+		chi.append(
+			<button className={"ri- btn primary"} disabled={() => !selectedItem._dirty} onClick={() => {
+				if (typeId === "st|char") return doSave(selectedItem.name);
+
+				SimpleModal({
+					type: "input",
+					title: "输入" + typeStr + "名称 【当前：" + selectedItem.name + "】",
+					placeholder: "重命名就在这填新名字，否则直接确认",
+					onConfirm(name) {
+						name ||= selectedItem.name;
+						if (!name) return false;
+						doSave(name);
+					}
+				})
+			}} title="保存"><Icon_save/></button>,
+			<button className="ri-download-line btn ghost" title="导出"
+					onClick={() => doExport(unconscious(selectedItem))}/>
+		);
+
+		handle = openWindow({
+			id: "panel-" + typeId,
+			icon: typeStr[0],
+			title: () => unconscious(selectedItem)?.name || "unknown",
+			dock: "right",
+			width: 400,
+			element,
+			actions: chi
+		});
+
+		const _off = EVENT_BUS.onoff(['closeWindow', handle.id], () => {
+			_off();
+
+			handle = null;
+			const classList = editBtn.classList;
+			classList.remove("primary");
+			classList.add("ghost");
+		});
+
+		const classList = editBtn.classList;
+		classList.remove("ghost");
+		classList.add("primary");
+	};
+	const _closePanel = () => {
+		if (handle) closeWindow(handle);
+	};
 
 	const typeStr = definition[typeId][0];
 
 	const dropdown = <Dropdown
 		items={items}
 		selection={$computed(() => (selectedItem._dirty || "") + (selectedItem.name || ""))}
-		onChanged={(type, index) => {
-			const name = items[index].name;
+		actions={() => <i className="ri-download-line" title="导出"></i>}
+		add={(name) => {
+			showOverwriteConfirm(selectedItem, typeStr, () => {
+				SimpleModal({
+					type: "input",
+					title: "输入新" + typeStr + "名",
+					value: name,
+					onConfirm(name) {
+						if (!name) return false;
+						const obj = structuredClone(defaultValue);
+						obj.name = name;
+						selectedItem.value = obj;
+						dropdown.setSelection(name);
+						openEditor();
+					},
+					onCancel() {
+						_closePanel();
+						setTimeout(() => {
+							selectedItem.value = undefined;
+							dropdown.setSelection(null);
+						}, 170);
+					}
+				})
+			});
+		}}
+		onChanged={(type, name, e) => {
 			if (type === 'd') {
 				kvListDel(typeId, name);
 			} else {
+				if (e.target.tagName === "I") {
+					e.stopPropagation();
+					doExport(kvListGet(typeId, name));
+					return;
+				}
+
 				showOverwriteConfirm(selectedItem, typeStr, () => kvListGet(typeId, name).then(value => {
 					selectedItem.value = value;
 					delete selectedItem._dirty;
 					$update(selectedItem);
-					dropdown.setSelection(index);
+					dropdown.setSelection(name);
 				}));
 			}
 		}}/>;
 
-	const element = <>
-		<div className={"choice-scroll"}>
-			<button className={"btn ghost"} onClick={() => {
-				const closePanel = _closePanel();
-				showOverwriteConfirm(selectedItem, typeStr, () => {
-					SimpleModal({
-						type: "input",
-						title: "输入新"+typeStr+"的名称",
-						onConfirm(name) {
-							if (!name) return false;
-							selectedItem.value = {name};
-							dropdown.setSelection(name);
-							openEditor();
-						},
-						onCancel() {
-							return closePanel.then(() => {
-								selectedItem.value = undefined;
-								dropdown.setSelection(null);
-							});
-						}
-					})
-				});
-			}}>新建
-			</button>
-			<button className={"btn ghost"} onClick={openEditor}
-					disabled={() => !unconscious(selectedItem)}
-					onContextMenu.prevent={e => {
-						const key = typeId + ":" + selectedItem.name;
+	const editBtn = <button className={"ri-edit-2-line btn ghost"} onClick={openEditor}
+		disabled={() => !unconscious(selectedItem)} title="编辑"
+		onContextMenu.prevent={e => {
+			const key = typeId + ":" + selectedItem.name;
 
-						let skipNext;
-						const [updateValue, onClose] = openJsonEditor(key, () => {
-							const { name, type, time, _dirty, ...rest } = unconscious(selectedItem);
-							return JSON.stringify(rest, null, 2);
-						}, (v) => {
-							const obj = JSON.parse(v);
-							obj.name = selectedItem.name;
-							obj.type = selectedItem.type;
-							markDirty(obj);
-							selectedItem.value = obj;
-							skipNext = true;
-						});
-						const syncToEditor = () => {
-							if (skipNext) skipNext = false;
-							else updateValue();
-						};
+			let skipNext;
+			const [updateValue, onClose] = openJsonEditor(key, () => {
+				const {name, type, time, _dirty, ...rest} = unconscious(selectedItem);
+				return JSON.stringify(rest, null, 2);
+			}, (obj) => {
+				obj.name = selectedItem.name;
+				obj.type = selectedItem.type;
+				markDirty(obj);
+				selectedItem.value = obj;
+				skipNext = true;
+			});
+			const syncToEditor = () => {
+				if (skipNext) skipNext = false;
+				else updateValue();
+			};
 
-						$watch(selectedItem, syncToEditor, false);
-						onClose(() => $unwatch(selectedItem, syncToEditor));
-					}}
-			>
-				编辑
-				<span className={"tooltip"}>{isMobile?"长按":"右键单击在独立窗口中"}编辑原始数据</span>
-			</button>
-			<button className={"btn ghost"} disabled={() => !selectedItem._dirty} onClick={() => {
-				SimpleModal({
-					type: "input",
-					title: "输入"+typeStr+"名称 【当前："+selectedItem.name+"】",
-					placeholder: "重命名就在这填新名字，否则直接确认",
-					onConfirm(name) {
-						name ||= selectedItem.name;
-						if (!name) return false;
-
-						delete selectedItem._dirty;
-						kvListSet(unconscious(selectedItem), typeId, name).then(() => {
-							dropdown.setSelection(name);
-						}, e => {
-							selectedItem._dirty = '*';
-						});
-					}
-				})
-			}}>保存
-			</button>
-			<button className={"btn ghost"} disabled={() => !selectedItem.value}
-					onClick={() => {
-						const value = structuredClone(unconscious(selectedItem));
-						const dirty = value._dirty;
-						delete value._dirty;
-						value.type = typeId;
-						let filename = definition[typeId][0] + ' ' + value.name;
-						if (dirty) filename += " (已修改)";
-
-						downloadFile(new File([JSON.stringify(value)], filename+".json", {lastModified: value.time}));
-					}}>
-				导出
-			</button>
-			{dropdown}
-		</div>
-	</>;
+			$watch(selectedItem, syncToEditor, false);
+			onClose(() => $unwatch(selectedItem, syncToEditor));
+		}}>
+		<span className={"tooltip"}>{auxMainlyTouch ? "长按" : "右击"}编辑原始数据</span>
+	</button>;
 
 	return [
-		element,
-		openEditor,
+		<div className={"choice-scroll"}>{dropdown}{editBtn}</div>,
 		items,
 		selectedItem,
+		(name) => {
+			showOverwriteConfirm(selectedItem, typeStr, () => kvListGet(typeId, name).then(value => {
+				selectedItem.value = value;
+				delete selectedItem._dirty;
+				$update(selectedItem);
+				openEditor();
+				dropdown.setSelection(name);
+			}));
+		},
 	];
 }
+
 //endregion
 
-const [presetBar, openPresetPanel, presetList, currentPreset] = createSchemaEditColumn("st|preset", _PresetEditor);
-const [charBar, openCharPanel, characterList, currentCharacter] = createSchemaEditColumn("st|char", _CharacterEditor);
-const [lorebookBar, openLorebookPanel, lorebookList, currentLorebook] = createSchemaEditColumn("st|lorebook", _LorebookEditor);
+const [presetBar, presetList, currentPreset] = createSchemaEditColumn("st|preset", _PresetEditor, {
+	prompts: [
+		{
+			name: "系统提示",
+			enabled: true,
+			role: "system",
+			content: `Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.`,
+		},
+		{
+			name: "默认模板",
+			enabled: true,
+			role: "system",
+			content: `
 
-charBar[0].append(<button className={"btn ghost"} disabled={() => {
-	const chr = unconscious(currentCharacter);
-	return !chr?.name || !unconscious(characterList).find(item => item.name === chr.name);
-}} onClick={() => {
-	createConversation(unconscious(currentCharacter));
-}}>创建故事</button>);
+{{worldInfoBefore}}
+
+---
+
+用户 {{user}} 信息：
+
+{{personaDescription}}
+
+角色 {{char}} 信息：
+
+{{description}}
+
+{{personality}}
+
+{{scenario}}
+
+---
+
+{{worldInfoAfter}}
+
+---
+
+{{dialogueExamples}}`,
+		},
+		{
+			name: "对话历史",
+			enabled: true,
+			role: "system",
+			content: "chatHistory",
+			attr: "marker"
+		}
+	]
+});
+const [charBar, characterList, currentCharacter, openCharacterEditor] = createSchemaEditColumn("st|char", _CharacterEditor);
+const [lorebookBar, lorebookList, currentLorebook] = createSchemaEditColumn("st|lorebook", _LorebookEditor);
+
+export const exportForCV_openCharacterEditor = openCharacterEditor;
+
+//region 从角色卡新建对话
+charBar.prepend(
+	<button className={"ri- btn ghost"} onClick={async () => {
+		openWindow({
+			id: "charViewer",
+			title: "橘色卡管理器",
+			element: (await import("./page/characterViewer.js")).default()
+		});
+	}} title="橘色卡管理器">
+		<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor">
+			<rect x="3" y="3" width="18" height="18" rx="2" stroke-width="2"/>
+			<line x1="14" y1="3" x2="14" y2="21" stroke-width="2"/>
+			<rect x="6" y="6" width="5.5" height="7" rx="1" fill="#f97316" stroke="none"/>
+			<line x1="6" y1="16" x2="11" y2="16" stroke-width="1.5" stroke-linecap="round"/>
+		</svg>
+	</button>,
+
+	<button className={"ri-book-open-line btn ghost"} disabled={() => {
+		const chr = unconscious(currentCharacter);
+		return !chr?.name || !unconscious(characterList).find(item => item.name === chr.name);
+	}} onClick={() => {
+		exportForCV_createConversation(unconscious(currentCharacter));
+	}} title="以选中角色开始故事"><span className="tooltip">以选中角色开始故事</span></button>
+);
+
+/**
+ * 从角色新建对话
+ * @param {AiChat.DnD.MyCharacter} char
+ * @return {Promise<void>}
+ */
+export async function exportForCV_createConversation(char) {
+	const conv = {
+		title: "[Char] " + char.name,
+		time: Date.now(),
+	};
+	const messages = [
+		{
+			role: "st|char",
+			content: {
+				name: char.name,
+				// ""为嵌入世界书（若存在）保留
+				lorebookNames: [""],
+				greeting: 0
+			}
+		}
+	];
+
+	if (config.temporaryChat) {
+		conv.temporary = true;
+		conv.title += ' (临时)';
+	}
+
+	await loadRPConversation(conv, messages, true);
+	await importConversationData(conv, messages);
+
+	if (config.temporaryChat) {
+		conv.id = "temporary-"+conv.time;
+	}
+
+	showToast("已创建 " + char.name + " 的新对话", "ok");
+}
+
+//endregion
 
 createTab("character", "角色", "ri-user-heart-line");
-SETTINGS.filter((item) => item._id === "import").forEach((item) => {
+GLOBAL_SETTINGS.filter((item) => item._id === "import").forEach((item) => {
 	if (!Array.isArray(item._tab)) {
 		item._tab = [item._tab || "general", "character"];
 	} else {
 		item._tab.push("character");
 	}
 });
-SETTINGS.push(
+GLOBAL_SETTINGS.push(
 	{
 		id: "nickname",
 		name: "你的名字",
@@ -303,10 +456,12 @@ SETTINGS.push(
 	{
 		id: "st_postProcess",
 		name: "提示词后处理",
-		title: "现代LLM后端的普遍规范: 系统提示只能在开头，末尾至多一条助手消息。\n角色对话的提示构造完全由预设控制，有问题请修改预设\n靠后处理兜底可能产生怪异行为",
+		title: "现代LLM普遍规范: 0-1条系统消息在开头，末尾0-1条助手消息。\n建议选择【合并同角色消息】\n但提示构造由预设完全控制，靠后处理兜底可能产生怪异行为",
 		type: "radio",
+		required: true,
 		_tab: "character",
 		choices: {
+			"无": 0,
 			"单系统消息": 1,
 			"合并同角色消息": 2,
 			"交替对话": 3
@@ -360,7 +515,7 @@ onLoad(() => {
 		}
 	});
 
-	EVENT_BUS.on(['createAgent', 'character'], (conv, messages, data, path) => {
+	EVENT_BUS.on(['createAgent', 'character'], (conv, path, messages, data) => {
 		messages.unshift({
 			role: "st|char",
 			content: {
@@ -369,7 +524,7 @@ onLoad(() => {
 				greeting: 0
 			}
 		});
-		return loadCB(conv, messages);
+		return loadRPConversation(conv, messages);
 	});
 })
 
@@ -427,14 +582,14 @@ registerToolset(RP_TOOLSET_ID, "", [FetchLorebook], {
 });
 //endregion
 
+const FIRST_LOAD = debugSymbol("CharacterFirstLoad");
 /**
  * 对话从数据库加载/切换到回调
- * FIXME: 初次打开时会调用两次，幂等但浪费性能（数据库加载/切换）
  * @param {AiChat.Conversation} conv
  * @param {AiChat.Message[]} messages
- * @param {string[]} [isLoadFromDB]
+ * @param {boolean} [isLoadFromDB]
  */
-const loadCB = (conv, messages, isLoadFromDB) => {
+const loadRPConversation = (conv, messages, isLoadFromDB) => {
 	/** @type {AiChat.DnD.MyCharConversation} */
 	const charInstance = messages[0];
 	const isCharacterCard = charInstance?.role === "st|char";
@@ -484,10 +639,16 @@ const loadCB = (conv, messages, isLoadFromDB) => {
 				content: charInstance
 			});
 		}
+		if (isLoadFromDB) conv[FIRST_LOAD] = true;
 	})
 };
-onConversationSwitchTo(loadCB);
-onConversationLoaded(loadCB);
+onConversationSwitchTo((conv, message) => {
+	return !conv[FIRST_LOAD] && loadRPConversation(conv, message);
+});
+onConversationSwitchOut((conv) => {
+	delete conv[FIRST_LOAD];
+});
+onConversationLoaded((conv, path, messages) => loadRPConversation(conv, messages, true));
 
 //region 数据导入
 /**
@@ -536,8 +697,6 @@ const checkJSON = (json, batch, fileName, imageBlob) => {
 	}
 };
 
-registerDataImportHandler("application/json", checkJSON);
-
 const imageLoader = async (file, batch) => {
 	const imageData = new Uint8Array(await file.arrayBuffer());
 	const im = await parseImageMeta(imageData, { text: true, strip: true });
@@ -556,46 +715,14 @@ const imageLoader = async (file, batch) => {
 	if (result) return await result;
 };
 
+registerDataImportHandler("application/json", checkJSON);
 registerDataImportHandler("image/png", imageLoader);
 registerDataImportHandler("image/jpeg", imageLoader);
-
-//endregion
-//region 从角色卡新建对话
-/**
- * 从角色新建对话
- * @param {AiChat.DnD.MyCharacter} char
- * @return {Promise<boolean>}
- */
-async function createConversation(char) {
-	await importConversationData({
-		title: "[Char] "+char.name,
-		time: Date.now(),
-	}, [
-		{
-			role: "st|char",
-			content: {
-				name: char.name,
-				// ""为嵌入世界书（若存在）保留
-				lorebookNames: [""],
-				greeting: 0
-			}
-		}
-	]);
-
-	showToast("已创建 "+char.name+" 的新对话", "ok");
-	return true;
-}
 //endregion
 //region UI组件
 MessageRoles["st|char"] = {
 	name: "角色卡",
-	/**
-	 *
-	 * @param {AiChat.DnD.MyCharConversation} self
-	 * @param output
-	 * @param callbacks
-	 */
-	compose(self, output, callbacks, _idx, _len, conv) {
+	preprocess(self, messages, conv) {
 		const {
 			/** @type {AiChat.DnD.MyCharacter} */
 			character: char,
@@ -669,104 +796,103 @@ MessageRoles["st|char"] = {
 					}
 				}
 
-				lorebookCaches.vfs = vfs = createWebFileSystem(new VirtualDirectory(map));
+				lorebookCaches.vfs = vfs = {};
+				createFileSystemAsync(vfs, createVirtualFileSystem(map));
 			}
 
-			(conv.mnt || (conv.mnt = {})).lorebook = { [FS_INSTANCE]: vfs };
+			(conv.mnt ??= {}).lorebook = vfs;
 		} else {
-
 			delete conv.mnt?.lorebook;
 		}
 
-		callbacks.push((input, output, body, prefill, conv) => {
-			// 宏环境
-			const macro = createSimpleMacroContext(char);
+		const output = messages.map(m => ({...m}));
 
-			//region 插入消息
-			if (char.autoMessages?.length) {
-				for (let {enabled, depth, content} of char.autoMessages) {
-					if (!enabled) continue;
+		// 宏环境
+		const macro = createSimpleMacroContext(char);
 
-					const msg = output[output.length - 1 - depth];
-					if (msg && (depth !== 0 || msg.role === "user")) insertText("\n\n"+applyMacro(content, macro), msg);
-				}
+		//region 插入消息
+		if (char.autoMessages?.length) {
+			for (let {enabled, depth, content} of char.autoMessages) {
+				if (!enabled) continue;
+
+				const msg = output[output.length - 1 - depth];
+				if (msg && (depth !== 0 || msg.role === "user")) insertText("\n\n"+applyMacro(content, macro), msg);
 			}
-			//endregion
-			//region 处理世界书
-			let worldInfoBefore = '', worldInfoAfter = '';
+		}
+		//endregion
+		//region 处理世界书
+		let worldInfoBefore = '', worldInfoAfter = '';
 
-			let depthTargets;
-			/**
-			 * @param {OpenAI.Role} role
-			 * @param {number} depth
-			 * @return {OpenAI.Message}
-			 */
-			const findDepthTarget = (role, depth) => {
-				if (!depthTargets) {
-					depthTargets = new Map;
-					for (let i = output.length - 1; i >= 0; i--) {
-						const o = output[i];
-						for (const key of ["", o.role]) {
-							const list = depthTargets.get(key);
-							if (list) list.push(o);
-							else depthTargets.set(key, [o]);
-						}
+		let depthTargets;
+		/**
+		 * @param {OpenAI.Role} role
+		 * @param {number} depth
+		 * @return {OpenAI.Message}
+		 */
+		const findDepthTarget = (role, depth) => {
+			if (!depthTargets) {
+				depthTargets = new Map;
+				for (let i = output.length - 1; i >= 0; i--) {
+					const o = output[i];
+					for (const key of ["", o.role]) {
+						const list = depthTargets.get(key);
+						if (list) list.push(o);
+						else depthTargets.set(key, [o]);
 					}
 				}
-
-				return depthTargets.get(role || "")?.[depth - 1];
-			};
-
-			const insertBook = book => {
-				const content = "\n\n"+applyMacro(book.content, macro);
-				if (book.position === "worldInfoBefore") worldInfoBefore += content;
-				else if (book.position === "worldInfoAfter") worldInfoAfter += content;
-				else {
-					const target = findDepthTarget(book.role, book.depth);
-					if (target) insertText(content, target);
-					else worldInfoAfter += content;
-				}
-			};
-			constantPages.forEach(insertBook);
-
-			if (lorebookImplType) {
-				if ('fs' === lorebookImplType) {
-					worldInfoBefore += "\n\n<lorebook>\nLorebook 在文件夹 `~/lorebook/` 中\n使用Read、Grep、Glob工具读取你的知识</lorebook>";
-				} else { // tool
-					worldInfoBefore += "\n\n<lorebook>\nLorebook 名称与关键词：\n"+lorebookCaches.toolKeys.join("\n")+"\n</lorebook>";
-				}
-			} else {
-				/** @type {LorebookMatcher} */
-				const matcher = lorebookCaches.matcher || (lorebookCaches.matcher = new LorebookMatcher(pages));
-				const activeBooks = matcher.match(output);
-				activeBooks.forEach(insertBook);
-				self[INST].activatedLorebookItems.value = activeBooks.map(k => k.name);
 			}
-			//endregion
 
+			return depthTargets.get(role || "")?.[depth - 1];
+		};
+
+		const insertBook = book => {
+			const content = "\n\n"+applyMacro(book.content, macro);
+			if (book.position === "worldInfoBefore") worldInfoBefore += content;
+			else if (book.position === "worldInfoAfter") worldInfoAfter += content;
+			else {
+				const target = findDepthTarget(book.role, book.depth);
+				if (target) insertText(content, target);
+				else worldInfoAfter += content;
+			}
+		};
+		constantPages.forEach(insertBook);
+
+		if (lorebookImplType) {
+			if ('fs' === lorebookImplType) {
+				worldInfoBefore += "\n\n<lorebook>\nLorebook 在文件夹 `~/lorebook/` 中\n使用Read、Grep、Glob工具读取你的知识</lorebook>";
+			} else { // tool
+				worldInfoBefore += "\n\n<lorebook>\nLorebook 名称与关键词：\n"+lorebookCaches.toolKeys.join("\n")+"\n</lorebook>";
+			}
+		} else {
+			/** @type {LorebookMatcher} */
+			const matcher = lorebookCaches.matcher || (lorebookCaches.matcher = new LorebookMatcher(pages));
+			const activeBooks = matcher.match(output);
+			activeBooks.forEach(insertBook);
+			self[INST].activatedLorebookItems.value = activeBooks.map(k => k.name);
+		}
+		//endregion
+		if (preset?.prompts?.length) {
+			macro.worldInfoBefore = worldInfoBefore;
+			macro.worldInfoAfter = worldInfoAfter;
+
+			return applyPreset(preset, macro, output);
+		} else {
 			let prefix = '';
 			const hasSystemMessage = output[0].role === "system";
 			if (hasSystemMessage) prefix = applyMacro(output[0].content, macro)+"\n\n";
 
-			if (preset?.prompts?.length) {
-				macro.worldInfoBefore = worldInfoBefore;
-				macro.worldInfoAfter = worldInfoAfter;
-
-				const content = applyPreset(preset, macro, output, prefill);
-				output.length = 0;
-				output.push(...content);
+			const content = prefix + makeStory(macro, worldInfoBefore, worldInfoAfter);
+			if (hasSystemMessage) {
+				output[0].content = content;
 			} else {
-				const content = prefix + makeStory(macro, worldInfoBefore, worldInfoAfter);
-				if (hasSystemMessage) {
-					output[0].content = content;
-				} else {
-					output.unshift({
-						role: "system",
-						content
-					})
-				}
+				output.unshift({
+					role: "system",
+					content
+				})
 			}
-		});
+		}
+
+		return output;
 	},
 	/**
 	 *
@@ -852,12 +978,12 @@ MessageRoles["st|char"] = {
 				const {name, pages} = lorebook;
 				chunks.push({
 					type: "html",
-					html: <details className={"think"}>
+					html: <details className="think">
 						<summary>
 							<span className="chevron ri-play-large-fill"></span>
 							世界书 ({name}) ({pages.length}项)
 						</summary>
-						<div className="think-content">
+						<div className="lorebooks">
 							{pages.map(_LorebookPage)}
 						</div>
 					</details>
@@ -909,7 +1035,6 @@ MessageRoles["st|char"] = {
 
 MessageRoles["st|greeting"] = {
 	name: "开场白",
-	reactive: true,
 	/**
 	 * @param {AiChat.DnD.MyCharConversation} card
 	 * @param output
@@ -1052,46 +1177,71 @@ const StoryConfigPanel = self => {
  */
 const _LorebookPage = item => {
 	let {name, enabled, comment, content, regex, constant, recursion, triggers, window, position, depth} = item;
-	const attributes = [];
-	if (!enabled) attributes.push("禁用");
-	if (constant) attributes.push("常驻");
-	if (recursion) attributes.push("递归");
-	if (regex) attributes.push("正则");
-	if (window === 0) attributes.push("永久激活");
-	if (position === "depth") position += "@"+depth;
+	const badges = [];
 
-	const el = <details onClick.once={() => {
+	if (position === "depth") badges.push("深度"+depth);
+	else badges.push(position === "worldInfoAfter" ? "角色定义后" : "角色定义前");
+
+	if (window === 0) badges.push("永久激活");
+	if (regex) badges.push("正则");
+
+	if (constant) badges.push("常驻");
+	else if (recursion) badges.push("递归");
+
+	if (!enabled) badges.push("禁用");
+
+	const el = <details className="lorebook" onToggle.once={() => {
+		const filename = analyze(content);
 		appendChildren(el, <>
-			<pre className="code-block">
-				<div className="code-header sticky">
-					<span>注释和元数据</span>
-					<span className="buttons">
-						<button className="ri-file-copy-line ghost" data-action="copy" title="复制代码"></button>
-					</span>
-				</div>
-				<code className={"hljs"}>
-					名称：{name}<br/>
-					属性：{attributes.join(" ")}<br/>
-					位置：{position}<br/>
-					{constant ? null : <>触发词：<ul style={"margin:0"}>{triggers.map(s => <li>{s}</li>)}</ul></>}
-					{comment}
-				</code>
-			</pre>
-			<pre className="code-block">
-				<div className="code-header sticky">
-					<span>{name || "内容"}</span>
-					<span className="buttons">
-						<button className="ri-download-2-line ghost" data-action="download" title="下载代码"></button>
-						<button className="ri-file-copy-line ghost" data-action="copy" title="复制代码"></button>
-					</span>
-				</div>
-				<code className={"hljs"}>{content}</code>
-			</pre>
-		</>)
-		el.append();
+			<dl className="meta">
+				{comment && <>
+					<dt>注释</dt>
+					<dd>{comment}</dd>
+				</>}
+				{!constant && <>
+					<dt>触发词</dt>
+					<dd className="chips">{triggers.map(s => <span className="chip">{String(s)}</span>)}</dd>
+				</>}
+				<dt>格式</dt>
+				<dd>{filename} (启发式)</dd>
+			</dl>
+
+			<HighlightBox code={content} filename={filename}/>
+		</>);
 	}}>
-		<summary>{name || comment || `${triggers.map(JSON.stringify).join(" | ")}` || "无标题"}</summary>
+		<summary className="row">
+			<span className="title">{name || comment || triggers.map(JSON.stringify).join(" | ") || "无标题"}</span>
+			<span className="spacer" />
+			<span className="badges">{badges.map(b => <span>{b}</span>)}</span>
+		</summary>
 	</details>;
 	return el;
 };
+
+const XML_RE = /<(\/?)([A-Za-z_]{1,100}[\w.:-]*)((?:"[^"]*"|'[^']*'|[^"'>])*?)(\/?)>/gm;
+const YML_RE = /^-?\s*\S[^#:{}\[\]|>%@*]*: /gm;
+const MD_RE = /^(?:```|~~~)|^#{1,6}\s+\S|^>\s?|^\|.*\|$|^(?:-{3,}|\*{3,}|_{3,})\s*$|!?\[[^\]]*\]\([^)\s]*\)|\*\*[^*\n]+\*\*|__[^_\n]+__|`[^`\n]+`/gm;
+
+function score(text, re) {
+	re.lastIndex = 0;
+	let score = 0;
+	let m;
+	while ((m = re.exec(text)) !== null && score++ < 1000);
+	return score;
+}
+
+function analyze(text) {
+	const xml = score(text, XML_RE);
+	const yml = score(text, YML_RE);
+	const md = score(text, MD_RE);
+
+	let type = '.txt';
+	let best = 0;
+
+	if (xml >= 5 && xml > best) { type = '.xml'; best = xml; }
+	if (yml >= 5 && yml > best) { type = '.yml'; best = yml; }
+	if (md >= 0 && md > best) { type = '.md'; best = md; }
+
+	return type;
+}
 //endregion

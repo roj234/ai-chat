@@ -1,0 +1,2 @@
+
+export const SP_CONNECT = 0, SP_WAIT = 1, SP_PREFILL = 2, SP_GENERATE = 3;

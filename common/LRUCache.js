@@ -1,5 +1,5 @@
 import {clearTimeout as ct, setTimeout as st} from "./heap-timer.js";
-import {fastObjectMap} from "./pure-utils.js";
+import {immutableObjectMap} from "unconscious/common/Utils.js";
 
 export const TYPE_EVICT = 1;
 export const TYPE_REMOVE = 2;
@@ -7,7 +7,7 @@ export const TYPE_REMOVE = 2;
 const IS_NODE = !import.meta.env?.MODE;
 const setTimeout1 = IS_NODE ? setTimeout : st;
 const clearTimeout1 = IS_NODE ? clearTimeout : ct;
-const MODES = fastObjectMap({
+const MODES = immutableObjectMap({
 	'access': 1,
 	'update': 2,
 	'livetime': 3
@@ -160,19 +160,21 @@ export class LRUCache extends Map {
 			this.#moveToFront(idx);
 
 			if (ttlMode && (ttlMode !== 3 || (value !== old)))
-				this.setTTL(idx, ttlMs);
+				this.#setTTL(idx, ttlMs);
 			return this;
 		}
 
+		let hasEk, ek, ev;
 		idx = this.#freeList;
 		if (idx === this.#NULL) {
 			idx = this.#tail;
 
-			const k = this.#keys[idx];
-			this.#onEvict?.(this.#values[idx], k, TYPE_EVICT);
+			ek = this.#keys[idx];
+			ev = this.#values[idx];
+			hasEk = true;
 
 			this.#remove(idx);
-			super.delete(k);
+			super.delete(ek);
 		} else {
 			this.#freeList = this.#next[idx];
 		}
@@ -182,11 +184,14 @@ export class LRUCache extends Map {
 		super.set(key, idx);
 		this.#insert(idx);
 
-		if (ttlMode) this.setTTL(idx, ttlMs);
+		if (ttlMode) this.#setTTL(idx, ttlMs);
+
+		if (hasEk) this.#onEvict?.(ev, ek, TYPE_EVICT);
+
 		return this;
 	}
 
-	setTTL(idx, ttlMs) {
+	#setTTL(idx, ttlMs) {
 		const timers = this.#ttlTimer;
 		const timer = timers[idx];
 		if (timer) {
@@ -209,16 +214,10 @@ export class LRUCache extends Map {
 		let idx = super.get(key);
 		if (idx === undefined) return false;
 
-		this.#onEvict?.(this.#values[idx], key, TYPE_REMOVE);
+		const value = this.#values[idx];
 
 		super.delete(key);
-
-		const timers = this.#ttlTimer;
-		if (timers?.[idx]) {
-			clearTimeout1(timers[idx]);
-			timers[idx] = undefined;
-		}
-
+		if (this.#ttlTimer) this.#setTTL(idx);
 		this.#remove(idx);
 
 		this.#next[idx] = this.#freeList;
@@ -226,6 +225,8 @@ export class LRUCache extends Map {
 		this.#prev[idx] = this.#NULL;
 		this.#keys[idx] = undefined;
 		this.#values[idx] = undefined;
+
+		this.#onEvict?.(value, key, TYPE_REMOVE);
 
 		return true;
 	}

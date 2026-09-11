@@ -1,6 +1,8 @@
 import {config} from "../states.js";
 import "./StatusPill.css";
 import {$computed, unconscious} from "unconscious";
+import {SP_CONNECT, SP_GENERATE, SP_PREFILL, SP_WAIT} from "./StatusPill_state.js";
+import {Icon_lightning} from "./Icons.jsx";
 
 const phrases = [
 	"正在连接服务器",
@@ -20,12 +22,11 @@ class LoadingMOTD extends HTMLElement {
 	#timer;
 
 	connectedCallback() {
-		this.textContent = phrases[this.#index++];
+		this.#render(phrases[this.#index++ % phrases.length]);
 		if (phrases.length > 1 && config.afkState < 2) {
 			this.#timer = setInterval(() => {
-				this.#index = (this.#index + 1) % phrases.length;
-				this.#render();
-			}, 4000);
+				this.#render(phrases[this.#index++ % phrases.length]);
+			}, 6000);
 		}
 	}
 
@@ -33,27 +34,15 @@ class LoadingMOTD extends HTMLElement {
 		clearInterval(this.#timer);
 	}
 
-	/*setAttribute(qualifiedName, value) {
-		if (qualifiedName === "text") {
-			this.#phrases = [value];
-		}
-	}*/
-
-	#render() {
-		// 使用 requestAnimationFrame 或简单的 transition 配合滤镜
-		const style = this.style;
-
-		style.transition = 'all 0.6s cubic-bezier(0.4, 0, 0.2, 1)';
-		style.opacity = '0';
-		style.filter = 'blur(10px)'; // 文字散开效果
-		style.letterSpacing = "5px";
-
-		setTimeout(() => {
-			this.textContent = phrases[this.#index];
-			style.opacity = '';
-			style.filter = '';
-			style.letterSpacing = '';
-		}, 400); // 稍微长一点的停顿会让切换更有质感
+	/**
+	 * 每个字符渲染为独立的 span，索引写入 CSS 变量 --i：
+	 * 弹跳登场的延迟与波浪浮动的相位均按 --i 错开，动画全部由 CSS 驱动。
+	 * @param {string} text 目标文本
+	 */
+	#render(text) {
+		this.replaceChildren(...Array.from(text, (ch, i) => {
+			return <span className="c" style={"--delay:" + i}>{ch}</span>;
+		}));
 	}
 }
 
@@ -65,13 +54,18 @@ export const StatusPill = ({kind, data}) => {
 	return $computed(() => {
 		switch (unconscious(kind)) {
 			default:
-			case "connect":
-				return <div className="ai-progress connect">
+			case SP_CONNECT:
+				return <div className="ai-status connect">
 					<div className="icon"></div>
 					<loading-motd />
 				</div>;
-			case "prefill":
-				return <div className="ai-progress prefill">
+			case SP_WAIT:
+				return <div className="ai-status wait">
+					<div className="icon"></div>
+					<span>正在准备响应...</span>
+				</div>;
+			case SP_PREFILL:
+				return <div className="ai-status prefill">
 					<svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
 						<path d="M21 12a9 9 0 1 1-6.219-8.56"/>
 					</svg>
@@ -81,26 +75,17 @@ export const StatusPill = ({kind, data}) => {
 					</div>
 					<span className="num">{() => (unconscious(data) * 100).toFixed(1)+"%"}</span>
 				</div>;
-
-			case "wait":
-				return <div className="ai-progress wait">
-					<div className="icon"></div>
-					<span>正在准备响应...</span>
-				</div>;
-
-			case "generate":
-				return <div className="ai-progress generate">
-					<svg className="icon" viewBox="0 0 24 24" fill="currentColor">
-						<path d="M13 2L3 14h7v8l10-12h-7z"/>
-					</svg>
-					{unconscious(data).tps ? <>
-						<span className="num">{() => data.tps?.toFixed(2)}</span>tps ·
+			case SP_GENERATE:
+				return <div className="ai-status generate">
+					<Icon_lightning />
+					{unconscious(data).tps != null ? <>
+						<span className="num">{() => data.tps?.toFixed(2)}</span>TPS ·
 						<span className="num">{() => data.tokens}</span>tokens ·
 					</> : <>
-						<span className="num">{() => (data.len / ((Date.now() - start) / 1000)).toFixed(2)}</span>cps ·
+						<span className="num">{() => (data.len / ((Date.now() - (data.start||start)) / 1000)).toFixed(2)}</span>CPS ·
 						<span className="num">{() => data.len}</span>chars ·
 					</>}
-					<span className="num">{$computed(() => ((Date.now() - start) / 1000).toFixed(2), [data])}</span>s
+					<span className="num">{$computed(() => ((Date.now() - (data.start||start)) / 1000).toFixed(2), [data])}</span>s
 				</div>
 		}
 	}, [kind]);

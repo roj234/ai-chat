@@ -27,7 +27,31 @@
     }
 }
 
-.filter { border: none; }
+/* 搜索 */
+.fa-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+
+    & .ghost {
+        position: absolute;
+        right: 4px;
+        padding: 4px;
+        border-radius: 0;
+        border: none;
+    }
+
+    & .icon {
+        position: absolute;
+        left: 10px;
+        width: 18px;
+        height: 18px;
+        color: var(--muted);
+        pointer-events: none;
+    }
+
+    & .text-input { padding-left: 32px; }
+}
 
 /* 箭头旋转动画 */
 .arrow-icon {
@@ -46,31 +70,37 @@
 
 /* 下拉菜单面板 */
 
-.pretty-select.open > ul {display: block;}
-.pretty-select.up > ul {bottom: 100%;}
-.pretty-select.up.open > ul {animation: fadeInUp 0.15s ease-out;}
-.pretty-select.down > ul {top: 100%;}
-.pretty-select.down.open > ul {animation: fadeInDown 0.15s ease-out;}
-.pretty-select > ul {
+.pretty-select.open > .dropdown {display: flex;flex-direction: column;}
+.pretty-select.up > .dropdown {bottom: 100%;}
+.pretty-select.up.open > .dropdown {animation: fadeInUp 0.15s ease-out;}
+.pretty-select.down > .dropdown {top: 100%;}
+.pretty-select.down.open > .dropdown {animation: fadeInDown 0.15s ease-out;}
+.pretty-select > .dropdown {
     min-width: 180px;
 
-    all: unset;
     border: 1px solid var(--chip-hover);
 
     position: absolute;
     left: 0;
+    right: 0;
     background: var(--card);
     box-shadow: var(--shadow);
     display: none;
     z-index: 1;
 
     max-height: 250px;
+
+    & > input { flex-shrink: 0; }
+}
+.pretty-select ul {
+    all: unset;
     overflow-y: auto;
 }
 
 /* 选项样式 */
 .pretty-select li {
-    padding: 4px 10px;
+    padding: 0 6px;
+    height: 30px;
     color: var(--muted);
     font-size: 13px;
     border: 1px solid transparent;
@@ -79,7 +109,7 @@
     justify-content: space-between;
     align-items: center;
 
-    &:hover {
+    &:hover, &:focus {
         background: var(--chip-bg);
         color: var(--text) !important;
         border-color: var(--muted);

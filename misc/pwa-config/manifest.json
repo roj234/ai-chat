@@ -1,6 +1,6 @@
 {
-  "name": "爱聊天 - AiChat",
-  "short_name": "AiChat",
+  "name": "Aint - 爱聊天",
+  "short_name": "Aint",
   "description": "你的最后一个LLM前端",
   "start_url": "./",
   "display": "standalone",

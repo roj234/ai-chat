@@ -1,30 +1,26 @@
 
 /* 侧边栏样式 */
 .sidebar {
-    position: fixed;
+    position: absolute;
     top: 0;
     bottom: 0;
     width: 300px;
-    background: var(--panel);
+    background: var(--bg);
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    z-index: 2;
 }
 
 .sidebar-header {
-    padding: var(--spacing-md);
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: var(--spacing-sm);
-    height: 48px;
-}
+    padding: var(--spacing-sm);
 
+    &:first-child {
+        border-bottom: 1px solid var(--border);
+    }
+
+    justify-content: space-between;
+}
 .sidebar-list > ._vl {
-    flex: 1;
-    overflow-y: auto;
     padding-left: var(--spacing-md);
     padding-right: var(--spacing-xs);
     gap: var(--spacing-sm);
@@ -37,7 +33,7 @@
     font-size: 0.85em;
     color: var(--muted);
     font-weight: 600;
-    margin-top: var(--spacing-lg);
+    margin-top: var(--spacing-md);
     padding-left: var(--spacing-sm);
     border-left: 2px solid var(--accent);
 }
@@ -48,9 +44,9 @@
     align-items: center;
     justify-content: space-between;
     padding: 0 var(--spacing-md);
-    height: 2.25rem;
+    height: 2rem;
     background: var(--chip-bg);
-    border-radius: var(--border-radius-md);
+    border-radius: var(--border-radius-sm);
     border: 1px solid transparent;
     transition: var(--transition);
     gap: var(--spacing-sm);
@@ -63,6 +59,11 @@
     &.active {
         background: var(--chip-active);
         border-color: var(--chip-active-border);
+    }
+
+    &.subagent {
+        margin-left: 16px;
+        border-left: 2px solid var(--accent);
     }
 }
 
@@ -95,4 +96,35 @@
 
 .moving .edit-btn {
     display: none !important;
+}
+
+/* 删除和撤销样式 */
+.dct-label {
+    color: var(--muted);
+    flex-shrink: 0;
+}
+
+.dct-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 撤销按钮：精致的小胶囊风格 */
+.dct-undo {
+    background: rgba(59, 130, 246, 0.15);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    color: var(--accent);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+
+    flex-shrink: 0;
+    &:hover {
+        background: rgba(59, 130, 246, 0.3);
+        color: var(--text);
+    }
 }

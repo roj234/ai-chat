@@ -2,8 +2,20 @@ import {showToast} from "../components/Toast.js";
 import {$watch, debugSymbol, unconscious} from "unconscious";
 import {highlightJsonLike} from "../markdown/highlight.js";
 import {webviewDownloadFile} from "/vendor/jsBridge.js";
-import {config} from "../states.js";
-import {isIDB} from "../database.js";
+import {auxKeyboardOnly, lastScrollDirectionIsUp} from "../states.js";
+import {isIDB, remoteDBUrl} from "../database.js";
+import SimpleModal from "../components/SimpleModal.jsx";
+import {base64Encode} from "unconscious/common/Base64.js";
+import {DI_messageContainer} from "../hooks.js";
+import {jsonFetch} from "/common/fetch-utils.js";
+import {throwDOMException} from "/common/pure-utils.js";
+import {SHA256} from "unconscious/common/SHA256.js";
+
+export const getRandomString = (length) => {
+	const view = new Uint8Array(length);
+	crypto.getRandomValues(view);
+	return base64Encode(view, true, length * 4 / 3);
+}
 
 export const resolveDBRelativeURL = (url) => {
 	if (url[0] === '@') {
@@ -13,7 +25,7 @@ export const resolveDBRelativeURL = (url) => {
 		}
 
 		try {
-			const backendBase = new URL(config.db_server, document.baseURI).toString();
+			const backendBase = new URL(remoteDBUrl, document.baseURI).toString();
 			const baseDir = backendBase.split('/').slice(0, -3).join('/') + '/';
 			url = new URL(url.slice(1), baseDir).toString();
 		} catch {}
@@ -46,11 +58,8 @@ export const errorBlock = (error, title) => {
 	return <div className="error-block" style={title && "--title:" + JSON.stringify(title)}>{pre}</div>;
 };
 
-export const MORPH_CHILD_FUNCTION = debugSymbol("MORPH_CHILD_FUNCTION");
-export const MORPH_CHILD_HANDLER = (key, node) => {
-	const fn = node[MORPH_CHILD_FUNCTION];
-	fn && fn(key, node);
-};
+export const onReuse_Callback = debugSymbol("onReuse");
+export const ReuseDelegator = (node, item) => node[onReuse_Callback]?.(node, item);
 
 const BLOB_URL = debugSymbol("BLOB_URL");
 const BLOB_DATAURL = debugSymbol("BLOB_DATAURL");
@@ -82,8 +91,9 @@ export const prettyError = error => {
 		}
 	}
 
+	const prefix = (error.name?error.name+": ":"")+(error.message);
 	const stackRegex = /at (.*):(\d+):(\d+)\)$/;
-	const stackTrace = (error.stack||'').split('\n').slice(1)
+	const stackTrace = (error.stack||'').slice(prefix.length).split('\n')
 		.map(line => {
 			const match = line.match(stackRegex);
 			if (match) {
@@ -98,7 +108,7 @@ export const prettyError = error => {
 			}
 			return line;
 		});
-	return (error.name?error.name+": ":"")+(error.message||"")+"\n"+(stackTrace.join("\n"));
+	return prefix+"\n"+(stackTrace.join("\n")).trim();
 };
 
 const TIMER = /* #__PURE__ */ Symbol();
@@ -143,6 +153,46 @@ export const copyButtonAnimation = (data, btn) => {
 		successCallback();
 	}
 };
+
+export const showImageZoomView = (src, title) => {
+	SimpleModal({
+		title: `图像预览 (${title})`,
+		className: "full",
+		message: <img src={src} alt={title || src} />
+	})
+}
+
+/**
+ *
+ * @param {string} message
+ * @param {Function} confirm
+ * @param {Function} cancel
+ * @param {boolean} [isKeyboard]
+ */
+export const deleteWithDrawback = (message, confirm, cancel, isKeyboard) => {
+	if (isKeyboard || auxKeyboardOnly) {
+		SimpleModal({
+			message: '确认删除"'+message+'？',
+			accent: 'danger',
+			confirmMessage: '删除',
+			onConfirm: confirm,
+			onCancel: cancel
+		});
+		return;
+	}
+
+	const closeToast = showToast(<>
+		<span className="dct-label">即将删除</span>
+		<span className="dct-title" title={message}>{message}</span>
+	</>, '', 5000, {
+
+		onClose(byTimer) {
+			if (byTimer == null) confirm();
+			else cancel();
+		},
+		closeBtn: <button className="dct-undo" onClick={() => closeToast(1)}>撤销</button>
+	});
+}
 
 /**
  *
@@ -218,7 +268,7 @@ export const updateOnIntersected = (element, callback) => {
  * @return {{}}
  */
 export const cloneNamed = (obj, names) => {
-	const result = {};
+	const result = Object.create(null);
 	obj = unconscious(obj);
 	for (const name of names) {
 		if (name in obj) result[name] = obj[name];
@@ -227,3 +277,65 @@ export const cloneNamed = (obj, names) => {
 };
 
 export const requestIdleCallback = window.requestIdleCallback || window.setTimeout;
+
+export const scrollMessagesToBottom = (force) => {
+	requestAnimationFrame(() => {
+		if (!unconscious(lastScrollDirectionIsUp) || force)
+			DI_messageContainer.vl.scrollTo(Number.MAX_SAFE_INTEGER);
+	});
+};
+
+/**
+ *
+ * @param {string[]} urlList
+ * @param {string} [instanceId]
+ * @param {string} [requiredCapability]
+ * @return {Promise<[string, string]>}
+ */
+export const connectBestServer = async (urlList, instanceId, requiredCapability) => {
+	const nonce = crypto.randomUUID();
+	const exceptResult = new SHA256().update(nonce+"AiChat").toString();
+
+	const timeout = new AbortController();
+	const timer = setTimeout(() => timeout.abort(new DOMException("连接超时", "TimeoutError")), 10000);
+
+	const testServer = async url => {
+		const  { id, pong, cap } = await jsonFetch(url+'ping', {
+			signal: timeout.signal,
+			body: JSON.stringify({nonce}),
+		})
+		if (pong === exceptResult) {
+			if (requiredCapability && !cap.includes(requiredCapability))
+				throwDOMException('请求的能力不可用');
+			return id;
+		}
+		throwDOMException('响应非法');
+	};
+
+	let lastId = instanceId;
+	let bestServer;
+	let count = urlList.length;
+
+	return new Promise((res, rej) => {
+		urlList.forEach((server) => {
+			if (!server.endsWith('/')) server += '/';
+
+			testServer(server).then((id) => {
+				if (id === lastId) {
+					timeout.abort();
+					clearTimeout(timer);
+					res([server, id]);
+				} else if (!bestServer) {
+					bestServer = [server, id];
+				}
+
+				if (!--count) res(bestServer);
+			}, (e) => {
+				if (!--count) {
+					if (bestServer) res(bestServer);
+					else rej(e);
+				}
+			});
+		})
+	});
+}

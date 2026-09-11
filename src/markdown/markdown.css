@@ -1,3 +1,7 @@
+/* 当用户消息内部包含代码块时，强制占满可用宽度 */
+.msg.user:has(.code-block) {
+    width: 100%;
+}
 
 .code-block {
     position: relative; /* 为右上角悬浮做绝对定位基准 */
@@ -57,6 +61,9 @@ q:before, q:after { content: none; }
     hyphens: auto;
     line-height: var(--md-line-height);
 
+    & > :first-child { margin-top: 0; }
+    & > :last-child { margin-bottom: 0; }
+
     & rt { font-size: 66%; }
 
     & img { max-width: 100%; }
@@ -72,9 +79,9 @@ q:before, q:after { content: none; }
     }
     & kbd {
         border: 1px solid var(--md-kbd-border);
-        padding: 2px;
+        padding: 1px 2px;
         border-radius: var(--border-radius-sm);
-        color: oklch(0.6 0.18 18deg);
+        color: #d64556;
         margin: 0 var(--spacing-xs);
         word-break: break-word;
     }

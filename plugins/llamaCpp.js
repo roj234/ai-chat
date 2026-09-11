@@ -1,12 +1,12 @@
-import {config, isLlamaCppBackend, models, setIsLlamaCppBackend, updateModels} from "/src/states.js";
-import {$asyncState, $cleanup, $computed, $foreach, $state, $unwatch, $update, $watch} from "unconscious";
+import {config} from "/src/states.js";
+import {$asyncState, $cleanup, $computed, $derived, $foreach, $state, $unwatch, $update, $watch} from "unconscious";
 import {isLanAddress} from "/common/isLanAddress.js";
 import "./llamaCpp.css";
 import {prettyError, resolveDBRelativeURL} from "/src/utils/utils.js";
-import {jsonFetch} from "/common/openai-api-utils.js";
-import {SETTINGS} from "/src/settings.js";
+import {jsonFetch} from "/common/fetch-utils.js";
+import {GLOBAL_SETTINGS} from "/src/settings.js";
 import {showToast} from "/src/components/Toast.js";
-import {deepEqual} from "unconscious/common/deepEqual.js";
+import {isLlamaCppBackend, models, setIsLlamaCppBackend, updateModels} from "/src/presets.js";
 
 const _endpoint = $state({});
 const _stateChanging = $state("");
@@ -23,16 +23,13 @@ const isLLaMACppRouter = $asyncState(({url, token}) => {
 	});
 }, _endpoint);
 
-$watch(config, () => {
+$watch([$derived(config.endpoint), $derived(config.accessToken)], () => {
 	const url = resolveDBRelativeURL(config.endpoint);
-	const value = {
+	_endpoint.value = {
 		// remove v1 postfix
-		url: isLanAddress(url) ? url.slice(0, url.length-2) : "",
+		url: isLanAddress(url) ? url.slice(0, url.length - 2) : "",
 		token: config.accessToken
 	};
-	if (deepEqual(value, _endpoint.value)) return;
-	_endpoint.value = value;
-	if (isLLaMACppRouter.error) $update(_endpoint);
 });
 
 const updateModelInfo = new IntersectionObserver((entries) => {
@@ -44,7 +41,7 @@ const BUTTON_STYLES = {
 	'unloaded': 'primary'
 };
 
-SETTINGS.push({
+GLOBAL_SETTINGS.push({
 	type: "element",
 	_tab: "model",
 	element: $computed(() => {
@@ -80,7 +77,7 @@ SETTINGS.push({
 				<button className={"btn primary"} onClick={() => $update(_endpoint)}>重试</button>
 			</div>
 		}
-	})
+	}, [isLLaMACppRouter])
 });
 
 /**

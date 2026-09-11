@@ -1,7 +1,29 @@
-import {$update, unconscious} from "unconscious";
-import {EVENT_BUS, LOCKED, messages, runningConversations, selectedConversation, updateMessageUI} from "/src/states.js";
-import {getMessagesCacheFirst, updateConversation} from "/src/database.js";
+import {EVENT_BUS, LOCKED, runningConversations} from "/src/states.js";
+import {getMessages, updateConversation} from "/src/database.js";
 import {submitUserChatMessage} from "./api-request.js";
+import {lockConversation, unlockConversation} from "./conversation-lock.js";
+
+function doInsert(msgs, items) {
+	const last = msgs.at(-1);
+	if (cannotInsertAfter(last)) return items;
+
+	const deferred = [];
+	const flag = last.finish_reason !== 'stop';
+	for (let item of items) {
+		if (item.defer) {
+			if (flag) {
+				deferred.push(item);
+				continue;
+			}
+
+			delete item.defer;
+		}
+
+		msgs.push(item);
+	}
+
+	return deferred;
+}
 
 /**
  * 向会话注入消息。
@@ -13,31 +35,35 @@ export const injectMessages = async (conv, ...items) => {
 	if (conv[LOCKED]) return;
 
 	if (runningConversations.has(conv.id)) {
-		!conv.pendingMessages ? conv.pendingMessages = items : conv.pendingMessages.push(...items);
+		(conv.pendingMessages??=[]).push(...items);
+		EVENT_BUS.post(['messageInject', 'pending'], conv);
 		await updateConversation(conv);
 		return false;
 	}
 
-	const msgs = await getMessagesCacheFirst(conv);
-	if (msgs.at(-1)?.error) return false;
-
-	const last =  msgs.at(-1);
-	msgs.push(...items);
-	await updateConversation(conv, msgs);
-
-	if (unconscious(selectedConversation)?.id === conv.id) {
-		messages.value = msgs;
-		$update(updateMessageUI);
-
-		if (last?.finish_reason === 'stop') {
-			submitUserChatMessage(true);
-			return true;
+	let msgs;
+	lockConversation(conv.id);
+	try {
+		msgs = await getMessages(conv);
+		const remain = doInsert(msgs, items);
+		if (remain.length) {
+			(conv.pendingMessages??=[]).push(...remain);
 		}
+		await updateConversation(conv, msgs);
+	} finally {
+		unlockConversation(conv.id);
 	}
 
-	EVENT_BUS.post(['injectMessage'], conv);
+	submitUserChatMessage(true, conv).catch(() => {});
 	return true;
 };
+
+/**
+ *
+ * @param {AiChat.Message} m
+ * @return {boolean}
+ */
+export const cannotInsertAfter = m => m?.role === 'assistant' && (m.error || m.finish_reason === 'interrupt' || m.finish_reason === 'length');
 
 /**
  *
@@ -48,19 +74,14 @@ export const injectMessages = async (conv, ...items) => {
 export const flushNotifications = (conv, messages) => {
 	const pm = conv.pendingMessages;
 	if (pm && !conv[LOCKED]) {
-		const last = messages.at(-1);
-		messages.push(...pm);
-		delete conv.pendingMessages;
+		const remain = doInsert(messages, pm);
+		if (remain.length) conv.pendingMessages = remain;
+		else delete conv.pendingMessages;
 
-		if (unconscious(selectedConversation)?.id === conv.id) {
-			$update(updateMessageUI);
-			if (last?.finish_reason === 'stop') {
-				queueMicrotask(() => {
-					submitUserChatMessage(true).catch(() => {});
-				});
-			}
-		}
-
+		EVENT_BUS.post(['messageInject', 'flushed'], conv);
+		queueMicrotask(() => {
+			submitUserChatMessage(true, conv).catch(() => {});
+		});
 		return updateConversation(conv, messages);
 	}
 }

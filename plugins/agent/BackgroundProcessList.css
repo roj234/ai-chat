@@ -1,0 +1,23 @@
+/* ===== 后台进程操作条（composer 上方） ===== */
+
+.bp-pid {
+    flex: none;
+    color: var(--muted);
+}
+
+.bp-kill {
+    flex: none;
+    height: 22px;
+    padding: 0 7px;
+    font-size: 12px;
+    border: 1px solid transparent;
+    border-radius: var(--border-radius-sm);
+    color: var(--muted);
+    transition: var(--transition);
+
+    &:hover:not(:disabled) {
+        border-color: var(--error-block-border);
+        background: var(--error-bg);
+        color: var(--error-text-color);
+    }
+}

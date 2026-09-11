@@ -4,12 +4,25 @@ import {spawn} from 'node:child_process';
 import {readBOM} from "../../common/chardet.js";
 import iconv from "iconv-lite";
 import {getEnvironmentPrompt} from "../utils/checkEnv.js";
-import {compileGlobPattern, createTextFileEditHelper, GREP_MAX_COLUMNS} from "../../common/fs-common.js";
-import {IGNORED_ERROR_MESSAGE, IgnoreMatcher} from "../../common/ignore.js";
+import {createTextFileEditHelper, GREP_MAX_COLUMNS} from "../../common/fs-common.js";
+import {ACL} from "../../common/ACL.js";
 import {createReadStream, createWriteStream} from 'node:fs';
 import {pipeline} from "node:stream/promises";
-import {createHash} from 'node:crypto';
 import {formatSize} from "unconscious/common/Utils.js";
+import {LRUCache} from "../../common/LRUCache.js";
+import {compileGlobPattern, emptyAsyncGenerator, generateGlobCode} from "../../common/fs-glob.js";
+import {Writable} from 'node:stream';
+// noinspection ES6UnusedImports
+import {mpscScheduler} from "../../common/pure-utils.js";
+
+const devNull = () => new Writable({
+	write(chunk, encoding, callback) {
+		callback();
+	},
+});
+
+const TEXT_FILE_MAX = 10485760;
+const BINARY_FILE_MAX = 52428800;
 
 /**
  * 路径校验
@@ -21,7 +34,7 @@ export const pathFilter = (relPath, ctx) => {
 	const root = ctx.fsRoot;
 	const targetPath = path.resolve(root, relPath);
 	// allow path like /tmp/... or C:/tmp/
-	if (!globalThis.AIChatArgs.noSandbox && !targetPath.startsWith(root) && !/^(?:[a-zA-Z]:)?[\\/]tmp(?:\/|$)/.test(targetPath)) {
+	if (!globalThis.AIChatArgs.noSandbox && !(targetPath+"\\").startsWith(root) && !/^(?:[a-zA-Z]:)?[\\/]tmp(?:\/|$)/.test(targetPath)) {
 		const err = new Error('Path Traversal');
 		err.statusCode = 403;
 		throw err;
@@ -34,9 +47,9 @@ async function pathFilterWithIgnore(ctx, relPath, isDir) {
 
 	const root = ctx.fsRoot;
 	const processedRelPath = targetPath.slice(root.length+1).replaceAll(path.sep, '/');
-	const ignore = await getIgnoreMatcher(root, targetPath);
-	if (ignore.test(processedRelPath, isDir)) {
-		const err = new Error(IGNORED_ERROR_MESSAGE);
+	const acl = await getACL(root, targetPath);
+	if (acl.denyList(processedRelPath, isDir)) {
+		const err = new Error(`This path is readonly`);
 		err.statusCode = 403;
 		throw err;
 	}
@@ -155,36 +168,63 @@ function modeToString(mode) {
 
 // ---------- 路由注册 ----------
 
-function killProcess(child) {
-	child.kill('SIGTERM');
-	setTimeout(() => {
-		if (process.platform === 'win32') {
-			try {
-				spawn('taskkill', ['/T', '/PID', child.pid, '/F'], { stdio: 'ignore' });
-			} catch {}
-		} else {
-			try {
-				process.kill(-child.pid, 'SIGKILL');
-			} catch {}
+const IS_WIN = process.platform === 'win32';
+
+/**
+ * 结束进程树。
+ * @param {import('node:child_process').ChildProcess} child
+ * @param {number} [gracePeriod] SIGTERM 升级到 SIGKILL 的宽限期(ms)，0 表示立即升级
+ * @returns {Promise<void>} Windows 下在 taskkill 返回后 resolve
+ */
+function killProcess(child, gracePeriod = 3000) {
+	const pid = child.pid;
+	// 用 exitCode/signalCode 判断，child.killed 只代表"发过信号"
+	if (pid == null || child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+
+	if (IS_WIN) {
+		return new Promise((resolve) => {
+			let settled = false;
+			const done = (ok) => {
+				if (settled) return;
+				settled = true;
+				if (!ok) try { child.kill('SIGKILL'); } catch {}
+				resolve();
+			};
+			const killer = spawn('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true });
+			killer.on('error', () => done(false));
+			killer.on('exit', (code) => done(code === 0));
+		});
+	}
+
+	const sig = gracePeriod > 0 ? 'SIGTERM' : 'SIGKILL';
+	try {
+		process.kill(-pid, sig);
+	} catch {
+		try { child.kill(sig); } catch {}
+	}
+	if (gracePeriod <= 0) return Promise.resolve();
+
+	const timer = setTimeout(() => {
+		try { process.kill(-pid, 'SIGKILL'); } catch {
+			try { child.kill('SIGKILL'); } catch {}
 		}
-		try { child.kill('SIGKILL'); } catch {}
-	}, 3000);
+	}, gracePeriod);
+	timer.unref?.();
+
+	return Promise.resolve();
 }
 
-const matcherCache = new Map;
+const matcherCache = new LRUCache(255);
 /**
  *
  * @param {string} root
  * @param {string} targetDir
- * @returns {Promise<IgnoreMatcher>}
+ * @returns {Promise<ACL>}
  */
-const getIgnoreMatcher = async (root, targetDir) => {
+const getACL = async (root, targetDir) => {
 	let matcher = matcherCache.get(root);
 	if (!matcher) {
-		if (matcherCache.size > 1000)
-			matcherCache.delete(matcherCache.keys().next().value);
-
-		matcher = new IgnoreMatcher();
+		matcher = new ACL();
 
 		/*let current = targetDir;
 		do {
@@ -193,7 +233,7 @@ const getIgnoreMatcher = async (root, targetDir) => {
 
 		for (const name of ['.ignore', '.gitignore']) {
 			try {
-				matcher.parse(await fs.readFile(path.join(root, name), 'utf-8'));
+				matcher.parseIgnore(await fs.readFile(path.join(root, name), 'utf-8'));
 				break;
 			} catch {}
 		}
@@ -203,6 +243,19 @@ const getIgnoreMatcher = async (root, targetDir) => {
 
 	return matcher;
 };
+
+async function glob(pattern, path_, showHidden, acl, exclude) {
+	const result = compileGlobPattern(pattern, path_, exclude);
+	const handle = result.path;
+
+	try {
+		await fs.access(handle);
+	} catch {
+		return emptyAsyncGenerator();
+	}
+
+	return eval(generateGlobCode(true));
+}
 
 /**
  * @param {AiChatBackend.Router} router
@@ -224,114 +277,53 @@ export async function registerFsRoutes(router, allowExec) {
 		modifiedSince = 0,
 		showDir = null,
 		showModified = false,
-		showHidden = false,
+		exclude = [],
+		showHidden,
 	}, ctx) => {
 		pattern = pattern || '*';
 		// 行为一致，顺便给AI擦屁股
 		if (pattern.startsWith("*.") && !pattern.includes('/')) pattern = "**/"+pattern;
 
 		const safePath = pathFilter(filePath, ctx);
-		const ignored = await getIgnoreMatcher(ctx.fsRoot, safePath);
+		const acl = await getACL(ctx.fsRoot, safePath);
 
-		let entries;
-		if (!(await fs.stat(safePath)).isDirectory()) throw new Error("Path is not a directory");
-
-		const glob = compileGlobPattern(pattern, safePath);
-		const segments = glob.segments;
-		const base = glob.path;
-
-		async function* walk(base, relDir, segIdx) {
-			const seg = segments[segIdx];
-			const nextIdx = segIdx + 1;
-			const isLast = nextIdx >= segments.length;
-
-			if (seg === '**') {
-				if (isLast) {
-					yield* yieldDescendants(base, relDir);
-				} else {
-					yield* walk(base, relDir, nextIdx);
-					for (const entry of await fs.readdir(base, { withFileTypes: true })) {
-						const name = entry.name;
-						const childPath = relDir ? relDir + '/' + name : name;
-						if (entry.isDirectory() && !ignored.test(childPath, true)) {
-							yield* walk(path.join(entry.parentPath, entry.name), childPath, segIdx);
-						}
-					}
-				}
-				return;
-			}
-
-			for (const entry of await fs.readdir(base, { withFileTypes: true })) {
-				const name = entry.name;
-				if (name[0] === '.' && !showHidden) continue;
-
-				if (!seg.test(name)) continue;
-
-				const entryPath = relDir ? relDir + '/' + name : name;
-				const isDir = entry.isDirectory();
-
-				if (isLast) {
-					if (!ignored.test(entryPath, isDir)) {
-						yield entry;
-					}
-				} else if (isDir && !ignored.test(entryPath, true)) {
-					yield* walk(path.join(entry.parentPath, entry.name), entryPath, nextIdx);
-				}
-			}
-		}
-
-		async function* yieldDescendants(base, relDir) {
-			for (const entry of await fs.readdir(base, { withFileTypes: true })) {
-				const name = entry.name;
-				const entryPath = relDir ? relDir + '/' + name : name;
-				const isDir = entry.isDirectory();
-
-				const ignore = ignored.test(entryPath, isDir);
-				if (ignore || (name[0] === '.' && !showHidden)) {
-					if (ignore === 'dir') yield entry;
-					continue;
-				}
-
-				yield entry;
-				if (isDir) yield* yieldDescendants(path.join(entry.parentPath, entry.name), entryPath);
-			}
-		}
-
-		entries = walk(base, glob.prefix, 0);
+		if (!(await fs.stat(safePath)).isDirectory()) throw new Error("Path is a file, cannot use glob");
 
 		let prefix = '';
-		let items = 0;
 		let modSince = modifiedSince ? +new Date(modifiedSince) : 0;
 		if (!isFinite(modSince)) throw 'Invalid date';
 
+		if (null == showHidden) showHidden = /(?:^|\/)\.[^./]/.test(pattern);
+
 		const result = [];
-		for await (const entry of entries) {
+		for await (const entry of await glob(pattern, safePath, showHidden, acl, exclude)) {
 			const parentPath = entry.parentPath.slice(safePath.length+1).replaceAll(path.sep, '/');
 			const displayPath = pattern !== '*' && parentPath ? parentPath+'/'+entry.name : entry.name;
 			const isDir = entry.isDirectory();
 
-			if (items >= limit) {
+			if (!json && result.length >= limit) {
 				prefix = `[TRUNCATED to ${limit} entries, use a more specific path or pattern]\n`;
 				break;
 			}
-			if (!json) items++;
+
+			const fullPath = path.join(entry.parentPath, entry.name);
+			const stats = await fs.stat(fullPath);
 
 			if (!isDir) {
-				const fullPath = path.join(entry.parentPath, entry.name);
-				const stats = await fs.stat(fullPath);
-
-				if (stats.mtimeMs > modSince) {
-					const item = [displayPath, "file", formatSize(stats.size)];
-					if (showModified || modSince) item.push(stats.mtime.toISOString().slice(0, -5));
+				if (stats.mtimeMs >= modSince) {
+					const item = [displayPath, "file", json ? stats.size : formatSize(stats.size)];
+					if (showModified || modSince) item.push(json ? stats.mtimeMs : stats.mtime.toISOString().slice(0, -5));
 					result.push(item);
 				}
 			} else if (displayPath && (showDir != null ? showDir : !modSince)) {
-				const ignore = ignored.test(displayPath, true);
-				result.push([displayPath,  ignore === 'dir' ? "dir (descents skipped)" : "dir"]);
+				const ignore = acl.denyList(displayPath, true);
+				const arr = [displayPath, ignore === 'skip' ? "dir (descents skipped)" : "dir"];
+				if (showModified) arr.push(0, json ? stats.mtimeMs : stats.mtime.toISOString().slice(0, -5));
+				result.push(arr);
 			}
 		}
 
-		if (modSince) result.sort((a, b) => b[3].localeCompare(a[3]));
+		if (modSince) result.sort((a, b) => b[3] - a[3]);
 
 		if (json) return result;
 		return result.length ? prefix+result.map(item => item.join("\t")).join("\n") : "[No result]";
@@ -342,8 +334,8 @@ export async function registerFsRoutes(router, allowExec) {
 		absPath: pathFilter,
 		async read(path, ctx) {
 			const stats = await fs.stat(path);
-			if (stats.size > 10485760) {
-				const msg = `File too large (${stats.size} bytes)`;
+			if (stats.size > TEXT_FILE_MAX) {
+				const msg = `File too large (${stats.size} > ${TEXT_FILE_MAX})`;
 				if (!ctx) throw msg; // for grep
 				return ctx.send(400, { error: msg });
 			}
@@ -360,13 +352,6 @@ export async function registerFsRoutes(router, allowExec) {
 		}
 	});
 
-	router.post('/ping', async (ctx) => {
-		const args = await ctx.readAsObject(1024);
-		const hash = createHash("sha256");
-		hash.update(args.nonce + 'AiChat');
-		ctx.send(200, { pong: hash.digest('hex') });
-	});
-
 	router.post('/read', async (ctx) => {
 		sendText(ctx.res, await teh.read(await ctx.readAsObject(), ctx));
 	});
@@ -377,7 +362,7 @@ export async function registerFsRoutes(router, allowExec) {
 		sendText(ctx.res, await teh.edit(await ctx.readAsObject(), ctx));
 	});
 	router.post('/write', async (ctx) => {
-		sendText(ctx.res, await teh.write(await ctx.readAsObject(), ctx));
+		sendText(ctx.res, await teh.write(await ctx.readAsObject(TEXT_FILE_MAX), ctx));
 	});
 	router.post('/append', async (ctx) => {
 		const { path, content, newline = true } = await ctx.readAsObject();
@@ -408,8 +393,8 @@ export async function registerFsRoutes(router, allowExec) {
 		const { path: filePath } = await ctx.readAsObject();
 		const safePath = pathFilter(filePath, ctx);
 		const stats = await fs.stat(safePath);
-		if (stats.size > 10485760) {
-			return ctx.send(400, { error: `File too large (${stats.size} bytes)` });
+		if (stats.size > BINARY_FILE_MAX) {
+			return ctx.send(400, { error: `File too large (${stats.size} > ${BINARY_FILE_MAX})` });
 		}
 
 		ctx.res.writeHead(200, {
@@ -428,7 +413,7 @@ export async function registerFsRoutes(router, allowExec) {
 		const safePath = await pathFilterWithIgnore(ctx, filePath);
 		await fs.mkdir(path.dirname(safePath), { recursive: true });
 
-		const buffer = await ctx.readAsBuffer();
+		const buffer = await ctx.readAsBuffer(BINARY_FILE_MAX);
 		await fs[ctx.url.pathname.endsWith("/appendRaw") ? 'appendFile' : 'writeFile'](safePath, buffer);
 		if (/\.(gitignore|ignore)$/.test(filePath)) matcherCache.delete(ctx.fsRoot);
 		teh.del(safePath);
@@ -458,8 +443,8 @@ nlink: ${stats.nlink}`);
 
 	// 基础操作
 	router.post('/mkdir', async (ctx) => {
-		const { path: filePath } = await ctx.readAsObject();
-		await fs.mkdir(await pathFilterWithIgnore(ctx, filePath, true), { recursive: true });
+		const { path: filePath, recursive = true } = await ctx.readAsObject();
+		await fs.mkdir(await pathFilterWithIgnore(ctx, filePath, true), { recursive });
 		ctx.send(200, 'Success');
 	});
 	router.post('/copy', async (ctx) => {
@@ -475,11 +460,11 @@ nlink: ${stats.nlink}`);
 		ctx.send(200, 'Success');
 	});
 	router.post('/delete', async (ctx) => {
-		const { path: filePath } = await ctx.readAsObject();
+		const { path: filePath, recursive = true, force = false } = await ctx.readAsObject();
 		const safePath = await pathFilterWithIgnore(ctx, filePath, true);
 		if (safePath === ctx.fsRoot) return ctx.send(403, { error: 'Cannot delete root' });
 
-		await fs.rm(safePath, { recursive: true, force: true });
+		await fs.rm(safePath, { recursive, force });
 		teh.del(safePath);
 		ctx.send(200, 'Success');
 	});
@@ -497,8 +482,10 @@ nlink: ${stats.nlink}`);
 	const ANSI_SEQ = new RegExp(osc+"|"+csi, 'g');
 
 	// 后台进程管理：输出全部落盘为日志文件，LLM 可自行 read_file 查看
-	/** @type {Map<string, {child: import('node:child_process').ChildProcess, logFile: string, cwd: string, timer?: number}>} */
+	/** @type {Map<number, {child: import('node:child_process').ChildProcess, logFile: string, cwd: string, timer: ReturnType<typeof setTimeout>, message?: string, killing?: boolean}>} */
 	const processes = new Map();
+
+	globalThis.AiChatAPI.addShutdownHook?.(() => Promise.all([...processes.values()].map(info => killProcess(info.child, 0))));
 
 	// 事件总线
 	let events = [];
@@ -526,20 +513,20 @@ nlink: ${stats.nlink}`);
 	};
 
 	router.post('/event', async (ctx) => {
-		const {runId, since = -1} = await ctx.readAsObject();
+		const {runId, since = 0} = await ctx.readAsObject();
 		const deadline = Date.now() + 120000;
 
 		const collect = () => {
-			const pos = events.findIndex(e => e.id > since);
+			const pos = events.findIndex(e => e.id >= since);
 			return {
 				runId: RUN_ID,
-				events: events.slice(pos),
+				events: pos < 0 ? [] : events.slice(pos),
 				next: eventId,
 			};
 		};
 
 		let id = events.at(-1)?.id;
-		if ((id == null || id <= since) && (runId === RUN_ID)) {
+		if ((id == null || id < since) && (runId === RUN_ID)) {
 			await new Promise(resolve => {
 				const timer = setTimeout(done, deadline - Date.now());
 				function done() {
@@ -561,11 +548,13 @@ nlink: ${stats.nlink}`);
 	 * @param {object}   options   - { cwd, timeout(ms), shell(boolean|string), safeCwd(用于落盘) }
 	 * @returns {Promise<{code: number, text: string}>}
 	 */
-	async function executeCommand(command, args, { cwd, timeout, shell = false, dir = '.', inline, async: _async, env, kill, stdin = true }) {
+	async function executeCommand(command, args, { cwd, timeout, shell = false, dir = '.', inline, async: isAsync, env, kill, stdin = true }) {
 		const child = spawn(command, args, {
 			cwd,
 			stdio: [stdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
 			shell,
+			// POSIX 下让子进程成为进程组组长，killProcess 才能用 -pid 杀掉整棵树
+			detached: !IS_WIN,
 			env: {
 				...process.env,
 				...env
@@ -578,17 +567,29 @@ nlink: ${stats.nlink}`);
 		let filename = `/pid-${child.pid}-${Math.random().toString(36).slice(3, 7)}.log`;
 		let file = null;
 
+		const createLogStream = () => {
+			file = createWriteStream(path.join(cwd, filename), { flags: 'w' });
+			file.on('error', (err) => {
+				child.stdout.unpipe(file);
+				child.stderr.unpipe(file);
+				console.error("[进程] 日志写入失败", err);
+				file = devNull();
+			});
+		};
+
 		/** @param {Buffer} chunk */
 		const onData = (chunk) => {
 			totalBytes += chunk.length;
 
 			if (file) {
+				if (file.writableEnded) return;
+
 				file.write(chunk);
 				tail = Buffer.concat([tail, chunk]).subarray(-HALF);
 			} else {
 				tail = Buffer.concat([tail, chunk]);
 				if (!inline && tail.length > OUTPUT_LIMIT) {
-					file = createWriteStream(path.join(cwd, filename), { flags: 'w' });
+					createLogStream();
 					file.write(tail);
 
 					head = tail.subarray(0, HALF);
@@ -617,6 +618,8 @@ nlink: ${stats.nlink}`);
 		};
 
 		const startTime = Date.now();
+		let notify = false;
+
 		const result = await new Promise((resolve) => {
 			let timer = setTimeout(() => {
 				child.stdout.removeAllListeners('data');
@@ -632,49 +635,61 @@ nlink: ${stats.nlink}`);
 				}
 
 				resolve({
-					code: (_async?'':'TIMEOUT, ')+'Running in background (pid='+child.pid+', logPath='+JSON.stringify(dir + filename)+')',
+					code: (isAsync?'':'TIMEOUT, ')+'Running in background (pid='+child.pid+', logPath='+JSON.stringify(dir + filename)+')',
 					text: getLog(),
 				});
 
-				// Ensure log file exists for remaining output
-				if (!file) {
-					file = createWriteStream(path.join(cwd, filename), { flags: 'w' });
-					file.write(tail);
-					head = tail = null;
-				} else {
-					file.write(tail);
-					head = tail = null;
-				}
+				if (!file) createLogStream();
+
+				file.write(tail);
+				head = tail = null;
+				notify = true;
 
 				child.stdout.pipe(file, { end: false });
 				child.stderr.pipe(file, { end: false });
-			}, Math.min(_async ? 100 : timeout, 275000));
+			}, Math.min(isAsync ? 100 : timeout, 275000));
 
-			if (!inline)
+			if (!inline && child.pid != null)
 				processes.set(child.pid, { child, logFile: dir+filename, cwd, timer });
 
-			console.log("[进程] 已启动", cwd, command, args);
+			console.log("[进程] 已启动", child.pid, command, args);
 
 			child.on('error', (err) => {
 				clearTimeout(timer);
+				if (!inline) processes.delete(child.pid);
 				resolve({ code: -1, text: err.message });
 			});
 
 			child.on('exit', (code, signal) => {
-				if (file) file.end();
+				const info = !inline ? processes.get(child.pid) : null;
+				if (!inline) processes.delete(child.pid);
 
-				if (_async) postEvent('process-exit', {
-					pid: child.pid,
-					code: signal || code,
-					logFile: dir+filename,
-					manual: !processes.has(child.pid)
-				});
+				file?.end();
+				clearTimeout(timer);
+
+				const codeStr = signal || "0x"+code.toString(16);
+				console.log("[进程] 已停止", child.pid, codeStr);
+
+				if (notify) {
+					fs.stat(dir+filename).catch(() => ({})).then(async state => {
+						let logFile = dir+filename;
+						if (state.size === 0) {
+							await fs.rm(logFile).then(() => logFile = '0B, deleted', () => {});
+						}
+						postEvent('process-exit', {
+							pid: child.pid,
+							code: codeStr,
+							logFile,
+							message: !info ? true : info?.message
+						});
+					});
+					processes.delete(child.pid);
+				}
 
 				if (head == null) return;
 
-				clearTimeout(timer);
 				resolve({
-					code: signal || code,
+					code: codeStr,
 					text: getLog()
 				});
 			});
@@ -687,14 +702,14 @@ nlink: ${stats.nlink}`);
 	 * 终止后台程序
 	 */
 	router.post('/kill', async (ctx) => {
-		const { pid } = await ctx.readAsObject();
+		const { pid, message } = await ctx.readAsObject();
 		const info = processes.get(pid);
 
 		if (!info) return sendText(ctx.res, `Error: process died or not started by agent.`);
 
 		const { child, logFile, timer } = info;
 
-		if (child.killed || child.exitCode !== null) {
+		if (child.exitCode !== null || child.signalCode != null) {
 			processes.delete(pid);
 			return sendText(ctx.res,
 				`status: exited earlier
@@ -703,10 +718,14 @@ logPath: ${logFile}`
 			);
 		}
 
-		console.log("[进程] 中止 "+pid);
 		clearTimeout(timer);
-		processes.delete(pid);
-		killProcess(child);
+		if (!message) {
+			processes.delete(pid);
+			info.message = true;
+		} else {
+			info.message = message;
+		}
+		await killProcess(child);
 
 		sendText(ctx.res,
 			`status: killed

@@ -14,7 +14,7 @@
         padding: 4px 10px;
         gap: 8px;
         display: flex;
-        font-size: 14px;
+        font-size: 13px;
         align-items: baseline;
     }
 
@@ -34,15 +34,18 @@
     }
     & .args {
         max-height: 256px;
-        padding: 8px 10px;
-
+        padding: 8px 2px 8px 10px;
         color: var(--code-fg);
         background: var(--code-bg);
         font-family: var(--code-font);
 
         border: 1px solid var(--border);
         border-radius: 8px;
+
         overflow: auto;
+        &:not(.CodeEditor) {
+            scrollbar-gutter: stable;
+        }
     }
 
     & button:not(.btn)[class^="ri-"] {
@@ -70,8 +73,8 @@
         grid-template: none;
     }
 
-    &.pending {
-        & .rerun-btn, &.need-approval > :nth-child(3) {
+    &:not(.t-success):not(.t-error):not(.running):not(.editing) {
+        & .rerun-btn, & > .o {
             display: none;
         }
     }

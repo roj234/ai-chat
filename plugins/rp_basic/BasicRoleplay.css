@@ -1,0 +1,69 @@
+
+.lorebooks {
+	margin-left: 10px;
+	font-size: 14px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.lorebook {
+	border: 1px solid transparent;
+	border-left: 3px solid var(--accent);
+
+	> summary {
+		padding: 4px 10px;
+
+		&::before {
+			content: "▸";
+			font-size: 16px;
+			transition: transform .15s;
+		}
+
+		&:hover {
+			background: var(--chip-hover);
+		}
+	}
+
+	&[open] {
+		background: var(--panel-2);
+		border-color: var(--border);
+		border-left-color: var(--ok);
+
+		& > summary::before { transform: rotate(90deg); }
+	}
+
+	.badges {
+		display: flex;
+		gap: 4px;
+		> span {
+			font-size: 11px;
+			line-height: 18px;
+			padding: 0 6px;
+			border-radius: 999px;
+			background: var(--chip-bg);
+			color: var(--text-muted);
+		}
+	}
+
+	.meta {
+		display: grid;
+		grid-template-columns: max-content 1fr;
+		gap: 8px 16px;
+		margin: 0;
+		padding: 10px 12px;
+		& dd { margin: 0; }
+	}
+
+	.textDiff {
+		border-radius: 0;
+		border: none;
+		border-top: 1px solid var(--border);
+	}
+
+	.chip {
+		padding: 1px 6px;
+		margin: 2px 4px 2px 0;
+		border-radius: 4px;
+	}
+}

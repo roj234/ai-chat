@@ -38,6 +38,7 @@ async function detectEnv() {
 	let [
 		gitResult,
 		bashResult,
+		bashMSYSResult,
 		python3Result,
 		pythonResult,
 		npmResult,
@@ -45,6 +46,7 @@ async function detectEnv() {
 	] = await Promise.all([
 		'git --version',
 		'bash --help',
+		'bash -c "cmd /c echo /"',
 		'python3 --version',
 		'python --version',
 		'npm --version',
@@ -66,6 +68,13 @@ async function detectEnv() {
 	if (bashResult.success) {
 		const match = bashResult.output.match(/^(BusyBox v[\d.]+)/);
 		env.bash = match ? match[1] : bashResult.output;
+		if (os.platform() === 'win32') {
+			env.bashDialect = !bashMSYSResult.success
+				? "unknown, probe double slashes and absolute path format first"
+				: bashMSYSResult.output === '/'
+					? "Busybox: Windows commands use **single** slashes (`cmd /c`) and absolute path is Windows-like (`C:/Windows/System32/`)"
+					: "MSYS: Windows commands use **double** slashes (`cmd //c`) and absolute path is unix-like (`/cygdrive/c/Windows/System32/`)";
+		}
 	} else {
 		env.bash = 'Not found';
 	}

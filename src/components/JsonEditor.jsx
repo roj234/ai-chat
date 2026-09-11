@@ -1,5 +1,5 @@
 import "./JsonEditor.css";
-import {$cleanup, $state, $watchWithCleanup, AS_IS, preserveState} from "unconscious";
+import {$cleanup, $state, $watchWithCleanup, AS_IS} from "unconscious";
 import {createJsonParser} from "unconscious/common/Json.js";
 import {lightAsync} from "../markdown/highlight.js";
 
@@ -31,7 +31,7 @@ const findPosition = (root, targetOffset) => {
 };
 
 export const JsonEditor = ({value = "", state}) => {
-	const currentText = preserveState($state(value));
+	const currentText = $state(value);
 	let pre;
 	/** @type {HTMLTextAreaElement} */
 	let textarea;
@@ -58,7 +58,6 @@ export const JsonEditor = ({value = "", state}) => {
 				cancelHighlight = null;
 				lastText = codeStr;
 				pre.innerHTML = html+"&nbsp;";
-				//morphdom(pre, "<pre>"+html+"</pre>");
 				if (errorPos != null) {
 					const cursor = <span className='cursor'></span>;
 

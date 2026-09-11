@@ -8,6 +8,7 @@ import clientPackageInfo from './package.json' with {type: 'json'};
 import {configProxy, makeBrotliZip, nodeResolve} from 'unconscious/vite/build-backend.js';
 import {ZipWriter} from "unconscious/common/zip-io.js";
 import fs from "node:fs/promises";
+import {globMacroPlugin} from "./common/fs-glob.js";
 
 const execFilePromise = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -32,6 +33,7 @@ const rollupConfig = {
 		configProxy({
 			include: /[\\/]config\.js$/
 		}),
+		globMacroPlugin(),
 		{
 			name: 'my-plugin',
 			/**

@@ -25,6 +25,10 @@
     &:not(:hover) > .list {
         display: none;
     }
+    & button:focus + .list {
+        display: block;
+    }
+
     & > .list {
         &.up { bottom: 100%; }
         &.mid {

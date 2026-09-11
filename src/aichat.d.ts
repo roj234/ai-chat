@@ -1,18 +1,57 @@
 import {OpenAI} from "./openai";
 
 declare namespace AiChat {
+    type FSType = 'db' | 'api' | 'local' | 'config' | 'opfs' | 'vfs';
+
+    type GlobSegment = {
+        t: 0,
+        re: RegExp,
+    } | { t: 1 } | {
+        t: 2,
+        branches: GlobSegment[]
+    };
+
+    type GlobNFA = {
+        re: RegExp[];
+        masks: Uint32Array;
+        match: number;
+        carry: number;
+        start: number;
+        suffix: number;
+    };
+
+    /** 等待中的后台进程退出事件 */
+    type FSEvent = {
+        runId?: string;
+        type: string;
+        pid: number;
+        /** 启动原因 */
+        explanation?: string;
+        /** VFS */
+        cwd?: string;
+        /** 启动时间 */
+        start?: number;
+    }
+
     type Mount = {
-        fs_type: 'db' | 'api' | 'local' | 'config' | 'opfs' | 'vfs';
+        fs_type: FSType;
         fs_base?: string;
-        fs_server?: string | string[];
+        fs_server?: string;
         fs_builtin?: string;
-        fs_events?: Object[];
+        fs_events?: FSEvent[];
+        fs_readonly?: boolean;
+
+        // only available for local/opfs/vfs
+        fs_ACL?: { ignore?: string, acl?: string };
+        fs_branch?: string;
     }
 
     export type Conversation = Mount & {
         id: number,
         title: string,
         time: number,
+
+        temporary?: true,
 
         /** 消息是否从DB加载完成 */
         ready?: boolean,
@@ -39,19 +78,31 @@ declare namespace AiChat {
         bm_leaf?: number;
 
         mnt?: Record<string, Mount>;
+        fs_readonly?: boolean;
 
         /** 覆盖全局配置，高于 config 优先级 */
         presets?: string | string[];
         /** 覆盖全局配置，高于 presets 优先级 */
         overrides?: Partial<LocalPreset>;
 
-        /** 子代理宿主 */
-        owner?: number;
         /** pending消息缓存 */
         pendingMessages?: Message[];
+
+        fs_secrets?: Record<string, { value: string, domain: string }>;
     }
 
-    export type Message = BaseMessage | AssistantMessage;
+    export type SubagentConversation = Conversation & {
+        /** 子代理宿主 */
+        owner: number;
+
+        sa_maxTurns?: number;
+        sa_terminated?: true;
+        sa_pending?: true;
+        sa_redirect?: Object;
+        sa_notify?: number;
+    }
+
+    export type Message = BaseMessage | AssistantMessage | FoldedMessage;
 
     type BaseMessage = OpenAI.Message & {
         // No 'tool' type here
@@ -63,9 +114,20 @@ declare namespace AiChat {
         hidden?: boolean;
         // 父消息的偏移量，分支对话用
         parent?: number;
+        // 所属折叠块的 id
+        foldGroup?: string[];
+        // payload
+        folded?: Object[];
 
-        // 其他人的对话
+        // 自定义名称
         label?: string;
+    }
+
+    type FoldedMessage = {
+        role: "fold";
+        group: string;
+        start: number;
+        end: number;
     }
 
     type FinishReason = 'length' | 'tool_calls' | 'stop' | 'error' | 'interrupt';
@@ -193,8 +255,9 @@ declare namespace AiChat {
     }
 
     type AgentFSPreset = {
-        fs_trashCan: boolean;
         fs_autoMount: boolean;
+        fs_env?: Record<string, string>;
+        fs_secrets?: Record<string, { value: string, domain: string }>;
     }
 
     type ManualOverridePreset = {
@@ -204,7 +267,7 @@ declare namespace AiChat {
     type GlobalPreset = {
         name: string,
 
-        db_server: string,
+        db_servers: string[],
         db_pat: string,
 
         theme?: 'light' | 'dark';
@@ -213,13 +276,12 @@ declare namespace AiChat {
         blobCacheCapacity: number,
         subagentDepth: number,
 
-        incognito: boolean,
+        temporaryChat: boolean,
 
         nickname: string;
 
         combineToolCalls: 0 | 1,
         expandThinkBlock: 0 | 1,
-        expandToolCall: 0 | 1,
         checkUpdate: 0 | 1,
     }
 
@@ -305,7 +367,23 @@ declare namespace AiChat {
         html: string;
     }
 
-    type ResponseContentPart = (OpenAI.TextPart | GalleryPart | ThinkPart | ToolPart | ToolUIPart | UsagePart | ErrorPart | BranchPart | HTMLPart | ProgressPart) & {
+    /** 组合工具调用：顶部“处理中/已处理 XX 秒” */
+    type ToolsHeaderPart = {
+        type: "tools_header";
+        start: number;
+        end: number;
+        openKey: AssistantMessage;
+    }
+
+    /** 组合工具调用：被折叠的一组工具调用（思维链等） */
+    type ToolGroupPart = {
+        type: "tool_group";
+        rounds: number;
+        time: number;
+        openKey: AssistantMessage;
+    }
+
+    type ResponseContentPart = (OpenAI.TextPart | GalleryPart | ThinkPart | ToolPart | ToolUIPart | UsagePart | ErrorPart | BranchPart | HTMLPart | ProgressPart | ToolsHeaderPart | ToolGroupPart) & {
         key?: object;
     };
 
@@ -327,6 +405,16 @@ declare namespace AiChat {
         reentrant?: FunctionToolReentrantMode;
 
         /**
+         * 是否允许并行执行（true=总体并行, same=单工具并行）
+         */
+        parallel?: boolean | 'same';
+
+        /**
+         * 在折叠模式也要渲染，因为类型是输出（仅 tool_ui 模式）
+         */
+        artifact?: 'i' | 'o' | 'io';
+
+        /**
          * 生成工具调用标题
          * @param request
          * @param context
@@ -344,7 +432,7 @@ declare namespace AiChat {
          * @param response 工具响应（任意对象），可以存入工具调用结果，以及renderer函数需要的数据
          * @param global_storage 全局状态存储
          */
-        script: (parameters: Record<string, any>, response: ToolResponse & Payload, global: Conversation) => any | Promise<any>;
+        script: (parameters: Record<string, any>, response: ToolResponse & Payload, global: Conversation, toolName: string, message: AssistantMessage) => any | Promise<any>;
         /**
          * 撤销script造成的更改
          * reentrant=true 时建议指定 undo，除非*你真的知道你在做什么*
@@ -399,7 +487,8 @@ declare namespace AiChat {
 
     type IDBKVList = {
         type?: IDBValidKey,
-        name?: IDBValidKey
+        name?: IDBValidKey,
+        meta?: any
     }
 
     type LLMRequestContext = {
@@ -417,14 +506,7 @@ declare namespace AiChat {
         trusted?: boolean
     }
 
-    type FileSystemInstance = {
-        read_image({path: string}): Promise<Blob>,
-        mkdir({path: string}): Promise<string>,
-        copy({src: string, dest: string, move: boolean}): Promise<string>,
-        stat({path: string}): Promise<string>,
-        delete({path: string}): Promise<string>,
-        list({path: string, glob: string}): Promise<string>,
-    }
+    type FileSystemInstance = {};
 
     namespace DnD {
         //region 酒馆类型定义
@@ -558,20 +640,24 @@ declare namespace AiChat {
 
         interface CustomMessageRole {
             name: string;
+
             /**
-             * chunks 是否需要动态生成
+             * @param self 当前消息
+             * @param messages 输入的消息列表
+             * @param conv 当前对话
              */
-            reactive?: boolean;
+            preprocess?(self: Message, messages: Message[], conv: Conversation): Message[];
+
             /**
              *
              * @param message 输入的消息
              * @param output 输出的JSON消息
-             * @param callbacks 写入一个回调，在所有compose完成后调用
              * @param index 消息序号
              * @param length 消息总数
              * @param conv 当前对话
              */
-            compose?(message: Message, output: OpenAI.Message[], callbacks: MessageComposedCallback[], index: number, length: number, conv: Conversation);
+            compose?(message: Message, output: OpenAI.Message[], index: number, length: number, conv: Conversation): void;
+
             /**
              *
              * @param message 消息
@@ -586,6 +672,7 @@ declare namespace AiChat {
                 index: number, isEditing: (Message) => boolean, messages: Message[],
                 defaultRenderContent: ((message: Message, chunks: ResponseContentPart[], content?: string) => void)
             ): void;
+
             // 返回 void 表示继续后面的处理，添加内部的keys，否则直接以这些keys结束
             keyFunc?(chunk: ResponseContentPart, keys: any[]): any[] | void;
 
@@ -698,33 +785,44 @@ declare namespace AiChat {
         }
     }
 
-    class BranchManager {
-        readonly conversation: Conversation;
-        readonly messages: Message[];
-        leaf: Message;
+    class BranchManager extends Array<AiChat.Message> {
+        readonly raw: Message[];
 
         constructor(conversation: Conversation, messages: Message[]);
 
+        push(...items: Message): number;
+        pop(): Message;
+        unshift(...items: Message): void;
+
         /**
-         * 获取当前分支的所有消息
+         * 分支数组的核心操作方法，目前只允许开头插入不入库消息，末尾插入消息，以及删除某一段到末尾的整体。
+         * @param start
+         * @param deleteCount
+         * @param addItems
+         */
+        splice(start: number, deleteCount: number, ...addItems: Message[]): Message[];
+
+        /**
+         * @param {Message} v 新的叶子消息
+         * @param {boolean=} sync 从原始数据编辑器同步
+         */
+        setLeaf(v: Message, sync?: boolean): void;
+
+        /**
+         * 刷新分支消息数组
          */
         getMessages(): Message[];
 
         /**
-         * 获取当前分支的所有消息并删除分支管理器的所有相关字段
-         */
-        toArray(): Message[];
-
-        /**
          * 在指定消息处创建新分支
-         * @param {number} parent 父消息
+         * @param {Message} parent 父消息
          * @param {Message} message 消息
          */
         branchAt(parent: Message, message: Message);
 
         /**
          * 切换分支：当某个分支有多个子节点时，选择其中一个
-         * @param {number} parent 分支发生点
+         * @param {Message} parent 分支发生点
          * @param {number} index 选择第几个分支
          */
         switchBranch(parent: Message, index: number);
@@ -737,9 +835,25 @@ declare namespace AiChat {
         getBranchInfo(message: Message): [number, number];
 
         /**
-         * 删除指定消息及其所有子孙节点，并回退当前叶子 ID 到父节点
-         * @param {number} messageId - 要删除的消息 ID
+         * 检查从指定消息开始（含自身）到叶子节点的路径上是否存在分支点
+         * @param {Message} message - 要检查的起始消息
          */
-        remove(messageId: number);
+        hasBranch(message: Message): boolean;
+
+        /**
+         * 将消息折叠，支持嵌套。
+         * @param start
+         * @param end
+         * @param data 写入原始消息的载荷字段，例如content
+         * @param foldId
+         * @param skipUpdate
+         * @returns 占位消息
+         */
+        fold(start: number, end: number, data: Object & { content: string }, foldId?: string, skipUpdate?: boolean): Message | void;
+
+        /**
+         * 解压折叠块
+         */
+        unfold(block: Message): Message[];
     }
 }

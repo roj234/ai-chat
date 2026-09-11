@@ -1,0 +1,494 @@
+import {readAsString} from "/common/chardet.js";
+import {createTextFileEditHelper} from "/common/fs-common.js";
+import {ACL, READ, WRITE} from "/common/ACL.js";
+import {formatSize} from "unconscious/common/Utils.js";
+import {AS_IS, UTF8_TEXT_ENCODER} from "unconscious";
+import {
+	copyEntry,
+	CREATE,
+	CREATE_LEAF,
+	CREATE_OPT,
+	RECURSIVE,
+	REQUIRE_DIR,
+	REQUIRE_FILE,
+	resolveHandle
+} from "./WebFSUtils.js";
+import {createOverlayFileSystem, OVERLAYFS_INTERNAL} from "./OverlayFileSystem.js";
+import {compileGlobPattern, emptyAsyncGenerator, generateGlobCode, parseGlobPattern} from "/common/fs-glob.js";
+// noinspection ES6UnusedImports
+import {FSE_NotFound, mpscScheduler, throwDOMException} from "/common/pure-utils.js";
+import {
+	VCS_BASE_BRANCH,
+	VCS_BRANCH,
+	VCS_BRANCHES,
+	VCS_COMMIT,
+	VCS_DELETE_BRANCH,
+	VCS_DIFF,
+	VCS_GET,
+	VCS_GET_BASE,
+	VCS_REVERT
+} from "./VCS_shared.js";
+import {showToast} from "/src/components/Toast.js";
+import {prettyError} from "/src/utils/utils.js";
+
+/**
+ * @template T
+ * @param {Promise<T>} promise
+ * @return {Promise<T>}
+ */
+const EAT = promise => promise.catch(() => {});
+const FILE_TOO_BIG = "InvalidStateError";
+const toArrayBuffer = data => (typeof data === "string" ? UTF8_TEXT_ENCODER.encode(data) : data).buffer;
+const prependLF = data => {
+	if (typeof data === 'string') return '\n' + data;
+	const newBuffer = new Uint8Array(data.length + 1);
+	data[0] = 0x0a;
+	newBuffer.set(data, 1);
+	return data;
+};
+
+async function readFileText(rootHandle, path) {
+	const fileHandle = (await resolveHandle(rootHandle, path, READ | REQUIRE_FILE))[2];
+	const file = await fileHandle.getFile();
+	return await file.text();
+}
+
+/**
+ * Walk the filesystem matching a glob pattern.
+ * Yields { name, relDir, handle } where handle is the FileSystemHandle.
+ * @param {FileSystemDirectoryHandle} rootHandle
+ * @param {string} pattern
+ * @param {string} path
+ * @param {boolean} [showHidden=false]
+ * @param {ACL} [acl]
+ * @param {string[]} [exclude]
+ * @return {Promise<AsyncGenerator<[name: string, relDir: string, handle: FileSystemDirectoryHandle | FileSystemFileHandle]>>}
+ */
+const glob = async (rootHandle, pattern, path, showHidden, acl, exclude) => {
+	const result = compileGlobPattern(pattern, path, exclude);
+	let handle;
+	try {
+		handle = (await resolveHandle(rootHandle, result.path, READ|REQUIRE_DIR, acl))[2];
+	} catch (e) {
+		if (e.name === FSE_NotFound)
+			return emptyAsyncGenerator();
+		throw e;
+	}
+
+	// Don't worry, it is handled by Vite
+	return eval(generateGlobCode(false));
+};
+
+/**
+ *
+ * @param {FileSystemDirectoryHandle | OverlayFileSystem} rootHandle
+ * @param {Partial<AiChat.Mount>} config
+ * @returns {Promise<AiChat.FileSystemInstance>}
+ */
+export const createWebFileSystem = async (rootHandle, config = {}) => {
+	const realHandle = rootHandle;
+
+	/** @type {ACL} */
+	let acl;
+	const loadACL = async () => {
+		let ignoreText = config.fs_ACL?.ignore;
+		if (ignoreText) {
+			ignoreText = await readFileText(realHandle, ignoreText);
+		} else {
+			for (const name of ['.ignore', '.gitignore']) {
+				try {
+					const fileHandle = await realHandle.getFileHandle(name);
+					const file = await fileHandle.getFile();
+					ignoreText = await file.text();
+					break;
+				} catch {}
+			}
+		}
+
+		let aclText = config.fs_ACL?.acl;
+		if (aclText) {
+			aclText = await readFileText(realHandle, aclText);
+		}
+
+		acl = new ACL();
+		if (aclText) acl.parseRule(aclText);
+		if (ignoreText) acl.parseIgnore(ignoreText);
+		acl.compile();
+	};
+	const myResolveHandle = (path, flags) => resolveHandle(rootHandle, path, flags, acl);
+
+	const api = {
+		async mkdir({path, recursive = true}) {
+			await myResolveHandle(path, WRITE|REQUIRE_DIR|CREATE_LEAF|(recursive ? CREATE : 0));
+			return 'Success';
+		},
+
+		async copy({ src, dest, move }) {
+			const [ srcParent, srcName, srcHandle ] = await myResolveHandle(src, move ? READ | WRITE : READ);
+			const [ destParent, destName ] = await myResolveHandle(dest, WRITE | CREATE | CREATE_LEAF | (srcHandle.kind === "file" ? REQUIRE_FILE : REQUIRE_DIR));
+
+			await copyEntry(srcHandle, destParent, destName, move);
+			if (move) await EAT(srcParent.removeEntry(srcName, RECURSIVE));
+
+			return 'Success';
+		},
+
+		async stat({path}) {
+			const [ parent, name, handle, isDir ] = await myResolveHandle(path, READ);
+
+			const file = isDir ? null : await handle.getFile();
+			let str = `type: ${(isDir ? 'dir' : 'file')}`;
+			if (file) {
+				str += `
+size: ${file.size}
+mtime: ${new Date(file.lastModified).toISOString()}`
+			}
+			return str;
+		},
+
+		async delete({path, recursive = true, force}) {
+			try {
+				const [ parent, name, handle ] = await myResolveHandle(path, WRITE);
+				await parent.removeEntry(name, recursive ? RECURSIVE : undefined);
+			} catch (e) {
+				if ((recursive || force) && e.name === FSE_NotFound) {}
+				else throw e;
+			}
+			return 'Success';
+		},
+
+		/**
+		 * Append content to a file, optionally ensuring a newline precedes the content
+		 * if the existing file doesn't end with one.
+		 *
+		 * @param {FileSystemDirectoryHandle} rootHandle
+		 * @param {string} path
+		 * @param {string|Uint8Array} content
+		 */
+		async append({path, content, newline = true}) {
+			const [parentHandle, name, fileHandle] = await myResolveHandle(path, WRITE | CREATE | CREATE_LEAF | REQUIRE_FILE);
+
+			if (fileHandle.createSyncAccessHandle) {
+				const raf = await fileHandle.createSyncAccessHandle();
+				const size = raf.getSize();
+
+				try {
+					if (newline && size > 0) {
+						const offset = size - 1;
+						const lastByte = new Uint8Array(1);
+						raf.read(lastByte.buffer, {at: offset});
+						const needNewline = lastByte[0] !== 0x0a;
+						if (needNewline) content = prependLF(content);
+					}
+
+					raf.write(toArrayBuffer(content), { at: size });
+				} finally {
+					raf.close();
+				}
+			} else {
+				for (;;) {
+					const file = await fileHandle.getFile();
+					const size = file.size;
+
+					// Check whether existing content ends with \n
+					if (newline && size > 0) {
+						const offset = size - 1;
+						const lastByte = new Uint8Array((await file.slice(offset, offset + 1).arrayBuffer()))[0];
+						const needNewline = lastByte !== 0x0a;
+						if (needNewline) content = prependLF(content);
+					}
+
+					const writable = await fileHandle.createWritable({ keepExistingData: true });
+					await writable.seek(size);
+					await writable.write(content);
+
+					try {
+						await writable.close();
+						break;
+					} catch (e) {
+						if (e.name === FILE_TOO_BIG) {
+							const data = new Blob([file, content]);
+							content = new Uint8Array(await data.arrayBuffer());
+							await parentHandle.removeEntry(name);
+							await parentHandle.getFileHandle(name, CREATE_OPT);
+						}
+					}
+				}
+			}
+
+			teh.del(path);
+			if (/^\.(gitignore|ignore)$/.test(path)) await loadACL();
+			return 'Success';
+		},
+
+		/** List directory, optionally with a glob filter */
+		async list({
+			path = '.',
+			pattern,
+			json = false,
+			limit = 500,
+			modifiedSince = 0,
+			showDir = null,
+			showModified = false,
+			exclude = [],
+			showHidden
+		}) {
+			pattern = pattern || '*';
+			// 行为一致，顺便给AI擦屁股
+			if (pattern.startsWith("*.") && !pattern.includes('/')) pattern = "**/"+pattern;
+
+			if (null == showHidden) showHidden = /(?:^|\/)\.[^./]/.test(pattern);
+
+			const entries = await glob(rootHandle, pattern, path, showHidden, acl, exclude);
+
+			let prefix = '';
+			let modSince = modifiedSince ? +new Date(modifiedSince) : 0;
+			if (!isFinite(modSince)) throw 'Invalid date';
+
+			const result = [];
+
+			for await (const [name, handle, relDir] of entries) {
+				const displayPath = relDir ? relDir + '/' + name : name;
+
+				if (!json && result.length >= limit) {
+					prefix = `[TRUNCATED to ${limit} entries, use a more specific path or pattern]\n`;
+					break;
+				}
+
+				if (handle.kind === 'file') {
+					const file = await handle.getFile();
+					if (file.lastModified >= modSince) {
+						const item = [displayPath, "file", json ? file.size : formatSize(file.size)];
+						if (showModified || modSince) item.push(json ? file.lastModified : new Date(file.lastModified).toISOString().slice(0, -5)+'Z');
+						result.push(item);
+					}
+				} else if ((showDir != null ? showDir : !modSince)) {
+					const ignore = acl.denyList(displayPath, true);
+					result.push([displayPath, ignore === 'skip' ? "dir (descents skipped)" : "dir"]);
+				}
+			}
+
+			if (modSince) result.sort((a, b) => b[3] - a[3]);
+
+			if (json) return result;
+			return result.length ? prefix+result.map(item => item.join("\t")).join("\n") : "[No result]";
+		}
+	};
+
+	/** Resolve a File from a path relative to root handle */
+	const resolveFile = async path => {
+		const data = await myResolveHandle(path, READ | REQUIRE_FILE);
+		const fileHandle = data[2];
+		return await fileHandle.getFile();
+	};
+
+	const fsCommonApi = {
+		list: api.list,
+		absPath: AS_IS,
+		/**
+		 * @param {string} path
+		 * @returns {Promise<string>}
+		 */
+		read: async(path) => readAsString(await resolveFile(path)),
+		/**
+		 * @param {string} path
+		 * @param {string|Uint8Array} data
+		 * @param [_ctx]
+		 * @param {1} [_overwrite]
+		 * @returns {Promise<void>}
+		 */
+		async write(path, data, _ctx, _overwrite) {
+			const [ parent, name, handle ] = await myResolveHandle(path, WRITE | CREATE | REQUIRE_FILE);
+
+			// 这是一个 hack，浏览器处理几MB的文件时可能会报错无法写，所以先删再写。至于为什么不无条件删除，hmm，为了沙箱恢复方便
+			if (handle && (await handle.getFile()).size > 1048576) try {
+				await parent.removeEntry(name);
+			} catch (e) {
+				if (e.name === FILE_TOO_BIG) throw "Failed to write file, it might locked by user.";
+				if (e.name === "NoModificationAllowedError") throwDOMException("Write file in parallel", "ConcurrentModificationError");
+				if (e.name !== 'NotSupportedError') throw e;
+			}
+
+			const fileHandle = await parent.getFileHandle(name, CREATE_OPT);
+			const writable = await fileHandle.createWritable();
+			await writable.write(data);
+			await writable.close();
+
+			if (/^\.(gitignore|ignore)$/.test(path)) await loadACL();
+		},
+		/**
+		 * @param {string} path
+		 * @returns {Promise<number>}
+		 */
+		async mtime(path) {
+			const file = await resolveFile(path);
+			return file.lastModified;
+		}
+	};
+	const teh = createTextFileEditHelper(fsCommonApi);
+
+	let branch = config.fs_branch;
+
+	async function enableOverlay() {
+		if (realHandle === rootHandle) {
+			const upper = await rootHandle.getDirectoryHandle(OVERLAYFS_INTERNAL+branch, CREATE_OPT);
+			config.fs_branch = branch;
+			rootHandle = await createOverlayFileSystem(upper, rootHandle);
+		}
+	}
+	async function disableOverlay() {
+		if (realHandle !== rootHandle) {
+			delete config.fs_branch;
+			branch = null;
+			rootHandle = realHandle;
+		}
+	}
+
+	await loadACL().catch(e => {
+		acl = new ACL();
+		acl.parseRule("-rwl *\n+rl /\n+rw /.acl");
+		acl.compile();
+		showToast("ACL初始化失败\n"+prettyError(e), "error");
+	});
+	if (branch) await enableOverlay();
+
+	return {
+		...api,
+		...teh,
+		open: async ({ path, writable }) => {
+			if (writable && config.fs_readonly) throwDOMException("Write-protect is enabled for this VFS", "ReadOnlyError");
+			return (await myResolveHandle(path, READ | REQUIRE_FILE | (writable * (CREATE | CREATE_LEAF | WRITE))))[2]
+		},
+		readRaw: ({path}) => resolveFile(path),
+		writeRaw: ({path, content}) => fsCommonApi.write(path, content, null, 1).then(() => teh.del(path)),
+		appendRaw: api.append,
+
+		vcs: async ({mode, path, limit, backup, target, emptyOnly}) => {
+			if (mode === VCS_GET) {
+				const overlayHandle = (await resolveHandle(rootHandle, path, READ | REQUIRE_FILE).catch(() => {}))?.[2];
+				return overlayHandle && await overlayHandle.getFile();
+			}
+			if (mode === VCS_GET_BASE) {
+				const baseHandle = (await resolveHandle(realHandle, path, READ | REQUIRE_FILE).catch(() => {}))?.[2];
+				return baseHandle && await baseHandle.getFile();
+			}
+
+			if (mode === VCS_BRANCHES) {
+				const list = [];
+				for await (const [name, h] of realHandle) {
+					if (name.startsWith(OVERLAYFS_INTERNAL) && h.kind === "directory") {
+						list.push(name.slice(OVERLAYFS_INTERNAL.length));
+					}
+				}
+				return [branch, list];
+			}
+
+			if (mode === VCS_DELETE_BRANCH) {
+				if (branch === path) await disableOverlay();
+				await realHandle.removeEntry(OVERLAYFS_INTERNAL+path, emptyOnly ? undefined : RECURSIVE);
+				return;
+			}
+
+			if (mode === VCS_BRANCH) {
+				if (path == null) return branch;
+
+				if (/[\x00-\x1F\x7F|<>"*?:\\/]/.test(path)) throwDOMException("Illegal character in branch name", "SyntaxError");
+
+				await disableOverlay();
+
+				if (path !== VCS_BASE_BRANCH) {
+					branch = path;
+					await enableOverlay();
+				}
+
+				return;
+			}
+
+			// 这会在Files的systemPrompt函数中调用
+			if (branch && realHandle === rootHandle) {
+				let p = enableOverlay();
+				if (mode == null) return p;
+				await p;
+			}
+
+			if (mode === VCS_DIFF) {
+				if (!branch) return [];
+
+				const acl1 = new ACL();
+				acl1.parseRule(`-rw .0V_Whiteout.log`);
+				acl1.compile();
+
+				const entries = await glob(rootHandle._upper, path, "", true, acl1);
+				const pattern = new RegExp("^"+parseGlobPattern(path, true)+"$", 'ui');
+
+				let prefix = '';
+
+				const deleted = new Set;
+
+				for (let path of rootHandle.deleted) {
+					if (pattern.test(path)) deleted.add(path);
+				}
+
+				const result = [];
+
+				for await (const [name, handle, relDir] of entries) {
+					let displayPath = relDir ? relDir + '/' + name : name;
+
+					if (result.length >= limit) {
+						prefix = `[TRUNCATED to ${limit} entries, use a more specific path or pattern]\n`;
+						break;
+					}
+
+					const h = await resolveHandle(realHandle, displayPath, 0).catch(e => {});
+
+					deleted.delete(displayPath);
+					if (handle.kind === 'file') {
+						const file = await handle.getFile();
+						const item = [h ? "modify" : "add", displayPath];
+						item.push(new Date(file.lastModified).toISOString().slice(0, -5)+'Z');
+						result.push(item);
+					} else {
+						deleted.delete(displayPath+'/');
+						if (!h) result.push(["dir", displayPath]);
+					}
+				}
+
+				result.sort((a, b) => b[2] - a[2]);
+
+				for (let path of deleted) {
+					const handle = await resolveHandle(realHandle, path, 0).catch(e => {});
+					if (handle) result.push(["del", path]);
+				}
+
+				return result;
+			}
+
+			if (mode === VCS_COMMIT) {
+				// 把 path 暂存区的内容提交到 target
+				let targetDir = realHandle,
+					srcFS = rootHandle,
+					backupFS;
+				if (path && path !== VCS_BASE_BRANCH) {
+					if (path === branch) throwDOMException("提交目标不能是当前暂存区", "InvalidModificationError");
+					srcFS = await createOverlayFileSystem(await realHandle.getDirectoryHandle(OVERLAYFS_INTERNAL+path), realHandle);
+				}
+				if (target) targetDir = await realHandle.getDirectoryHandle(OVERLAYFS_INTERNAL+target);
+
+				const opt = { clean: !!backup, lower: targetDir };
+
+				if (backup) {
+					backupFS = await realHandle.getDirectoryHandle(OVERLAYFS_INTERNAL+backup, CREATE_OPT);
+					await srcFS.backup(backupFS);
+				}
+
+				return srcFS.commit(opt);
+			}
+
+			if (mode === VCS_REVERT) {
+				return rootHandle.revert(path);
+			}
+
+			// should not reach here
+		}
+	};
+};

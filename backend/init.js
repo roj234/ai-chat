@@ -8,12 +8,14 @@ import {registerSearchRoutes} from "./routes/search.js";
 import {registerLogRoutes} from "./routes/log.js";
 import {registerDatabaseRoutes} from "./routes/database.js";
 import {registerFsRoutes} from "./routes/agent.js";
-import {registerBlobRoutes} from "./routes/blob-storage.js";
+import {BLOB_HASH_REGEX, registerBlobRoutes} from "./routes/blob-storage.js";
 import {registerVectorDBRoutes} from "./routes/vectordb.js";
-import {proxyHandler, registerSSEProxyRoutes} from "./routes/sse-proxy.js";
+import {proxyHandler, registerSSEProxyRoutes} from "./api-proxy/api-proxy-openai.js";
 
 import {
 	ALLOW_USER_NAMES,
+	FS_SERVICE_PAT,
+	INSTANCE_ID,
 	INTERACTIVE_LOGIN,
 	MAX_UPLOAD_SIZE,
 	RESTRICT_USER_CREATION,
@@ -28,6 +30,7 @@ import {registerPairingRoutes} from "./routes/pairing.js";
 
 // Export plugin APIs to globalThis
 import "./pluginApi.js";
+import {createHash} from "node:crypto";
 
 /**
  * @param router {AiChatBackend.Router}
@@ -45,6 +48,19 @@ const registerSSEProxy = (router, rootDir) => {
 	router.pop();
 };
 
+const registerPingHandler = (router, cap) => {
+	router.post('/ping', async (ctx) => {
+		const args = await ctx.readAsObject(1024);
+		const hash = createHash("sha256");
+		hash.update(args.nonce + 'AiChat');
+		ctx.send(200, {
+			pong: hash.digest('hex'),
+			id: INSTANCE_ID,
+			cap
+		});
+	});
+};
+
 /**
  *
  * @param {string} dataPath
@@ -56,45 +72,62 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 	const workspace = path.resolve(workspacePath || dataPath+"/workspace");
 
 	/** @type {AiChatBackend.Router} */
-	const router = new Router((ctx) => {
+	const router = new Router( (ctx) => {
 		let fsRoot;
 
+		const urlPath = ctx.path;
+		const method = ctx.req.method;
 		const {userId} = ctx.params;
 		if (userId != null) {
-			if (RESTRICT_USER_CREATION && !ALLOW_USER_NAMES.has(userId)) {
-				ctx.send(403, { error: "username is not allowed" });
+			if (RESTRICT_USER_CREATION ? !ALLOW_USER_NAMES.has(userId) : /[\s\\/:*?<>|]/.test(userId)) {
+				ctx.send(403, { error: "userId is not allowed" });
 				return true;
 			}
 
-			if (/\/sse\/v1\//.test(ctx.path)) return;
+			if (/\/sse\/v1\//.test(urlPath)) return;
+			if (method === 'POST' && /\/(login|ping)$/.test(urlPath)) return;
 
-			loadUserData(dataPath, userId, ctx);
-
+			ignorePAT:
 			if (INTERACTIVE_LOGIN) {
 				const pat = (ctx.req.headers.authorization || '').slice("Bearer ".length);
 				if (!pat) {
-					if (!/\/(?:login|blobs|blob\/[a-zA-Z0-9_-]+)$/.test(ctx.path)) {
-						ctx.send(401, {error: "unauthorized"});
-						return true;
+					if (new RegExp("/blob/"+BLOB_HASH_REGEX+"$").test(urlPath) && method === 'GET') {
+						break ignorePAT;
 					}
+
+					ctx.send(401, {error: "unauthorized"});
+					return true;
 				} else {
-					const valid = checkPAT(pat, ctx);
+					loadUserData(dataPath, userId, ctx);
+					const valid = checkPAT(pat, ctx)?.capabilities === 1;
 					if (!valid) {
-						ctx.send(401, {error: "invalid token"});
+						ctx.send(401, {error: "invalid PAT"});
 						return true;
 					}
 				}
+			} else {
+				loadUserData(dataPath, userId, ctx, true);
 			}
 
 			fsRoot = path.join(workspace, userId);
 		} else {
+			if (workspacePath) {
+				if (method === 'POST' && /\/(ping)$/.test(urlPath)) return;
+
+				const pat = (ctx.req.headers.authorization || '').slice("Bearer ".length);
+				if (pat !== FS_SERVICE_PAT) {
+					ctx.send(401, {error: "invalid token"});
+					return true;
+				}
+			}
+
 			fsRoot = workspace;
 		}
 
 		const relativePath = ctx.searchParams.get("root");
 		if (relativePath) {
 			const targetPath = path.resolve(fsRoot, relativePath);
-			if (!targetPath.startsWith(fsRoot)) {
+			if (!targetPath.startsWith(fsRoot + path.sep)) {
 				ctx.send(403, {error: "Path Traversal"});
 				return true;
 			}
@@ -102,8 +135,8 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 			fsRoot = targetPath;
 		}
 
-		ctx.fsRoot = fsRoot;
 		ctx.errorFilter = str => str.replaceAll(fsRoot, "");
+		ctx.fsRoot = fsRoot + path.sep;
 	});
 
 	router.push(apiPath);
@@ -124,7 +157,7 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 		router.push("fs");
 		await registerFsRoutes(router, workspacePath);
 		router.pop();
-
+		registerPingHandler(router, 'fs');
 		router.pop();
 		return router;
 	}
@@ -166,6 +199,11 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 	 * @return {Promise<*[]>}
 	 */
 	async function handleBatch(ctx, body) {
+		if (!Array.isArray(body) || !body.every(item => Array.isArray(item) && item.length === 2)) {
+			ctx.send(500, { error: "invalid body" });
+			return;
+		}
+
 		const rejectors = ctx.variables;
 		const sync = router.sync;
 		let out = [];
@@ -214,11 +252,13 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 	router.post('/batch', async (ctx) => {
 		const body = await ctx.readAsObject(4194304);
 		const out = await handleBatch(ctx, body);
-		return ctx.send(200, out);
+		if (out) ctx.send(200, out);
 	});
 
+	registerPingHandler(router, 'db,fs');
+
 	if (INTERACTIVE_LOGIN) {
-		registerPairingRoutes(router);
+		registerPairingRoutes(router, dataPath);
 	} else {
 		router.post('/login', (ctx) => {
 			ctx.res.writeHead(200, { 'Content-Type': 'text/event-stream' });

@@ -1,4 +1,6 @@
 import {
+	config,
+	EVENT_BUS,
 	messages,
 	onConversationLoaded,
 	onConversationSwitchOut,
@@ -15,7 +17,8 @@ import {showToast} from "./components/Toast.js";
 import {MCPClient} from "/common/MCPClient.js";
 import {parseJson5} from "unconscious/common/Json.js";
 import {highlightJsonLike} from "./markdown/highlight.js";
-import {getCombinedPreset, markMessageDirty} from "./database.js";
+import {markMessageDirty} from "./database.js";
+import {getCombinedPreset} from "./presets.js";
 
 export const TOOL_NAME = debugSymbol("ToolName");
 export const TOOL_IS_RUNNING = debugSymbol("Running");
@@ -23,10 +26,18 @@ export const TOOL_IS_RUNNING = debugSymbol("Running");
 const TOOL_PARAM = debugSymbol("ToolArgumentCache");
 
 /**
- * @type {Record<string, string | function(): string>}
+ * @type {Record<string, string | function(AiChat.Conversation): Promise<string>>}
  */
 export const PLACEHOLDERS = {};
 export const TEMPORARY_PLACEHOLDER = debugSymbol("PlaceholderOnConversation");
+/**
+ *
+ * @param {AiChat.Conversation} conv
+ * @param {string} key
+ * @param {string} val
+ * @return {string}
+ */
+export const setPlaceholder = (conv, key, val) => (conv[TEMPORARY_PLACEHOLDER] || (conv[TEMPORARY_PLACEHOLDER] = {}))[key] = val;
 
 /**
  * 常开模块
@@ -35,7 +46,7 @@ export const TEMPORARY_PLACEHOLDER = debugSymbol("PlaceholderOnConversation");
 export const defaultGroups = new Set(["Use"]);
 /**
  * 工具集摘要，在调用后激活工具
- * @type {Record<string, {description: string, tools: string[], skill?: string, hidden: boolean | 'manual', systemPrompt: string}>}
+ * @type {Record<string, {description: string, tools: string[], skill?: string, hidden: boolean | 'manual', systemPrompt: string, depend?: string[]}>}
  */
 export const toolset = {};
 /**
@@ -91,9 +102,10 @@ toolScriptRegistry["Use"] = {
 		response.newTools = newToolNames;
 
 		try {
+			const bak = new Set(activatedModules);
 			for (const moduleName of modules) {
-				if (!toolset[moduleName] || activatedModules.has(moduleName))
-					throw "Tool schema validation error:\n$.modules: value("+JSON.stringify(moduleName)+") must in "+JSON.stringify(listUsableToolset(activatedModules));
+				if (!toolset[moduleName] || bak.has(moduleName))
+					throw "Tool schema validation error:\n$.modules: value("+JSON.stringify(moduleName)+") must in "+JSON.stringify(listUsableToolset(bak));
 
 				let {tools: toolArr, onActivated, depend} = toolset[moduleName];
 
@@ -225,12 +237,19 @@ export const getAvailableTools = async (conversation) => {
 			outputTools.push(tool);
 		}
 	}
+
+	const intl = new Intl.Collator();
 	return [outputTools.sort((a, b) => {
-		return a.function.name.localeCompare(b.function.name);
+		return intl.compare(a.function.name, b.function.name);
 	}), systemPrompt.filter(Boolean).join("\n")];
 };
 
-const convertToCamelCase = str => str.replace(/-([a-z])/g, (match, letter) => letter.toUpperCase());
+const convertToCamelCase = str => {
+	if (str.match(/^(['"]).+\1$/)) {
+		str = parseJson5(str);
+	}
+	return str.replace(/-([a-z])/g, (match, letter) => letter.toUpperCase())
+};
 
 const YAML_BLOCK = /^[>|][+-]?$/;
 
@@ -240,7 +259,7 @@ const YAML_BLOCK = /^[>|][+-]?$/;
  * YAML？我不知道什么是 112KB 的 js-yaml，这个函数只有几百字节，也只应该几百字节。
  * 它不支持类型转换锚点引用嵌套列表JSON文档分隔符……但够用
  * @param {string} content
- * @return {[{}, string, number]}
+ * @return {[Record<string, any>, string, number]}
  */
 export const parseFrontmatter = content => {
 	const metadata = {};
@@ -303,6 +322,7 @@ export const parseFrontmatter = content => {
 
 		if (line.startsWith('- ')) {
 			if (null == container) {
+				ctx[0] = indent;
 				ctx[1] = container = [];
 			} else if (!Array.isArray(container)) {
 				throw new Error("Cannot mix list and object");
@@ -318,31 +338,29 @@ export const parseFrontmatter = content => {
 			}
 
 			const isArray = value;
-			if (isArray) stack.push([ indent, container = {}, null ]);
+			if (isArray) stack.push([ MARK, container = {}, null ]);
 
 			key = convertToCamelCase(line.slice(0, index));
 			value = line.slice(index+1).trim();
 			if (!value) {
 				// 同级 a:\nb:
-				if (!isArray && prevIndent === indent) handleIndent(indent-1);
-				stack.push([ indent, null, key ]);
+				stack.push([ MARK, null, key ]);
 				continue;
 			}
 		}
 
 		const ch = value[0];
-		if (ch === "'") value = value.slice(1, -1).replaceAll("''", "'");
-		else if (ch === '"') value = parseJson5(value);
+		if (value.match(/^(['"]).+\1$/)) value = ch === '\'' ? value = value.slice(1, -1).replaceAll("''", "'") : parseJson5(value);
 		else if (YAML_BLOCK.test(value)) {
 			stack.push([ MARK, '', key, [value, 0] ]);
 			continue;
-		} else if (ch === '[' || ch === '{') {
-			try {
-				value = parseJson5(value);
-			} catch {
-				// literal string
-			}
 		}
+		else if (ch === '[' || ch === '{') value = parseJson5(value, { json5: true, yaml: true });
+		else if (value.match(/^(?:true|yes)$/i)) value = true;
+		else if (value.match(/^(?:false|no)$/i)) value = false;
+		else if (value.match(/^(?:~|null)$/i)) value = null;
+		else if (value.match(/^[+-]?(?:nan|inf)$/i)) value = (ch === '-' ? -1 : 1) * (value.match(/inf$/i) ? Infinity : NaN);
+		else if (value.match(/^[+-]?(?:0x[a-f\d]+|0b[01]+|0[0-7]+|\d+|\d*\.\d*(?:e[+-]?\d+)?)$/i)) value = value.includes('.') ? parseFloat(value) : parseInt(value);
 
 		if (container == null) ctx[1] = container = {};
 
@@ -370,7 +388,8 @@ const NO_PARAMETERS = {
  *     onActivated?: function(AiChat.Conversation): AiChat.FunctionTool[],
  *     onDeactivated?: function(AiChat.Conversation),
  *     hidden?: boolean | 'manual',
- *     systemPrompt: string | function(AiChat.Conversation): string | Promise<string>,
+ *     depend?: string[],
+ *     systemPrompt?: string | function(AiChat.Conversation): string | Promise<string>,
  *     default?: boolean,
  *     data?: any
  * }} extra
@@ -516,8 +535,16 @@ export const addMCPServer = (mcpBaseUrl, mcpName, mcpDescription = "External too
 
 const CONV_REACTIVE_MAP = debugSymbol("UIStates");
 
-onConversationLoaded((conv, msg) => redoToolCalls(conv, msg, 0));
+onConversationLoaded((conv, path, msg) => redoToolCalls(conv, msg, 0));
 onConversationSwitchOut((conv) => delete conv[CONV_REACTIVE_MAP]);
+
+/**
+ *
+ * @param {AiChat.ToolResponse} ctx
+ * @param {OpenAI.ToolCall} tool
+ * @return {string}
+ */
+export const getToolName = (ctx, tool) => ctx?.[TOOL_NAME] ?? tool.function.name;
 
 /**
  *
@@ -527,10 +554,16 @@ onConversationSwitchOut((conv) => delete conv[CONV_REACTIVE_MAP]);
  * @return {"secure" | boolean}
  */
 export const getToolInteractiveLevel = (ctx, tool, conv) => {
-	let secure = toolScriptRegistry[ctx[TOOL_NAME]]?.interactive;
+	const name = getToolName(ctx, tool);
+	let secure = toolScriptRegistry[name]?.interactive;
 	let tp;
 	if (typeof secure === "function" && (tp = getToolParameters(ctx, tool, true)))
 		secure = secure(tp, conv);
+
+	if (secure === 'secure') {
+		const allowed = /*(await getCombinedPreset(conv))*/config.permittedTools;
+		if (allowed?.includes(name) || allowed?.includes('*') || conv.grantedTools?.has(name)) return false;
+	}
 
 	return secure;
 }
@@ -558,6 +591,7 @@ const getToolUserInteractionLevel = async (conv, name, parameters) => {
 }
 
 const UNSAFE_TOOL_DENY_MESSAGE = "User doesn't permit this tool use. Nothing changed. STOP and wait for user.";
+const UNSAFE_TOOL_DENY_MESSAGE_AFK = "该操作需要用户审批. 用户当前不在.";
 
 /**
  *
@@ -569,7 +603,6 @@ const UNSAFE_TOOL_DENY_MESSAGE = "User doesn't permit this tool use. Nothing cha
  * @return {Promise<number>}
  */
 export const runTools = async (response,  conv, forceRerun, allowUnsafe, customRejectText) => {
-	markMessageDirty(response);
 	const {tool_calls, tool_responses} = response;
 
 	const signal = runningConversations.get(conv.id)?.abort.signal;
@@ -607,12 +640,12 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 
 			if (msg?.success != null) {
 				if (forceRerun !== i) return;
-				if (msg.success) fn?.undo?.(msg, conv, tc);
+				if (msg.success) await fn?.undo?.(msg, conv, tc);
 			}
 
-			msg = tool_responses[i] = { [TOOL_NAME]: name };
+			if (!msg?.pending) msg = tool_responses[i] = { [TOOL_NAME]: name };
 
-			const parameters = getToolParameters(msg, tc);
+			let parameters = getToolParameters(msg, tc);
 			const allowRun = fn.default || conv.tools.has(name);
 
 			if (!(fn && allowRun)) {
@@ -632,40 +665,56 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 			if (schema) {
 				let error = validateAndShowError(parameters, schema);
 				if (error) {
+					const MSG = '$: additional properties: ';
+					let changed = false;
+
+					if (error.startsWith(MSG)) {
+						for (const key of JSON.parse(error.slice(MSG.length))) {
+							delete parameters[key];
+							changed = true;
+						}
+					}
+
 					const fix = fn.fix;
 					if (fix) {
 						fix(parameters, error);
+						changed = true;
+					}
+
+					if (changed) {
 						error = validateAndShowError(parameters, schema);
 					}
+
 					if (error) {
 						flags |= 4; // UNRECOVERABLE_ERROR
 						throw "Schema validation error:\n"+error;
 					}
-					// 改变历史
-					tc.function.arguments = JSON.stringify(parameters);
 				}
+				// 在不支持约束采样的推理商上优化工具调用成功率（不知道是否有效其实）
+				parameters = msg[TOOL_PARAM] = sortBySchema(parameters, schema);
+				// 改变历史
+				tc.function.arguments = JSON.stringify(parameters);
 			}
 
-			msg.time = Date.now();
+			const deny = customRejectText || (config.afkState === 2 ? UNSAFE_TOOL_DENY_MESSAGE_AFK : UNSAFE_TOOL_DENY_MESSAGE);
 			const uiLevel = await getToolUserInteractionLevel(conv, name, parameters);
 			if (uiLevel) {
 				flags |= 1; // INTERACTIVE
 				if (uiLevel === 2) {
-					if (null == forceRerun) {
-						delete msg.time;
-						return;
-					}
+					if (null == forceRerun) return;
 
-					if (!allowUnsafe) {
-						throw customRejectText||UNSAFE_TOOL_DENY_MESSAGE;
-					}
+					if (!allowUnsafe) throw deny;
 				}
 			} else if (false === allowUnsafe) {
-				throw customRejectText||UNSAFE_TOOL_DENY_MESSAGE;
+				throw deny;
 			}
 
+			msg.time ??= Date.now();
 			msg[TOOL_IS_RUNNING] = true;
-			let result = fn.script(parameters, msg, conv);
+
+			await EVENT_BUS.post(['beforeToolCall', name], parameters, msg, conv);
+
+			let result = fn.script(parameters, msg, conv, name, response);
 			if (result instanceof Promise) {
 				$update(updateMessageUI);
 				// 这太危险了，可能导致无法撤销的副作用
@@ -677,6 +726,8 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 					result = result instanceof ContentPart ? result.content : JSON.stringify(result);
 				msg.success = true;
 				msg.content = result;
+			} else {
+				msg.pending = true;
 			}
 		} catch (e) {
 			if (typeof e === 'string' && !e.startsWith('Error: '))
@@ -693,14 +744,37 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 			flags |= 2; // ERROR
 		}
 		delete msg[TOOL_IS_RUNNING];
-		if (forceRerun === true && null == msg.content) throw 'some interactive tool need user input';
+		if (forceRerun === true && null == msg.content) throw `${name} 拒绝被自动执行 (可能需要用户交互)`;
 		if (msg.time) msg.duration = Date.now() - msg.time;
+
+		markMessageDirty(response);
 	};
 
 	if (typeof forceRerun === "number") await callTool(forceRerun);
-	else for (let i = 0; i < tool_calls.length; i++) {
-		if (signal?.aborted) return -1;
-		await callTool(i);
+	else {
+		let prevName;
+		const waitList = [];
+		for (let i = 0; i < tool_calls.length; i++) {
+			if (signal?.aborted) return -1;
+
+			const p = callTool(i);
+
+			const currName = tool_calls[i].function.name;
+			const parallel = toolScriptRegistry[currName]?.parallel;
+			if (!parallel || (parallel === 'same' && prevName && prevName !== currName)) {
+				if (waitList.length) {
+					await Promise.all(waitList);
+					waitList.length = 0;
+					prevName = null;
+				}
+				await p;
+			} else {
+				prevName = currName;
+				waitList.push(p);
+			}
+		}
+
+		if (waitList.length) await Promise.all(waitList);
 	}
 
 	return flags;
@@ -708,12 +782,12 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 
 /**
  * 撤销工具调用
- * @param {AiChat.Conversation} global
+ * @param {AiChat.Conversation} conv
  * @param {AiChat.AssistantMessage[]} messages
  * @param {number} first
  * @param {boolean} reentrantOnly
  */
-export const undoToolCalls = (global, messages, first, reentrantOnly) => {
+export const undoToolCalls = (conv, messages, first, reentrantOnly) => {
 	for (let i = messages.length - 1; i >= first; i--) {
 		const {tool_calls, tool_responses} = messages[i];
 		if (tool_responses) {
@@ -723,14 +797,14 @@ export const undoToolCalls = (global, messages, first, reentrantOnly) => {
 					const impl = toolScriptRegistry[tc.function.name];
 					if (tr.time == null || (reentrantOnly && !impl?.reentrant)) continue;
 
-					impl?.undo?.(tr, global, tc);
+					impl?.undo?.(tr, conv, tc);
 				} catch (e) {
 					console.error(e);
 					showToast(<div>无法撤销工具调用【{tc.function.name}】<br/>
 						详情: {prettyError(e)}<br/>
 						参数: <div dangerouslySetInnerHTML={highlightJsonLike(tc.function.arguments)}></div><br/>
 						响应: <div dangerouslySetInnerHTML={highlightJsonLike(tr)}></div>
-					</div>, 'error', 60000);
+					</div>, 'error', 30000);
 				}
 			}
 		}
@@ -739,52 +813,31 @@ export const undoToolCalls = (global, messages, first, reentrantOnly) => {
 
 /**
  * 重做工具调用
- * @param {AiChat.Conversation} global
+ * @param {AiChat.Conversation} conv
  * @param {AiChat.AssistantMessage[]} messages
  * @param {number} first
  * @param {boolean=} includeTrue
  */
-export const redoToolCalls = (global, messages, first, includeTrue) => {
+export const redoToolCalls = (conv, messages, first, includeTrue) => {
 	for (let i = first; i < messages.length; i++) {
 		const {tool_calls, tool_responses} = messages[i];
 		if (tool_calls) {
 			for (let i = 0; i < tool_calls.length; i++) {
-				const {name, arguments: args} = tool_calls[i].function;
+				const tc = tool_calls[i];
+				const {name, arguments: args} = tc.function;
 
 				const impl = toolScriptRegistry[name];
-				const toolResponse = tool_responses?.[i];
-				if (toolResponse) toolResponse[TOOL_NAME] = name;
-
+				const toolResponse = tool_responses[i];
 				const reentrant = impl?.reentrant;
 				if (reentrant && (includeTrue || reentrant === 'stateless')) {
 					try {
-						impl.script(JSON.parse(args), toolResponse, global);
+						impl.script(JSON.parse(args), toolResponse, conv, toolResponse ? getToolName(toolResponse, tc) : name);
 					} catch (e) {
 						console.error("Redo tool "+name, e);
 					}
 				}
 			}
 		}
-	}
-};
-
-/**
- *
- * @param {string} system_prompt
- */
-export const setSystemPrompt = system_prompt => {
-	if (system_prompt) {
-		if (messages[0].role === "system") {
-			messages[0].content = system_prompt;
-		} else {
-			messages.unshift({
-				role: "system",
-				time: Date.now(),
-				content: system_prompt
-			});
-		}
-	} else if (messages[0].role === "system") {
-		messages.shift();
 	}
 };
 
@@ -854,4 +907,84 @@ export const updateConversationState = (conv, name, value) => {
  * @param {string} key
  * @return {function(*, *): string}
  */
-export const prefixTitle = (prefix, key = 'path') => (req, ctx) => prefix + ' ' + getToolParameters(ctx, req)[key];
+export const prefixTitle = (prefix, key = 'path') => (req, ctx) => prefix + ' ' + (getToolParameters(ctx, req)[key]||'');
+
+/**
+ * 按 JSON Schema 递归排序对象键名
+ * 优化工具调用成功率的小技巧
+ * @param {Object} obj
+ * @param {OpenAI.ObjectSchema} schema
+ */
+const sortBySchema = (obj, schema) => {
+	/**
+	 * @param {OpenAI.Schema} schema
+	 * @return {Map<string, number>}
+	 */
+	function getOrder(schema) {
+		const visited = new Set();
+		const map = new Map, defined = new Set;
+
+		const walk = (schema) => {
+			if (visited.has(schema)) return;
+			visited.add(schema);
+
+			if (schema.properties) {
+				const required = new Set(schema.required);
+				for (const key of Object.keys(schema.properties)) {
+					if (required.has(key)) {
+						if (!map.has(key)) map.set(key, map.size);
+					}
+					else {
+						defined.add(key);
+					}
+				}
+			}
+
+			schema.allOf?.forEach(walk);
+			schema.oneOf?.forEach(walk);
+			schema.anyOf?.forEach(walk);
+		};
+
+		walk(schema);
+
+		for (const item of defined) map.set(item, map.size);
+		return map;
+	}
+
+	/**
+	 * @param value
+	 * @param {OpenAI.Schema} schema
+	 */
+	function sort(value, schema) {
+		if (!schema || typeof value !== 'object' || value === null) return value;
+
+		if (Array.isArray(value)) {
+			const items = schema.items;
+			return value.map((v, i) => sort(v, schema.prefixItems?.[i] ?? items));
+		}
+
+		const sorter = getOrder(schema);
+		if (!sorter.size) return value;
+
+		const keys = Object.keys(value);
+		let isSorted = 0;
+
+		keys.sort((a, b) => {
+			const ra = sorter.get(a) ?? sorter.size;
+			const rb = sorter.get(b) ?? sorter.size;
+			const delta = ra - rb;
+			if (delta > 0) isSorted = 1;
+			return delta;
+		});
+
+		const properties = schema.properties;
+
+		const out = isSorted ? Object.create(null) : value;
+		for (const key of keys) {
+			out[key] = sort(value[key], properties[key] ?? schema.additionalProperties);
+		}
+		return out;
+	}
+
+	return sort(obj, schema);
+};

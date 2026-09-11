@@ -1,4 +1,4 @@
-import {sseFetch} from "./openai-api-utils.js";
+import {sseFetch} from "./fetch-utils.js";
 
 export class MCPClient {
 	statusListener;

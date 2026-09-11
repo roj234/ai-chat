@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "AIChat伴侣",
+  "version": "1.0.0",
+  "description": "浏览器控制和RunJS沙箱CORS禁用.",
+  "minimum_chrome_version": "102",
+  "permissions": ["declarativeNetRequest", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "AIChat伴侣"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  }
+}

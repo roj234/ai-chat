@@ -134,7 +134,7 @@ POST /api/fs/ping
 ```js
 {
 	// 小写 hex
-	pong: sha256(nonce + "AiChat").toHex()
+	pong: sha256(nonce + "AiChat[FS]").toHex()
 }
 ```
 

@@ -1,4 +1,3 @@
-import morphdom from 'morphdom';
 import './markdown-editor.css';
 import {renderMarkdownToElement} from "/src/markdown/markdown.js";
 import {appendChildren} from "unconscious";
@@ -12,11 +11,9 @@ const syncTitle = (text) => {
 const updatePreview = () => {
 	const markdownText = editor.value;
 
-	const newPreviewNode = <div id={"preview"} className={"markdown-body"}></div>;
-	renderMarkdownToElement(newPreviewNode, markdownText, {noHighlight: true});
-
 	Promise.resolve().then(() => {
-		morphdom(preview, newPreviewNode);
+		preview.replaceChildren();
+		renderMarkdownToElement(preview, markdownText, {noHighlight: true});
 
 		const firstHeader = preview.querySelector('h1, h2');
 		if (firstHeader) syncTitle(firstHeader.innerText);

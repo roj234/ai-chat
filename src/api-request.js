@@ -1,6 +1,6 @@
 // API request
 import {createMarkdownStream} from "./markdown/markdown.js";
-import {cloneNamed, getTextContent, prettyError, resolveDBRelativeURL} from "./utils/utils.js";
+import {cloneNamed, getTextContent, prettyError, resolveDBRelativeURL, scrollMessagesToBottom} from "./utils/utils.js";
 import {setWakeLock} from "./utils/wakeLock.js";
 import {
 	abortCompletion,
@@ -8,9 +8,9 @@ import {
 	EVENT_BUS,
 	getCurrentTheme,
 	inputText,
-	isLlamaCppBackend,
 	lastScrollDirectionIsUp,
 	LOCKED,
+	LOG_CACHE,
 	MessageRoles,
 	messages,
 	PAGE_TITLE,
@@ -29,21 +29,31 @@ import {
 	PLACEHOLDERS,
 	runTools,
 	TEMPORARY_PLACEHOLDER,
-	TOOL_NAME,
 	toolScriptRegistry
 } from "./toolset.js";
-import {$stampLock, $state, $update, $watch, AS_IS, debugSymbol, isReactive, unconscious} from "unconscious";
+import {
+	$stampLock,
+	$state,
+	$update,
+	$watch,
+	AS_IS,
+	debugSymbol,
+	isReactive,
+	ONCE_EVENT,
+	unconscious
+} from "unconscious";
 import {showToast} from "./components/Toast.js";
 import failure from "../media/failure.js";
 import complete from "../media/complete.js";
 import {
 	appendBillingLog,
 	DONE,
-	getCombinedPreset,
+	getImmediateMessages,
+	getMessageContainer,
+	getMessages,
 	isIDB,
 	kvListGet,
 	markMessageDirty,
-	MESSAGES_SNAPSHOT,
 	updateConversation
 } from "./database.js";
 import {BODY_PARAMETERS, defaultCoTPrompt, defaultSystemPrompt, defaultTitlePrompt} from "./settings.js";
@@ -53,38 +63,77 @@ import SimpleModal from "./components/SimpleModal.jsx";
 import {highlightJsonLike} from "./markdown/highlight.js";
 import {setConversationTitle} from "./components/ConversationList.jsx";
 import {deepEntries, jsonEval} from "unconscious/common/json-schema-utils.js";
-import {applyDelta, jsonFetch, ORIGINAL_ERROR, sseFetch} from "/common/openai-api-utils.js";
+import {applyDelta, jsonFetch, ORIGINAL_ERROR, sseFetch} from "/common/fetch-utils.js";
 import {base64DecodeToUint8Array} from "unconscious/common/Base64.js";
-import {DI, DI_messageContainer, DI_messageVirtualList, DID_SYNC_LOCK, DID_SYNC_UNLOCK} from "./hooks.js";
-import {objectIdentityHash} from "/common/object-hash.js";
-import {encodeObjects} from "./utils/marshal.js";
+import {DI_messageContainer, DI_messageVirtualList} from "./hooks.js";
+import {encodeObjects, objectIdentityHash} from "./utils/serialization.js";
 import {SHA256} from "unconscious/common/SHA256.js";
 import {DONT_PARSE_HTML_IN_THINKING} from "./components/ThinkBlock.jsx";
 import {LLM_COST_SCALE} from "/backend/sync.js";
+import {SP_CONNECT, SP_GENERATE, SP_PREFILL, SP_WAIT} from "./components/StatusPill_state.js";
+import {getCombinedPreset, isLlamaCppBackend, PRESET_KVS_ID} from "./presets.js";
+import {expandFolds} from "./utils/BranchManager.js";
+import {lockConversation, unlockConversation} from "./conversation-lock.js";
 
 /**
  * @param {boolean} [loop]
+ * @param {AiChat.Conversation} [conv]
  * @return {Promise<void>}
  */
-export const submitUserChatMessage = async (loop) => {
-	const conv = unconscious(selectedConversation);
-	if (!EVENT_BUS.post(["loopEntry"], conv)) return;
+export const submitUserChatMessage = async (loop, conv) => {
+	conv ??= unconscious(selectedConversation);
+	if (false === EVENT_BUS.post(["loopEntry"], conv)) return;
 
-	const messages_ = $stampLock(messages);
-	DI[DID_SYNC_LOCK]?.(conv.id);
+	let versionId = await getMessages(conv);
+	let messages_ = $stampLock(messages, versionId);
+	lockConversation(conv.id);
 
 	try {
 		let result;
 		do {
 			result = await agentLoop(conv, messages_, null, !loop);
+
+			if (versionId !== getImmediateMessages(conv)) {
+				messages_ = $stampLock(messages, await getMessages(conv));
+			}
 		} while (result === 'tool_calls' && loop);
 		//return result;
 	} finally {
-		DI[DID_SYNC_UNLOCK]?.(conv.id);
+		unlockConversation(conv.id);
 	}
 };
 
 const RETRY_COUNT = debugSymbol("RetryCount");
+
+/**
+ * @return {number}
+ */
+const distanceToBottom = () => DI_messageContainer.scrollHeight - DI_messageContainer.clientHeight - DI_messageContainer.scrollTop;
+
+/**
+ * 通用通知模块
+ * @param {AiChat.Conversation} conv
+ * @param {string} message
+ * @param {boolean} success
+ */
+const notifyUser = (conv, message, success) => {
+	const hasFocus = document.hasFocus();
+	if (config.sound === 'always' || (config.sound === 'background' && (!success || !hasFocus))) {
+		success ? complete() : failure();
+	}
+
+	if (hasFocus) {
+		if (selectedConversation.id !== conv.id) {
+			showToast(message, success ? 'ok' : "error");
+		}
+	} else if (document.visibilityState === 'hidden' && Notification.permission === 'granted') {
+		new Notification(`会话 ${conv.title || "无标题"}(#${conv.id}) 需要操作`, {
+			body: message,
+			//requireInteraction: !success,
+			//icon: ""
+		})
+	}
+};
 
 /**
  *
@@ -97,7 +146,14 @@ const RETRY_COUNT = debugSymbol("RetryCount");
  * @returns {Promise<false|string>}
  */
 export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
-	if (runningConversations.has(conversation.id)) throw new Error("Loop already running");
+	if (runningConversations.has(conversation.id)) throw new DOMException("agentLoop is running for "+conversation.id);
+
+	const abort = $state(new AbortController());
+	runningConversations.set(conversation.id, {
+		conversation,
+		abort,
+		messages
+	});
 
 	const convCombined = await getCombinedPreset(conversation);
 	if (cfg) cfg = { ...convCombined, ...cfg };
@@ -106,11 +162,13 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 	let markdownRenderer = cfg.afkState === 2 ? (content, container) => container && (container.textContent = content) : createMarkdownStream();
 	let updateCount = 0;
 	let lastMessage;
+	let lastDetails;
 	let _waitingFor;
 
 	const roleId = conversation.roleId;
 	const schemaPreprocess = roleId ? s => "```"+roleId+"\n"+s : AS_IS;
 
+	const forceRender = () => render(lastMessage, true);
 	const render = (message, force) => {
 		lastMessage = message;
 
@@ -127,10 +185,10 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		if (!force) {
 			const details = container.closest("details:not([open])");
 			if (details) {
-				if (!details.classList.contains("m")) {
-					details.classList.add("m");
-					// only update when open
-					details.addEventListener("click", () => render(message));
+				if (lastDetails == null) {
+					lastDetails = details;
+					details.addEventListener("click", forceRender, ONCE_EVENT);
+					// 只在展开时解析思考块的markdown
 				}
 				return;
 			}
@@ -145,11 +203,21 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			updateCount++;
 		}
 
-		const atBottom = DI_messageContainer.scrollHeight - DI_messageContainer.clientHeight - DI_messageContainer.scrollTop;
+		if (lastDetails) {
+			lastDetails.removeEventListener("click", forceRender);
+			lastDetails = null;
+		}
 
-		markdownRenderer(isThinking ? textContent : schemaPreprocess(textContent), container, isThinking ? DONT_PARSE_HTML_IN_THINKING : null);
+		const dist = distanceToBottom();
 
-		if (atBottom < 250 && !unconscious(lastScrollDirectionIsUp)) DI_messageContainer.vl.scrollTo(DI_messageContainer.scrollHeight);
+		try {
+			markdownRenderer(isThinking ? textContent : schemaPreprocess(textContent), container, isThinking ? DONT_PARSE_HTML_IN_THINKING : null);
+		} catch (e) {
+			console.error(e);
+			showToast("Markdown更新出错\n"+prettyError(e), 'error');
+		}
+
+		if (dist < 30 && !unconscious(lastScrollDirectionIsUp)) DI_messageContainer.vl.scrollTo(Number.MAX_SAFE_INTEGER);
 	};
 	const renderer = (type, message) => {
 		if (selectedConversation.id !== conversation.id) return;
@@ -170,9 +238,9 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			}
 		}
 		$update(updateMessageUI);
+		if (distanceToBottom() < 30) scrollMessagesToBottom();
 	};
 
-	const abort = $state(new AbortController());
 	const isDisplaying = () => selectedConversation.id === conversation.id;
 	/** @type {AiChat.LLMRequestContext} */
 	const context = { isDisplaying };
@@ -187,10 +255,6 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		oldValue = newValue;
 	});
 
-	runningConversations.set(conversation.id, {
-		abort,
-		messages
-	});
 	EVENT_BUS.post(['loopBegin'], conversation);
 
 	if (!IS_ANDROID_BUILD) document.title = `工作中(${runningConversations.size}) - ${PAGE_TITLE}`;
@@ -265,7 +329,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 			let needUpdate;
 			const resumeId = conversation.resumeId;
-			if (finishReason !== 'error' || assistantMessage.error?.trim().endsWith(CANCEL_RESUME)) {
+			if (finishReason !== 'error' || !(typeof assistantMessage.error === 'string' && assistantMessage.error.trim().endsWith(ALLOW_RESUME))) {
 				if (resumeId) {
 					promises.push(jsonFetch(resolveDBRelativeURL(cfg.endpoint)+"/abort/"+resumeId, {
 						key: cfg.accessToken,
@@ -278,14 +342,14 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 				}
 			} else {
 				if (resumeId) {
-					assistantMessage.error = '连接意外中止\n服务器支持断线重连\n请点击输入框的【继续】按钮';
+					assistantMessage.error = '连接意外中止\n尝试点击输入框的【继续】按钮';
 					if (isDisplaying()) $update(updateMessageUI);
 				}
 			}
 
 			const needLog = result.request_id && (finishReason !== 'error' || result.input_tokens);
-			if (config.incognito) {
-				assistantMessage.log = result;
+			if (conversation.temporary) {
+				assistantMessage[LOG_CACHE] = result;
 			} else
 
 			if (needUpdate || needLog || isContentfulMessage(assistantMessage)) {
@@ -306,6 +370,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 		const hasPendingInput = isDisplaying() && inputText.trim();
 		const tc = assistantMessage.tool_calls;
+
 		let toolTurnReached;
 		if (tone === '' && !__skipToolCall && !hasPendingInput && !(toolTurnReached = cfg.maxToolTurns && !(countAgenticTurns(messages_uc) % cfg.maxToolTurns))) {
 			const timer = setTimeout(commitMessage, 2000);
@@ -320,9 +385,9 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			}
 
 			if (flags) {
-				if (!cfg.afkState || (flags&1)) {
-					isSuccess = false;
+				if (!cfg.afkState || ((flags&1) && cfg.afkState !== 2)) {
 					finishReason = 'interrupt';
+					notifyUser(conversation, "请回答问题", true);
 				} else if (retryCount < cfg.toolRetryLimit && (flags&4)) {
 					conversation[RETRY_COUNT] = retryCount + 1;
 					messages.pop();
@@ -330,17 +395,28 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			}
 
 			if (isDisplaying()) $update(updateMessageUI);
-		} else if (tc) {
-			assistantMessage.tool_responses = tc.map(tc => ({ [TOOL_NAME]: tc.function.name }));
-			// 因为走到这个分支我们一定要停，所以是ok时停
-			if (isSuccess) {
-				finishReason = 'interrupt';
-				if (toolTurnReached && conversation.owner) {
-					assistantMessage.finish_reason = "interrupt";
-					assistantMessage.error = "Max API calls reached.";
-				}
+		} else {
+			if (!isSuccess) {
+				notifyUser(conversation, "模型调用出错"+(assistantMessage.error ? '\n'+prettyError(assistantMessage.error) : ''), false);
 			}
-			if (isDisplaying()) $update(updateMessageUI);
+
+			if (tc) {
+				assistantMessage.tool_responses = tc.map(() => ({}));
+				// 因为走到这个分支我们一定要停，所以是ok时停
+				if (isSuccess) {
+					finishReason = 'interrupt';
+					if (toolTurnReached && conversation.meta?.owner) {
+						assistantMessage.finish_reason = "interrupt";
+						notifyUser(conversation, assistantMessage.error = "Max API calls reached.", false);
+					} else {
+						notifyUser(conversation, "请审查工具调用", false);
+					}
+				}
+
+				if (isDisplaying()) $update(updateMessageUI);
+			} else if (isSuccess) {
+				notifyUser(conversation, messages.at(-2)?.tool_calls ? "已完成工作" : "已生成回复", true);
+			}
 		}
 
 		const commitedDueToToolTimeout = promises.length;
@@ -360,17 +436,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		};
 
 		const hasPendingInput2 = isDisplaying() && inputText.trim();
-		if ('tool_calls' !== finishReason) {
-			mayGenerateTitle();
-
-			if (cfg.sound) {
-				if (cfg.sound === "always" || !document.hasFocus())
-					isSuccess ? complete() : failure();
-			}
-
-			if (!isDisplaying() && cfg.afkState < 2 && !cfg.disableFinishToast)
-				showToast(`对话 ${conversation.title}(#${conversation.id}) 已结束 (${finishReason})`, tone ?? "error");
-		} else if (cfg.generateTitle !== true) {
+		if ('tool_calls' !== finishReason || cfg.generateTitle !== true) {
 			mayGenerateTitle();
 		}
 		if (hasPendingInput2) finishReason = 'userInput';
@@ -381,7 +447,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		if (abort.signal.aborted) return false;
 		return finishReason;
 	} finally {
-		EVENT_BUS.post(['loopEnd'], conversation);
+		await EVENT_BUS.post(['loopEnd'], conversation);
 		runningConversations.delete(conversation.id);
 		const runningNow = runningConversations.size;
 		if (!runningNow) setWakeLock(false);
@@ -431,16 +497,16 @@ const generateChatTitle = async (conversation, messages, config) => {
 	let s2 = m&&getTextContent(m).slice(0, 512);
 
 	let titleModel = config.titleModel;
-	if (titleModel?.[0] === ":") {
-		config = {
-			...config,
-			...await kvListGet('preset', titleModel.slice(1))
-		};
-		titleModel = config.titleModel;
+	if (titleModel) {
+		config = (await Promise.all([
+			{...config},
+			kvListGet(PRESET_KVS_ID, titleModel.slice(0, titleModel.indexOf('/'))),
+			kvListGet(PRESET_KVS_ID, titleModel)
+		])).reduce(Object.assign);
 	}
 
 	const body = {
-		model: titleModel || config.model,
+		model: config.model,
 		messages: [{
 			role: "system",
 			content: (config.titlePrompt || defaultTitlePrompt) + `
@@ -457,7 +523,7 @@ Directly output title in JSON \` { "title": <conversation title> } \`, no explai
 	};
 
 	const [reasoningPath, reasoningEnabledValue, reasoningDisabledValue = 'false'] = (config.reasoningPath||"reasoning/enabled").split(",");
-	if (config.forceThink !== 0) jsonEval(body, reasoningPath, "set", JSON.parse(reasoningDisabledValue));
+	if (config.forceThink == null) jsonEval(body, reasoningPath, "set", JSON.parse(reasoningDisabledValue));
 
 	setConversationTitle(conversation, '正在生成标题……', true);
 
@@ -466,7 +532,8 @@ Directly output title in JSON \` { "title": <conversation title> } \`, no explai
 	try {
 		const json = await jsonFetch(baseUrl+'/chat/completions', {
 			key: config.accessToken,
-			body: JSON.stringify(body)
+			body: JSON.stringify(body),
+			signal: AbortSignal.timeout(30000)
 		});
 
 		const now = Date.now();
@@ -495,12 +562,12 @@ Directly output title in JSON \` { "title": <conversation title> } \`, no explai
 export const MARKDOWN_APPEND = 2, MARKDOWN_END = 3;
 
 export const findStreamingContainer = think => {
-	const loading = DI_messageVirtualList.lastElementChild?.querySelector(".body>.ai-progress");
+	const loading = DI_messageVirtualList.lastElementChild?.querySelector(".body>.ai-status");
 	if (loading) {
 		const element = loading.previousElementSibling;
 		if (element) {
 			if (think) {
-				if (element.matches(".think")) return element.lastElementChild;
+				if (element.matches(".think")) return element.children[1];
 			} else {
 				if (element.matches(".md")) return element;
 			}
@@ -518,7 +585,7 @@ export const isContentfulMessage = assistantMessage => assistantMessage.think?.c
 const setMessageCacheState = (conversation, messages, hashes, state) => {
 	const indices = new Map;
 	for (const message of messages) {
-		const container = conversation[MESSAGES_SNAPSHOT]?.get(message.id);
+		const container = getMessageContainer(conversation, message.id);
 		if (container) indices.set(container[MESSAGE_HASH], container);
 	}
 
@@ -528,7 +595,7 @@ const setMessageCacheState = (conversation, messages, hashes, state) => {
 	}
 };
 
-const CANCEL_RESUME = "network error";
+const ALLOW_RESUME = "network error";
 
 /**
  *
@@ -598,7 +665,12 @@ async function sendCompletionRequest(
 		})
 	}
 
-	if (onProgress && !unconscious(lastScrollDirectionIsUp) && context.isDisplaying()) scrollMessagesToBottom();
+	if (context.isDisplaying()) {
+		$update(updateMessageUI);
+		if (onProgress && distanceToBottom() < 30 && !unconscious(lastScrollDirectionIsUp)) {
+			scrollMessagesToBottom();
+		}
+	}
 
 	if (error) {
 		if (config.sound) failure();
@@ -622,16 +694,18 @@ async function sendCompletionRequest(
 	let thinkState;
 
 	const endThinking = () => {
-		thinkState.duration += Date.now() - thinkState.start;
+		thinkState.duration += (Date.now()+localTimeDelta) - thinkState.start;
 		delete thinkState.start;
 		delete thinkState.index;
-		thinkState = assistantMessage.think = {...thinkState};
+		thinkState = assistantMessage.think = unconscious(thinkState);
 	};
 
-	const progressKind = $state("connect");
+	const progressKind = $state(SP_CONNECT);
 	const progressValue = $state({});
 	assistantMessage[PROGRESS_KIND] = progressKind;
 	assistantMessage[PROGRESS_VALUE] = progressValue;
+
+	onProgress?.();
 
 	// Request
 	try {
@@ -642,22 +716,7 @@ async function sendCompletionRequest(
 			key: config.accessToken,
 			signal: abortCompletion.signal
 		}, (json, messageType) => {
-			if (config.logSSE) console.log("SSE response", json);
-
-			const timings = json.timings;
-			if (timings && config.afkState < 2) {
-				const promptProgress = json.prompt_progress;
-				if (promptProgress) {
-					progressKind.value = 'prefill';
-					progressValue.value = promptProgress.processed / promptProgress.total;
-					return;
-				}
-
-				progressValue.value = {
-					tps: timings.predicted_per_second,
-					tokens: timings.predicted_n
-				};
-			}
+			if (config.logSSE) console.log("chunk", json);
 
 			const res = json.resumable;
 			if (res) resumable = res;
@@ -669,7 +728,7 @@ async function sendCompletionRequest(
 					return;
 				}
 
-				progressKind.value = 'wait';
+				progressKind.value = SP_WAIT;
 
 				const {id, model} = json;
 
@@ -682,7 +741,7 @@ async function sendCompletionRequest(
 				if (resumable) {
 					if (!resumable.end && null != conversation.id) {
 						conversation.resumeId = id;
-						updateConversation(conversation, assistantMessage.id > 0 ? null : messages);
+						updateConversation(conversation, assistantMessage.id > 0 ? null : unconscious(messages));
 					} else {
 						delete conversation.resumeId;
 					}
@@ -709,6 +768,25 @@ async function sendCompletionRequest(
 						onProgress?.(MARKDOWN_APPEND, assistantMessage);
 					});
 				}
+			}
+
+			const promptProgress = json.prompt_progress;
+			if (promptProgress) {
+				progressKind.value = SP_PREFILL;
+				const progress = promptProgress.processed / promptProgress.total;
+				if (progress < 1) {
+					progressValue.value = progress;
+					return;
+				}
+				progressKind.value = SP_WAIT;
+			}
+
+			const timings = json.timings;
+			if (timings) {
+				progressValue.value = {
+					tps: timings.predicted_per_second,
+					tokens: timings.predicted_n
+				};
 			}
 
 			/** @type {OpenAI.ChatChoice | OpenAI.TextChoice} */
@@ -740,6 +818,7 @@ async function sendCompletionRequest(
 
 				const reasoningDetails = delta.reasoning_details;
 				if (reasoningDetails) {
+					reasoning_text ??= '';
 					assistantMessage.reasoning_details = applyDelta(assistantMessage.reasoning_details, reasoningDetails);
 					reasoning_format = 'rd';
 				} else if (delta.reasoning_content) {
@@ -757,7 +836,10 @@ async function sendCompletionRequest(
 					let hasNewToolCalls;
 					for (const {index, ...item} of delta.tool_calls) {
 						const dLen = item.function?.arguments?.length;
-						if (dLen) progressValue.len += dLen;
+						if (dLen) {
+							progressValue.start = firstPacketTime;
+							progressValue.len = (progressValue.len || 0) + dLen;
+						}
 
 						if (index === undefined) {
 							toolCalls.push($state(item));
@@ -774,13 +856,13 @@ async function sendCompletionRequest(
 						$update(tc);
 					}
 					if (hasNewToolCalls) onProgress?.(MARKDOWN_END);
-				}
+				} else if (text == null && reasoning_text == null) return;
 			} else {
 				text = chunk.text;
 				if (!text) return;
 			}
 
-			progressKind.value = 'generate';
+			progressKind.value = SP_GENERATE;
 
 			if (context.antiSlop?.sample(chunk, assistantMessage)) {
 				throw "retry";
@@ -821,7 +903,7 @@ async function sendCompletionRequest(
 					};
 
 					if (!content && !assistantMessage.tool_calls) {
-						thinkState.start = Date.now();
+						thinkState.start = Date.now() + localTimeDelta;
 						thinkState.index = 0;
 						thinkState = $state(thinkState);
 					}
@@ -878,7 +960,7 @@ async function sendCompletionRequest(
 			if (!assistantMessage.tool_calls) {
 				onProgress?.(MARKDOWN_APPEND, assistantMessage);
 				if (null == progressValue.tps) {
-					progressValue.value = { len: content.length + (thinkState?.content.length || 0) };
+					progressValue.value = { start: firstPacketTime, len: content.length + (thinkState?.content.length || 0) };
 				}
 			}
 
@@ -890,7 +972,7 @@ async function sendCompletionRequest(
 
 		if (!finishReason) {
 			finishReason = 'error';
-			assistantMessage.error = conversation.resumeId ? CANCEL_RESUME : "连接意外终止";
+			assistantMessage.error = conversation.resumeId ? ALLOW_RESUME : "连接意外终止";
 		}
 	} catch (err) {
 		if (err.name === 'AbortError') {
@@ -912,8 +994,7 @@ async function sendCompletionRequest(
 
 				if (config.sound) failure();
 				if (err.status) {
-					if (conversation.resumeId) err = CANCEL_RESUME;
-					else err = `API错误 (${err.status})\n${err.message}`;
+					err = `API错误 (${err.status})\n${err.message}`;
 				} else {
 					err = prettyError(err);
 				}
@@ -921,6 +1002,7 @@ async function sendCompletionRequest(
 			}
 		}
 	} finally {
+		if (isReactive(thinkState)) endThinking();
 		streamResponseCompleted(assistantMessage, genImages);
 
 		delete assistantMessage[PROGRESS_KIND];
@@ -933,12 +1015,6 @@ async function sendCompletionRequest(
 
 	return log;
 }
-
-export const scrollMessagesToBottom = () => {
-	requestAnimationFrame(() => {
-		DI_messageContainer.vl.scrollTo(DI_messageContainer.scrollHeight);
-	});
-};
 
 // 第一个见 sendCompletionRequest 函数
 const allowPrefillFinishReasons = [null, "length", "interrupt", "error"];
@@ -967,10 +1043,11 @@ async function buildCompletionPayload(
 	const canPrefill = config.canPrefill || config.mode === 'completions';
 
 	// Prepare request body
-	const headers = {
-		//'HTTP-Referer': 'https://github.com/roj234/ai-chat',
-		//'X-Title': 'AiChat',
-	};
+	const headers = config.accessToken.startsWith("sk-or-") ? {
+		'X-Title': 'Aint',
+		'X-OpenRouter-Categories': 'personal-agent,general-chat',
+		'HTTP-Referer': 'https://github.com/roj234/ai-chat',
+	} : {};
 	let path = '/chat/completions';
 
 	const resumeId = conversation.resumeId;
@@ -1009,32 +1086,135 @@ async function buildCompletionPayload(
 		}
 	}
 
+	const maybeToolMessage = messages.findLast(s => s.role === 'assistant');
+	if (maybeToolMessage?.tool_calls) {
+		const flags = await runTools(maybeToolMessage, conversation, true);
+		if (flags === -1) throw ('取消工具调用');
+	}
+
+	/**
+	 * @type {Partial<OpenAI.ChatCompletionRequest>}
+	 */
+	let body = {
+		model: config.model,
+		stream: true
+	};
+
+	for (const {id, body_id, default: _omit} of BODY_PARAMETERS) {
+		const v = config[id];
+		if (v !== undefined && v !== _omit) {
+			body[body_id] = v;
+		}
+	}
+
+	let toolPrompt;
+	if (config.mode === 'completions') {
+		path = '/completions';
+	} else {
+		if (config.modalities.includes("tool") && (conversation.activatedModules?.size || conversation.tools?.size)) {
+			let tools;
+			[tools, toolPrompt] = await getAvailableTools(conversation);
+			if (tools.length) body.tools = tools;
+			// is this default=true for llama.cpp ?
+			body.parallel_tool_calls = true;
+
+			if (!toolChoice) body.tool_choice = "none";
+			else if (typeof toolChoice === "object") {
+				if (Array.isArray(toolChoice)) body.tools.push(...toolChoice);
+				else body.tool_choice = toolChoice;
+			}
+		}
+
+		const reasoningEffort = config.reasoning;
+		const useModelCoT = isThinkingEnabled(config) && reasoningEffort;
+		const [reasoningPath, reasoningEnabledValue = 'true', reasoningDisabledValue = 'false'] = (config.reasoningPath||"reasoning/enabled").split(",");
+
+		if (config.forceThink == null) {
+			jsonEval(body, reasoningPath, "set", JSON.parse(useModelCoT?reasoningEnabledValue:reasoningDisabledValue));
+		}
+		if (useModelCoT) {
+			const [reasoningEffortPath, reasoningEffortType = 's'] = (config.reasoningEffortPath || "reasoning/effort").split(",");
+			let fieldValue = reasoningEffort;
+			if (reasoningEffortType === 'i') {
+				if (typeof reasoningEffort === 'string') {
+					if (reasoningEffort === "minimal") {
+						fieldValue = 1024;
+					} else {
+						fieldValue = ({
+							"low": 0.2,
+							"medium": 0.5,
+							"high": 0.8,
+							"xhigh": 0.95,
+							"max": 0.99
+						}[reasoningEffort]) * body.max_completion_tokens;
+					}
+				}
+			} else if (typeof reasoningEffort === 'number') {
+				fieldValue = 'high';
+			}
+			jsonEval(body, reasoningEffortPath, "set", config.reasoning = fieldValue);
+		}
+	}
+
+	messages = expandFolds(unconscious(messages));
+
+	let [systemPrompt, systemBody] = await buildSystemPrompt(config, conversation, config.systemPrompt || defaultSystemPrompt, toolPrompt);
+
+	let sid = 0;
+	for (; sid < messages.length; sid++) {
+		if (!MessageRoles[messages[sid].role]?.preprocess) break;
+	}
+
 	/**
 	 * @type {OpenAI.Message[]}
 	 */
 	const json_messages = [];
 
-	const useRefs = config.useRefs && config.mode === 'chat';
-
-	let insideBlock;
-	let callbacks = [];
-	for (let j = 0; j < messages.length; j++) {
-		const m = messages[j];
-
-		const compose = MessageRoles[m.role]?.compose;
-		if (compose) {
-			await compose(m, json_messages, callbacks, j, messages.length, conversation);
-			continue;
+	if (sid > 0) {
+		let _msgs = messages;
+		messages = messages.slice(sid - (systemPrompt ? 1 : 0));
+		if (systemPrompt) messages[0] = {
+			role: 'system',
+			content: systemPrompt
 		}
 
+		let prefillMessage = isPrefill && messages.pop();
+
+		for (let i = 0; i < sid; i++) {
+			const m = _msgs[i];
+			messages = await MessageRoles[m.role].preprocess(m, messages, conversation, systemPrompt);
+		}
+
+		if (prefillMessage != null) messages.push(prefillMessage);
+	} else {
+		if (systemPrompt && messages[0].role !== 'system') {
+			json_messages.push({
+				role: 'system',
+				content: systemPrompt
+			});
+		}
+	}
+
+	const useRefs = config.useRefs && config.mode === 'chat';
+
+	const conversationHash = (await objectIdentityHash([
+		conversation.activatedModules,
+		messages[0].role ?? 'user'
+		// 以后有什么对话预处理器也填写进来
+	])).slice(0, 10);
+
+	let insideBlock;
+	for (let i = 0; i < messages.length; i++) {
+		const m = messages[i];
+
 		if (useRefs) {
-			const container = conversation[MESSAGES_SNAPSHOT]?.get(m.id);
+			const container = getMessageContainer(conversation, m.id);
 			let hash = container?.[MESSAGE_HASH];
 			if (!hash) {
-				hash = await objectIdentityHash(m);
+				hash = conversationHash+":"+await objectIdentityHash(m);
 				if (container) {
 					container[MESSAGE_HASH] = hash;
-					container[MESSAGE_CACHED] = messages.length - j > 2;
+					container[MESSAGE_CACHED] = messages.length - i > 2;
 				}
 			}
 
@@ -1046,22 +1226,29 @@ async function buildCompletionPayload(
 				insideBlock = true;
 			} else if (insideBlock) {
 				json_messages.push({ role: "cache_end" });
+				insideBlock = false;
 			}
 		}
 
+		const compose = MessageRoles[m.role]?.compose;
+		if (compose) {
+			await compose(m, json_messages, i, messages.length, conversation);
+			continue;
+		}
+
 		const json_msg = cloneNamed(m, ["role", "content", "tool_calls", "reasoning_details"]);
+		if (m.role === 'fold') json_msg.role = m.foldRole ?? 'user';
 		json_messages.push(json_msg);
 
 		const {tool_calls, tool_responses, think} = m;
 		if (tool_calls) {
-			const flags = await runTools(m, conversation, true);
-			if (flags === -1) throw ('取消操作');
-
-			for (let i = 0; i < tool_calls.length; i++) {
+			for (let j = 0; j < tool_calls.length; j++) {
+				const content = tool_responses[j].content;
+				if (content == null) throw `messages[${i}].tool_calls[${j}] 未执行`;
 				json_messages.push({
 					role: "tool",
-					tool_call_id: tool_calls[i].id,
-					content: tool_responses[i].content,
+					tool_call_id: tool_calls[j].id,
+					content,
 				});
 			}
 		}
@@ -1086,70 +1273,10 @@ async function buildCompletionPayload(
 		}
 	}
 
-	if (callbacks.length && useRefs) throw ("请求体回调函数不支持服务端引用");
-
-	/**
-	 * @type {Partial<OpenAI.ChatCompletionRequest>}
-	 */
-	let body = {
-		model: config.model,
-		stream: true
-	};
-
-	for (const {id, body_id, default: _omit} of BODY_PARAMETERS) {
-		const v = config[id];
-		if (v !== undefined && v !== _omit) {
-			body[body_id] = v;
-		}
-	}
-
-	let toolPrompt;
 	if (config.mode === 'completions') {
-		path = '/completions';
-		// Build a single prompt from conversation (with roles)
 		body.prompt = state.completionTemplate(json_messages);
 	} else {
 		body.messages = json_messages;
-
-		if (config.modalities.includes("tool") && (conversation.activatedModules?.size || conversation.tools?.size)) {
-			let tools;
-			[tools, toolPrompt] = await getAvailableTools(conversation);
-			if (tools.length) body.tools = tools;
-			// is this default=true for llama.cpp ?
-			body.parallel_tool_calls = true;
-
-			if (!toolChoice) body.tool_choice = "none";
-			else if (typeof toolChoice === "object") {
-				if (Array.isArray(toolChoice)) body.tools.push(...toolChoice);
-				else body.tool_choice = toolChoice;
-			}
-		}
-
-		const reasoningEffort = config.reasoning;
-		const enableThink = isThinkingEnabled(config) && reasoningEffort;
-		const [reasoningPath, reasoningEnabledValue = 'true', reasoningDisabledValue = 'false'] = (config.reasoningPath||"reasoning/enabled").split(",");
-
-		if (config.forceThink !== 0) {
-			jsonEval(body, reasoningPath, "set", JSON.parse(enableThink?reasoningEnabledValue:reasoningDisabledValue));
-			if (enableThink) {
-				const [reasoningEffortPath, reasoningEffortType = 's'] = (config.reasoningEffortPath || "reasoning/effort").split(",");
-				let fieldValue = reasoningEffort;
-				if (reasoningEffortType === 'i') {
-					if (reasoningEffort === "minimal") {
-						fieldValue = 1024;
-					} else {
-						fieldValue = ({
-							"low": 0.2,
-							"medium": 0.5,
-							"high": 0.8,
-							"xhigh": 0.95,
-							"max": 0.99
-						}[reasoningEffort]) * body.max_completion_tokens;
-					}
-				}
-				jsonEval(body, reasoningEffortPath, "set", fieldValue);
-			}
-		}
 	}
 
 	{
@@ -1177,19 +1304,10 @@ async function buildCompletionPayload(
 		}
 	}
 
-	const additionalBody = config.additionalBody;
-	if (additionalBody) Object.assign(body, additionalBody);
-
-	let [systemPrompt, systemBody] = await buildSystemPrompt(config, conversation, config.systemPrompt || defaultSystemPrompt, toolPrompt);
-	if (systemPrompt) {
-		if (json_messages[0]?.role !== 'system')
-			json_messages.unshift({role: 'system', content: systemPrompt});
-	}
 	if (systemBody) Object.assign(body, systemBody);
 
-	for (const callback of callbacks) {
-		callback(messages, json_messages, body, isPrefill, conversation);
-	}
+	const additionalBody = config.additionalBody;
+	if (additionalBody) Object.assign(body, additionalBody);
 
 	block:
 	if (config.antiSlop) {
@@ -1319,6 +1437,7 @@ export const buildSystemPrompt = async (config, conversation, prompt, toolPrompt
 				case "htmlTag": {
 					result += config.allowHTMLTags.includes("basic") ? "\n- HTML tags in Markdown are supported, use HTML table for complex tables, details/summary for spoilers, and optional inline styles." : "";
 				}
+				break;
 				case "think":
 					result += isThinkingEnabled(config) && config.reasoning === false ? (config.CoTPrompt || defaultCoTPrompt) : "";
 				break;
@@ -1327,13 +1446,13 @@ export const buildSystemPrompt = async (config, conversation, prompt, toolPrompt
 				break;
 				default:
 					if (id[0] === ':') {
-						const preset = await kvListGet('preset', id.slice(1));
+						const preset = await kvListGet(PRESET_KVS_ID, id);
 						result += preset.systemPrompt;
 					} else {
-						let val = PLACEHOLDERS[id] ?? conversation[TEMPORARY_PLACEHOLDER]?.[id];
+						let val = conversation[TEMPORARY_PLACEHOLDER]?.[id] ?? PLACEHOLDERS[id];
 						if (val != null) {
 							if (typeof val === "function")
-								val = val();
+								val = await val(conversation);
 							result += val;
 						} else if (id[0] !== '#') {
 							throw new Error("未识别的占位符 {{"+id+"}}");
@@ -1416,13 +1535,6 @@ const streamResponseCompleted = (assistantMessage, genImages) => {
 		if (hasText) delete assistantMessage.think?.content;
 	}
 	if (tool_calls) assistantMessage.tool_calls = tool_calls.map(unconscious);
-
-	if (isReactive(think)) {
-		think.duration += Date.now() - think.start;
-		delete think.start;
-
-		assistantMessage.think = {...think};
-	}
 
 	if (genImages?.length) {
 		const arr = [];

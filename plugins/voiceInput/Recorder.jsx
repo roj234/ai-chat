@@ -54,7 +54,6 @@ export const Recorder = ({ onSubmit }) => {
 							try {
 								recordBlob = await recorder.stop();
 								recordBlob = new File([recordBlob], '录音 '+new Date(startMs).toLocaleTimeString()+'.mp3', recordBlob);
-								console.log(recordBlob);
 								stat(`✅ 完成 · ${formatSize(recordBlob.size)}`);
 								recordState.value = 2;
 							} catch (err) {
@@ -73,7 +72,6 @@ export const Recorder = ({ onSubmit }) => {
 	</div>;
 
 	$cleanup(elm, () => {
-		console.log("Recorder stopped");
 		recorder?.destroy();
 		ob.disconnect();
 	})

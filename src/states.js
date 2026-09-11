@@ -1,37 +1,25 @@
-import {$asyncState, $computed, $state, $store, $watch, debugSymbol, unconscious} from 'unconscious';
-import {deepEqual} from "unconscious/common/deepEqual.js";
-import {jsonFetch} from "../common/openai-api-utils.js";
-import {resolveDBRelativeURL} from "./utils/utils.js";
+import {$derived, $state, $store, $watch, debugSymbol, unconscious} from 'unconscious';
 import {EventBus} from "./utils/EventBus.js";
+import {LRUCache} from "../common/LRUCache.js";
 
 export const PAGE_TITLE = document.title;
 
 export const EVENT_BUS = new EventBus();
 
-const createMediaState = (query) => {
-	const state = $state();
+const createMediaState = (query, change) => {
 	const mediaQuery = matchMedia(query);
-	const cb = () => {
-		state.value = mediaQuery.matches;
-	};
+	const cb = () => change(mediaQuery.matches);
 	mediaQuery.onchange = cb;
 	cb();
-	return state;
 };
 
 /**
  * @type {boolean}
  */
-export let isMobile = IS_ANDROID_BUILD;
-
-if (!IS_ANDROID_BUILD) {
-	const isMobileQuery = matchMedia('(max-width: 768px)');
-	const cb = () => {
-		isMobile = isMobileQuery.matches;
-	};
-	isMobileQuery.onchange = cb;
-	cb();
-}
+export let auxSmallScreen = IS_ANDROID_BUILD, auxMainlyTouch, auxKeyboardOnly;
+if (!IS_ANDROID_BUILD) createMediaState('(max-width: 768px)', (v) => auxSmallScreen = v);
+createMediaState('(pointer: coarse)', (v) => auxMainlyTouch = v);
+createMediaState('(any-pointer: none)', (v) => auxKeyboardOnly = v);
 
 /**
  *
@@ -89,9 +77,9 @@ const conversationLoadedCallbacks = [];
 const conversationBeforeunloadCallbacks = [];
 
 /**
- * @param {function(AiChat.Conversation, AiChat.Message[]): void} callback
+ * @param {function(AiChat.Conversation, string[], AiChat.Message[]): void | Promise<void>} callback
  */
-export const onConversationLoaded = callback => EVENT_BUS.on('conversationLoad', callback);
+export const onConversationLoaded = callback => EVENT_BUS.on('convLoad', callback);
 
 /**
  * @param {function(AiChat.Conversation, AiChat.Message[]): void} callback
@@ -128,7 +116,7 @@ export const resetConversation = () => {
 	messages.value = [];
 };
 
-export const ensureActiveConversation = async () => {
+export const ensureConversation = async () => {
 	if (null == unconscious(selectedConversation)) {
 		// 创建新对话
 		const conv = {
@@ -137,11 +125,15 @@ export const ensureActiveConversation = async () => {
 			ready: true
 		};
 
-		if (config.incognito) conv.id = -1;
-		//else await updateConversation(conv, unconscious(messages), true);
+		if (config.temporaryChat) {
+			conv.id = "temporary-"+Date.now();
+			conv.title = "临时对话";
+			conv.temporary = true;
+		}
 
-		conversations.unshift(conv);
 		selectedConversation.value = conv;
+
+		EVENT_BUS.post(['convNew'], conv, unconscious(messages));
 	}
 };
 
@@ -152,49 +144,26 @@ export const switchToConversation = (conv) => {
 	selectedConversation.value = conv;
 };
 
+const fastLookup = new LRUCache(32);
+
+EVENT_BUS.on('convDel', (data, path) => {
+	fastLookup.delete(path[1]);
+});
+
 /**
  * @param {number} id
  * @return {AiChat.Conversation | null}
  */
 export const findConversation = (id) => {
-	const conv = unconscious(selectedConversation);
-	return conv?.id !== id ? unconscious(conversations).find(item => item.id === id) : conv;
-};
-
-/**
- * @type {import("unconscious").Reactive<{}>}
- * @private
- */
-const _modelEndpoint = $state();
-
-/**
- * @type {boolean}
- */
-export let isLlamaCppBackend, isMyLlamaCppBackend;
-
-export const setIsLlamaCppBackend = (b, b2) => {
-	isLlamaCppBackend = b;
-	isMyLlamaCppBackend = b2;
-};
-
-/**
- * @type {import("unconscious").ReactivePromise<AiChat.ApiModel[]>}
- */
-export const models = $asyncState(endpoint => {
-	return endpoint?.url ? jsonFetch(resolveDBRelativeURL(endpoint.url) + "/models", {key: endpoint.key}).then(({data}) => data) : [];
-}, _modelEndpoint);
-
-/**
- * @param {boolean=} force
- * @return {import("unconscious").ReactivePromise<AiChat.ApiModel[]>}
- */
-export const updateModels = force => {
-	const value = {
-		url: resolveDBRelativeURL(config.endpoint),
-		key: config.accessToken
-	};
-	if (force || !deepEqual(value, _modelEndpoint.value)) _modelEndpoint.value = value;
-	return models;
+	let conv = unconscious(selectedConversation);
+	if (conv?.id !== id) {
+		conv = fastLookup.get(id);
+		if (conv == null) {
+			conv = unconscious(conversations).find(item => item.id === id);
+			if (conv != null) fastLookup.set(id, conv);
+		}
+	}
+	return conv;
 };
 
 /**
@@ -213,6 +182,7 @@ export const abortCompletion = $state();
  *
  * @type {Map<number, {
  *     abort: AbortController,
+ *     conversation: AiChat.Conversation,
  *     messages: AiChat.Message[]
  * }>}
  */
@@ -222,7 +192,6 @@ $watch(selectedConversation, () => {
 	abortCompletion.value = unconscious(runningConversations.get(selectedConversation.id)?.abort);
 });
 
-
 let nativeTheme;
 {
 	const root = document.querySelector(":root");
@@ -231,7 +200,7 @@ let nativeTheme;
 		nativeTheme = colorSchemeQuery.matches ? 'dark' : 'light';
 		root.setAttribute("data-theme", config.theme || nativeTheme);
 	};
-	$watch($computed(() => config.theme), cb);
+	$watch($derived(config.theme), cb);
 	colorSchemeQuery.onchange = cb;
 }
 
@@ -242,9 +211,10 @@ export const getCurrentTheme = () => config.theme || nativeTheme;
 
 export const PROGRESS_KIND = debugSymbol("ProgressType");
 export const PROGRESS_VALUE = debugSymbol("ProgressValue");
+export const LOG_CACHE = debugSymbol("BillingLog");
 
 export const BRANCH_MANAGER = debugSymbol("BranchManager");
-export const LOCKED = debugSymbol("ConversationLocker");
+export const LOCKED = debugSymbol("ServerLocked");
 
 export const updateConversationListUI = $state();
 export const updateConversationUI = $state();

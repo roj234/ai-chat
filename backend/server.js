@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import {watch} from 'node:fs';
 import path from "node:path";
 import {parseArgs} from 'node:util';
+import {spawn} from "node:child_process";
 
 import {WebSocketServer} from "unconscious/common/ws2/src/index.js";
 import {ZipReader} from "unconscious/common/zip-io.js";
@@ -11,7 +12,16 @@ import {ZipReader} from "unconscious/common/zip-io.js";
 import "./utils/log-hook.js";
 import "./utils/fetch-hook.js";
 
-import {INTERACTIVE_LOGIN, PAT_SERVER_SALT, reload, SERVER_BASE_ADDR, WEBSOCKET_SYNC_ENABLE} from "./config.js";
+import {
+	FS_SERVICE_PAT,
+	INSTANCE_ID,
+	INTERACTIVE_LOGIN,
+	PAT_SERVER_SALT,
+	reload,
+	SERVER_BASE_ADDR,
+	WEBSOCKET_SYNC_ENABLE
+} from "./config.js";
+import {debugSecret} from "./utils/debugSecret.js";
 import {PROTOCOL_VERSION} from "./sync.js";
 
 import {createRouter} from './init.js';
@@ -19,6 +29,9 @@ import {createSyncManager, createSyncValidateMiddleware} from "./syncServer.js";
 import {createZipRouter} from "./utils/zipRouter.js";
 import {closeAllConnections} from "./utils/UserManager.js";
 import {isLanAddress} from "../common/isLanAddress.js";
+
+const shutdownHooks = [];
+globalThis.AiChatAPI.addShutdownHook = (hook) => shutdownHooks.push(hook);
 
 const options = {
 	addr: { type: 'string', short: 'a', default: '127.0.0.1' },
@@ -84,13 +97,30 @@ async function fileWatcher(path, callback, uiName) {
 
 try {
 	await fileWatcher(configPath, async (configPath) => {
-		await reload(configPath + '?t='+(await fs.stat(configPath)).mtimeMs);
-		if (INTERACTIVE_LOGIN && !PAT_SERVER_SALT) {
+		await reload("./config.default.js");
+		await reload(configPath+'?t='+(await fs.stat(configPath)).mtimeMs);
+
+		const repl = [];
+
+		if (INTERACTIVE_LOGIN && !PAT_SERVER_SALT) repl.push(['PAT_SERVER_SALT', crypto.randomUUID()]);
+		if (!INSTANCE_ID) repl.push(['INSTANCE_ID', crypto.randomUUID()]);
+
+		if (repl.length) {
 			let js = await fs.readFile(configPath, 'utf-8');
-			js = js.replace(/PAT_SERVER_SALT\s*=\s*(['"`])\1/, `PAT_SERVER_SALT = '${crypto.randomUUID()}'`);
+			for (const [k, v] of repl) {
+				const initJs = js;
+				js = js.replace(new RegExp(`\\b${k}\\s*=\\s*(['"\`])\\1`), `${k} = '${v}'`);
+
+				if (initJs === js) {
+					console.error(`[config] 配置文件缺少键 ${k} 可能需要自行从 default 迁移。`);
+					process.exit(1);
+				}
+			}
+
 			await fs.writeFile(configPath, js, 'utf-8');
-			await reload(configPath + '?t='+(await fs.stat(configPath)).mtimeMs);
+			await reload(configPath+'?t='+(await fs.stat(configPath)).mtimeMs);
 		}
+
 	}, "配置文件");
 } catch (e) {
 	console.error("[config] 配置文件加载失败");
@@ -98,8 +128,14 @@ try {
 	process.exit(1);
 }
 
-if (!INTERACTIVE_LOGIN && !isLanAddress(addr))
-	throw new Error("监听地址不是内网，必须开启 INTERACTIVE_LOGIN");
+if (!isLanAddress(addr)) {
+	if (workspace) {
+		if (!FS_SERVICE_PAT)
+			throw new DOMException("监听地址不是内网，必须配置 FS_SERVICE_PAT");
+	} else if (!INTERACTIVE_LOGIN) {
+		throw new DOMException("监听地址不是内网，必须配置 INTERACTIVE_LOGIN");
+	}
+}
 
 const router = await createRouter(DATA_PATH, "api", workspace);
 
@@ -123,6 +159,23 @@ if (zipPath) {
 
 		router.zipRouter = createZipRouter(zip);
 	}, "前端");
+}
+
+if (debugSecret) {
+	let called;
+	router.get(`/${debugSecret}/restart`, () => {
+		if (called) return;
+		called = true;
+
+		const child = spawn(process.execPath, [...process.execArgv, ...process.argv], { stdio: 'inherit', });
+		child.once('error', (err) => {
+			console.error('[restart] 启动新进程失败：', err);
+		});
+		child.once('spawn', async () => {
+			await gracefulShutdown();
+			process.exit(0);
+		});
+	});
 }
 
 const server = serverType.createServer(serverOptions, (req, res) => router.handle(req, res));
@@ -165,8 +218,6 @@ server.listen(PORT, addr, () => {
 	console.log(`  内置前端: ${zipPath?frontendVersion:"无"}`);
 });
 
-const shutdownHooks = [];
-
 // 封装一个优雅退出的函数
 async function gracefulShutdown() {
 	console.log('[shutdown] 正在关闭数据库...');
@@ -180,8 +231,6 @@ async function gracefulShutdown() {
 	await closeAllConnections();
 	process.exit(0);
 }
-
-globalThis.AiChatAPI.addShutdownHook = (hook) => shutdownHooks.push(hook);
 
 // 监听 Ctrl+C (SIGINT)
 process.on('SIGINT', gracefulShutdown);

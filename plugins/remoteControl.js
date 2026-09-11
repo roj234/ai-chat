@@ -1,14 +1,23 @@
 import {sendToSyncServer} from "/src/database/syncClient.js";
 import {SYNC_RPC, SYNC_SEND_TO_OWNER} from "/backend/sync.js";
-import {config, conversations, inputText, isMobile, selectedConversation, switchToConversation} from "/src/states.js";
-import {$state, $update, $watch, unconscious} from "unconscious";
+import {
+	auxMainlyTouch,
+	config,
+	conversations,
+	findConversation,
+	inputText,
+	selectedConversation,
+	switchToConversation
+} from "/src/states.js";
+import {$state, $unwatch, $update, $vforeach, $watch, unconscious} from "unconscious";
 import {showToast} from "/src/components/Toast.js";
 import {DI, DID_RMI, DID_SEND_BUTTON, onLoad} from "/src/hooks.js";
 import {delta, patch, rep} from "unconscious/common/deepEqual.js";
 import {prettyError} from "/src/utils/utils.js";
-import {VirtualList} from "unconscious/common/VirtualList.js";
-import {SETTINGS} from "../src/settings.js";
-import {ContextRing} from "../src/components/SendButton.jsx";
+import {GLOBAL_SETTINGS} from "/src/settings.js";
+import {ContextRing} from "/src/components/SendButton.jsx";
+
+//let sendToSyncServer;
 
 // 消息类型常量
 const NO_SUCH_CLIENT = -1;
@@ -40,7 +49,6 @@ const RPC = (conversationId, func, payload) => new Promise((resolve, reject) => 
  * @property {''|null} disabled
  * @property {string} text
  * @property {number} convId
- * @property {boolean} running
  */
 
 // ---------- 被控端（服务端） ----------
@@ -117,14 +125,15 @@ const RMI = {
 		}
 
 		const fakeInputBox = <textarea
+			className="userInput"
 			placeholder="有事尽管问我"
 			disabled={rpcBusy} value={() => clientState.text}
 			onInput={() => {
 				sendToSyncServer(SYNC_SEND_TO_OWNER, [id, [INPUT, 0, delta(clientState.text, fakeInputBox.value)]]);
 			}}
 			onKeyDown={(e) => {
-				if (isMobile) return;
-				if (e.key === 'Enter' && !e.shiftKey) {
+				if (auxMainlyTouch) return;
+				if (e.isComposing && e.key === 'Enter' && !e.shiftKey) {
 					e.preventDefault();
 					e.stopImmediatePropagation();
 					fakeSendButton.click();
@@ -138,13 +147,6 @@ const RMI = {
 			onClick={() => serialRPC(SUBMIT)}
 		/>;
 
-		const vl = new VirtualList({
-			data: unconscious(conversations).filter(conv => conv.id > 0),
-			renderer: data => <li
-				className={"ellipsis" + (data === unconscious(selectedConversation) ? " selected" : "")}
-				_conv={data} title={data.title}>{data.title || "#" + data.id}</li>
-		});
-
 		const changeConversation = <div className="pretty-select preset-switch up">
 			<div className="input" onClick.stop={() => changeConversation.classList.toggle("open")}>切换远程会话<span
 				className="arrow-icon ri-arrow-down-s-line"></span></div>
@@ -153,10 +155,11 @@ const RMI = {
 				const conv = e.delegateTarget._conv;
 				serialRPC(SWITCH_TO, conv.id).then(() => switchToConversation(conv));
 			}}>
-				{vl.dom}
+				{$vforeach(unconscious(conversations).filter(conv => conv.id > 0), data => <li
+					className={"ellipsis" + (data === unconscious(selectedConversation) ? " selected" : "")}
+					_conv={data} title={data.title}>{data.title || "#" + data.id}</li>)}
 			</ul>
 		</div>;
-		vl.attach(changeConversation.querySelector(".dropdown"));
 
 		const fakeQuery = <div className="query rc">
 			{fakeInputBox}
@@ -183,18 +186,6 @@ const RMI = {
 			sendToSyncServer(SYNC_SEND_TO_OWNER, [id, [UNSUBSCRIBE]]);
 			fakeQuery.remove();
 		};
-	},
-
-	/**
-	 * 被控端通知状态变化（由外部调用）
-	 * @param {number} id - 对话ID
-	 * @param {boolean} running - 当前运行状态（兼容旧接口，可忽略）
-	 */
-	state(id, running) {
-		if (id === selectedConversation.id) {
-			immediateState.running = !!running;
-			onStateUpdated();
-		}
 	},
 
 	/**
@@ -260,24 +251,32 @@ const RMI = {
 				sendBtn.click();
 				break;
 			case SWITCH_TO:
-				const conv = conversations.find(item => item.id === payload);
+				const conv = findConversation(payload);
 				if (!conv) {
 					reply({ error: '找不到对话 #'+payload })
 					return;
 				}
 				switchToConversation(conv);
-				break;
+
+				const cb = () => {
+					if (selectedConversation.ready) {
+						$unwatch(selectedConversation, cb);
+						reply("");
+					}
+				};
+				$watch(selectedConversation, cb, false);
+				return;
 
 			default:
 				reply({ error: "未知操作" });
 				return;
 		}
-		reply("OK");
+		reply("");
 	},
 };
 
 export const registerRemoteControl = () => {
-	SETTINGS.push({
+	GLOBAL_SETTINGS.push({
 		id: "remoteControl",
 		//_tab: "tools",
 		name: "远程操作",

@@ -8,7 +8,7 @@ npm i
 # 检查配置文件是否存在
 if [ ! -f config.js ]; then
     echo "[INFO] Config file not found. Creating config.js from example..."
-    cp config.example.js config.js
+    cp config.default.js config.js
     echo "[IMPORTANT] Please edit config.js to configure your environment."
     echo ""
     read -p "Press [Enter] key to continue starting the server..."

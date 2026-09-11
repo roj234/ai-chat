@@ -11,11 +11,28 @@
 		padding: 4px;
 		border-radius: 8px;
 
-		& > li {
-			padding: 6px;
+		& li {
 			border-radius: 6px;
 			cursor: pointer;
 		}
+	}
+
+	&:not(.open) > .ts {
+		display: none;
+	}
+
+	position: relative;
+
+	& .ts {
+		background: var(--panel-2);
+		border-radius: var(--border-radius-md);
+		box-shadow: var(--shadow);
+		padding: 4px;
+
+		position: absolute;
+		left: 200px;
+		bottom: calc(100% + 10px);
+		width: 300px;
 	}
 
 	& .ri-lock-line {

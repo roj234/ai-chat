@@ -1,45 +1,49 @@
 
 .timeline-divider {
 	position: relative;
-	display: flex;
-	align-items: center;
-	justify-content: center;
+	left: -6px;
 
-	&::before {
-		content: "";
-		position: absolute;
-		left: 0;
-		right: 0;
-		height: 1px;
-		background: linear-gradient(90deg,
-			transparent 0%,
-			rgba(51, 65, 85, 0.6) 20%,
-			rgba(51, 65, 85, 0.6) 80%,
-			transparent 100%
-		);
-	}
-
-	& button {
-		position: relative;
+	& > button {
 		display: inline-flex;
 		align-items: center;
-		gap: 1ch;
-		background: var(--card);
-		border: 1px solid var(--border);
-		border-radius: 6px;
+		gap: 0.5ch;
+		border-radius: var(--border-radius-sm);
 		padding: 4px 1ch;
-		font-size: 14px;
+		font-size: 13px;
 		color: var(--muted);
 		transition: all 0.2s ease;
 
 		&:hover {
-			background: var(--panel);
-			border-color: var(--accent);
-			color: var(--text);
+			background: var(--chip-hover);
 		}
+	}
+
+	& > button > i {
+		font-size: 16px;
+	}
+
+	&:not(.done) > button > i {
+		animation: spin 1s linear infinite;
+	}
+
+	&.done > button > i {
+		color: var(--ap-green);
 	}
 
 	& .white {
 		color: var(--text);
 	}
+
+	& .chevron {
+		font-size: 15px;
+		transition: transform 0.15s ease;
+	}
+
+	&.open .chevron {
+		transform: rotate(90deg);
+	}
+}
+
+.tool-group > button {
+	padding-left: 0;
 }

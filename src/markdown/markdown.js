@@ -2,10 +2,11 @@ import {copyButtonAnimation, downloadFile} from "../utils/utils.js";
 
 import {createMarkdownRenderer} from "./renderer.js";
 import {createMarkdownParser} from "fastmd";
+import {queueMacrotask} from "unconscious/common/queueMacrotask.js";
 
 import "./markdown.css";
 
-const tags = {
+export const HTMLTagKinds = {
 	basic: [
 		"details", "summary",
 		"b", "i", "u", "p", "br", "em", "kbd", "q", "strong", "code", "ruby", "rp", "rt", "sup", "sub", "small", "center",
@@ -16,11 +17,10 @@ const tags = {
 		"img", "a",
 	],
 	style: ["style"],
-	script: ["script"]
 };
 
 const mdParserOptions = {
-	allowedTags: tags.basic,
+	allowedTags: HTMLTagKinds.basic,
 	parseQuotes: true,
 	preserveLineBreaks: true,
 	allowNestedCodeFence3: true
@@ -33,10 +33,12 @@ const mdParserOptions = {
 export const setAllowHTMLTags = (tagTypes) => {
 	const arr = [];
 	if (tagTypes) for (let type of tagTypes) {
-		arr.push(...tags[type]);
+		arr.push(...HTMLTagKinds[type]);
 	}
 	mdParserOptions.allowedTags = arr;
 }
+
+const SLICE_PER_FRAME = 10000;
 
 /**
  *
@@ -51,12 +53,11 @@ export const renderMarkdownToElement = (container, md, options = {}) => {
 		...options
 	});
 
-	const CHUNK = 10000;
+	let i = 0;
 	const chunkedRender = () => {
-		parser.write(md.slice(0, CHUNK));
-		md = md.slice(CHUNK);
-		if (!md) parser.end();
-		else requestAnimationFrame(chunkedRender);
+		parser.write(md.slice(i, i += SLICE_PER_FRAME));
+		if (i >= md.length) parser.end();
+		else queueMacrotask(chunkedRender);
 	};
 	chunkedRender();
 	return container;
@@ -150,30 +151,65 @@ const rendererOptions = { stream: true };
  * @param [options]
  * @return {import("fastmd").Parser}
  */
-export const createStreamingMarkdownParser = (output, options) => {return createMarkdownParser(createMarkdownRenderer(output, rendererOptions), {...mdParserOptions, ...options});};
+export const createStreamingMarkdownParser = (output, options) => {
+	return createMarkdownParser(
+		createMarkdownRenderer(output, rendererOptions),
+		{...mdParserOptions, stream: true, ...options}
+	);
+};
 
+function STATE(parser) {
+	let buf = '';
+	let pos = 0;
+	let end = false;
+
+	const update = () => {
+		let lim = pos + SLICE_PER_FRAME;
+		const len = buf.length;
+		parser.write(buf.slice(pos, Math.min(lim, len)));
+		if (lim >= len) {
+			lim = len;
+			if (end) parser.end();
+		} else {
+			requestAnimationFrame(update)
+		}
+		pos = lim;
+	}
+
+	return {
+		set(text) {
+			buf = text;
+			update();
+		},
+		end() {
+			if (pos === buf.length) parser.end();
+			end = true;
+		}
+	}
+}
+
+/**
+ *
+ * @return {(function(string, HTMLElement, Object): void)|*}
+ */
 export const createMarkdownStream = () => {
 	let parser;
-	let prevOutput;
-	let bufferIndex;
+	let prevDOM;
 
-	/**
-	 * @param {string} buffer
-	 * @param {HTMLElement} output
-	 */
-	return (buffer, output, options) => {
-		if (prevOutput !== output) {
-			if (parser) parser.end();
-			if (!(prevOutput = output)) return;
+	return (str, dom, options) => {
+		if (prevDOM !== dom) {
+			if (parser) {
+				parser.end();
+				parser = null;
+			}
+			if (!(prevDOM = dom)) return;
 
-			// 给AntiSlop的重试循环用
-			output.replaceChildren();
-			parser = createStreamingMarkdownParser(output, options);
-			bufferIndex = 0;
+			dom.replaceChildren();// 这个给AntiSlop的重试循环用
+
+			parser = STATE(createStreamingMarkdownParser(dom, options));
 		}
-		if (!buffer || !parser) return;
+		if (!str || !parser) return;
 
-		parser.write(buffer.slice(bufferIndex));
-		bufferIndex = buffer.length;
+		parser.set(str);
 	};
 };

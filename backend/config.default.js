@@ -1,0 +1,274 @@
+/**
+ * AIChat 配置文件
+ * 请勿修改 config.default.js
+ * 修改 config.js 实时生效。
+ * 有关把key写在独立的文件里，或使用正则表达式过滤敏感词等高级功能，见 文档 -> 服务端配置
+ * 修改那些文件不会立即生效，你可以touch一下这个文件，或者用监听器……之后再说吧
+ */
+
+// ==========================================
+// 0. 专用文件访问服务
+// ==========================================
+
+/**
+ * 访问时需要的密钥
+ * 带 --workspace 启动时唯一读取的参数，默认为空
+ * 暴露到公网时必须设置
+ */
+export const FS_SERVICE_PAT = '';
+
+// ==========================================
+// 1. 语义搜索与向量化 (Semantic Search)
+// ==========================================
+
+/** 是否启用语义搜索功能（需要向量数据库支持） */
+export const SEMANTIC_SEARCH_ENABLE = false;
+
+/** 向量化 API 地址 (如 OpenAI, llama-server 或 我的参考实现) */
+export const SEMANTIC_SEARCH_API_BASE = 'http://localhost:5002/api/v1/embeddings';
+
+/** 向量化 API 访问密钥 */
+export const SEMANTIC_SEARCH_API_KEY = "";
+
+/** 使用的 Embedding 模型 (需与维度 SEMANTIC_SEARCH_EMBEDDING_SIZE 匹配) */
+export const SEMANTIC_SEARCH_API_MODEL = "qwen3-embedding-0.6b";
+
+/** 向量维度：OpenAI 一般为 1536，本地模型常用 768 或 1024 */
+export const SEMANTIC_SEARCH_EMBEDDING_SIZE = 1024;
+
+/**
+ * 文本分块策略
+ * 用于处理长文本超过嵌入模型上下文的情况
+ */
+export const SEMANTIC_SEARCH_CHUNK_MODE = {
+	/**
+	 * type 模式:
+	 * - "head": 仅保留开头（适合摘要类）
+	 * - "head-tail": 取头尾各一半（适合长文语义保留）
+	 */
+	type: "head-tail",
+	/** 分块截取后的最大字符长度 */
+	length: 4096
+};
+
+// ==========================================
+// 2. 实时同步与用户管理
+// ==========================================
+
+/**
+ * 服务器API直连地址 (用于输入用户名)
+ * @example https://nas.lan/aichat/api/
+ */
+export const SERVER_BASE_ADDR = ``;
+
+/** 是否开启 WebSocket 状态同步 */
+export const WEBSOCKET_SYNC_ENABLE = true;
+
+/**
+ * 动态生成 WebSocket 连接地址
+ * @param {AiChatBackend.RouteContext} ctx - 路由上下文
+ * @returns {string} 完整的 WebSocket WS/WSS URL
+ */
+export const WEBSOCKET_SYNC_BASE = (ctx) => {
+	// 默认用@返回相对数据库API的地址。
+	// 你也可以返回绝对URL如 ws://${ctx.req.headers.host}/api
+	// 或相对于网页的URL（谨慎使用，不兼容安卓）
+	return `@sync`;
+};
+
+/** 实例 ID（用来确定同一台服务器），如果是空字符串，下次服务器启动时会随机生成 */
+export const INSTANCE_ID = '';
+
+/** 是否开启用户注册限制 */
+export const RESTRICT_USER_CREATION = false;
+
+/** 白名单用户列表：仅当 RESTRICT_USER_CREATION 为 true 时生效 */
+export const ALLOW_USER_NAMES = new Set(['admin', 'user']);
+
+/** 要求交互式登录（在控制台接受）并下发PAT */
+export const INTERACTIVE_LOGIN = false;
+
+/** 服务器盐值，修改以作废所有PAT，如果是空字符串，下次服务器启动时会随机生成 */
+export const PAT_SERVER_SALT = '';
+
+/** 只接受在这个时间后签发的PAT */
+export const PAT_VALID_AFTER = new Date("2026-01-01").getTime() / 1000;
+
+/** Blob 存储最大大小 */
+export const MAX_UPLOAD_SIZE = 52428800;
+
+// ==========================================
+// 3. 安全与数据库设置
+// ==========================================
+
+/**
+ * 同时打开的SQLite数据库数量
+ */
+export const MAX_OPEN_DATABASES = 30;
+
+/**
+ * 启动时执行的额外 SQLite 语句
+ * 默认开启 WAL 模式以提升并发写入性能
+ */
+export const STARTUP_SQL = `
+    PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = NORMAL;
+`;
+
+/**
+ * 启用文件传输助手
+ */
+export const ENABLE_FILE_TRANSFER = true;
+
+/**
+ * 启用简易聊天室
+ */
+export const ENABLE_CHATROOM = true;
+
+// ==========================================
+// 4. SSE 后端代理与转发 (SSE Proxy)
+// ==========================================
+
+/**
+ * SSE 后端代理路由表
+ *
+ * 匹配逻辑：
+ * 1. 匹配 Header 中的 Authorization (Bearer 后面的 Key)。
+ * 2. 若匹配成功，则转发至对应的 url 并覆盖 authorization。
+ * 3. 若未匹配，则尝试使用 'default' 配置。
+ * 4. 若 'default' 未定义 authorization，则执行 BYOK (Bring Your Own Key) 模式。
+ * 5. 无匹配项且无 default 时返回 403。
+ *
+ * @type {Record<string, AiChatBackend.SSEProxyTarget>}
+ */
+export const SSE_PROXY_BACKEND = {
+	"some-internal-key": {
+		url: 'https://api.openai.com/v1/chat/completions',
+		authorization: 'sk-xxxxxx',
+		headers: {
+			"User-Agent": "opencode/1.2.3"
+		},
+		trace: true // 是否记录该通道的日志 (需开启 SSE_PROXY_TRACE)
+	},
+
+	default: {
+		url: '',
+		authorization: 'xxx'
+	}
+};
+
+/**
+ * 可以async
+ * @param {AiChatBackend.SSEProxyTarget} target
+ * @param {AiChatBackend.RouteContext} ctx
+ * @return {void | function(OpenAI.ChatCompletionRequest, AiChatBackend.SSEProxyTarget): Promise<Partial<AiChatBackend.SSEProxyTarget>>}
+ */
+export const SSE_PROXY_MODERATION = (target, ctx) => {
+
+}
+
+/**
+ * 断线重连缓存大小。
+ * 该缓存无超时，但客户端重连成功后会删除对应条目。
+ * 一条消息最高占用约 200KB 内存（provider应该不至于攻击client）
+ */
+export const SSE_RESUME_CACHE_SIZE = 254;
+
+/** 断线重连超时 (毫秒)：默认禁用 */
+export const SSE_RESUME_TTL = 0;
+
+/**
+ * 消息引用缓存大小。
+ * 设置为 0 禁用消息引用功能。
+ * 消息引用将消息块存储在SSE服务端并节省客户端 -> 服务器的流量（但无法节省服务器 -> 提供商的流量）。
+ * 由于消息块的大小是任意的，因此（对恶意请求来说）一条消息最高占用 40MB 的内存。
+ * 通常一条消息占用 几 - 几十KB。
+ */
+export const SSE_REF_CACHE_SIZE = 1000;
+
+/** 消息引用超时 (毫秒)：默认禁用 */
+export const SSE_REF_TTL = 0;
+
+// ==========================================
+// 5. 计费与价格映射 (Billing)
+// ==========================================
+
+function isLiangWenFeng() {
+	const beijingTime = new Date(Date.now() + 8 * 60 * 60 * 1000);
+	const day = beijingTime.getUTCDay();
+	if (day === 0 || day === 6) return 0.5;
+	const minutes = beijingTime.getUTCHours() * 60 + beijingTime.getUTCMinutes();
+	const isPeak =
+		(minutes >= 9 * 60 && minutes < 12 * 60) ||
+		(minutes >= 14 * 60 && minutes < 18 * 60);
+	return isPeak;
+}
+
+// 价格表：每百万 token 价格（元）
+const RATES = {
+	"deepseek-v4-flash": {
+		peak: [3.0, 9.0, 0.10],
+		idle: [1.5, 4.5, 0.05]
+	},
+	"deepseek-v4-pro": {
+		peak: [9.0, 27.0, 0.30],
+		idle: [4.5, 13.5, 0.15]
+	}
+};
+
+/**
+ * 日志钩子，可以在这里做一些计费和别名相关的操作，这个函数只影响日志记录
+ * - 入库时调用，改变代码不影响过去的数据
+ * - 但你依然需要保证幂等性，因为有重建（压缩）数据库接口，会对每一条历史消息调用这个函数
+ * - 返回 SKIP 不记录这条日志
+ * @param {AiChat.BillingLog} log
+ * @return {"SKIP"|void}
+ */
+export const LOG_HOOK = (log) => {
+	if (null == log.output_tokens) return 'SKIP';
+
+	// 去除 OpenRouter 的模型名称前缀（当然也可以反过来加上，这只是 replace 的两个参数）
+	log.model = log.model.replaceAll(/^(anthropic|google|openrouter|openai|deepseek)\/|[-:]free$/g, "");
+
+	if (log.cost == null) {
+		const { input_tokens = 0, cached_tokens = 0, cache_write_tokens = 0, output_tokens = 0, provider } = log;
+
+		const price = (input, out, cached, unit = 'CNY') => {
+			log.currency = unit;
+			log.cost = Math.trunc(input * input_tokens + cached * cached_tokens + out * output_tokens);
+		};
+
+		// 每百万 Token 价格
+		if (log.model === "deepseek-v4-pro" || log.model === "deepseek-v4-flash") {
+			price(...RATES[log.model][isLiangWenFeng() ? "peak":"idle"]);
+		}
+		if (log.model === "gpt-5.6-sol") {
+			price(5, 30, 0.5, 'USD');
+		}
+		if (log.model === "gpt-5.6-terra") {
+			price(2, 12, 0.2, 'USD');
+		}
+		if (log.model === "gpt-5.6-luna") {
+			price(0.2, 1.2, 0.02, 'USD');
+		}
+	}
+};
+
+// ==========================================
+// 6. 数据压缩与序列化 (Optimization)
+//  - 修改这些选项不会影响之前的数据
+//  - 设置压缩级别为 0 来禁用 br
+//  - 禁用了 br 也有关不掉的 gzip
+// ==========================================
+
+/** 触发压缩的阈值（字节）：超过此大小的数据库字段将进行 brotli 压缩 */
+export const DB_COMPRESS_MIN_SIZE = 1024;
+
+/** 数据库的 Brotli 压缩级别 (0-11) */
+export const DB_COMPRESS_LEVEL = 7;
+
+/** 是否使用 Msgpack 替代 JSON 序列化响应（体积更小，速度更快） */
+export const RESPONSE_USE_MSGPACK_SCHEMA = true;
+
+/** 响应的 Brotli 压缩级别 (0-11) */
+export const RESPONSE_COMPRESS_LEVEL = 6;

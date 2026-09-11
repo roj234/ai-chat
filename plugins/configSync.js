@@ -1,30 +1,20 @@
-import {$computed, $watch, appendChildren, unconscious} from "unconscious";
+import {$derived, $watch, unconscious} from "unconscious";
 import {config, conversations} from "/src/states.js";
 import {getKV, setKV} from "/src/database.js";
 import {DI_settings, onLoad} from "/src/hooks.js";
 import {showToast} from "/src/components/Toast.js";
 import {AsyncButton} from "/src/components/AsyncButton.jsx";
+import {GLOBAL_SETTINGS, PRIVATE_CONFIG_KEY} from "/src/settings.js";
+import {deepEqual} from "unconscious/common/deepEqual.js";
 
-const LOCAL_CONFIG = `theme
-checkUpdate
-width
-sidebarWidth
-sound
-expandThinkBlock
-expandToolCall
-backgroundFit
-db_server
-db_pat`.split("\n");
 
 const saveConfig = () => {
-	const copyConfig = structuredClone(unconscious(config));
-	delete copyConfig._new;
-	LOCAL_CONFIG.forEach(key => delete copyConfig[key]);
-
+	const copyConfig = {...unconscious(config)};
+	PRIVATE_CONFIG_KEY.forEach(key => delete copyConfig[key]);
 	return setKV("config", copyConfig);
 };
 
-const loadConfig = (db_server, db_pat) => getKV("config").catch((err) => {
+const loadConfig = (db_servers, db_pat) => getKV("config").catch((err) => {
 	if (err.status === 401) return 0;
 }).then(newCfg => {
 	if (!newCfg) {
@@ -36,8 +26,8 @@ const loadConfig = (db_server, db_pat) => getKV("config").catch((err) => {
 	}
 
 	const oldCfg = unconscious(config);
-	LOCAL_CONFIG.forEach(key => newCfg[key] = oldCfg[key]);
-	newCfg.db_server = db_server;
+	PRIVATE_CONFIG_KEY.forEach(key => newCfg[key] = oldCfg[key]);
+	newCfg.db_servers = db_servers;
 	newCfg.db_pat = db_pat;
 	delete newCfg._new;
 
@@ -45,29 +35,38 @@ const loadConfig = (db_server, db_pat) => getKV("config").catch((err) => {
 	DI_settings.sync();
 });
 
+GLOBAL_SETTINGS.push(
+	{
+		type: "element",
+		_tab: ["general", "data"],
+		_order: -1,
+		name: "本地配置",
+		element: <div className={"choice-scroll"}>
+			<AsyncButton onClick={() => {
+				let {db_servers, db_pat} = config;
+				return loadConfig(db_servers, db_pat);
+			}}>恢复</AsyncButton>
+			<AsyncButton onClick={saveConfig}>备份</AsyncButton>
+		</div>
+	},
+);
+
 export const registerConfigSync = () => {
-	let {db_server, db_pat, _new: isNew} = config;
+	let servers = [...(config.db_servers || [])];
+	let {db_pat, _new: isNew} = config;
+
 	onLoad(() => {
-		const presetButtons = DI_settings.byId("pb");
-		appendChildren(presetButtons, <>
-			<AsyncButton pendingText={'读取中'} okText={'已读取'} onClick={() => {
-				let {db_server, db_pat} = config;
-				return loadConfig(db_server, db_pat);
-			}}>读取配置</AsyncButton>
-			<AsyncButton pendingText={'保存中'} okText={'已保存'} onClick={saveConfig}>保存配置</AsyncButton>
-		</>);
+		if (isNew) loadConfig(servers, db_pat);
 
-		if (isNew) loadConfig(db_server, db_pat);
+		$watch($derived(config.db_servers), () => {
+			const b = config.db_servers;
+			if (deepEqual(servers, b)) return;
+			servers = [...b];
 
-		let updated;
-		$watch($computed(() => config.db_server), () => {
-			let new_server = config.db_server;
-			if (new_server === db_server || !unconscious(conversations)) return;
-			if (updated) return;
-			updated = true;
+			// 对话尚未加载完成时不处理（多为启动阶段的配置恢复）
+			if (!unconscious(conversations)) return;
 
 			saveConfig().then(() => {
-				if (new_server !== ':idb:' && db_server !== ':idb:' && new_server) delete config.db_pat;
 				config._new = true;
 				location.reload();
 			})

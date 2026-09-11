@@ -6,7 +6,7 @@ export const DEFAULT_USER_NAME = 'Tav'; // see Baldur's Gate 3
 
 // 按照酒馆的命名，这叫宏
 export const applyMacro = (prompt, ctx) => prompt.replaceAll(/\{\{(.+?)}}/g, (text, match) => {
-	return ctx[match] || text;
+	return match in ctx ? ctx[match] || '' : text;
 });
 
 const IS_SYSTEM = debugSymbol("InternalMessage");
@@ -17,10 +17,9 @@ const IS_SYSTEM = debugSymbol("InternalMessage");
  * @param {AiChat.DnD.MyRegexp[]} regexps
  * @param {Record<string, string>} ctx
  * @param {OpenAI.Message[]} jsonMessages
- * @param {boolean} prefill
  * @return {OpenAI.Message[]}
  */
-export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages, prefill) => {
+export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages) => {
 	let first = '';
 	/** @type {OpenAI.Message[]} */
 	const messages = [{
@@ -36,8 +35,6 @@ export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages, pre
 	if (jsonMessages[0].role === "system") {
 		first = applyMacro(jsonMessages.shift().content, ctx);
 	}
-
-	let prefillMessage= prefill && jsonMessages.pop();
 
 	let message ;
 	for (;;) {
@@ -103,7 +100,8 @@ export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages, pre
 					}
 
 					if (match === "lastUserMessage") return lastUserMessage;
-					if (ctx[match]) return ctx[match];
+					if (match === "dialogueExamples") return ctx.dialogueExamples?.length ? EXAMPLE_CHAT_LABEL + ctx.dialogueExamples.join(EXAMPLE_CHAT_LABEL) : '';
+					if (match in ctx) return ctx[match] || '';
 
 					const idx = match.indexOf("::");
 					const cmd = match.slice(0, idx);
@@ -197,7 +195,6 @@ export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages, pre
 		}
 	}
 
-	if (prefillMessage) messages.push(prefillMessage);
 	return messages;
 };
 

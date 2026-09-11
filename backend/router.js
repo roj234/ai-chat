@@ -1,4 +1,4 @@
-import {msgpack_schema, msgpack_schema_version} from "../common/MsgpackSchema.js";
+import {msgpack_schema, msgpack_schema_version} from "../common/wire-compression-schema.js";
 import {constants, createBrotliCompress, createGzip} from "node:zlib";
 import {RESPONSE_COMPRESS_LEVEL, RESPONSE_USE_MSGPACK_SCHEMA} from "./config.js";
 import {decodeMsg, encodeRawMsg} from "unconscious/common/msgpack.js";
@@ -488,17 +488,21 @@ export class Router {
 		const urlPath = parsedUrl.pathname.slice(1);
 		let method = req.method.toUpperCase();
 
+		const inputHeaders = req.headers["access-control-request-headers"] || "Content-Type, Authorization, X-Ci, X-Pv, X-Sv";
+
 		// CORS
 		res.setHeader('Access-Control-Allow-Origin', '*');
-		res.setHeader('Access-Control-Allow-Methods', '*');
-		res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Ci, X-Pv, X-Sv');
 
 		if (method === 'OPTIONS') {
+			res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+			res.setHeader('Access-Control-Allow-Headers', inputHeaders);
 			res.writeHead(204);
 			res.end();
 			return;
 		}
 
+		res.setHeader('Access-Control-Allow-Methods', '*');
+		res.setHeader('Access-Control-Allow-Headers', '*');
 		if (method === 'HEAD') method = 'GET';
 
 		// 谦让式协程就是爽啊，什么对象池都可以滚了
@@ -523,14 +527,13 @@ export class Router {
 				if (ok) return;
 			} catch (err) {
 				console.error(err);
-				res.end();
+				req.end();
 				return;
 			}
 		}
 
-		// ── 404 ──
-		res.writeHead(404, { 'Content-Type': 'application/json' });
-		res.end(JSON.stringify({ error: 'Not Found' }));
+		res.writeHead(404);
+		res.end();
 	}
 
 	/**
@@ -565,6 +568,12 @@ export class Router {
 			},
 			variables: newVariables,
 			send(status, data) {
+				if (undefined === data) {
+					res.writeHead(status);
+					res.end();
+					return;
+				}
+
 				const {accept = '', ['x-sv']: x_msv} = req.headers;
 				const acceptEncoding = (req.headers['accept-encoding'] || '').toLowerCase();
 
@@ -608,6 +617,12 @@ export class Router {
 				outputStream.end();
 			},
 			readAsBuffer: (maxLength = 1048576) => new Promise((resolve, reject) => {
+				if (parseInt(req.headers['content-length']) > maxLength) {
+					const error = new Error('Request body too large');
+					error.status = 413;
+					reject(error);
+				}
+
 				let chunks = [];
 				let totalLength = 0;
 				req.on('data', chunk => {
@@ -625,9 +640,9 @@ export class Router {
 				req.on('error', reject);
 			}),
 			readAsString: (maxLength) => ctx.readAsBuffer(maxLength).then(String),
-			readAsObject: async () => {
+			readAsObject: async (maxLength) => {
 				const type = ctx.req.headers['content-type'];
-				const buffer = await ctx.readAsBuffer();
+				const buffer = await ctx.readAsBuffer(maxLength);
 				if (type === 'application/json') {
 					return JSON.parse(buffer.toString());
 				}
@@ -639,9 +654,10 @@ export class Router {
 		};
 
 		let filter = this.#filter;
-		if (typeof filter === 'function' && filter(ctx)) return;
 
 		try {
+			if (typeof filter === 'function' && filter(ctx)) return;
+
 			await handler(ctx);
 		} catch (err) {
 			console.error(err);

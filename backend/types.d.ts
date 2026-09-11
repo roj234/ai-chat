@@ -25,7 +25,7 @@ namespace AiChatBackend {
         readAsString(maxLength?: number): Promise<string>,
         readAsObject(sizeLimit?: number = 1048576): Promise<Record<string, any>>,
         params: Record<string, string>,
-        send(number, Object): void,
+        send(number, Object?): void,
         req: import("node:http").IncomingMessage,
         res: import("node:http").ServerResponse,
 
@@ -48,6 +48,7 @@ namespace AiChatBackend {
     }
 
     type SSEProxyRequest = {
+        //owner: SSEProxyTarget;
         id: string;
         timoutId: number;
         abort: AbortController,
@@ -71,6 +72,13 @@ namespace AiChatBackend {
         authorization: string,
         proxy?: string,
         headers?: import("node:http").OutgoingHttpHeaders,
-        trace?: boolean | 'packet'
+        // 注：只有前两者实现了
+        format?: 'openai' | 'responses' | 'anthropic' | 'gemini';
+        // 对于大部分模拟OpenAI Responses的API来说，previous_response_id是不被支持的，必须在这里填false
+        store?: boolean;
+        // 留存请求和响应
+        trace?: boolean;
+        // 配置允许使用的模型
+        models?: string[];
     }
 }

@@ -3,7 +3,7 @@ import {getToolParameters, registerToolset} from "/src/toolset.js";
 import {$asyncState, $computed, $watch, debugSymbol} from "unconscious";
 import {selectedConversation} from "/src/states.js";
 import {errorBlock, loadingBlock} from "/src/utils/utils.js";
-import {fileAccess} from "./fileAccess.js";
+import {fileAccess} from "../agent/index.js";
 import {readAsString} from "/common/chardet.js";
 import {parseCsv} from "/common/loadCsv.js";
 
@@ -88,7 +88,8 @@ registerToolset("Chart", "Create charts and data visualizations from CSV files."
 			options: {
 				type: "object",
 				description: "Additional Chart.js global options (e.g., scales, plugins).",
-				default: { responsive: true }
+				default: { responsive: true },
+				additionalProperties: true
 			},
 		},
 		required: ["type"]

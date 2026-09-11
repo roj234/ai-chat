@@ -1,0 +1,41 @@
+
+/* 顶层骨架 */
+.jsonEditorApp {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+
+	/* 编辑器容器适配 */
+	& .CodeEditor {
+		background-color: var(--code-bg);
+		color: var(--code-fg);
+		height: 100%;
+	}
+
+	& .editor-error {
+		background-color: var(--error-bg);
+		border-top: 1px solid var(--error);
+		padding: 4px 16px;
+		color: var(--error-text-color);
+		font-size: 12px;
+	}
+
+	& .icon {
+		color: var(--error);
+		width: 20px;
+		height: 20px;
+	}
+}
+
+/* 按钮规范 */
+
+.je-btn {
+	color: var(--muted);
+	font-size: 13px;
+	gap: 4px;
+	padding: 4px 8px;
+
+	&:hover {
+		color: var(--text);
+	}
+}

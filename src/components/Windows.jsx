@@ -1,6 +1,7 @@
 import "./Windows.css";
 
-import {$foreach, $state, $update, $watchWithCleanup, appendChild} from 'unconscious';
+import {$computed, $foreach, $state, $update, $watchWithCleanup, appendChild, AS_IS} from 'unconscious';
+import {auxSmallScreen, EVENT_BUS} from "../states.js";
 
 /**
  * @typedef {Object} WindowState
@@ -24,13 +25,13 @@ const windowList = $state([]);
 let focusedWindow;
 
 /** 自增的 z-index 基准 */
-let topZ = 1000;
+let topZ = 0;
 
 const syncList = () => { windowList.value = [...windows.values()]; };
 
-const isWindowOpen = (id) => windows.has(id);
-
 export const getWindow = (id) => windows.get(id);
+
+const container = <div className="MDI" />;
 
 /** 由 FloatingWindow 在创建好 DOM 后调用，注册到管理器 */
 const registerWindow = (id, state) => {
@@ -53,19 +54,21 @@ export const focusWindow = (w) => {
 
 function syncFocused(w) {
 	if (focusedWindow === w) {
-		let top = null, topZ = -Infinity;
+		focusedWindow = null;
+		let topZ = -1;
 		for (const win of windows.values()) {
 			if (win.element.classList.contains(MINIMIZED)) continue;
-			const z = +win.element.style.zIndex || 0;
+			const z = +win.element.style.zIndex;
 			if (z > topZ) {
 				topZ = z;
-				top = win;
+				focusedWindow = win;
+				$update(windowList);
 			}
 		}
-		if (top) focusWindow(top);
 	}
 }
 
+const TRANSITION = 'closing';
 /**
  * 关闭窗口。
  * @param {WindowState | string} w
@@ -75,12 +78,13 @@ export const closeWindow = (w) => {
 	if (!w) return;
 
 	const el = w.element;
-	el.classList.add('closing');
-	const detach = () => el.remove();
-	el.addEventListener('animationend', detach);
-	setTimeout(detach, 150);
+	el.classList.add(TRANSITION);
+	const end = () => el.remove(w.reuse);
+	el.addEventListener('animationend', end);
+	setTimeout(end, 160);
 
 	windows.delete(w.id);
+	EVENT_BUS.post(['closeWindow', w.id], w);
 	syncList();
 	syncFocused(w);
 };
@@ -90,11 +94,21 @@ export const closeWindow = (w) => {
  * @param {WindowState} w
  */
 const minimizeWindow = (w) => {
-	const classList = w.element.classList;
+	const el = w.element;
+	const classList = el.classList;
 	if (!classList.contains(MINIMIZED)) {
-		classList.add(MINIMIZED);
-		$update(windowList);
-		syncFocused(w);
+		classList.add(MINIMIZED, TRANSITION);
+
+		const end = () => {
+			if (!classList.contains(MINIMIZED)) return;
+
+			el.removeEventListener('animationend', end);
+			classList.remove(TRANSITION);
+			$update(windowList);
+			syncFocused(w);
+		};
+		el.addEventListener('animationend', end);
+		setTimeout(end, 160);
 	}
 };
 
@@ -105,7 +119,7 @@ const minimizeWindow = (w) => {
 const restoreWindow = (w) => {
 	const classList = w.element.classList;
 	if (classList.contains(MINIMIZED)) {
-		classList.remove(MINIMIZED);
+		classList.remove(MINIMIZED, TRANSITION);
 		$update(windowList);
 	}
 	focusWindow(w);
@@ -121,7 +135,7 @@ const toggleMaximize = (w) => {
 	return w.element.classList.toggle(MAXIMIZED);
 };
 
-const cloneContent = (node) => node.cloneNode?.(true) || node;
+const cloneContent = (node) => typeof node === "function" ? $computed(node) : node.cloneNode?.(true) || node;
 const extractText = (node) => node.textContent || node;
 
 const MIN_W = 280;
@@ -134,24 +148,36 @@ const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
  * @param {Object} config
  * @param {JSX.Element} [config.icon] - 图标
  * @param {JSX.Element} [config.title] - 标题
- * @param {JSX.Element} config.element - 内容
- * @param {boolean} [config.resizable=false] - 是否允许缩放与最大化
+ * @param {JSX.Element} [config.actions] - 标题栏扩展
+ * @param {JSX.Element | function(WindowState): JSX.Element} config.element - 内容
+ * @param {number} config.width
+ * @param {number} config.height
+ * @param {boolean} [config.resizable=true] - 是否允许缩放与最大化
  * @returns {WindowState}
  */
-export const openWindow = ({id, icon, title, element, resizable = false}) => {
+export const openWindow = ({
+	id, icon, title,
+	actions,
+	element,
+	width = 1024, height = 768,
+	dock,
+	resizable = true,
+	reuse,
+}) => {
 	mountTaskbar();
 
-	if (isWindowOpen(id)) {
-		const w = getWindow(id);
-		if (w.minimized) restoreWindow(w);
-		else focusWindow(w);
-		return w;
+	const w = getWindow(id);
+	if (w) { restoreWindow(w); return w; }
+
+	if (icon == null) {
+		icon = title[0];
+		title = title.slice(1);
 	}
 
 	/** @type {WindowState} */
 	const state = {
-		id, icon, title, resizable,
-		minimized: false, active: true,
+		id, icon, title, resizable, reuse,
+		active: true,
 		element: null,
 	};
 
@@ -223,9 +249,26 @@ export const openWindow = ({id, icon, title, element, resizable = false}) => {
 
 	const count = windowList.length || 0;
 	const offset = (count % 6) * 28;
-	const width = 480, height = 360;
-	const left = clamp((innerWidth - width) / 2 + offset, 0, innerWidth - 120);
-	const top = clamp((innerHeight - height) / 2 + offset, 0, innerHeight - 120);
+
+	const iw = innerWidth, ih = innerHeight;
+
+	if (width <= 1) width = iw * width;
+	else if (width > iw) width = iw;
+
+	if (height <= 1) height = ih * height;
+	else if (height > ih) height = ih;
+
+	if (typeof element === "function") element = element(state);
+
+	let top, left;
+	if (dock) {
+		top = 0;
+		left = dock === 'right' ? innerWidth - width : 0;
+		height = ih;
+	} else {
+		left = clamp((iw - width) / 2 + offset, 0, iw - 120);
+		top = clamp((ih - height) / 2 + offset, 0, ih - 120);
+	}
 
 	const root = (
 		<div className="window"
@@ -235,20 +278,23 @@ export const openWindow = ({id, icon, title, element, resizable = false}) => {
 				<span className="icon">{cloneContent(icon)}</span>
 				<span className="title" onPointerDown.left={startDrag} onDblclick={handleMaximize}>{cloneContent(title)}</span>
 				<span className="controls">
+					{actions}
 					<button className="ri-subtract-line ghost" title="最小化" onClick={() => minimizeWindow(state)}></button>
 					{resizable && <button ref={maxBtn} className="ri-fullscreen-line ghost" title="最大化" onClick={handleMaximize}></button>}
 					<button className="ri-close-line" title="关闭" onClick={() => closeWindow(state)}></button>
 				</span>
 			</div>
-			<div className="win-body">{element}</div>
+			<div className={"win-body "+id.replaceAll(' ', '-')}>{element}</div>
 			{resizable && <div className="win-resize" onPointerDown.left={startResize}></div>}
 		</div>
 	);
 
 	state.element = root;
 	registerWindow(id, state);
+	EVENT_BUS.post(['openWindow', id], state);
 	focusWindow(state);
-	document.body.append(root);
+	if (auxSmallScreen) handleMaximize();
+	container.append(root);
 	return state;
 };
 
@@ -265,17 +311,18 @@ const Taskbar = () => {
 				return <div
 					className={'item' + (w.element.className.slice(6)) + (w === focusedWindow ? ' active' : '')}
 					onClick={() => {
-						if (w === focusedWindow) minimizeWindow(w);
-						else if (w.element.classList.contains(MINIMIZED)) restoreWindow(w);
+						if (w.element.classList.contains(MINIMIZED)) restoreWindow(w);
+						else if (w === focusedWindow) minimizeWindow(w);
 						else focusWindow(w);
 					}}>
-					<span className={"tooltip"}>{extractText(w.title)}</span>
 					<span className="icon">{cloneContent(w.icon)}</span>
 					<span className="label">{cloneContent(w.title)}</span>
 					<button className="ri-close-line" title="关闭" onClick.stop={() => closeWindow(w.id)}></button>
 				</div>
-			}, w => {
-				return [w.id, w.element.className, focusedWindow === w].join('\0');
+			}, AS_IS, {
+				onReuse(node, w) {
+					node.className = 'item' + (w.element.className.slice(6)) + (w === focusedWindow ? ' active' : '');
+				}
 			})}
 		</aside>
 	);
@@ -286,4 +333,5 @@ const mountTaskbar = () => {
 	if (mounted) return;
 	mounted = true;
 	appendChild(document.body, <Taskbar/>);
+	appendChild(document.body, container);
 };

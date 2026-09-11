@@ -124,7 +124,7 @@ function makeRequest(url, { method, headers: headersInit, body, signal, agent, .
 		}
 
 		if (signal) {
-			const onAbort = () => req.destroy(new DOMException('The operation was aborted', 'AbortError'));
+			const onAbort = () => req.destroy(new DOMException('Aborted', 'AbortError'));
 			if (signal.aborted) return onAbort();
 			signal.addEventListener('abort', onAbort, { once: true });
 			req.on('close', () => signal.removeEventListener('abort', onAbort));

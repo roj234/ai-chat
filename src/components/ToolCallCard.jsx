@@ -1,20 +1,22 @@
 import './ToolCallCard.css';
-import {getToolInteractiveLevel, runTools, TOOL_IS_RUNNING, TOOL_NAME, toolScriptRegistry} from "../toolset.js";
-import {config, messages, selectedConversation} from "../states.js";
-import {$state, $update, $watch, appendChildren, debugSymbol, isReactive, unconscious} from "unconscious";
-import {MORPH_CHILD_FUNCTION} from "../utils/utils.js";
-import morphdom from "morphdom";
+import {getToolInteractiveLevel, getToolName, runTools, TOOL_IS_RUNNING, toolScriptRegistry} from "../toolset.js";
+import {LOCKED, messages, selectedConversation} from "../states.js";
+import {$state, $update, $watch, appendChildren, debugSymbol, isReactive, ref, unconscious} from "unconscious";
+import {onReuse_Callback, showImageZoomView} from "../utils/utils.js";
 import {highlight, highlightJsonLike} from "../markdown/highlight.js";
 import SimpleModal from "./SimpleModal.jsx";
-import {markMessageDirty, updateConversation} from "../database.js";
+import {updateConversation} from "../database.js";
 import {BorderSpinner} from "./BorderSpinner.jsx";
+import {CollapseButton} from "./ThinkBlock.jsx";
 
 const RESP_SYMBOL = debugSymbol("ToolResponseUpdate");
+const AUTO_EXPAND = debugSymbol("AutoExpandForApproval");
+const OPENED = debugSymbol("OpenedDuringGeneration");
 
 const formatDuration = ms => {
-    if (!ms) return '—';
-    if (ms >= 1000) return (ms / 1000).toFixed(2) + 's';
-    return ms + 'ms';
+    if (!ms) return '';
+    if (ms >= 1000) return `(${(ms / 1000).toFixed(2)}s)`;
+    return `(${ms}ms)`;
 }
 
 /**
@@ -29,9 +31,9 @@ const formatDuration = ms => {
 export function ToolCallCard(props) {
     const { tool, message, idx } = props;
 
-    const name = message.tool_responses?.[idx]?.[TOOL_NAME] || tool.function.name;
-    const reactiveResponse = $state();
     let toolResponse = message.tool_responses[idx];
+    const name = getToolName(toolResponse, tool);
+    const reactiveResponse = $state();
 
     const initializeHtml = () => {
         base[RESP_SYMBOL] = reactiveResponse;
@@ -39,17 +41,17 @@ export function ToolCallCard(props) {
         const input = <pre className="args" />, output = <pre className="args" />;
         const duration = $state();
 
+        let _response = ref();
         appendChildren(base, <>
-            <div className="tool-body">
+            <div className="tool-body i">
                 <div className="args-title">参数</div>
                 {input}
             </div>
-            <div className="tool-body">
+            <div className="tool-body o" ref={_response}>
                 <div className="args-title">结果 {duration}
                     {isReactive(tool) ? null : <button className={"rerun-btn"} onClick={({target}) => {
                         const runOperation = () => {
                             target.disabled = true;
-                            markMessageDirty(message);
                             runTools(message, unconscious(selectedConversation), idx, true).then(() => {
                                 $update(messages);
                             }).finally(() => {
@@ -73,6 +75,7 @@ export function ToolCallCard(props) {
                 </div>
                 {output}
             </div>
+            <CollapseButton/>
         </>);
 
         // 什么都ondemand，算了，反正【我觉得爽也是一种优秀】
@@ -80,22 +83,38 @@ export function ToolCallCard(props) {
             $watch(tool, () => {
                 highlight(tool.function.arguments, "json", input);
             });
+            tool[OPENED] = true;
         } else {
+            const renderInput =  toolScriptRegistry[name]?.renderInput;
             const renderOutput =  toolScriptRegistry[name]?.renderOutput;
 
             $watch(reactiveResponse, () => {
                 toolResponse = message.tool_responses[idx];
-                duration.value = toolResponse && ("("+formatDuration(toolResponse.duration)+")");
+                duration.value = toolResponse && formatDuration(toolResponse.duration);
                 const isRunning = toolResponse?.[TOOL_IS_RUNNING];
+
+                if (renderInput && input.parentElement) {
+                    try {
+                        const result = renderInput(toolResponse || {}, input, tool, message);
+                        if (result !== false) {
+                            if (result != null)
+                                input.replaceWith(result);
+                        }
+                    } catch (e) {
+                        console.error("工具内容渲染失败", e);
+                    }
+                }
 
                 if (toolResponse && renderOutput && !base.classList.contains("pending")) {
                     try {
+                        const _elementAtOutput = _response.lastElementChild;
                         const result = renderOutput(toolResponse, output, isRunning, tool, message);
                         if (result !== false) {
-                            output.replaceWith(result);
+                            _elementAtOutput.replaceWith(result);
                             return;
                         }
-                        base.lastElementChild.lastElementChild.replaceWith(output);
+
+                        _elementAtOutput.replaceWith(output);
                     } catch (e) {
                         console.error("工具内容渲染失败", e);
                     }
@@ -108,74 +127,68 @@ export function ToolCallCard(props) {
                         if (part.type === 'text') {
                             elements.push(part.text);
                         } else if (part.type === 'image_url') {
-                            const url = part.image_url?.url;
-                            url && elements.push(<img title={url.name} src={typeof url === "string" ? url : url.toUrl()}/>);
+                            const file = part.image_url.url;
+                            const src = typeof file === "string" ? file : file.toUrl();
+                            elements.push(<img title={file.name} onClick={() => showImageZoomView(src, file.name)} src={src}/>);
                         } else {
                             elements.push(<div dangerouslySetInnerHTML={highlightJsonLike(tmpContent)} />);
                         }
                     }
                     output.replaceChildren(<div className={"gallery"}>{elements}</div>);
                 } else {
-                    morphdom(output, `<pre class="args">${highlightJsonLike(tmpContent)}</pre>`);
+                    output.innerHTML = highlightJsonLike(tmpContent);
                 }
             });
 
-            const renderInput =  toolScriptRegistry[name]?.renderInput;
-            if (renderInput) {
-                try {
-                    const result = renderInput(toolResponse || {}, input, tool, message);
-                    if (result !== false) {
-                        if (result instanceof Node)
-                            input.replaceWith(result);
-                        return;
-                    }
-                } catch (e) {
-                    console.error("工具内容渲染失败", e);
-                }
-            }
-            // 这个函数自带JSON格式化，但是不应该在流式响应的时候使用它，不是么
-            input.innerHTML = highlightJsonLike(tool.function.arguments);
+            // 这个函数自带JSON格式化，但是不应该在流式响应的时候使用它
+            if (input.parentElement)
+                input.innerHTML = highlightJsonLike(tool.function.arguments);
         }
     };
 
+    const generating = isReactive(tool);
+
     let title;
     try {
-        title = !isReactive(tool) && toolScriptRegistry[name]?.title?.(tool, message.tool_responses[idx] || {});
+        title = !generating && toolScriptRegistry[name]?.title?.(tool, message.tool_responses[idx] || {});
     } catch (e) {
         console.error("工具标题渲染失败", e);
     }
-    const base = <details className={"tool-call"} onClick.once={initializeHtml}>
-        <summary className="tool-header" title={"展开工具参数\n"+name}>{title || name}</summary>
+    const base = <details className={"tool-call"} onToggle.once={initializeHtml}>
+        <summary className="tool-header" title={"展开调用详情\n" + name}>{title || name}</summary>
     </details>;
 
-    morphToolCallCard(props, base);
-    base[MORPH_CHILD_FUNCTION] = morphToolCallCard;
+    updateCard(base, props);
+    base[onReuse_Callback] = updateCard;
 
-    if (config.expandToolCall && isReactive(tool)) {
+    if (!generating && tool[OPENED]) {
         base.open = true;
-        base.click();
+        delete tool[OPENED];
     }
     return base;
 }
 
 /**
  *
+ * @param {HTMLDetailsElement} element
  * @param {OpenAI.ToolCall} tool
  * @param {AiChat.AssistantMessage} message
  * @param {number} idx
- * @param {HTMLDetailsElement} element
  */
-const morphToolCallCard = ({tool, message, idx}, element) => {
+const updateCard = (element, {tool, message, idx}) => {
     const conv = unconscious(selectedConversation);
+    const isFinished = message.tool_responses.length;
     const resp = message.tool_responses[idx] || {};
-    const {success, content, [TOOL_NAME]: tool_name} = resp;
+    const {success, content} = resp;
 
+    const tool_name = getToolName(resp, tool);
+    const is_readonly = !!conv[LOCKED];
     const is_running = !!resp[TOOL_IS_RUNNING];
     const is_errored = false === success;
     const is_success = true === success;
 
     const secure = getToolInteractiveLevel(resp, tool, conv);
-    const pending = !!(tool_name && secure !== true && !is_running && null == success);
+    const pending = !is_readonly && isFinished && true !== secure && !is_running && null == success;
     const is_secure_pending = !!(pending && secure);
 
     // 清空状态类并打上当前唯一确定的状态 Class
@@ -184,20 +197,26 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
     classList.toggle("running", is_running);
     classList.toggle("t-error", is_errored);
     classList.toggle("secure", is_secure_pending);
-    classList.toggle("pending", pending);
+    classList.toggle("pending", pending || (!isFinished && idx === message.tool_calls.length-1));
+    classList.toggle("generating", !isFinished);
     classList.toggle("t-success", is_success);
 
     const needApproval = "need-approval";
-    if (message.finish_reason && pending && !classList.contains(needApproval)) {
+    if (pending && !classList.contains(needApproval)) {
         classList.add(needApproval);
 
         let rejectReasonText;
-        const setAuditState = (target, allowUnsafe) => runTools(message, conv, idx, allowUnsafe, rejectReasonText).then(() => $update(messages));
+        const setAuditState = (target, allowUnsafe) => {
+            delete element[AUTO_EXPAND];
+            return runTools(message, conv, idx, allowUnsafe, rejectReasonText).then(() => $update(messages));
+        };
         const granted = conv.grantedTools?.has(tool_name);
 
-        element.open = true;
-        element.click();
-        element.append(<div className={"tool-body"+(secure?" audit":"")}>
+        if (!element[RESP_SYMBOL]) {
+            element[AUTO_EXPAND] = element.open = true;
+            element.dispatchEvent(new Event('toggle'));
+        }
+        element.append(<div className={"tool-body c"+(secure?" audit":"")}>
             <div className="args-title">{secure ? "敏感操作需要批准" : "工具执行已暂停"}</div>
             <div className={"audit-box"}>
                 <button className={"btn primary"} onClick={({target}) => {
@@ -231,6 +250,12 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
     } else if (!pending && classList.contains(needApproval)) {
         classList.remove(needApproval);
         element.lastElementChild.remove();
+
+        // 把自动展开收回
+        if (element[AUTO_EXPAND]) {
+            delete element[AUTO_EXPAND];
+            element.open = false;
+        }
     }
 
     const title = element.firstElementChild;
@@ -243,11 +268,10 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
 
     const updateResponse = element[RESP_SYMBOL];
     if (updateResponse) {
-        updateResponse.value = content ?? !resp[TOOL_IS_RUNNING];
+        updateResponse.value = content ?? !is_running;
     } else {
         if (message === messages.at(-1) && is_errored) {
             element.open = true;
-            element.click(); // call initializeHtml
         }
     }
 }
