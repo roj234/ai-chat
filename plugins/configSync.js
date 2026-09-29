@@ -1,10 +1,11 @@
-import {$computed, $watch, unconscious} from "unconscious";
+import {$derived, $watch, unconscious} from "unconscious";
 import {config, conversations} from "/src/states.js";
 import {getKV, setKV} from "/src/database.js";
 import {DI_settings, onLoad} from "/src/hooks.js";
 import {showToast} from "/src/components/Toast.js";
 import {AsyncButton} from "/src/components/AsyncButton.jsx";
-import {PRIVATE_CONFIG_KEY, SETTINGS} from "../src/settings.js";
+import {GLOBAL_SETTINGS, PRIVATE_CONFIG_KEY} from "/src/settings.js";
+import {deepEqual} from "unconscious/common/deepEqual.js";
 
 
 const saveConfig = () => {
@@ -13,7 +14,7 @@ const saveConfig = () => {
 	return setKV("config", copyConfig);
 };
 
-const loadConfig = (db_server, db_pat) => getKV("config").catch((err) => {
+const loadConfig = (db_servers, db_pat) => getKV("config").catch((err) => {
 	if (err.status === 401) return 0;
 }).then(newCfg => {
 	if (!newCfg) {
@@ -26,7 +27,7 @@ const loadConfig = (db_server, db_pat) => getKV("config").catch((err) => {
 
 	const oldCfg = unconscious(config);
 	PRIVATE_CONFIG_KEY.forEach(key => newCfg[key] = oldCfg[key]);
-	newCfg.db_server = db_server;
+	newCfg.db_servers = db_servers;
 	newCfg.db_pat = db_pat;
 	delete newCfg._new;
 
@@ -34,7 +35,7 @@ const loadConfig = (db_server, db_pat) => getKV("config").catch((err) => {
 	DI_settings.sync();
 });
 
-SETTINGS.push(
+GLOBAL_SETTINGS.push(
 	{
 		type: "element",
 		_tab: ["general", "data"],
@@ -42,8 +43,8 @@ SETTINGS.push(
 		name: "本地配置",
 		element: <div className={"choice-scroll"}>
 			<AsyncButton onClick={() => {
-				let {db_server, db_pat} = config;
-				return loadConfig(db_server, db_pat);
+				let {db_servers, db_pat} = config;
+				return loadConfig(db_servers, db_pat);
 			}}>恢复</AsyncButton>
 			<AsyncButton onClick={saveConfig}>备份</AsyncButton>
 		</div>
@@ -51,19 +52,21 @@ SETTINGS.push(
 );
 
 export const registerConfigSync = () => {
-	let {db_server, db_pat, _new: isNew} = config;
-	onLoad(() => {
-		if (isNew) loadConfig(db_server, db_pat);
+	let servers = [...(config.db_servers || [])];
+	let {db_pat, _new: isNew} = config;
 
-		let updated;
-		$watch($computed(() => config.db_server), () => {
-			let new_server = config.db_server;
-			if (new_server === db_server || !unconscious(conversations)) return;
-			if (updated) return;
-			updated = true;
+	onLoad(() => {
+		if (isNew) loadConfig(servers, db_pat);
+
+		$watch($derived(config.db_servers), () => {
+			const b = config.db_servers;
+			if (deepEqual(servers, b)) return;
+			servers = [...b];
+
+			// 对话尚未加载完成时不处理（多为启动阶段的配置恢复）
+			if (!unconscious(conversations)) return;
 
 			saveConfig().then(() => {
-				if (new_server !== ':idb:' && db_server !== ':idb:' && new_server) delete config.db_pat;
 				config._new = true;
 				location.reload();
 			})

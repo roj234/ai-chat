@@ -1,13 +1,13 @@
-import {getWindow, openWindow} from "../src/components/Windows.jsx";
-import {EVENT_BUS} from "../src/states.js";
-import {getContextStrokeColor} from "../src/components/contextColor.js";
+import {getWindow, openWindow} from "/src/components/Windows.jsx";
+import {EVENT_BUS} from "/src/states.js";
+import {getContextStrokeColor} from "/src/components/contextColor.js";
 import {$computed, $state, $vforeach, $watchWithCleanup, unconscious} from "unconscious";
 import {formatDate} from "unconscious/common/Utils.js";
-import {sendToSyncServer} from "../src/database/syncClient.js";
+import {sendToSyncServer} from "/src/database/syncClient.js";
 import {SYNC_DM, SYNC_DM_QUERY} from "../backend/sync.js";
 import {inspect} from "unconscious/common/inspect.js";
-import {COMMAND_REGISTRY} from "../src/commands.js";
-import {isIDB} from "../src/database.js";
+import {COMMAND_REGISTRY} from "/src/commands.js";
+import {isIDB} from "/src/database.js";
 
 const MAX_TEXT = 1666;
 

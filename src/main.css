@@ -254,14 +254,21 @@ body.no-motion {
     flex: 1;
     padding-right: 6px;
 }
-.row {
+.row, .row > ._vl {
     display: flex; flex-wrap: wrap; gap: var(--spacing-sm); align-items: center;
 }
 
-.col {
+.col, .col > ._vl {
     display: flex;
     flex-direction: column;
 }
+
+/* Z-index 层级表 */
+.taskbar {z-index: 1;}
+.MDI {z-index: 2;}
+/* 注意，模态框 SimpleDialog 用的是 dialog 天生有着最大的 zindex 无法降低 */
+.toasts {z-index: 3;}
+
 
 /* 统一按钮 */
 .btn {
@@ -346,6 +353,7 @@ body.no-motion {
     display: flex;
     justify-content: center;
     height: 100%;
+    overflow-x: hidden;
 }
 .panel {
     display: flex;
@@ -375,7 +383,9 @@ body._fileUI .hide-human {
             display: flex;
             justify-content: center;
             align-items: center;
-            font-size: 36px;
+            & > span {
+                font-size: 36px;
+            }
             padding-bottom: 24px;
         }
     }
@@ -388,7 +398,7 @@ body._fileUI .hide-human {
 
 .scroll-spy {
     position: relative;
-    bottom: 250px;
+    bottom: 100px;
 }
 
 .panel>._vl {
@@ -452,9 +462,6 @@ body._fileUI .hide-human {
 
         /* 修复溢出问题 */
         & > * { min-width: 0; }
-
-        & > .md > :first-child { margin-top: 0; }
-        & > .md > :last-child { margin-bottom: 0; }
     }
 }
 
@@ -573,7 +580,7 @@ body._fileUI .hide-human {
             border-radius: inherit; /* 如果父元素有圆角 */
         }
 
-        & textarea {
+        & .userInput {
             min-height: 3lh;
         }
     }
@@ -594,8 +601,8 @@ body._fileUI .hide-human {
         width: 100%;
         padding: 0 var(--spacing-md) var(--spacing-md);
     }
-    &:has(textarea:focus) { border-color: var(--accent); }
-    & textarea {
+    &:has(.userInput:focus) { border-color: var(--accent); }
+    & .userInput {
         width: 100%;
         max-height: 50vh;
         background: transparent;
@@ -933,7 +940,7 @@ body._fileUI .hide-human {
         display: flex !important;
     }
 
-    .query textarea {
+    .query .userInput {
         height: 2.75rem;
     }
 

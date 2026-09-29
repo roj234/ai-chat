@@ -87,7 +87,7 @@ jobs:
           
           cp dist/dist.brip ai-chat
           cp dist/server.js ai-chat
-          cp backend/config.example.js ai-chat
+          cp backend/config.default.js ai-chat
           cp backend/package.json ai-chat
           cp misc/launch.bat ai-chat
           cp misc/launch.sh ai-chat

@@ -7,11 +7,9 @@ export let DI_messageContainer;
 /** @type {HTMLElement & {}} */
 export let DI_messageVirtualList;
 
-export const DID_SYNC_LOCK = 0;
-export const DID_SYNC_UNLOCK = 1;
-export const DID_RMI = 2;
-export const DID_SEND_BUTTON = 3;
-export const DID_TITLE_POSITION = 4;
+export const DID_RMI = 0;
+export const DID_SEND_BUTTON = 1;
+export const DID_TITLE_POSITION = 2;
 
 /**
  * 统一管理的依赖注入对象

@@ -1,7 +1,7 @@
-import {updateOnIntersected} from "../src/utils/utils.js";
-import {SETTINGS} from "/src/settings.js";
+import {updateOnIntersected} from "/src/utils/utils.js";
+import {GLOBAL_SETTINGS} from "/src/settings.js";
 import {onLoad} from "/src/hooks.js";
-import {$computed, $state, $watch, unconscious} from "unconscious";
+import {$derived, $state, $watch, unconscious} from "unconscious";
 import {formatSize} from "unconscious/common/Utils.js";
 import {config} from "/src/states.js";
 
@@ -12,21 +12,23 @@ let element;
 const swc = navigator.serviceWorker;
 
 if (DB_MODE !== 'local' && swc) {
-	SETTINGS.push({
+	GLOBAL_SETTINGS.push({
+		_tab: "data",
 		type: "element",
 		name: "远程文件缓存",
-		_tab: "data",
 		element: <div className={"choice-scroll"} ref={element} />
 	});
-	SETTINGS.push({
+	GLOBAL_SETTINGS.push({
+		_tab: "data",
 		id: "blobCacheCapacity",
 		type: "number",
-		name: "容量限制（MB）",
+		name: "容量限制",
 		min: 10,
 		max: 500,
 		step: 10,
 		default: 100,
-		_tab: "data"
+		unit: "MiB",
+		inline: true,
 	});
 
 	const cb = () => {
@@ -35,7 +37,7 @@ if (DB_MODE !== 'local' && swc) {
 		} else {
 			const size = $state(0);
 			updateOnIntersected(element, () => getCacheSize().then(size1 => size.value = size1));
-			$watch($computed(() => config.blobCacheCapacity), () => {
+			$watch($derived(config.blobCacheCapacity), () => {
 				const cap = config.blobCacheCapacity;
 				if (cap) setMaxCacheSize(cap << 20).then(([before, after]) => {
 					console.log("Size reduced: "+formatSize(before-after));

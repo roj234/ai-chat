@@ -13,6 +13,7 @@ import "./utils/fetch-hook.js";
 
 import {
 	FS_SERVICE_PAT,
+	INSTANCE_ID,
 	INTERACTIVE_LOGIN,
 	PAT_SERVER_SALT,
 	reload,
@@ -91,13 +92,30 @@ async function fileWatcher(path, callback, uiName) {
 
 try {
 	await fileWatcher(configPath, async (configPath) => {
-		await reload(configPath + '?t='+(await fs.stat(configPath)).mtimeMs);
-		if (INTERACTIVE_LOGIN && !PAT_SERVER_SALT) {
+		await reload("./config.default.js");
+		await reload(configPath+'?t='+(await fs.stat(configPath)).mtimeMs);
+
+		const repl = [];
+
+		if (INTERACTIVE_LOGIN && !PAT_SERVER_SALT) repl.push(['PAT_SERVER_SALT', crypto.randomUUID()]);
+		if (!INSTANCE_ID) repl.push(['INSTANCE_ID', crypto.randomUUID()]);
+
+		if (repl.length) {
 			let js = await fs.readFile(configPath, 'utf-8');
-			js = js.replace(/PAT_SERVER_SALT\s*=\s*(['"`])\1/, `PAT_SERVER_SALT = '${crypto.randomUUID()}'`);
+			for (const [k, v] of repl) {
+				const initJs = js;
+				js = js.replace(new RegExp(`\\b${k}\\s*=\\s*(['"\`])\\1`), `${k} = '${v}'`);
+
+				if (initJs === js) {
+					console.error(`[config] 配置文件缺少键 ${k} 可能需要自行从 default 迁移。`);
+					process.exit(1);
+				}
+			}
+
 			await fs.writeFile(configPath, js, 'utf-8');
-			await reload(configPath + '?t='+(await fs.stat(configPath)).mtimeMs);
+			await reload(configPath+'?t='+(await fs.stat(configPath)).mtimeMs);
 		}
+
 	}, "配置文件");
 } catch (e) {
 	console.error("[config] 配置文件加载失败");
@@ -108,9 +126,9 @@ try {
 if (!isLanAddress(addr)) {
 	if (workspace) {
 		if (!FS_SERVICE_PAT)
-			throw new Error("监听地址不是内网，必须配置 FS_SERVICE_PAT");
+			throw new DOMException("监听地址不是内网，必须配置 FS_SERVICE_PAT");
 	} else if (!INTERACTIVE_LOGIN) {
-		throw new Error("监听地址不是内网，必须配置 INTERACTIVE_LOGIN");
+		throw new DOMException("监听地址不是内网，必须配置 INTERACTIVE_LOGIN");
 	}
 }
 

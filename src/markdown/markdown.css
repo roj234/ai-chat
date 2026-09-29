@@ -61,6 +61,9 @@ q:before, q:after { content: none; }
     hyphens: auto;
     line-height: var(--md-line-height);
 
+    & > :first-child { margin-top: 0; }
+    & > :last-child { margin-bottom: 0; }
+
     & rt { font-size: 66%; }
 
     & img { max-width: 100%; }

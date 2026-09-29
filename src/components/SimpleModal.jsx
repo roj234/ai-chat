@@ -70,20 +70,18 @@ const SimpleModal = ({
 		inputValue = value;
 	}
 
-	const modal = <dialog className={"modal " + className} onClick={(e) => {
-		// 排除键盘导致的点击事件
-		if (e.pointerId < 0) return;
+	let downPos;
+	const modal = <dialog className={"modal " + className} onPointerDown={(e) => {
+		downPos = { x: e.clientX, y: e.clientY, pointerId: e.pointerId };
+	}} onClick={(e) => {
+		if (e.pointerId < 0 || (downPos != null && e.pointerId != null && e.pointerId !== downPos.pointerId) || !modal.isConnected) return;
 
 		// 检测点击是否落在 dialog 自身（而非内部子元素）
 		const rect = modal.getBoundingClientRect();
-		const inside =
-			e.clientX >= rect.left &&
-			e.clientX <= rect.right &&
-			e.clientY >= rect.top &&
-			e.clientY <= rect.bottom;
+		const inside = (x, y) => x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 
-		if (!inside && onConfirm && !ignoreCancel) modal.remove();
-	}} role="dialog" aria-modal="true">
+		if (!inside(downPos.x, downPos.y) && !inside(e.clientX, e.clientY) && onConfirm && !ignoreCancel) handleClose();
+	}}>
 		<div className="header"><b>{title}</b></div>
 		<div className="body">
 			{typeof message === 'string' ? <p>{message}</p> : message}

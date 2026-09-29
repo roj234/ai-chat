@@ -5,6 +5,7 @@ import {runTools, toolInfo, toolScriptRegistry} from "../toolset.js";
 import {validateAndShowError} from "unconscious/common/json-schema-utils.js";
 import {EVENT_BUS, selectedConversation, updateMessageUI} from "../states.js";
 import {inspect} from "unconscious/common/inspect.js";
+import {getRandomString} from "../utils/utils.js";
 
 /**
  *
@@ -59,7 +60,7 @@ export function ToolCallEditor(props) {
                     调用ID
                     <span className={"spacer"}></span>
                     <button className={"ri-dice-line ghost"} title={"随机生成"} onClick={e => {
-                        toolCallId.value = Math.random().toString(36).slice(3);
+                        toolCallId.value = getRandomString(8);
                     }}></button>
                 </div>
                 <div className={"input-warp"}>

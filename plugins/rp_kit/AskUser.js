@@ -50,6 +50,7 @@ export const AskUser = {
 	renderer(response, frozen, tc, message) {
 		const content = $state(response.content?.slice(response.content.startsWith(USER_PREFIX) ? USER_PREFIX.length : 0));
 		if (frozen) {
+			if (!unconscious(content)) return;
 			return <div className={"rp-choice"}>
 				<button className="selected" style={"white-space:pre-line"} title={"已选择"} disabled dangerouslySetInnerHTML={content}></button>
 			</div>;
@@ -58,7 +59,7 @@ export const AskUser = {
 		$watch(content, () => {
 			const value = unconscious(content).trim();
 			response.success = !!value;
-			response.content = value ? USER_PREFIX + value : '';
+			response.content = USER_PREFIX + (value || 'Empty');
 			markMessageDirty(message);
 			$update(inputText);
 		}, false);

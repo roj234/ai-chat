@@ -12,7 +12,7 @@ export class EventBus {
 	/**
 	 *
 	 * @param {string | string[]} event
-	 * @param {function(data: Object, evt: string[]): void | Promise<void>} handler
+	 * @param {function(data: any, evt: string[]): void | Promise<void>} handler
 	 */
 	on(event, handler) {
 		let set = this.#events.get(event);
@@ -23,7 +23,7 @@ export class EventBus {
 	/**
 	 *
 	 * @param {string | string[]} event
-	 * @param {function(data: Object, evt: string[]): void | Promise<void>} handler
+	 * @param {function(data: any, evt: string[]): void | Promise<void>} handler
 	 * @return {Function}
 	 */
 	onoff(event, handler) {
@@ -34,7 +34,7 @@ export class EventBus {
 	/**
 	 *
 	 * @param {string | string[]} event
-	 * @param {function(data: Object, evt: string[]): void | Promise<void>} handler
+	 * @param {function(data: any, evt: string[]): void | Promise<void>} handler
 	 */
 	off(event, handler) {
 		const h = this.#events.get(event);
@@ -60,8 +60,8 @@ export class EventBus {
 	/**
 	 *
 	 * @param {string[]} event
-	 * @param {Object} first
-	 * @param {Object} [rest]
+	 * @param {any} [first]
+	 * @param {any} [rest]
 	 */
 	post(event, first, ...rest) {
 		const x = [];

@@ -6,7 +6,7 @@ import {webviewFetch} from "/vendor/jsBridge.js";
  */
 const networkErrorHandler = (url, err) => {
 	if (err.message === "Failed to fetch")
-		throw ("网络连接失败\n请检查API地址是否正确，连接是否畅通 (以及是否支持CORS)\n"+url);
+		throw ("一般网络故障\n请检查网址是否正确、服务器是否工作、和CORS配置\n"+url);
 	throw err;
 };
 
@@ -67,7 +67,7 @@ const makeHeaders = (data, key) => {
  * @param {string=} key
  * @param {boolean=true} json
  * @param {RequestInit} data
- * @param {function(OpenAI.Response, string): void} onChunk
+ * @param {function(OpenAI.Response | Object, string): void} onChunk
  * @return {Promise<Response>}
  */
 export const sseFetch = (url, {key = "", json = true, ...data} = {}, onChunk) => FETCH(url, {

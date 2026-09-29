@@ -1,6 +1,6 @@
 import {DI_settings, onLoad} from "/src/hooks.js";
 import {$computed, $foreach} from "unconscious";
-import {models, presets, updateModels} from "../src/presets.js";
+import {models, presets, updateModels} from "/src/presets.js";
 
 onLoad((app) => {
 	const DATALIST_ID = 'DL-modelIds';

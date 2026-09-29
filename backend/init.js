@@ -10,11 +10,12 @@ import {registerDatabaseRoutes} from "./routes/database.js";
 import {registerFsRoutes} from "./routes/agent.js";
 import {BLOB_HASH_REGEX, registerBlobRoutes} from "./routes/blob-storage.js";
 import {registerVectorDBRoutes} from "./routes/vectordb.js";
-import {proxyHandler, registerSSEProxyRoutes} from "./routes/sse-proxy.js";
+import {proxyHandler, registerSSEProxyRoutes} from "./routes/api-proxy-openai.js";
 
 import {
 	ALLOW_USER_NAMES,
 	FS_SERVICE_PAT,
+	INSTANCE_ID,
 	INTERACTIVE_LOGIN,
 	MAX_UPLOAD_SIZE,
 	RESTRICT_USER_CREATION,
@@ -29,6 +30,7 @@ import {registerPairingRoutes} from "./routes/pairing.js";
 
 // Export plugin APIs to globalThis
 import "./pluginApi.js";
+import {createHash} from "node:crypto";
 
 /**
  * @param router {AiChatBackend.Router}
@@ -70,11 +72,10 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 			const urlPath = ctx.path;
 			const method = ctx.req.method;
 			if (/\/sse\/v1\//.test(urlPath)) return;
+			if (method === 'POST' && /\/(login|ping)$/.test(urlPath)) return;
 
 			ignorePAT:
 			if (INTERACTIVE_LOGIN) {
-				if (urlPath.endsWith('/login') && method === 'POST') break ignorePAT;
-
 				const pat = (ctx.req.headers.authorization || '').slice("Bearer ".length);
 				if (!pat) {
 					if (new RegExp("/blob/"+BLOB_HASH_REGEX+"$").test(urlPath) && method === 'GET') {
@@ -237,6 +238,16 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 		const body = await ctx.readAsObject(4194304);
 		const out = await handleBatch(ctx, body);
 		if (out) ctx.send(200, out);
+	});
+
+	router.post('/ping', async (ctx) => {
+		const args = await ctx.readAsObject(1024);
+		const hash = createHash("sha256");
+		hash.update(args.nonce + 'AiChat[DB]');
+		ctx.send(200, {
+			pong: hash.digest('hex'),
+			id: INSTANCE_ID
+		});
 	});
 
 	if (INTERACTIVE_LOGIN) {

@@ -1,7 +1,7 @@
 import {IndexedDBAccess} from "/src/utils/dbAccess.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {prettyError, updateOnIntersected} from "/src/utils/utils.js";
-import {SETTINGS} from "/src/settings.js";
+import {GLOBAL_SETTINGS} from "/src/settings.js";
 import {config} from "/src/states.js";
 import {showToast} from "/src/components/Toast.js";
 import {createWebFileSystem} from "./WebFSDriver.js";
@@ -9,12 +9,20 @@ import {createConfigFileSystem} from "./ConfigFileSystem.js";
 import {NAMED_VFS} from "./VirtualFileSystem.js";
 import {$computed, $foreach, $forElse, $state, $update, debugSymbol, ONCE_EVENT, unconscious} from "unconscious";
 import {formatSize, immutableObjectMap, prettyTime} from "unconscious/common/Utils.js";
-import {isIDB, kvListDel, kvListGet, kvListGetValues, kvListSet} from "/src/database.js";
+import {isIDB, kvListDel, kvListGet, kvListGetValues, kvListSet, remoteDBUrl} from "/src/database.js";
 import "./Mounts.css";
-import {PROMISE_CATCH} from "/common/pure-utils.js";
+import {
+	createAsyncQueue,
+	FSE_NotAllowed,
+	FSE_NotFound,
+	FSE_NotSupported,
+	PROMISE_CATCH,
+	throwDOMException
+} from "/common/pure-utils.js";
 import {CREATE_OPT, resolveDirectory} from "./WebFSUtils.js";
 import {addRemoteFileSystem, BACKEND_SERVER_KVLIST_ID, createRemoteFileSystem} from "./RemoteFSDriver.js";
 import {Icon_search, Icon_warning} from "/src/components/Icons.jsx";
+import {normalizePath} from "unconscious/common/path-utils.js";
 
 /** @type {Map<string, {
  * handle: FileSystemDirectoryHandle,
@@ -68,7 +76,8 @@ const materializeFileSystem = async (mount) => {
 	let {fs_type, fs_base} = mount;
 	switch (fs_type) {
 		case "db": {
-			return createRemoteFileSystem(config.db_server + 'fs/', config.db_pat, fs_base);
+			if (DB_MODE !== 'local')
+				return createRemoteFileSystem(remoteDBUrl+'fs/', config.db_pat, fs_base);
 		}
 		case "api": {
 			let {uri, pat} = await kvListGet(BACKEND_SERVER_KVLIST_ID, mount.fs_server);
@@ -106,19 +115,27 @@ const materializeFileSystem = async (mount) => {
 							throw e;
 						}
 
-						if (result !== "granted") throw new Error("你拒绝了权限请求");
+						if (result !== "granted") throwDOMException("用户拒绝授予权限", FSE_NotAllowed);
 						break;
 					}
 
 					await (await handle.entries()).next();
 					localFileSystemCache.set(folder.name, inst = {handle, fss: new Map});
 				} else {
-					throw new Error("文件路径 "+base+" 不存在");
+					throwDOMException("文件路径 "+base+" 不存在", FSE_NotFound);
 				}
 			}
 
+			const hasACL = mount.fs_ACL;
+
 			let fs = inst.fss.get(fs_base);
-			if (!fs) inst.fss.set(fs_base, fs = await createWebFileSystem(await resolveDirectory(inst.handle, paths), mount));
+			if (!fs || hasACL) {
+				fs = await createWebFileSystem(await resolveDirectory(inst.handle, paths), mount);
+				// ACL 不缓存
+				if (hasACL) return fs;
+
+				inst.fss.set(fs_base, fs);
+			}
 			return fs;
 		}
 		case "opfs": {
@@ -130,7 +147,7 @@ const materializeFileSystem = async (mount) => {
 			return createConfigFileSystem(fs_base, mount);
 		case "vfs":
 			const vd = NAMED_VFS[fs_base];
-			if (!vd) throw new Error("找不到虚拟文件系统实例 "+fs_base);
+			if (!vd) throwDOMException("找不到虚拟文件系统实例 "+fs_base, FSE_NotFound);
 			return createWebFileSystem(vd, mount);
 	}
 };
@@ -443,7 +460,7 @@ async function callFBI(mount) {
 					<span className={"spacer"}></span>
 					<button className="ri-close-line btn sm danger" title={"关闭窗口"} onClick={() => {
 						modal.remove();
-						reject("未选择文件系统");
+						reject(fsError?.message ?? fsError ?? "未选择文件系统");
 					}}/>
 				</div>
 				{fsError && <div className="fa-alert row">
@@ -625,7 +642,7 @@ export const callFileSystemFunc = (fs, func, parameters, conv) => {
 	if (typeof fs === 'function') return fs(func, parameters, conv);
 
 	const handler = fs[func];
-	if (!handler) throw `${func} is not implemented in this VFS`;
+	if (!handler) throwDOMException(`${func} is not implemented in this VFS`, FSE_NotSupported);
 	return handler(parameters);
 };
 
@@ -633,24 +650,24 @@ export const callFileSystemFunc = (fs, func, parameters, conv) => {
  * 根据路径选择文件系统
  * @param {string} path
  * @param {AiChat.Conversation} conv
- * @returns {Promise<[string, AiChat.FileSystemInstance]>}
+ * @returns {Promise<[string, AiChat.FileSystemInstance, AiChat.Mount]>}
  */
 export const getFileSystem = async (path, conv) => {
 	if (path) {
 		if (path.startsWith("~/")) {
 			let end = path.indexOf('/', 2);
 			const mountPoint = conv.mnt?.[path.slice(2, end < 0 ? path.length : end)];
-			if (!mountPoint) throw `mount point ${path} not found`;
-			return [end < 0 ? "" :path.slice(end+1), await createFileSystem(mountPoint)];
+			if (!mountPoint) throwDOMException(`Mount ${JSON.stringify(path)}`, FSE_NotFound);
+			return [end < 0 ? "" :path.slice(end+1), await createFileSystem(mountPoint), mountPoint];
 		}
-		if (path[0] === '/') throw "Absolute path is not allowed, it will confuse you when interacting with multiple VFSs";
+		if (path[0] === '/') throwDOMException("Absolute path is not allowed, it is confusing when interacting with multiple VFSs", FSE_NotAllowed);
 	}
 	const myfs = await createFileSystem(conv);
-	return [path, myfs];
+	return [path, myfs, conv];
 };
 
-const writeTools = new Set(["write", "patch", "edit", "delete", "append", "mkdir", "writeRaw", "appendRaw"]);
-const keys = ["path", "cwd", "pattern"];
+const destructiveTools = new Set(["write", "patch", "edit", "delete", "append", "mkdir", "writeRaw", "appendRaw", "copy"]);
+const keys = ["path", "cwd"];
 /**
  * AI工具包装器
  * @param {string} func
@@ -658,17 +675,18 @@ const keys = ["path", "cwd", "pattern"];
  */
 export const fileAccess = (func) => async (parameters, _, conv) => {
 	// This is Global not per-fs alert
-	if (conv.fs_readonly && writeTools.has(func)) throw "Write-protect is enabled";
+	if (conv.fs_readonly && destructiveTools.has(func)) throwDOMException("Write-protect is enabled globally", "ReadOnlyError");
 
 	let path, key;
 	for (let i = 0; i < keys.length; i++) {
 		key = keys[i];
 		if ((path = parameters[key])) break;
 	}
+	if (!path && func === 'list') path = parameters.pattern;
 
-	let [newPath, fs] = await getFileSystem(path, conv);
+	let [newPath, fs, mnt] = await getFileSystem(path, conv);
 
-	if (fs.fs_readonly && writeTools.has(func)) throw "Write-protect is enabled for this VFS";
+	if (mnt.fs_readonly && destructiveTools.has(func)) throwDOMException("Write-protect is enabled for this VFS", "ReadOnlyError");
 
 	if (newPath !== path) {
 		parameters = { ...parameters };
@@ -678,12 +696,64 @@ export const fileAccess = (func) => async (parameters, _, conv) => {
 	return callFileSystemFunc(fs, func, parameters, conv);
 };
 
+export const crossVFSCopyMove = async({src, dest, move}, _, conv) => {
+	if (conv.fs_readonly) throwDOMException("Write-protect is enabled globally", "ReadOnlyError");
+	if (src === dest) throw 'src and dest are same';
+
+	let srcFileSystem, destFileSystem;
+	[src, srcFileSystem] = await getFileSystem(src, conv);
+	[dest, destFileSystem] = await getFileSystem(dest, conv);
+
+	if (move && srcFileSystem.fs_readonly) throwDOMException("Write-protect is enabled for src VFS", "ReadOnlyError");
+	if (destFileSystem.fs_readonly) throwDOMException("Write-protect is enabled for dest VFS", "ReadOnlyError");
+
+	if (srcFileSystem === destFileSystem) {
+		if (normalizePath(dest).join('/').startsWith(normalizePath(src).join('/')+"/"))
+			throwDOMException("Move into descents", FSE_NotAllowed);
+
+		return callFileSystemFunc(srcFileSystem, 'copy', {
+			src,
+			dest,
+			move
+		}, conv);
+	}
+
+	const fileType = await callFileSystemFunc(srcFileSystem, 'stat', { path: src });
+	if (fileType.startsWith('type: file')) {
+		const content = await callFileSystemFunc(srcFileSystem, 'readRaw', { path: src });
+		await callFileSystemFunc(destFileSystem, 'writeRaw', { path: dest, content });
+	} else {
+		const srcFiles = await callFileSystemFunc(srcFileSystem, 'list', {
+			path: src,
+			pattern: '**',
+			json: true,
+			showDir: false
+		}, conv);
+
+		const [enqueue, waitAll] = createAsyncQueue();
+
+		for (const [path] of srcFiles) {
+			await enqueue(async() => {
+				const content = await callFileSystemFunc(srcFileSystem, 'readRaw', {path});
+				await callFileSystemFunc(destFileSystem, 'writeRaw', { path, content });
+			});
+		}
+
+		await waitAll();
+	}
+
+	if (move) {
+		await callFileSystemFunc(srcFileSystem, 'delete', { path: src });
+	}
+}
+
 // UI
 
 const state = $state();
 const updateEstimate = () => navigator.storage.estimate().then(t => state.value = formatSize(t.usage) + "/" + formatSize(t.quota));
 const opfsDialog = <div className={"choice-scroll"}>
-	<button className={"btn ghost"} onClick={() => callFBI({ fs_label: "管理文件系统" }).catch(PROMISE_CATCH)}>管理文件系统</button>
+	<button className={"btn ghost"} onClick={() => callFBI({fs_label: "管理文件系统"}).catch(PROMISE_CATCH)}>管理文件系统</button>
+	<button className={"btn ghost"} onClick={() => localFileSystemCache.clear()}>清理ACL缓存</button>
 	<button className={"btn danger"} onClick={() => {
 		SimpleModal({
 			title: "清空私库（OPFS）？",
@@ -703,7 +773,7 @@ const opfsDialog = <div className={"choice-scroll"}>
 
 updateOnIntersected(opfsDialog, updateEstimate);
 
-SETTINGS.push({
+GLOBAL_SETTINGS.push({
 	_tab: "tools",
 	type: "element",
 	element: opfsDialog

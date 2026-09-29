@@ -1,19 +1,12 @@
 import {config, conversations, messages, selectedConversation} from "./states.js";
 import {showToast} from "./components/Toast.js";
-import {
-	deleteDatabase,
-	getMessagesCacheFirst,
-	isIDB,
-	kvListGetValues,
-	kvListSet,
-	updateConversation
-} from "./database.js";
+import {deleteDatabase, getMessages, isIDB, kvListGetValues, kvListSet, updateConversation} from "./database.js";
 import {downloadFile, prettyError} from "./utils/utils.js";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {ZipReader, ZipWriter} from "unconscious/common/zip-io.js";
 import {$computed, $state, $update, unconscious} from "unconscious";
-import {decodeObjects, serializeJSON} from "./utils/marshal.js";
-import {PRIVATE_CONFIG_KEY, SETTINGS} from "./settings.js";
+import {decodeObjects, serializeJSON} from "./utils/serialization.js";
+import {GLOBAL_SETTINGS, PRIVATE_CONFIG_KEY} from "./settings.js";
 import {DI_settings} from "./hooks.js";
 import {createJsonParser} from "unconscious/common/Json.js";
 
@@ -82,8 +75,6 @@ const loadBackupZip = async file => {
 			return;
 		}
 	}
-
-	config.incognito = 0;
 
 	const kvList = await zipFile.getText("kvList.json");
 	if (kvList) {
@@ -301,7 +292,7 @@ const cleanMessages = messages => messages.map(({id, ...rest}) => id < 0 ? null 
 const serializeToJSONLine = async (conv, zw) => {
 	const { id: _a, ready: _b, ...stripped } = conv;
 	stripped.id = APP_NAME;
-	const messages = cleanMessages(await getMessagesCacheFirst(conv));
+	const messages = cleanMessages(await getMessages(conv));
 
 	let jsonData = await serializeJSON(stripped, 0, zw);
 	for (const message of messages) {
@@ -330,7 +321,7 @@ const parseJSONLine = (str) => {
 	return messages;
 };
 
-SETTINGS.push(
+GLOBAL_SETTINGS.push(
 	{
 		type: "element",
 		_tab: ["general", "data"],
@@ -339,7 +330,7 @@ SETTINGS.push(
 		name: "导入对话、预设、备份及更多格式",
 		element: <div className={"choice-scroll"}>
 			<label className="btn ghost" tabIndex={0} role={"button"}>导入
-				<input type="file" accept="application/zip,application/json,image/png,image/jpeg" style="display:none;" multiple onChange={importConversation}/>
+				<input type="file" accept=".zip,.json,.jsonl,image/png,image/jpeg" style="display:none;" multiple onChange={importConversation}/>
 			</label>
 		</div>
 	},

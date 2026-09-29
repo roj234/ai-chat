@@ -1,5 +1,7 @@
-dist
-dist-app
-data
+/dist
+/dist-app
+/data
 node_modules
 config.js
+
+/public/assets/sandbox/

@@ -143,6 +143,11 @@ export class VectorDB {
 		return this.index.size;
 	}
 
+	/** 等待底层文件加载完成（`index` 填充完毕后 resolve） */
+	get ready() {
+		return this.#ready;
+	}
+
 	// ──── 初始化 ──────────────────────────────────────
 
 	async #init() {
@@ -313,13 +318,15 @@ export class VectorDB {
 	/**
 	 * 删除向量：将 ID 字段写零，回收槽位。
 	 * @param {string} id
-	 * @returns {Promise<void>}
+	 * @returns {Promise<boolean>}
 	 */
 	async delete(id) {
 		await this.#ready;
+		if (!this.index.get(id)) return false;
+
 		return this.#withWriteLock(async () => {
 			const item = this.index.get(id);
-			if (!item) return;
+			if (!item) return false;
 
 			const zeroes = Buffer.alloc(ID_LENGTH);
 			await this.#handle.write(zeroes, 0, zeroes.length, item.offset);
@@ -327,6 +334,44 @@ export class VectorDB {
 			this.freeSlots.push(item.offset);
 			this.index.delete(id);
 			await this.#faissDelete(id);
+
+			return true;
+		});
+	}
+
+	/**
+	 * 重命名向量 ID。
+	 * @param {string} oldId
+	 * @param {string} newId
+	 * @returns {Promise<void>}
+	 */
+	async rename(oldId, newId) {
+		if (oldId === newId) return;
+		if (Buffer.byteLength(newId, 'utf8') > ID_LENGTH) {
+			throw new Error(`id "${newId}" too long, max ${ID_LENGTH} bytes`);
+		}
+
+		// 不存在
+		if (!await this.delete(newId)) return;
+
+		return this.#withWriteLock(async () => {
+			const item = this.index.get(oldId);
+			if (!item) return;
+
+			// 覆写定长 ID 字段（不足部分保持 0）
+			const buf = Buffer.alloc(ID_LENGTH);
+			buf.write(newId, 'utf8');
+			await this.#handle.write(buf, 0, buf.length, item.offset);
+
+			this.index.delete(oldId);
+			this.index.set(newId, item);
+
+			const faissId = this.#idToFaissId.get(oldId);
+			if (faissId !== undefined) {
+				this.#idToFaissId.delete(oldId);
+				this.#idToFaissId.set(newId, faissId);
+				this.#faissIdToId.set(faissId, newId);
+			}
 		});
 	}
 

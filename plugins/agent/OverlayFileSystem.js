@@ -3,14 +3,13 @@
  */
 import {normalizePath} from "unconscious/common/path-utils.js";
 import {copyEntry, CREATE_OPT, RECURSIVE, resolveDirectory} from "./WebFSUtils.js";
-import {createAsyncQueue} from "/common/pure-utils.js";
+import {createAsyncQueue, FSE_NotFound, throwDOMException} from "/common/pure-utils.js";
 
 export const OVERLAYFS_INTERNAL = '.0V3R1ay_';
 const DELETED_FILE = OVERLAYFS_INTERNAL+`Deleted.txt`;
 
-export const fsError = (name, message) => new DOMException(message ?? name, name);
-const notFoundError = path => fsError('NotFoundError', `The requested entry '${path}' could not be found.`);
-const invalidModificationError = path => fsError('InvalidModificationError', `'${path}' directory is not empty`);
+const throwNotFound = path => throwDOMException(`The requested entry '${path}' could not be found.`, FSE_NotFound);
+const throwInvalidModification = path => throwDOMException(`'${path}' directory is not empty`, 'InvalidModificationError');
 
 const LOWER = false, UPPER = true;
 
@@ -130,7 +129,7 @@ class OverlayDirectoryHandle {
 			const noCreation = !options?.create;
 			const rel = this._path+name;
 			if (this._ctx.deleted.has(rel)) {
-				if (noCreation) throw notFoundError(rel)
+				if (noCreation) throwNotFound(rel)
 			} else {
 				try {
 					handle = await this._lower?.getFileHandle(name);
@@ -160,7 +159,7 @@ class OverlayDirectoryHandle {
 		}
 
 		if (!lower && !upper) {
-			if (!options?.create) throw notFoundError(rel);
+			if (!options?.create) throwNotFound(rel);
 
 			if (!this._upper) await mkdirs(this);
 			upper = await this._upper.getDirectoryHandle(name, options);
@@ -183,7 +182,7 @@ class OverlayDirectoryHandle {
 				this._ctx, rel+'/', name, this, upper, lower
 			);
 			if (!(await childView.entries().next()).done) {
-				throw invalidModificationError(rel);
+				throwInvalidModification(rel);
 			}
 		}
 
@@ -300,17 +299,17 @@ class OverlayFileSystem extends OverlayDirectoryHandle {
 	}
 
 	async getFileHandle(name, options) {
-		if (name.startsWith(OVERLAYFS_INTERNAL)) throw notFoundError(name);
+		if (name.startsWith(OVERLAYFS_INTERNAL)) throwNotFound(name);
 		return super.getFileHandle(name, options);
 	}
 
 	async getDirectoryHandle(name, options) {
-		if (name.startsWith(OVERLAYFS_INTERNAL)) throw notFoundError(name);
+		if (name.startsWith(OVERLAYFS_INTERNAL)) throwNotFound(name);
 		return super.getDirectoryHandle(name, options);
 	}
 
 	async removeEntry(name, options) {
-		if (name.startsWith(OVERLAYFS_INTERNAL)) throw notFoundError(name);
+		if (name.startsWith(OVERLAYFS_INTERNAL)) throwNotFound(name);
 		return super.removeEntry(name, options);
 	}
 

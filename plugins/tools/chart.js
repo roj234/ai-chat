@@ -88,7 +88,8 @@ registerToolset("Chart", "Create charts and data visualizations from CSV files."
 			options: {
 				type: "object",
 				description: "Additional Chart.js global options (e.g., scales, plugins).",
-				default: { responsive: true }
+				default: { responsive: true },
+				additionalProperties: true
 			},
 		},
 		required: ["type"]

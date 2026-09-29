@@ -173,8 +173,9 @@ export function createSettingDialog(optionsArray, settings, onSettingChanged) {
 					}
 				}
 
-				const modelName = data.name;
-				if (modelName != null) data.meta = modelName;
+				const modelName = modelTab && set.name;
+				if (modelName) data.meta = modelName;
+				else delete data.meta;
 
 				return kvListSet(data, PRESET_KVS_ID, name).then(() => {
 					config[CONFIG_VERSION] = (config[CONFIG_VERSION] || 0) + 1;
@@ -220,6 +221,18 @@ export function createSettingDialog(optionsArray, settings, onSettingChanged) {
 		}
 	};
 
+	let doEmit = false;
+	let visible = false;
+	let dirty = false;
+	const ob = new IntersectionObserver((entries) => {
+		visible = entries.at(-1).isIntersecting;
+		if (visible && dirty) {
+			oldUI.sync(false, !doEmit);
+			dirty = doEmit = false;
+		}
+	});
+	ob.observe(dialog);
+
 	return {
 		showHide,
 		show() {
@@ -235,7 +248,12 @@ export function createSettingDialog(optionsArray, settings, onSettingChanged) {
 			})
 		},
 		sync(readFromChoices, skipEmit) {
-			oldUI.sync(readFromChoices, skipEmit);
+			if (visible) {
+				oldUI.sync(readFromChoices, skipEmit);
+			} else {
+				dirty = true;
+				doEmit |= !skipEmit;
+			}
 		},
 		byId: id => byId.get(id)
 	};

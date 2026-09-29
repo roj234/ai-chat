@@ -7,7 +7,7 @@ import {
 	updateConversationUI,
 	updateMessageUI
 } from "../states.js";
-import {$computed, $state, $watch, $watchWithCleanup, unconscious} from "unconscious";
+import {$computed, $derived, $state, $watch, $watchWithCleanup, unconscious} from "unconscious";
 import {getToolInteractiveLevel} from "../toolset.js";
 
 import "./ContextUsage.css";
@@ -47,9 +47,9 @@ export function ContextRing(sendBtn) {
 	</div>;
 
 	bar.style.strokeDasharray = CIRCUMFERENCE;
-	const max = $computed(() => config.maxContext);
-	const used = $computed(() => selectedConversation.contextUsage);
-	$watchWithCleanup([updateConversationUI, used, max], () => {
+	const max = $derived(config.maxContext);
+	const used = $computed(() => selectedConversation.contextUsage, [updateConversationUI, selectedConversation]);
+	$watchWithCleanup([used, max], () => {
 		let pct = unconscious(used) / unconscious(max);
 		tooltipDiv.style.display = isNaN(pct) ? 'none' : '';
 		if (pct > 1) pct = 1;

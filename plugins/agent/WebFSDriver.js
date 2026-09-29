@@ -1,6 +1,6 @@
 import {readAsString} from "/common/chardet.js";
 import {createTextFileEditHelper} from "/common/fs-common.js";
-import {ACL, FSE_NotFound, LIST, READ, throwDOMException, WRITE} from "/common/ACL.js";
+import {ACL, READ, WRITE} from "/common/ACL.js";
 import {formatSize} from "unconscious/common/Utils.js";
 import {AS_IS, UTF8_TEXT_ENCODER} from "unconscious";
 import {
@@ -16,7 +16,7 @@ import {
 import {createOverlayFileSystem, OVERLAYFS_INTERNAL} from "./OverlayFileSystem.js";
 import {compileGlobPattern, emptyAsyncGenerator, generateGlobCode, parseGlobPattern} from "/common/fs-glob.js";
 // noinspection ES6UnusedImports
-import {mpscScheduler} from "/common/pure-utils.js";
+import {FSE_NotFound, mpscScheduler, throwDOMException} from "/common/pure-utils.js";
 import {
 	VCS_BASE_BRANCH,
 	VCS_COMMIT,
@@ -27,8 +27,8 @@ import {
 	VCS_REVERT,
 	VCS_SWITCH
 } from "./VCS_shared.js";
-import {showToast} from "../../src/components/Toast.js";
-import {prettyError} from "../../src/utils/utils.js";
+import {showToast} from "/src/components/Toast.js";
+import {prettyError} from "/src/utils/utils.js";
 
 /**
  * @template T
@@ -67,7 +67,7 @@ const glob = async (rootHandle, pattern, path, showHidden, acl, exclude) => {
 	const result = compileGlobPattern(pattern, path, exclude);
 	let handle;
 	try {
-		handle = (await resolveHandle(rootHandle, result.path, READ|LIST|REQUIRE_DIR, acl))[2];
+		handle = (await resolveHandle(rootHandle, result.path, READ|REQUIRE_DIR, acl))[2];
 	} catch (e) {
 		if (e.name === FSE_NotFound)
 			return emptyAsyncGenerator();
@@ -117,14 +117,14 @@ export const createWebFileSystem = async (rootHandle, config = {}) => {
 	const myResolveHandle = (path, flags) => resolveHandle(rootHandle, path, flags, acl);
 
 	const api = {
-		async mkdir({path}) {
-			await myResolveHandle(path, WRITE|CREATE|REQUIRE_DIR|CREATE_LEAF);
+		async mkdir({path, recursive = true}) {
+			await myResolveHandle(path, WRITE|REQUIRE_DIR|CREATE_LEAF|(recursive ? CREATE : 0));
 			return 'Success';
 		},
 
 		async copy({ src, dest, move }) {
 			const [ srcParent, srcName, srcHandle ] = await myResolveHandle(src, move ? READ | WRITE : READ);
-			const [ destParent, destName ] = await myResolveHandle(dest, WRITE | CREATE | (srcHandle.kind === "file" ? REQUIRE_FILE : REQUIRE_DIR));
+			const [ destParent, destName ] = await myResolveHandle(dest, WRITE | CREATE | CREATE_LEAF | (srcHandle.kind === "file" ? REQUIRE_FILE : REQUIRE_DIR));
 
 			await copyEntry(srcHandle, destParent, destName, move);
 			if (move) await EAT(srcParent.removeEntry(srcName, RECURSIVE));
@@ -145,9 +145,14 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			return str;
 		},
 
-		async delete({path}) {
-			const [ parent, name, handle ] = await myResolveHandle(path, WRITE);
-			await parent.removeEntry(name, RECURSIVE);
+		async delete({path, recursive = true, force}) {
+			try {
+				const [ parent, name, handle ] = await myResolveHandle(path, WRITE);
+				await parent.removeEntry(name, recursive ? RECURSIVE : undefined);
+			} catch (e) {
+				if ((recursive || force) && e.name === FSE_NotFound) {}
+				else throw e;
+			}
 			return 'Success';
 		},
 
@@ -160,7 +165,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 		 * @param {string|Uint8Array} content
 		 */
 		async append({path, content, newline = true}) {
-			const [parentHandle, name, fileHandle] = await myResolveHandle(path, WRITE | CREATE | REQUIRE_FILE);
+			const [parentHandle, name, fileHandle] = await myResolveHandle(path, WRITE | CREATE | CREATE_LEAF | REQUIRE_FILE);
 
 			if (fileHandle.createSyncAccessHandle) {
 				const raf = await fileHandle.createSyncAccessHandle();
@@ -251,7 +256,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 
 				if (handle.kind === 'file') {
 					const file = await handle.getFile();
-					if (file.lastModified > modSince) {
+					if (file.lastModified >= modSince) {
 						const item = [displayPath, "file", json ? file.size : formatSize(file.size)];
 						if (showModified || modSince) item.push(json ? file.lastModified : new Date(file.lastModified).toISOString().slice(0, -5)+'Z');
 						result.push(item);
@@ -294,12 +299,13 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 		async write(path, data, _ctx, _overwrite) {
 			const [ parent, name, handle ] = await myResolveHandle(path, WRITE | CREATE | REQUIRE_FILE);
 
-			if (handle) try {
+			// 这是一个 hack，浏览器处理几MB的文件时可能会报错无法写，所以先删再写。至于为什么不无条件删除，hmm，为了沙箱恢复方便
+			if (handle && (await handle.getFile()).size > 1048576) try {
 				await parent.removeEntry(name);
 			} catch (e) {
 				if (e.name === FILE_TOO_BIG) throw "Failed to write file, it might locked by user.";
 				if (e.name === "NoModificationAllowedError") throwDOMException("Write file in parallel", "ConcurrentModificationError");
-				throw e;
+				if (e.name !== 'NotSupportedError') throw e;
 			}
 
 			const fileHandle = await parent.getFileHandle(name, CREATE_OPT);
@@ -348,7 +354,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 	return {
 		...api,
 		...teh,
-		open: async ({ path, create }) => (await myResolveHandle(path, READ | WRITE | REQUIRE_FILE | (create * (CREATE|CREATE_LEAF))))[2],
+		open: async ({ path, create }) => (await myResolveHandle(path, READ | REQUIRE_FILE | (create * (CREATE|CREATE_LEAF|WRITE))))[2],
 		readRaw: ({path}) => resolveFile(path),
 		writeRaw: ({path, content}) => fsCommonApi.write(path, content, null, 1).then(() => teh.del(path)),
 		appendRaw: api.append,
@@ -391,7 +397,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			}
 
 			if (mode === VCS_SWITCH) {
-				if (/[\x00-\x1F\x7F|<>"*?:\\/]/.test(path)) throw new Error("Illegal character in branch name");
+				if (/[\x00-\x1F\x7F|<>"*?:\\/]/.test(path)) throwDOMException("Illegal character in branch name", "SyntaxError");
 
 				await disableOverlay();
 
@@ -418,7 +424,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 				acl1.compile();
 
 				const entries = await glob(rootHandle._upper, path, "", true, acl1);
-				const pattern = new RegExp("^"+parseGlobPattern(path, true), 'ui');
+				const pattern = new RegExp("^"+parseGlobPattern(path, true)+"$", 'ui');
 
 				let prefix = '';
 
@@ -438,16 +444,17 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 						break;
 					}
 
+					const h = await resolveHandle(realHandle, displayPath, 0).catch(e => {});
+
 					deleted.delete(displayPath);
 					if (handle.kind === 'file') {
 						const file = await handle.getFile();
-						const h = await resolveHandle(realHandle, displayPath, 0).catch(e => {});
 						const item = [h ? "modify" : "add", displayPath];
 						item.push(new Date(file.lastModified).toISOString().slice(0, -5)+'Z');
 						result.push(item);
 					} else {
 						deleted.delete(displayPath+'/');
-						result.push(["dir", displayPath]);
+						if (!h) result.push(["dir", displayPath]);
 					}
 				}
 
@@ -467,7 +474,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 				if (mode === VCS_COMMIT) {
 					let targetFS;
 					if (target && target !== VCS_BASE_BRANCH) {
-						if (target === branch) throw "Commit 目标不能是当前暂存区.";
+						if (target === branch) throwDOMException("提交目标不能是当前暂存区", "InvalidModificationError");
 						targetFS = await createOverlayFileSystem(await realHandle.getDirectoryHandle(OVERLAYFS_INTERNAL+target), realHandle);
 					}
 					const changed = await rootHandle.commit({ clean: true, path, lower: targetFS });

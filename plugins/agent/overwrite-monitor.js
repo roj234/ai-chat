@@ -1,4 +1,4 @@
-import {getMessagesCacheFirst} from "/src/database.js";
+import {getMessages} from "/src/database.js";
 import {getToolParameters} from "/src/toolset.js";
 import {EVENT_BUS} from "/src/states.js";
 import {debugSymbol} from "unconscious";
@@ -6,7 +6,7 @@ import {debugSymbol} from "unconscious";
 
 const NEWLY_CREATED_FILES = debugSymbol("WrittenFiles");
 
-export const FileChangerNames = new Set(['Read', 'Write', 'Edit', 'Patch']);
+export const FileChangerNames = new Set(['Read', 'Write', 'Edit', 'Patch', 'CopyMove']);
 
 /**
  * @param {AiChat.Conversation} conv
@@ -19,14 +19,17 @@ export async function getChangeableFiles(conv, path) {
 		if (path) return;
 
 		files = conv[NEWLY_CREATED_FILES] = new Set;
-		for (const message of await getMessagesCacheFirst(conv)) {
+		for (const message of await getMessages(conv)) {
 			const resp = message.tool_responses;
 			if (resp) {
 				for (let i = 0; i < resp.length; i++) {
 					const k = message.tool_calls[i], v = resp[i];
-					if (v.success && FileChangerNames.has(k.function.name)) {
-						const tp = getToolParameters(v, k, true);
-						if (tp) files.add(tp.path);
+					const name = k.function.name;
+					if (v.success) {
+						if (FileChangerNames.has(name)) {
+							const tp = getToolParameters(v, k, true);
+							if (tp) files.add(name === 'Copy' ? tp.dest : tp.path);
+						}
 					}
 				}
 			}
@@ -37,4 +40,4 @@ export async function getChangeableFiles(conv, path) {
 	return files;
 }
 
-EVENT_BUS.on('conversationBranch', (conv) => {delete conv[NEWLY_CREATED_FILES];});
+EVENT_BUS.on('switchBranch', (conv) => {delete conv[NEWLY_CREATED_FILES];});

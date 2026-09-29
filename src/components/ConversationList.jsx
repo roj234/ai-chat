@@ -1,12 +1,12 @@
 import './ConversationList.css';
-import {$state, $update, $watch, $watchWithCleanup, debugSymbol, ONCE_EVENT, unconscious} from 'unconscious';
+import {$state, $update, $watchWithCleanup, debugSymbol, ONCE_EVENT, unconscious} from 'unconscious';
 import {ITEM_KEY, VirtualList} from 'unconscious/common/VirtualList.js';
 import {formatDate} from 'unconscious/common/Utils.js';
 import {deepEqual} from "unconscious/common/deepEqual.js";
-import {deleteConversation, getKV, setKV, updateConversation} from "../database.js";
+import {deleteConversation, updateConversation} from "../database.js";
 import {
+	auxMainlyTouch,
 	conversations,
-	isMobile,
 	LOCKED,
 	resetConversation,
 	runningConversations,
@@ -21,8 +21,6 @@ import "/plugins/rp_basic/TagList.css";
 import {showToast} from "./Toast.js";
 import {deleteWithDrawback, prettyError} from "../utils/utils.js";
 
-let PINNED_ITEMS = new Set;
-
 const closeHoverMenu = (e) => {
 	if (hoverMenu.isConnected) {
 		requestAnimationFrame(() => hoverMenu.remove(true));
@@ -33,70 +31,78 @@ const closeHoverMenu = (e) => {
 
 /**
  *
- * @type {import("unconscious").Reactive<number>}
+ * @type {import("unconscious").Reactive<AiChat.Conversation>}
  */
-const hoverConversationIndex = $state({});
+const hoverConversation = $state({});
 const hoverMenu = <div className={"dropdown"} style={"position:fixed;z-index:1"}>
 	<div className="list mid" style={"display:block;"}>
 		<label data-action={"edit"}>编辑标题</label>
 		<label data-action={"export"}>导出</label>
-		<label data-action={"pin"}>{() => PINNED_ITEMS.has(unconscious(hoverConversationIndex)) ? "取消置顶" : "置顶"}</label>
+		<label data-action={"pin"}>{() => hoverConversation.meta?.pinned ? "取消置顶" : "置顶"}</label>
 		<label data-action={"multi"}>多选</label>
-		{() => unconscious(hoverConversationIndex) ? <label data-action={"delete"}>删除</label> : null}
+		{() => unconscious(hoverConversation) ? <label data-action={"delete"}>删除</label> : null}
 	</div>
 </div>;
 
 onLoad((app) => {
 	app.addEventListener("click", closeHoverMenu, {capture: true});
-
-	const tmp = $state();
-	getKV("pinned", tmp);
-	$watch(tmp, () => {
-		PINNED_ITEMS = new Set(unconscious(tmp) || []);
-		$update(conversations);
-	}, false);
 });
 
 const GROUP_LABELS = ["置顶", "今天", "昨天", "7天内", "30天内"];
 // 分组逻辑：基于时间戳计算相对日期
 const groupConversations = () => {
-	const today = new Date().setHours(0, 0, 0, 0);
-	const yesterday = today - 86400000;
-	const sevenDaysAgo = today - 7 * 86400000;
-	const thirtyDaysAgo = today - 30 * 86400000;
+	const base = new Date();
+	const today = base.setHours(0, 0, 0, 0);
+	const yesterday = base.setDate(base.getDate() - 1);
+	const sevenDaysAgo = base.setDate(base.getDate() - 5);
+	const thirtyDaysAgo = base.setDate(base.getDate() - 23);
 
-	const groups = new Map;
+	let monthKey = null, monthStart = 0, monthEnd = 0;
+
+	const baseGroups = [];
+	const timeGroups = new Map;
 
 	// idb sorted this
 	conversations.forEach(conv => {
 		if (conv[DELETING]) return;
 
-		let groupName;
+		let key;
 
-		if (PINNED_ITEMS.has(conv.id)) {
-			groupName = 0;
+		if (conv.meta?.pinned) {
+			key = 0;
 		} else {
-			const date = new Date(conv.time);
-			const timestamp = date.setHours(0, 0, 0, 0);
-			if (timestamp === today) {
-				groupName = 1;
-			} else if (timestamp === yesterday) {
-				groupName = 2;
-			} else if (timestamp > sevenDaysAgo) {
-				groupName = 3;
-			} else if (timestamp > thirtyDaysAgo) {
-				groupName = 4;
+			const t = conv.time;
+			if (t >= today) {
+				key = 1;
+			} else if (t >= yesterday) {
+				key = 2;
+			} else if (t >= sevenDaysAgo) {
+				key = 3;
+			} else if (t >= thirtyDaysAgo) {
+				key = 4;
 			} else {
-				groupName = date.getFullYear()+"-"+(date.getMonth()+1);
+				if (t >= monthStart && t < monthEnd) {
+					monthKey.push(conv);
+				} else {
+					const d = new Date(t);
+					const y = d.getFullYear(), m = d.getMonth();
+
+					key = y * 12 + m;
+					monthStart = new Date(y, m, 1).getTime();
+					monthEnd   = new Date(y, m + 1, 1).getTime();
+
+					monthKey = timeGroups.get(key);
+					if (!monthKey) timeGroups.set(key, monthKey = [conv]);
+					else monthKey.push(conv);
+				}
+				return;
 			}
 		}
 
-		const group = groups.get(groupName);
-		if (!group) groups.set(groupName, [conv]);
-		else group.push(conv);
+		(baseGroups[key] ??= []).push(conv);
 	});
 
-	return groups;
+	return [baseGroups, timeGroups];
 };
 
 /**
@@ -179,12 +185,13 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 					vl.render();
 					return;
 				case "pin":
-					if (!PINNED_ITEMS.delete(conv.id)) {
-						PINNED_ITEMS.add(conv.id);
-					}
-					setKV("pinned", PINNED_ITEMS.size ? [...PINNED_ITEMS] : undefined);
-					$update(conversations);
-					$update(hoverConversationIndex);
+					const meta = conv.meta ??= {};
+					if (!meta.pinned) meta.pinned = true;
+					else delete meta.pinned;
+					updateConversation(conv).then(() => {
+						$update(conversations);
+						$update(hoverConversation);
+					})
 					return;
 				case "edit":
 					SimpleModal({
@@ -213,6 +220,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 						resetConversation();
 					}
 
+					const isKeyboard = e.detail === 0;
 					deleteWithDrawback(`${conv.title||'无标题'} (#${conv.id})`, () => {
 						deleteConversation(conv).then(() => {
 							const noUpdate = unconscious(conversations);
@@ -229,7 +237,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 
 						delete conv[DELETING];
 						$update(conversations);
-					})
+					}, isKeyboard);
 				}
 				return;
 			}
@@ -247,7 +255,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 		const closest = e.target.closest('.chat-item');
 		if (closest === hoverMenu.closest('.chat-item')) return;
 		closest.addEventListener("mouseleave", closeHoverMenu, ONCE_EVENT);
-		hoverConversationIndex.value = closest._conv.id;
+		hoverConversation.value = closest._conv;
 
 		hoverMenu.style.left = e.pageX+"px";
 		hoverMenu.style.top = Math.min(innerHeight - 180, e.pageY)+"px";
@@ -260,27 +268,30 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 	const groupAndConvArr = [];
 	const vl = new VirtualList({
 		element: list,
-		itemHeight: 36+8,
-		gap: 8,
+		itemHeight: 32,
 		data: groupAndConvArr,
 		keyFunc,
-		isSameKey(node, key) {
-			if (Array.isArray(key)) {
-				node.classList.toggle('spin-before', runningConversations.has(key[0]));
+		reuseHook(node, newKey, item) {
+			if (!deepEqual(node[ITEM_KEY], newKey)) return false;
+
+			if (Array.isArray(newKey)) {
+				node.classList.toggle('spin-before', runningConversations.has(item.id));
 			}
-			return deepEqual(node[ITEM_KEY], key);
+
+			return true;
 		},
 		renderer(conv) {
 			if (conv.nodeType) return conv;
 
 			const btn = conv.id === 0 ? <button className="ri-folder-transfer-fill" title={"文件传输助手"}/> : <button className={"edit-btn ri-menu-line"} title={"菜单"} />;
-			btn.addEventListener(isMobile ? 'click' : 'mouseover', mouseHandler);
+			btn.addEventListener(auxMainlyTouch ? 'click' : 'mouseover', mouseHandler);
 			const running = runningConversations.has(conv.id);
 
+			const owner = conv.meta?.owner;
 			// 多选删除 删除未使用的文件
 			return <div
 				_conv={conv}
-				className={`chat-item ${running?' spin-before' : ''}${unconscious(selectedConversation) === conv ? ' active' : ''}`}
+				className={`chat-item${running?' spin-before' : ''}${owner?' subagent':''}${unconscious(selectedConversation) === conv ? ' active' : ''}`}
 				title={conv.title+" (#"+conv.id+")\n"+formatDate("Y-m-d H:i:s", conv.time)}
 				tabIndex={0}
 				role="listitem"
@@ -289,7 +300,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 					conv[SELECTED] = e.target.checked;
 				}}/>}
 				{conv[LOCKED] && <span className="ri-lock-line" title={"其它端正在编辑"} />}
-				<span className="chat-title">{conv.title || '无标题'}</span>
+				<span className="chat-title">{(conv.title || '无标题') + (owner?" for #"+owner:"")}</span>
 				{inSelectionMode ? null : btn}
 			</div>;
 		}
@@ -311,25 +322,26 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 		vl.render();
 	});
 
+	// 这个函数看起来性能很糟糕，但在十万条对话上 120Hz 更新(每调用 ~8ms)，React拿头跟我打
 	$watchWithCleanup(conversations, () => {
 		groupAndConvArr.length = 0;
 
 		if (inSelectionMode) prependMultiselectControl();
 
-		const groups = groupConversations();
+		const [baseGroups, timeGroups] = groupConversations();
 		for (let i = 0; i < 5; i++) {
-			const val = groups.get(i);
+			const val = baseGroups[i];
 			if (val) {
-				groupAndConvArr.push(<div className="chat-group">
-					<div>{GROUP_LABELS[i]}</div>
-				</div>, ...val);
-				groups.delete(i);
+				groupAndConvArr.push(<div className="chat-group"><div>{GROUP_LABELS[i]}</div></div>);
+				for (let j = 0; j < val.length; j++) groupAndConvArr.push(val[j]);
 			}
 		}
-		for (const [k, v] of [...groups].sort(([ka], [kb]) => ka - kb)) {
+
+		for (const [k, v] of [...timeGroups].sort(([ka], [kb]) => kb - ka)) {
 			groupAndConvArr.push(<div className="chat-group">
-				<div>{k}</div>
-			</div>, ...v);
+				<div>{Math.floor(k/12)+'-'+(k%12 + 1)}</div>
+			</div>);
+			for (let j = 0; j < v.length; j++) groupAndConvArr.push(v[j]);
 		}
 		vl.render();
 	}, false);

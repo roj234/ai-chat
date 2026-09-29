@@ -2,9 +2,16 @@ import {showToast} from "../components/Toast.js";
 import {$watch, debugSymbol, unconscious} from "unconscious";
 import {highlightJsonLike} from "../markdown/highlight.js";
 import {webviewDownloadFile} from "/vendor/jsBridge.js";
-import {config, noPointer} from "../states.js";
-import {isIDB} from "../database.js";
+import {auxKeyboardOnly} from "../states.js";
+import {isIDB, remoteDBUrl} from "../database.js";
 import SimpleModal from "../components/SimpleModal.jsx";
+import {base64Encode} from "unconscious/common/Base64.js";
+
+export const getRandomString = (length) => {
+	const view = new Uint8Array(length);
+	crypto.getRandomValues(view);
+	return base64Encode(view, true, length * 4 / 3);
+}
 
 export const resolveDBRelativeURL = (url) => {
 	if (url[0] === '@') {
@@ -14,7 +21,7 @@ export const resolveDBRelativeURL = (url) => {
 		}
 
 		try {
-			const backendBase = new URL(config.db_server, document.baseURI).toString();
+			const backendBase = new URL(remoteDBUrl, document.baseURI).toString();
 			const baseDir = backendBase.split('/').slice(0, -3).join('/') + '/';
 			url = new URL(url.slice(1), baseDir).toString();
 		} catch {}
@@ -47,11 +54,8 @@ export const errorBlock = (error, title) => {
 	return <div className="error-block" style={title && "--title:" + JSON.stringify(title)}>{pre}</div>;
 };
 
-export const MORPH_CHILD_FUNCTION = debugSymbol("MORPH_CHILD_FUNCTION");
-export const MORPH_CHILD_HANDLER = (key, node) => {
-	const fn = node[MORPH_CHILD_FUNCTION];
-	fn && fn(key, node);
-};
+export const onReuse_Callback = debugSymbol("onReuse");
+export const ReuseDelegator = (node, item) => node[onReuse_Callback]?.(node, item);
 
 const BLOB_URL = debugSymbol("BLOB_URL");
 const BLOB_DATAURL = debugSymbol("BLOB_DATAURL");
@@ -100,7 +104,7 @@ export const prettyError = error => {
 			}
 			return line;
 		});
-	return prefix+"\n"+(stackTrace.join("\n"));
+	return prefix+"\n"+(stackTrace.join("\n")).trim();
 };
 
 const TIMER = /* #__PURE__ */ Symbol();
@@ -154,8 +158,15 @@ export const showImageZoomView = (src, title) => {
 	})
 }
 
-export const deleteWithDrawback = (message, confirm, cancel) => {
-	if (noPointer) {
+/**
+ *
+ * @param {string} message
+ * @param {Function} confirm
+ * @param {Function} cancel
+ * @param {boolean} [isKeyboard]
+ */
+export const deleteWithDrawback = (message, confirm, cancel, isKeyboard) => {
+	if (isKeyboard || auxKeyboardOnly) {
 		SimpleModal({
 			message: '确认删除"'+message+'？',
 			accent: 'danger',

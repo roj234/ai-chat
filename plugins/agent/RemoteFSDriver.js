@@ -1,4 +1,4 @@
-import {jsonFetch} from "/common/openai-api-utils.js";
+import {jsonFetch} from "/common/fetch-utils.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {prettyError} from "/src/utils/utils.js";
 import {kvListSet} from "/src/database.js";
@@ -18,7 +18,7 @@ const MSG = "文件服务响应异常，请确认 URL 是否配置正确。";
  */
 const connectServer = async (baseUrl, pat) => {
 	const nonce = crypto.randomUUID();
-	const exceptResult = new SHA256().update(nonce+'AiChat').toString();
+	const exceptResult = new SHA256().update(nonce+"AiChat[FS]").toString();
 
 	let json;
 	try {

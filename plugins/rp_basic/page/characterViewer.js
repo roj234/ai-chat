@@ -1,9 +1,9 @@
 import {$asyncState, $foreach, $state, $update, unconscious} from "unconscious";
 import {createMarkdownStream, HTMLTagKinds, renderMarkdownToElement} from "/src/markdown/markdown.js";
-import {sseFetch} from "/common/openai-api-utils.js";
+import {sseFetch} from "/common/fetch-utils.js";
 import "/src/database.js";
 import {requestBackend} from "/src/database/remoteDB.js";
-import {config, EVENT_BUS} from "/src/states.js";
+import {EVENT_BUS} from "/src/states.js";
 import {deleteWithDrawback, downloadFile, showImageZoomView} from "/src/utils/utils.js";
 import {writeJPEG, writePNG} from "/common/imate.js";
 import {base64Encode} from "unconscious/common/Base64.js";
@@ -11,7 +11,8 @@ import {isIDB, kvListDel, kvListGet, kvListGetKeys} from "/src/database.js";
 import "./characterViewer.css";
 import {openWindow} from "/src/components/Windows.jsx";
 import {exportForCV_createConversation, exportForCV_openCharacterEditor} from "../BasicRoleplay.js";
-import {Icon_search} from "../../../src/components/Icons.jsx";
+import {Icon_search} from "/src/components/Icons.jsx";
+import {decodeObjects} from "/src/utils/serialization.js";
 
 const API_PREFIX = 'cards/';
 const limit = 8;
@@ -27,7 +28,7 @@ const cards = $asyncState(async page => {
 		try {
 			const data = await requestBackend(API_PREFIX+'?page=' + page + '&limit=' + limit + (term ? '&search=' + encodeURIComponent(term) : ''), undefined);
 			pages.value = Math.ceil(data.total / limit);
-			return data.data;
+			return decodeObjects(data.data);
 		} catch (e) {
 			mayUseBackend = false;
 		}
@@ -86,7 +87,6 @@ Only output the translation result, no explanations, no additional text.`,
 		],
 		reasoning: false,
 		stream: true,
-		temperature: 0.3,
 	});
 
 	let accumulated = '';
@@ -151,18 +151,21 @@ async function showDetail(c) {
 	openWindow({
 		id: "charCard-"+name,
 		icon: "卡",
+		width: 600,
+		height: 800,
 		title: name+(creator ? " by "+creator : ""),
 		element: () => renderMarkdownToElement(<div className="md"/>, text, { external: true, allowedTags })
 	})
 }
 
-function confirmDelete(name) {
+function confirmDelete(name, e) {
+	const isKeyboard = e.detail === 0;
 	deleteWithDrawback("角色 "+JSON.stringify(name), () => {
 		kvListDel(CHAR_TYPE, name).then(() => {
 			const idx = cards.findIndex(s => s.name === name);
 			if (idx >= 0) $update(currentPage);
 		});
-	}, () => {});
+	}, () => {}, isKeyboard);
 }
 
 const characters = $state([]);
@@ -173,7 +176,7 @@ EVENT_BUS.on(['kvs', CHAR_TYPE], (name) => {
 	if (idx >= 0) $update(currentPage);
 });
 
-export function createCharacterViewer() {
+export default function() {
 	currentPage.value = 1;
 	$update(currentPage);
 
@@ -207,7 +210,7 @@ export function createCharacterViewer() {
 				const text = c.creatorNotes || c.description;
 				if (text) renderMarkdownToElement(div, text.slice(0, 1000));
 
-				const src = c.image && (config.db_server + `blob/${c.image.hash}`);
+				const src = c.image?.toUrl();
 
 				return <div className="card">
 					<div className="cover">
@@ -227,7 +230,7 @@ export function createCharacterViewer() {
 					<div className="card-actions">
 						<button className="btn" title="导出角色卡数据" onClick={() => saveCard(c.name)}>导出</button>
 						<button className="btn" title="编辑人设" onClick={() => showEditModal(c.name)}>编辑</button>
-						<button className="btn delete" title="删除角色卡" onClick={() => confirmDelete(c.name)}>删除</button>
+						<button className="btn delete" title="删除角色卡" onClick={(e) => confirmDelete(c.name, e)}>删除</button>
 					</div>
 				</div>
 			}, JSON.stringify)}</div>

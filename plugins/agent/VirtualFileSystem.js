@@ -1,4 +1,5 @@
 import {NestedMap, NODE_VALUE} from "unconscious/common/NestedMap.js";
+import {FSE_NotFound, FSE_NotSupported, throwDOMException} from "../../common/pure-utils.js";
 
 const SOME = {};
 
@@ -22,8 +23,11 @@ export class VirtualFile {
 	async createWritable({ keepExistingData } = SOME) {
 		let text = keepExistingData ? await this._text() : '';
 		return {
-			write(data) {text += data;},
-			seek(pos) { throw new DOMException("Seek is not supported", "NotImplementedError"); },
+			async write(data) {
+				if (data instanceof Blob) data = await data.text();
+				else if (typeof data !== "string") throwDOMException("Binary is not supported yet", FSE_NotSupported);
+				text += data;},
+			seek(pos) {throwDOMException("Seek not implemented", FSE_NotSupported);},
 			close: async () => {
 				await this.fs.write(this.path, text);
 				this.text = text;
@@ -68,7 +72,7 @@ export class VirtualDirectory {
 	}
 	[Symbol.asyncIterator]() { return this.entries(); }
 
-	getDirectoryHandle(name, { create } = SOME) {
+	async getDirectoryHandle(name, { create } = SOME) {
 		const children = this.children;
 		const entries = children.get(name);
 		let hook;
@@ -76,31 +80,33 @@ export class VirtualDirectory {
 			return hook?.handle || new VirtualDirectory(this.fs, [...this.path, name], entries);
 		}
 
-		hook = children.get(NODE_VALUE)?.dir(name, create, this);
+		hook = await (children.get(NODE_VALUE)?.dir?.(name, create, this));
 		if (hook) return hook;
 
-		if (create) throw "Creating directory is not supported in current directory";
-		throw 'Not exist or not directory';
+		const message = (create?"CreateDir ":"ReadDir " )+JSON.stringify([...this.path, name].join('/'));
+		throwDOMException(message,create ? FSE_NotSupported : FSE_NotFound);
 	}
 
-	getFileHandle(name, { create } = SOME) {
+	async getFileHandle(name, { create } = SOME) {
 		const children = this.children;
 		const handle = children.get(name)?.get(NODE_VALUE);
 		if (handle?.read) {
 			return new VirtualFile(handle, [...this.path, name]);
 		}
 
-		const hook = children.get(NODE_VALUE)?.file(name, create, this);
+		const hook = await (children.get(NODE_VALUE)?.file?.(name, create, this));
 		if (hook) return hook;
 
-		if (create) throw "Creating file is not supported in current directory";
-		throw 'Not exist or not file';
+		const message = (create?"CreateFile ":"ReadFile " )+JSON.stringify([...this.path, name].join('/'));
+		throwDOMException(message,create ? FSE_NotSupported : FSE_NotFound);
 	}
 
-	removeEntry(name, options, { recursive } = SOME) {
-		const hook = this.children.get(NODE_VALUE)?.del;
+	async removeEntry(name, options, { recursive } = SOME) {
+		const hook = await (this.children.get(NODE_VALUE)?.del);
 		if (hook) return hook(name, recursive, this);
-		throw "Not supported";
+
+		const message = ("Delete " )+JSON.stringify([...this.path, name].join('/'));
+		throwDOMException(message, FSE_NotSupported);
 	}
 }
 

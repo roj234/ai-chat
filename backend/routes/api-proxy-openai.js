@@ -1,129 +1,15 @@
-import {
-	SSE_PROXY_BACKEND,
-	SSE_PROXY_MODERATION,
-	SSE_REF_CACHE_SIZE,
-	SSE_REF_TTL,
-	SSE_RESUME_CACHE_SIZE,
-	SSE_RESUME_TTL
-} from "../config.js";
-import {EventEmitter} from "node:events";
-import {applyDelta, sseFetch} from "../../common/openai-api-utils.js";
+import {SSE_PROXY_MODERATION, SSE_REF_CACHE_SIZE} from "../config.js";
+import {applyDelta, sseFetch} from "../../common/fetch-utils.js";
 import fs from "node:fs/promises";
-import {openAsBlob} from "node:fs";
 import path from "node:path";
 import {Transform} from 'node:stream';
-import {LRUCache} from "../../common/LRUCache.js";
 import {createJsonStream} from "../../common/StreamJsonSerializer.js";
 import {deepEntries} from "unconscious/common/json-schema-utils.js";
 import {isLanAddress} from "../../common/isLanAddress.js";
 import {getProxyAgent} from "../utils/socks5-agent.js";
-import {blobDB} from "./blob-storage.js";
-
-const log = (str, ...args) => console.log(`[SSE Proxy] `+str, ...args);
-
-/**
- * @type {Map<string, AiChatBackend.SSEProxyRequest>}
- */
-const activeRequests = new Map;
-/**
- * @type {LRUCache<string, AiChatBackend.SSEProxyRequest>}
- */
-let finishedRequests ;
-
-/**
- * 消息引用缓存：hash -> 完整消息对象
- * 命中后客户端无需重复上传历史消息内容，仅引用 hash
- * @type {LRUCache<string, OpenAI.Message[]>}
- */
-let messageCache;
-
-/**
- * @param {OpenAI.Message[]} messages
- * @param {string} blobDir
- * @returns {Promise<[OpenAI.Message[], string[]]>}
- */
-async function processMessageRefs(messages, blobDir) {
-	if (messageCache?.capacity !== SSE_REF_CACHE_SIZE) {
-		messageCache = new LRUCache(SSE_REF_CACHE_SIZE, SSE_REF_TTL ? { ttlMode: "access" } : null);
-	}
-
-	const missing = new Set;
-	const created = new Set;
-	const output = [];
-
-	let blockIndex, blockHash;
-
-	const endCacheBlock = () => {
-		if (blockHash) {
-			if (blockIndex === i) throw new Error("Empty cache_block");
-			messageCache.set(blockHash, messages.slice(blockIndex, i), SSE_REF_TTL);
-			created.add(blockHash);
-			blockHash = null;
-		}
-	};
-
-	let i = 0;
-	for (; i < messages.length; i++) {
-		const m = messages[i];
-
-		if (m.role === 'cache_end') {
-			endCacheBlock();
-		} else if (m.role === 'cached') {
-			endCacheBlock();
-
-			const cached = messageCache.get(m.id);
-			if (!cached) missing.add(m.id);
-			else output.push(...cached);
-		} else if (m.role === 'cache_new') {
-			endCacheBlock();
-
-			blockHash = m.id;
-			if (!blockHash) throw new Error("Invalid hash in cache_block");
-			blockIndex = i+1;
-		} else {
-			output.push(m);
-		}
-	}
-	endCacheBlock();
-
-	if (missing.size) return [null, [...missing]];
-
-	const tasks = [];
-
-	for (const [val, own, key] of deepEntries(output)) {
-		if (val?.$ === 'BlobH') {
-			const hash = val.hash;
-			const hashBuf = Buffer.from(hash, 'base64url');
-			const row = blobDB.prepare('SELECT name, type FROM blobs WHERE hash = ?').get(hashBuf);
-
-			const err = () => {throw new Error("附件 "+(val.name || row?.name || hash)+" 丢失或损坏");};
-			if (!row) err();
-
-			const filePath = path.join(blobDir, hash.slice(0, 2).toLowerCase(), hash);
-			tasks.push(openAsBlob(filePath, { type: row.type }).then((blob) => own[key] = blob, err));
-		}
-	}
-	await Promise.all(tasks);
-
-	return [output, [...created]];
-}
-
-function checkToken(ctx) {
-	let {authorization} = ctx.req.headers;
-	if (!authorization?.startsWith("Bearer ")) return ctx.send(403, { error: 'unknown key' });
-	authorization = authorization.slice(7);
-
-	let target = SSE_PROXY_BACKEND[authorization] || SSE_PROXY_BACKEND['default'];
-	if (!target?.url) return ctx.send(403, { error: 'unknown key' });
-	if (!target.authorization) {
-		target = {
-			...target,
-			authorization
-		}
-	}
-
-	return target;
-}
+import {responsesProxyHandler} from "./api-proxy-responses.js";
+import {apiProxyLog as log, checkToken, processMessageRefs} from "./api-proxy-utils.js";
+import {finishedRequests, ProxyResumeManager, registerResumeRoutes} from "./api-proxy-resume.js";
 
 /**
  * 创建一个限制大小的可读流
@@ -177,16 +63,17 @@ const ONCE_KEYS = [
  * @return {Promise<void>}
  */
 async function SSEHandler(logPath, apiPath, blobDir, ctx) {
-	let result = checkToken(ctx);
-	if (!result) return;
-	let {url: baseUrl, authorization, proxy: proxyUrl, headers, trace} = result;
+	let target = checkToken(ctx);
+	if (!target) return;
+	const format = target.format ?? 'openai';
+	if (format === 'responses') return responsesProxyHandler(target, logPath, blobDir, ctx);
+	if (format !== 'openai') return ctx.send(500, { error: "unsupported format "+format })
+
+	let {url: baseUrl, authorization, proxy: proxyUrl, headers, trace} = target;
 	if (!baseUrl.endsWith("/")) baseUrl += '/';
 
 	const moderation = SSE_PROXY_MODERATION(baseUrl, authorization, ctx);
-	if (moderation && typeof moderation !== "function") {
-		ctx.send(400, moderation);
-		return;
-	}
+	if (moderation && typeof moderation !== "function") return ctx.send(400, moderation);
 
 	const MAX_BODY_LENGTH = 20971520;
 	let body;
@@ -241,10 +128,6 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 		//duplex = 'half';
 	}
 
-	if (finishedRequests?.capacity !== SSE_RESUME_CACHE_SIZE) {
-		finishedRequests = new LRUCache(SSE_RESUME_CACHE_SIZE, SSE_RESUME_TTL ? { ttlMode: "update" } : null);
-	}
-
 	const extraHeaders = {};
 	for (let key in ctx.req.headers) {
 		/// for OpenRouter attribution and/or DSH fake
@@ -253,32 +136,13 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 		}
 	}
 
-	let completion = {};
-	/** @type {AiChatBackend.SSEProxyRequest} */
-	let proxyRequest;
-	function writeTrace(data) {
-		return proxyRequest._append = proxyRequest._append.then(() =>
-			fs.appendFile(proxyRequest._fileName, '\n' + data)
-		, err => log('写入 trace 失败', err));
-	}
-	function sendChunk(serialized) {
-		if (!ctx.res.closed) ctx.res.write(`data: ${serialized}\n\n`);
-		// log every chunk
-		if (trace === 'packet') writeTrace(serialized);
-		proxyRequest.event.emit('data', serialized);
-	}
-
-	let hasError;
-	const startTime = Date.now();
-	const abort = new AbortController();
+	const pm = new ProxyResumeManager(ctx, body, trace && logPath);
+	const completion = pm.completion;
 
 	try {
 		const optionalParams = baseUrl+apiPath;
-		if (trace) log('请求发送', optionalParams);
 
-		ctx.res.on('close', () => {
-			if (!proxyRequest) abort.abort();
-		});
+		ctx.res.once('close', () => pm.end());
 
 		await sseFetch(optionalParams, {
 			body,
@@ -287,14 +151,14 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 				...extraHeaders,
 				...headers
 			},
-			signal: abort.signal,
+			signal: pm.abort.signal,
 			agent: getProxyAgent(proxyUrl),
 			key: authorization
-		}, (chunk, isPlainJson) => {
+		}, (chunk, eventType) => {
 			const now = Date.now();
 			const id = chunk.id;
 
-			if (isPlainJson === '\0') {
+			if (eventType === '\0') {
 				if (firstChunk) Object.assign(chunk, firstChunk);
 				const response = JSON.stringify(chunk);
 
@@ -309,37 +173,15 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 				}
 
 				ctx.res.writeHead(200, { 'Content-Type': 'application/json' });
-				ctx.res.write(response);
+				ctx.res.end(response);
 				return;
 			}
 
-			if (!proxyRequest) {
-				log('响应开始', id);
+			if (!pm.req) {
 				if (null == id) return;
-
-				activeRequests.set(id, proxyRequest = {
-					id,
-					abort,
-					data: completion,
-					event: new EventEmitter,
-					isFinished: false
-				});
-
-				if (trace) {
-					const fileName = `${logPath}/${encodeURIComponent(id)}_${now%1000}.jsonl`;
-					proxyRequest._fileName = fileName;
-					proxyRequest._append = fs.mkdir(logPath, {recursive: true})
-						.then(() => fs.appendFile(fileName, traceBody))
-						.catch(err => log('写入 trace 失败', err));
-				}
-
-				ctx.res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-				if (firstChunk) sendChunk(JSON.stringify(firstChunk));
-
-				completion.resumable = chunk.resumable = { start: startTime, now };
+				chunk.resumable = pm.begin(id);
+				if (firstChunk) pm.send(JSON.stringify(firstChunk));
 			}
-
-			proxyRequest.lastUpdated = now;
 
 			const {choices, text, ...rest} = chunk;
 			if (choices) {
@@ -363,7 +205,7 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 					const role = delta.role;
 					if (role && role === compChoice.delta.role) delete delta.role;
 
-					if (null == resumable.re && delta.content) {
+					if (null == resumable.re && (delta.content || delta.tool_calls)) {
 						resumable.now = resumable.re = now;
 						chunk.resumable = resumable;
 					}
@@ -384,57 +226,12 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 			}
 
 			Object.assign(completion, rest);
-			sendChunk(JSON.stringify(chunk));
+			pm.send(JSON.stringify(chunk));
 		});
 	} catch (err) {
-		const id = proxyRequest?.id;
-		if (err.name === 'AbortError') {
-			log('请求中止', id);
-		} else {
-			if (err.message === "fetch failed") {
-				err = err.cause;
-			}
-
-			log('请求出错', id, err);
-
-			let {status = 500, message} = err;
-			try {
-				message = JSON.parse(message);
-			} catch {}
-			const obj = message.error ? message : { error: message };
-
-			if (proxyRequest) {
-				sendChunk(JSON.stringify(obj));
-			} else {
-				ctx.send(status, obj);
-			}
-			hasError = true;
-
-			// 确保源连接被释放，避免 hang 住
-			ctx.req.destroy();
-		}
+		pm.onError(err);
 	} finally {
-		if (proxyRequest) {
-			if (!hasError) log('响应结束', proxyRequest.id);
-
-			completion.resumable.end = true;
-			proxyRequest.isFinished = true;
-			proxyRequest.event.emit('end');
-			proxyRequest.event.removeAllListeners();
-
-			delete proxyRequest.event;
-			delete proxyRequest.abort;
-
-			activeRequests.delete(proxyRequest.id);
-			finishedRequests.set(proxyRequest.id, proxyRequest, SSE_RESUME_TTL);
-
-			if (trace === true) {
-				await writeTrace(JSON.stringify(proxyRequest.data));
-			}
-		}
-		abort.abort();
-
-		if (!hasError && !ctx.res.closed) ctx.res.end();
+		pm.end(true);
 	}
 }
 
@@ -497,12 +294,7 @@ export function registerSSEProxyRoutes(router, dataPath) {
 	const logPath = path.join(dataPath, "logs");
 	const blobDir = path.join(dataPath, "blobs");
 
-	finishedRequests = new LRUCache(SSE_RESUME_CACHE_SIZE, SSE_RESUME_TTL ? { ttlMode: "update" } : null);
-
 	// 调试用
-	router.get("/trace", (ctx) => {
-		ctx.send(200, { generating: [...activeRequests.keys()], finished: [...finishedRequests.keys()] });
-	});
 	router.delete("/cache", (ctx) => {
 		modelCache.clear();
 		finishedRequests.clear();
@@ -550,48 +342,5 @@ export function registerSSEProxyRoutes(router, dataPath) {
 	router.post('/chat/completions', SSEHandler.bind(null, logPath, "chat/completions", null));
 	router.post('/completions', SSEHandler.bind(null, logPath, "completions", null));
 
-	router.post('/resume/:id', (ctx) => {
-		const {id} = ctx.params;
-		const state = activeRequests.get(id) ?? finishedRequests.get(id);
-		if (!state) return ctx.send(404, { error: "not found" });
-
-		const {data, event, isFinished} = state;
-
-		const res = ctx.res;
-		if (!ctx.req.headers['accept']?.includes("text/event-stream")) {
-			res.writeHead(400, { 'Content-Type': 'application/json' });
-			res.end(JSON.stringify(data));
-			return;
-		}
-
-		const onData = (text) => res.write(`data: ${text}\n\n`);
-		const onEnd = () => res.end(`data: [DONE]\n\n`);
-
-		// 如果是多线程，这里可能需要加锁，但是JS是谦让式协程，所以没什么好担心的
-		if (!data.resumable.end) data.resumable.now = Date.now();
-
-		res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-		onData(JSON.stringify(data));
-
-		if (isFinished) { onEnd(); return; }
-
-		event.on('data', onData);
-		event.once('end', onEnd);
-
-		res.on('close', () => event.off('data', onData));
-	});
-	router.post('/abort/:id', (ctx) => {
-		const {id} = ctx.params;
-		const state = activeRequests.get(id) ?? finishedRequests.get(id);
-
-		if (state) {
-			if (activeRequests.delete(id)) {
-				state.abort.abort();
-			} else {
-				finishedRequests.delete(id);
-			}
-			return ctx.send(200, { success: true });
-		}
-		ctx.send(404, { error: "not found" });
-	});
+	registerResumeRoutes(router);
 }

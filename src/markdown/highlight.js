@@ -1,5 +1,4 @@
 import hljs from "/vendor/hljs/core.js";
-import morphdom from "morphdom";
 import './highlight-theme.css';
 
 import {ITEM_KEY, VirtualList} from "unconscious/common/VirtualList.js";
@@ -8,6 +7,8 @@ import {selectableVirtualListMixin} from "unconscious/common/selectableVirtualLi
 import {VOID_TAGS} from "fastmd";
 import json5 from "/common/json5-highlight.js";
 import {inspect} from "unconscious/common/inspect.js";
+import {patchChildren} from "/common/morphpostfix.js";
+import {queueMacrotask} from "unconscious/common/queueMacrotask.js";
 
 hljs.registerLanguage('json5', json5);
 
@@ -34,18 +35,16 @@ export const lightAsync = (code, language, onDone, shouldStop) => {
 
 	const step = () => {
 		if (cancelled || shouldStop?.()) return;
-		const start = performance.now();
-		// Monkey Patch: yield every 256 time regexp matches
-		while (!(result = gen.next()).done) {
-			if (performance.now() - start > 8) {
-				requestAnimationFrame(step);
-				return;
-			}
+
+		if (!(result = gen.next()).done) {
+			queueMacrotask(step);
+			return;
 		}
+
 		if (!cancelled) onDone(result.value.value);
 	};
 
-	requestAnimationFrame(step);
+	queueMacrotask(step);
 	return () => { cancelled = true; };
 };
 
@@ -61,7 +60,7 @@ export const splitMultilineHTML = (rawHtml, openTagsStack = []) => {
 	const lines = rawHtml.split('\n');
 	return lines.map((lineContent, index) => {
 		// 1. 在行首补全之前未闭合的标签
-		let prefix = openTagsStack.map(tag => tag.full).join('');
+		let prefix = openTagsStack.join('');
 
 		// 2. 分析当前行新增的标签状态
 		// 匹配 <span class="..."> 或 </span>
@@ -71,7 +70,7 @@ export const splitMultilineHTML = (rawHtml, openTagsStack = []) => {
 
 		while ((match = tagRegex.exec(lineContent)) !== null) {
 			if (match[1] === 'span') { // 开始标签
-				openTagsStack.push({name: 'span', full: match[0]});
+				openTagsStack.push(match[0]);
 			} else if (match[3] === 'span') { // 闭合标签
 				openTagsStack.pop();
 			}
@@ -84,17 +83,37 @@ export const splitMultilineHTML = (rawHtml, openTagsStack = []) => {
 	});
 };
 
+const PATCH_TEMPLATE = <template/>;
+
+/**
+ * 用高亮后的 HTML 更新 element 的内容，尽量沿用原有节点。
+ *
+ * 简化版 morphdom：不比较 key、不处理事件，只做「同类型就地更新，分叉处整体替换」。
+ * 高亮每次都是增量重算的，前缀几乎总是不变，沿用这些节点省掉了多余的重排，
+ * 也不会像 innerHTML 一样重建文本节点、打断正在流式输出的选区。
+ *
+ * @param {Element} element
+ * @param {string} html
+ */
+const patchHtml = (element, html) => {
+	PATCH_TEMPLATE.innerHTML = html;
+	patchChildren(element, PATCH_TEMPLATE.content);
+};
+
 const getOrCreateVL = node => {
 	let vl = node._vl;
-	if (!vl) {
-		node._vl = vl = new VirtualList({
+	if (!vl?._wrapper) {
+		vl = node._vl = new VirtualList({
 			overscan: 50,
 			itemHeight: null,
 			data: [{text: ""}],
 			renderer: (item, index) => <div className={'line'} dangerouslySetInnerHTML={item.text ?? item}/>,
 			keyFunc: (item) => item.text ?? item
 		});
-		$cleanup(node, () => vl.destroy());
+		$cleanup(node, () => {
+			vl.destroy();
+			delete node._vl;
+		});
 	}
 	return vl;
 };
@@ -116,32 +135,53 @@ export const highlight = (code, language, node, is_finished) => {
 		if (is_finished) {
 			delete node._cache;
 
-			lightAsync(code, language, (value) => {
-				const canScroll = node.scrollHeight > node.offsetHeight;
-				if (!canScroll) { node.innerHTML = value; return; }
-				node.style.height = node.offsetHeight + 'px';
-				//const scrollTop = node.scrollTop;
+			const lines = code.split('\n');
 
-				const lines = code.split('\n');
-				node._value = code;
+			const needVirtualList = lines.length > 50;
 
-				const virtualList = getOrCreateVL(node);
+			let virtualList;
+			const installVirtualList = () => {
+				virtualList = getOrCreateVL(node);
 				node.replaceChildren(virtualList.dom);
-				virtualList.attach(node/*, true*/);
-				// noinspection JSPrimitiveTypeWrapperUsage
-				virtualList.items = splitMultilineHTML(value, []).map(s => new String(s));
-
+				virtualList.attach(node);
 				selectableVirtualListMixin(virtualList, (line) => lines[line]);
+			};
 
-				virtualList._visible = true;
-				virtualList.resize();
-				node.scrollTop = 1e9;
-			}, () => !node.isConnected);
+			if (node.childNodes.length === 0) {
+				if (needVirtualList) {
+					installVirtualList();
+					// noinspection JSPrimitiveTypeWrapperUsage
+					virtualList.setItems(lines.map(s => new String(s)));
+					node.style.height = '50lh';
+				} else {
+					node.textContent = code;
+				}
+			}
+
+			if (language) {
+				lightAsync(code, language, (value) => {
+					if (!needVirtualList) { node.innerHTML = value; return; }
+					node.style.height = '50lh';
+					node._value = code;
+
+					if (!virtualList) installVirtualList();
+					// noinspection JSPrimitiveTypeWrapperUsage
+					virtualList.items = splitMultilineHTML(value).map(s => new String(s));
+
+					// 避免同步布局
+					queueMacrotask(() => virtualList.scrollToBottom());
+				}, () => !node.isConnected);
+			} else {
+				if (virtualList)
+					queueMacrotask(() => virtualList.scrollToBottom());
+			}
 			return;
 		}
 
 		let cache = node._cache;
-		if (!cache) {
+		if (!cache || !node._vl) {
+			if (!node.isConnected) return;
+
 			const virtualList = getOrCreateVL(node);
 			node._cache = cache = { work: <span/>, pos: 0 };
 			node.replaceChildren(virtualList.dom);
@@ -152,7 +192,7 @@ export const highlight = (code, language, node, is_finished) => {
 		let newCode = code.slice(cache.pos);
 		let newHtml = lightSync(newCode, language);
 
-		// 除去白名单内的流式语言（例如JSON），在单行内应用 morphdom
+		// 除去白名单内的流式语言（例如JSON），在单行内做增量 DOM 更新
 		// 是的这就是他妈的比 shiki-stream 快，你去 benchmark 吧
 		// 但是不支持 subLanguage 比如 JS/CSS in HTML 因为没有上下文
 		let stableHtml = (fullStreamableLanguages.has(language) || newCode.includes("\n")) && trimLastTopLevelElement(newHtml);
@@ -209,8 +249,11 @@ export const highlight = (code, language, node, is_finished) => {
 			}
 		}
 
-		// 动态部分
-		morphdom(staging, `<span>${newHtml}</span>`);
+		// 动态部分：只重建变化的那部分，其余节点原地保留（避免打断流式输出时的选区）
+		if (staging._html !== newHtml) {
+			patchHtml(staging, newHtml);
+			staging._html = newHtml;
+		}
 		vl.scrollTo(node.scrollHeight);
 	};
 
@@ -228,6 +271,8 @@ export const highlight = (code, language, node, is_finished) => {
 					delete node.dataset.processed;
 					callback(code);
 				});
+			} else {
+				if (is_finished) callback(code);
 			}
 		}
 

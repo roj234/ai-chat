@@ -1,9 +1,10 @@
 import {
 	abortCompletion,
+	auxMainlyTouch,
+	auxSmallScreen,
 	config,
-	ensureActiveConversation,
+	ensureConversation,
 	inputText,
-	isMobile,
 	lastScrollDirectionIsUp,
 	messages,
 	selectedConversation
@@ -13,12 +14,14 @@ import {AttachmentGallery, blobToContentPart} from "./AttachmentGallery.jsx";
 import {CUSTOM_CONTROLS} from "../settings.js";
 import {createSendButton} from "./SendButton.jsx";
 import {bind} from "../utils/utils.js";
-import {$computed, $state, $update, $watch, unconscious} from "unconscious";
+import {$derived, $state, $update, $watch, unconscious} from "unconscious";
 import {handleCommand} from "../commands.js";
 import SimpleModal from "./SimpleModal.jsx";
-import {getBlob, getCombinedPreset} from "../database.js";
+import {getBlob} from "../database.js";
 import {webviewUploadImage} from "/vendor/jsBridge.js";
 import {Recorder} from "/plugins/voiceInput/Recorder.jsx";
+import {getCombinedPreset} from "../presets.js";
+import {closeWindow, openWindow} from "./Windows.jsx";
 
 export const createUserInputComposer = (scroller) => {
 	/** @type {import("unconscious").Reactive<OpenAI.ContentPart[]>} */
@@ -34,7 +37,7 @@ export const createUserInputComposer = (scroller) => {
 		target.value = '';
 	}}/>;
 
-	$watch([selectedConversation, $computed(() => config.modalities)], () => {
+	$watch([selectedConversation, $derived(config.modalities)], () => {
 		if (selectedConversation.id === 0) {
 			fileInput.accept = "*";
 			return;
@@ -66,8 +69,10 @@ export const createUserInputComposer = (scroller) => {
 		if (blob) blobToContentPart(blob, 0 === selectedConversation.id, attachments);
 	};
 
-	const element = (<div className="composer" class:hidden={() => isMobile && unconscious(lastScrollDirectionIsUp)}>
-		<div className="logo hide-human">
+	const debon = $derived(config.temporaryChat);
+	const element = (<div className="composer" class:hidden={() => auxSmallScreen && unconscious(lastScrollDirectionIsUp)}>
+		<div className="logo col hide-human">
+			{() => unconscious(debon) ? <div className="row"><i className="ri-eye-off-line" />临时<span className="tooltip">新对话的数据不会保存，并将在刷新后丢失</span></div> : null}
 			<span style={{
 				display: "flex",
 				alignItems: "flex-end",
@@ -82,15 +87,15 @@ export const createUserInputComposer = (scroller) => {
 				}} title={"返回底部"}/>
 		<div className="query">
 			<h1 className={"drag"}>松开上传</h1>
-			<textarea placeholder="有事尽管问我" id="userInput" ref={userInput}
+			<textarea placeholder="有事尽管问我" className="userInput" enterkeyhint="send" ref={userInput}
 					  onInput={() => {
 						  // Auto resize when typing
 						  userInput.style.height = '';
 						  userInput.style.height = (userInput.scrollHeight) + 'px';
 					  }}
 					  onKeyDown={(e) => {
-						  if (isMobile) return;
-						  if (e.key === 'Enter' && !e.shiftKey) {
+						  if (auxMainlyTouch) return;
+						  if (!e.isComposing && e.key === 'Enter' && !e.shiftKey) {
 							  e.preventDefault();
 							  if (!unconscious(abortCompletion)) onSend();
 						  }
@@ -101,30 +106,31 @@ export const createUserInputComposer = (scroller) => {
 				<div className="row hide-human">{CUSTOM_CONTROLS}</div>
 				<div className="spacer"></div>
 				<div className="dropdown">
-					<button className="ri-attachment-2 btn ghost" title="添加附件" onClick={isMobile ? undefined : () => fileInput.click()}></button>
+					<button className="ri-attachment-2 btn ghost" title="添加附件" onClick={() => {
+						if (auxMainlyTouch) return;
+						fileInput.click()
+					}}></button>
 					<div className="list mid up">
 						{IS_ANDROID_BUILD && <label className="ri-camera-4-fill" onClick={() => {
 							webviewUploadImage().then(blobCallback)
 						}}>
 							拍摄照片
 						</label>}
-						<label className="ri-mic-fill" onClick={() => {
-							const modal = <div className={'modal-overlay'}>
-								<div className={'modal'} onClick={(e) => e.stopPropagation()}>
-									<div className={"header"}>
-										<b>录音机</b>
-										<div className={"spacer"} />
-										<button className="ri-close-line btn ghost" onClick={() => modal.remove()} title={"关闭"} />
-									</div>
-									<Recorder onSubmit={(blob) => {
-										blobCallback(blob);
-										modal.remove();
-									}}/>
-								</div>
-							</div>;
-							document.body.append(modal);
+						<label className="ri-mic-fill" role="button" tabIndex={0} onClick={() => {
+							const handle = openWindow({
+								id: 'recorder',
+								icon: <i className={"ri-mic-fill"}></i>,
+								title: "录音机",
+								element: () => <div style={"padding:8px"}><Recorder onSubmit={(blob) => {
+									blobCallback(blob);
+									closeWindow(handle);
+								}}/></div>,
+								width: 500,
+								height: 230,
+								resizable: false
+							});
 						}}>录制语音</label>
-						<label className="ri-attachment-2" onClick={() => fileInput.click()}>选择文件</label>
+						<label className="ri-attachment-2" role="button" tabIndex={0} onClick={() => fileInput.click()}>选择文件</label>
 					</div>
 				</div>
 
@@ -300,14 +306,14 @@ export const createUserInputComposer = (scroller) => {
 
 			messages.push(userMessage);
 		} else {
-			if (sendButton.disabled) return;
+			if (sendButton.firstElementChild.disabled) return;
 		}
 
 		scrollMessagesToBottom();
 
 		if (noAI) return;
 
-		await ensureActiveConversation();
+		await ensureConversation();
 
 		if (config.reviewMessage && input) return;
 		submitUserChatMessage(true);

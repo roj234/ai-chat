@@ -1,14 +1,14 @@
 import {getKV, setKV} from "/src/database.js";
-import {SETTINGS} from "/src/settings.js";
-import {$computed, $state, $watch, unconscious} from "unconscious";
-import {config, isMobile} from "/src/states.js";
+import {GLOBAL_SETTINGS} from "/src/settings.js";
+import {$derived, $state, $watch, unconscious} from "unconscious";
+import {auxSmallScreen, config} from "/src/states.js";
 import {onLoad} from "/src/hooks.js";
 import "./customBackground.css";
 
 /** @type {import('unconscious').Reactive<Blob>} */
 const BG_BLOB = $state(), FONT_BLOB = $state();
 /** @type {import('unconscious').Reactive<'cover' | 'contain' | 'stretch' | 'tile' | 'center'>} */
-const BG_FIT = $computed(() => config.backgroundFit);
+const BG_FIT = $derived(config.backgroundFit);
 
 let blurredTrack;
 
@@ -25,7 +25,7 @@ onLoad(() => {
 		if (!blob) { style.background = ''; blurredTrack.style.display = 'none'; return; }
 		let url = blob.toUrl();
 
-		const pos = isMobile ? 'center top' : 'center center';
+		const pos = auxSmallScreen ? 'center top' : 'center center';
 		const fit = unconscious(BG_FIT);
 		let bgStyle;
 
@@ -60,26 +60,28 @@ onLoad(() => {
 	});
 });
 
-SETTINGS.push({
+const MyControl = ({accept, state, id}) => <div className="choice-scroll radio row">
+	<label className="btn chip" class:active={() => !!unconscious(state)}>
+		设置
+		<input type={"file"} accept={accept} style={"display:none"}
+			   onChange={({target}) => {
+				   const file = target.files[0];
+				   setKV(id, state.value = file);
+			   }}/>
+	</label>
+	<button className={"btn danger"} style="border-radius:0" onClick={() => {
+		setKV(id, state.value = undefined);
+	}}>清除
+	</button>
+	<span style="margin-left:8px">{() => state.name}</span>
+</div>
+
+GLOBAL_SETTINGS.push({
 	type: "element",
 	_tab: "customize",
 	name: "聊天背景",
-	element: <div className={"choice-scroll"}>
-		<label className={"btn ghost"}>
-			设置
-			<input type={"file"} accept={"image/*"} style={"display:none"}
-				   onChange={({target}) => {
-					   const file = target.files[0];
-					   setKV("chat-background", BG_BLOB.value = file);
-				   }}/>
-		</label>
-		<button className={"btn danger"} onClick={() => {
-			setKV("chat-background", BG_BLOB.value = undefined);
-		}}>清除
-		</button>
-		{() => BG_BLOB.name}
-	</div>
-},{
+	element: <MyControl accept="image/*" state={BG_BLOB} id="chat-background" />
+}, {
 	type: "radio",
 	required: true,
 	_tab: "customize",
@@ -92,23 +94,9 @@ SETTINGS.push({
 		"平铺": "tile",
 		"居中": "center"
 	},
-},{
+}, {
 	type: "element",
 	_tab: "customize",
 	name: "聊天字体",
-	element: <div className={"choice-scroll"}>
-		<label className={"btn ghost"}>
-			设置
-			<input type={"file"} accept={"application/font-*"} style={"display:none"}
-				   onChange={({target}) => {
-					   const file = target.files[0];
-					   setKV("chat-font", FONT_BLOB.value = file);
-				   }}/>
-		</label>
-		<button className={"btn danger"} onClick={() => {
-			setKV("chat-font", FONT_BLOB.value = undefined);
-		}}>清除
-		</button>
-		{() => FONT_BLOB.name}
-	</div>
+	element: <MyControl accept=".ttf,.otf,.fnt,.woff,.woff2" state={FONT_BLOB} id="chat-font" />
 });

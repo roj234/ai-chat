@@ -1,7 +1,8 @@
 import {$update, unconscious} from "unconscious";
 import {EVENT_BUS, LOCKED, messages, runningConversations, selectedConversation, updateMessageUI} from "/src/states.js";
-import {getMessagesCacheFirst, updateConversation} from "/src/database.js";
+import {getMessages, updateConversation} from "/src/database.js";
 import {submitUserChatMessage} from "./api-request.js";
+import {lockConversation, unlockConversation} from "./conversation-lock.js";
 
 /**
  * 向会话注入消息。
@@ -18,12 +19,18 @@ export const injectMessages = async (conv, ...items) => {
 		return false;
 	}
 
-	const msgs = await getMessagesCacheFirst(conv);
-	if (msgs.at(-1)?.error) return false;
+	let msgs, last;
+	lockConversation(conv.id);
+	try {
+		msgs = await getMessages(conv);
+		if (msgs.at(-1)?.error) return false;
 
-	const last =  msgs.at(-1);
-	msgs.push(...items);
-	await updateConversation(conv, msgs);
+		last = msgs.at(-1);
+		msgs.push(...items);
+		await updateConversation(conv, msgs);
+	} finally {
+		unlockConversation(conv.id);
+	}
 
 	if (unconscious(selectedConversation)?.id === conv.id) {
 		messages.value = msgs;

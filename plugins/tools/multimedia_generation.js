@@ -1,20 +1,20 @@
 import {ContentPart, getToolParameters, registerToolset} from "/src/toolset.js";
 import complete from "/media/complete.js";
-import {SETTINGS} from "/src/settings.js";
+import {GLOBAL_SETTINGS} from "/src/settings.js";
 import {config} from "/src/states.js";
 import {AudioPlayer} from "/src/components/AudioPlayer.jsx";
 import {isPureObject} from "unconscious";
-import {loadingBlock} from "/src/utils/utils.js";
-import {jsonFetch} from "/common/openai-api-utils.js";
+import {getRandomString, loadingBlock} from "/src/utils/utils.js";
+import {jsonFetch} from "/common/fetch-utils.js";
 import "./multimedia_generation.css";
 import {DI_settings, onLoad} from "/src/hooks.js";
 import {parseJson5} from "unconscious/common/Json.js";
 
 import {compressImage, limitMaxSide} from "/common/imate.js";
-import {getCombinedPreset} from "/src/database.js";
 import {fileAccess} from "../agent/index.js";
 import {TemplateFormatter} from "/common/template-formatter.js";
 import {normalizePath} from "unconscious/common/path-utils.js";
+import {getCombinedPreset} from "/src/presets.js";
 
 /**
  * 将 ComfyUI 流程模板发送至服务器并获取生成的图像 Blob
@@ -165,14 +165,15 @@ const Draw = {
 	script: ({ prompt, aspectRatio, longEdge, options, saveTo }, context, conv) => {
 		const [width, height] = calculateResolution(aspectRatio, longEdge);
 
-		const seed = parseInt(Math.random().toString(36).slice(2), 36);
+		const seed = new Uint8Array(4);
+		crypto.getRandomValues(seed);
 
 		return generateImage(config.mg_img_api, {
 			sampler_name: "Euler",
 			cfg_scale: 1,
 			steps: 8,
 			negativePrompt: '',
-			seed,
+			seed: new DataView(seed.buffer).getInt32(0),
 			prompt,
 			longEdge,
 			width,
@@ -184,7 +185,7 @@ const Draw = {
 			// TODO 如果保存到文件，就不要再留一份Blob
 			context.images = images;
 
-			let basePath = saveTo && normalizePath(saveTo+'/'+Math.random().toString(36).slice(3, 10)).join('/');
+			let basePath = saveTo && normalizePath(saveTo+'/'+getRandomString(4)).join('/');
 			const result = new ContentPart();
 			const blob = images[0];
 
@@ -339,7 +340,7 @@ const DesignVoice = {
 
 export const registerMultimediaGeneration = () => {
 	const DATALIST_ID = "DL-imageApiProvider";
-	SETTINGS.push({
+	GLOBAL_SETTINGS.push({
 		id: "mg_img_api",
 		_tab: "tools",
 		name: "[MultimediaGeneration] v2.0 (弃用)\n\n图像生成API",

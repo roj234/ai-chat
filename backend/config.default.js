@@ -1,8 +1,9 @@
 /**
  * AIChat 配置文件
- * 修改此文件立即生效。
+ * 请勿修改 config.default.js
+ * 修改 config.js 实时生效。
  * 有关把key写在独立的文件里，或使用正则表达式过滤敏感词等高级功能，见 文档 -> 服务端配置
- * 当然，修改那些文件不会立即生效，你可以touch一下这个文件
+ * 修改那些文件不会立即生效，你可以touch一下这个文件，或者用监听器……之后再说吧
  */
 
 // ==========================================
@@ -74,6 +75,9 @@ export const WEBSOCKET_SYNC_BASE = (ctx) => {
 	// 或相对于网页的URL（谨慎使用，不兼容安卓）
 	return `@sync`;
 };
+
+/** 实例 ID（用来确定同一台服务器），如果是空字符串，下次服务器启动时会随机生成 */
+export const INSTANCE_ID = '';
 
 /** 是否开启用户注册限制 */
 export const RESTRICT_USER_CREATION = false;

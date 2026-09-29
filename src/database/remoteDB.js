@@ -1,18 +1,26 @@
 import {config, EVENT_BUS} from "../states.js";
-import {decodeObjects, encodeObjects, serializeJSON} from "../utils/marshal.js";
+import {decodeObjects, encodeObjects, serializeJSON} from "../utils/serialization.js";
 import {initSync} from "./syncClient.js";
 import {decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
 import {msgpack_schema, msgpack_schema_version} from "/common/wire-compression-schema.js";
 import {SHA256} from "unconscious/common/SHA256.js";
 import {base64Encode} from "unconscious/common/Base64.js";
-import {prettyError, requestIdleCallback, resolveDBRelativeURL} from "../utils/utils.js";
+import {prettyError, resolveDBRelativeURL} from "../utils/utils.js";
 import {$store, $update, AS_IS, debugSymbol, unconscious} from "unconscious";
 import SimpleModal from "../components/SimpleModal.jsx";
 import {delta, patch, rep} from "unconscious/common/deepEqual.js";
 import {PROTOCOL_VERSION} from "/backend/sync.js";
-import {DIFF_SNAPSHOT, MESSAGES_CACHE} from "../database.js";
+import {
+	DIFF_SNAPSHOT,
+	getImmediateMessages,
+	IdempotencyKeyForReplay,
+	remoteDBUrl,
+	setRemoteDBUrl
+} from "../database.js";
 import {LRUCache} from "/common/LRUCache.js";
-import {sleep} from "/common/pure-utils.js";
+import {sleep, throwDOMException} from "/common/pure-utils.js";
+import {jsonFetch} from "/common/fetch-utils.js";
+import {showToast} from "../components/Toast.js";
 
 let clientId;
 
@@ -31,14 +39,10 @@ export const serializeMsgpack = async (obj) => {
 	return encodeMsg(obj, msgpack_schema, mapping.size ? (value) => mapping.get(value) ?? value : null);
 };
 
-/** @type {string} */
-let dbUrl = config.db_server;
 /** @type {boolean} */
 export let serverAcceptMsgpack;
 
 export const requestBackend = async (path, {body, method} = {}) => {
-	if (!dbUrl.endsWith('/')) config.db_server = dbUrl += '/';
-
 	const headers = {
 		'Accept': 'application/vnd.msgpack,application/json',
 		'Content-Type': serverAcceptMsgpack ? 'application/vnd.msgpack' : 'application/json',
@@ -58,9 +62,11 @@ export const requestBackend = async (path, {body, method} = {}) => {
 	};
 	let res;
 	try {
-		res = await fetch(dbUrl+path, init);
-	} catch {
-		throw "请求失败，请检查网络";
+		res = await fetch(remoteDBUrl+path, init);
+	} catch (e) {
+		if (e.message === 'Failed to fetch')
+			throwDOMException("一般网络故障", "NetworkError");
+		throw e;
 	}
 
 	const decode = () => {
@@ -101,6 +107,8 @@ let batchQueue;
 let prevError;
 
 const runBatch = async () => {
+	if (!remoteDBUrl) await initialize(true);
+
 	const queue = batchQueue;
 	batchQueue = null;
 
@@ -109,14 +117,21 @@ const runBatch = async () => {
 	if (mqLength) {
 		// 如果切换了数据库服务器
 		if (!config._new) {
-			for (const item of mq) {
-				queue.push([JSON.parse(item), AS_IS, AS_IS]);
-			}
+			const keys = new Set();
+			queue.forEach((item) => keys.add(item[0][1][IdempotencyKeyForReplay]));
+
+			const tmp = [];
+			mq.forEach(item => {
+				const key = item[IdempotencyKeyForReplay];
+				if (key === undefined || !keys.has(key)) tmp.push([JSON.parse(item), AS_IS, AS_IS]);
+			});
+
+			queue.unshift(...tmp);
 		}
 		mq.length = 0;
 	}
 
-	requestBackend('batch', {
+	return requestBackend('batch', {
 		method: "POST",
 		body: queue.map(q => q[0])
 	}).then(items => {
@@ -129,9 +144,11 @@ const runBatch = async () => {
 
 		if (mqLength) {
 			$update(messageQueue);
-			requestIdleCallback(() => location.reload());
+			prevError?.();
 		}
-	}).catch(async err => {
+
+		return true;
+	}, async err => {
 		// all request failed
 		for (let q of queue) {
 			q[2](err);
@@ -140,7 +157,13 @@ const runBatch = async () => {
 			let action = q[0][0];
 			action = action.slice(action.indexOf("/")+1);
 			if (action.startsWith("set") || action.startsWith("upsert") || action.startsWith("delete")) {
-				mq.push(await serializeJSON(q[0]));
+				const temp = new String(await serializeJSON(q[0]));
+
+				// 这个东西不需要活过页面重载
+				const key = q[0][1][IdempotencyKeyForReplay];
+				if (key) temp[IdempotencyKeyForReplay] = key;
+
+				mq.push(temp);
 			}
 		}
 
@@ -155,18 +178,23 @@ const runBatch = async () => {
 			}
 
 			$update(messageQueue);
-			prevError?.remove();
-			prevError = SimpleModal({
-				title: "请求失败 ("+mq.length+")",
-				message: `刷新页面将尝试重放请求\n取消将丢弃失败的请求（数据可能丢失）\n\n详细错误信息：`+prettyError(err),
-				confirmMessage: "刷新页面",
-				onConfirm() {
-					location.reload()
-				},
-				onCancel() {
+			prevError?.();
+			prevError = showToast(<span className="row">
+				<span>
+					远程数据库错误:<br/>
+					{prettyError(err)}<br/>
+					{() => messageQueue.length} 条命令未发送<br/>
+					刷新将自动重试<br/>
+				</span>
+				<button className="btn primary" onClick={() => {
+					batchQueue = [];
+					runBatch().then((ok) => ok && location.reload());
+				}}>重试</button>
+				<button className="btn danger" onClick={() => {
 					messageQueue.value = [];
-				}
-			});
+					prevError();
+				}}>丢弃</button>
+			</span>, '', 0);
 		}
 	});
 };
@@ -189,17 +217,18 @@ const batched = (key, unmarshal) => value => {
 	return unmarshal ? promise.then(decodeObjects) : promise;
 };
 
-const u_upsertConversation = batched("conversation/upsert");
-
-export const upsertConversation = async conversation => conversation.id = await u_upsertConversation(conversation);
+export const upsertConversation = batched("conversation/upsert");
 export const deleteConversation = batched("conversation/delete");
 
 const u_getConversation = batched("conversation", true);
 const u_messages = batched("messages", true);
 
+export const getConversation = conv => u_getConversation([conv.id]);
+
 export const getMessages = async conversation => {
 	const id = conversation.id;
-	const metadata = u_getConversation([id, conversation[MESSAGES_CACHE] && conversation.time]);
+	const cached = getImmediateMessages(conversation, true);
+	const metadata = u_getConversation([id, cached && conversation.time]);
 	const messages = u_messages(id);
 
 	return metadata.then(json => {
@@ -210,7 +239,7 @@ export const getMessages = async conversation => {
 		conversation.id = id;
 		return messages.catch(err => {
 			if (err.status !== 304) throw err;
-			return conversation[MESSAGES_CACHE];
+			return cached;
 		});
 	});
 };
@@ -234,7 +263,65 @@ const showIncompatibleDialog = backendVersion => {
 	});
 };
 
-export const initialize = () => {
+export const initialize = async (urlOnly) => {
+	if (urlOnly || !remoteDBUrl) {
+		const servers = config.db_servers;
+		let dbUrl;
+		if (servers.length > 1) {
+			const nonce = crypto.randomUUID();
+			const exceptResult = new SHA256().update(nonce+"AiChat[DB]").toString();
+
+			const timeout = new AbortController();
+			const timer = setTimeout(() => timeout.abort(new DOMException("服务器连接超时", "TimeoutError")), 10000);
+
+			const testServer = async dbUrl => {
+				const  { id, pong } = await jsonFetch(dbUrl + 'ping', {
+					signal: timeout.signal,
+					body: JSON.stringify({nonce}),
+				})
+				if (pong === exceptResult) return id;
+				throwDOMException('nonce mismatch');
+			};
+
+			let lastId = config._instanceId;
+			let bestServer;
+			let count = servers.length;
+
+			[dbUrl, config._instanceId] = await new Promise((res, rej) => {
+				servers.forEach((server) => {
+					if (!server.endsWith('/')) server += '/';
+
+					testServer(server).then((id) => {
+						if (id === lastId) {
+							timeout.abort();
+							clearTimeout(timer);
+							res([server, id]);
+						} else if (!bestServer) {
+							bestServer = [server, id];
+						}
+
+						if (!--count) res(bestServer);
+					}, (e) => {
+						if (!--count) {
+							if (bestServer) res(bestServer);
+							else rej(e);
+						}
+					});
+				})
+			});
+		} else {
+			dbUrl = servers[0];
+		}
+		if (!dbUrl.endsWith('/')) dbUrl += '/';
+
+		setRemoteDBUrl(dbUrl);
+		if (urlOnly) return;
+	}
+
+	EVENT_BUS.on(['kvs'], (name, path) => {
+		kvsCache.delete(path[1]+':'+name);
+	});
+
 	batched("version")().catch(err => {
 		if (err.startsWith?.("unknown")) return ['Legacy'];
 		throw err;
@@ -273,7 +360,7 @@ export const getKV = (key, val) => {
 	});
 	return promise;
 };
-export const setKV = (key, value) => value === undefined ? u_deleteKV(key) : u_setKV([key, value]).then(() => EVENT_BUS.post(['kv', key], value));
+export const setKV = (key, value) => value === undefined ? u_deleteKV(key) : u_setKV([key, value]);
 
 // values这个接口主要是给备份(导出)用的
 export const kvListGetValues = batched("kvs/values", true);
@@ -314,10 +401,6 @@ const u_deleteKVList = batched("kvs/delete");
 /** @type {Map<string, AiChat.IDBKVList & Object>} */
 const kvsCache = new LRUCache(100);
 
-EVENT_BUS.on(['kvs'], (name, path) => {
-	kvsCache.delete(path[1]+':'+name);
-});
-
 /**
  * @param {string} type
  * @param {string} name
@@ -329,12 +412,16 @@ export const kvListGet = async (type, name) => {
 	const cacheKey = type+":"+name;
 	let val = kvsCache.get(cacheKey);
 	if (!val) {
-		val = await u_getKVList([type, name]);
+		const p = u_getKVList([type, name]);
+
+		kvsCache.set(cacheKey, p);
+		p.catch(() => kvsCache.delete(cacheKey));
+
+		val = await p;
 		if (val) {
 			delete val.type;
 			val[DIFF_SNAPSHOT] = structuredClone(val);
 			kvsCache.set(cacheKey, val);
-			EVENT_BUS.post(['kvsGot', type, name], val);
 		}
 	}
 	return val;
@@ -391,7 +478,7 @@ export const kvListSet = async (value, type, name) => {
 		});
 };
 
-export const kvListDel = (type, name) => u_deleteKVList([type, name]).then(() => EVENT_BUS.post(['kvs', type, 'del'], name));
+export const kvListDel = (type, name) => u_deleteKVList([type, name]);
 
 export const appendBillingLog = batched("log/insert");
 export const getBillingLog = batched("log");
@@ -436,7 +523,7 @@ const BLOB = debugSymbol("BlobValue");
 function _FakeBlob(hash,obj) {this.$='BlobH';this.hash=hash;Object.assign(this, obj);}
 _FakeBlob.prototype = {
 	constructor: File,
-	toUrl() {return dbUrl+`blob/`+this.hash;},
+	toUrl() {return remoteDBUrl+`blob/`+this.hash;},
 	async blob() {return this[BLOB] || (this[BLOB] = await (await fetch(this.toUrl(), { cache: 'force-cache', integrity: 'sha256-'+this.hash }).catch(() => {throw new Error("附件 "+(this.name||this.hash)+" 丢失或损坏")})).blob());},
 	async toDataURL() {return (await this.blob()).toDataURL();},
 	async arrayBuffer() {return (await this.blob()).arrayBuffer();},
@@ -460,14 +547,14 @@ export const uploadBlob = async blob => {
 
 	const hash = await blobHash(blob);
 	if (blob.hash === hash) return hash;
-	blob.hash = hash;
+	Object.defineProperty(blob, 'hash', { value: hash, });
 
 	try {
 		await u_getBlobInfo(hash);
 	} catch {
 		if (maxBlobSize && blob.size > maxBlobSize) throw '文件 '+blob.hash+' 过大';
 
-		let url = dbUrl+`blob/`+hash+"?name="+encodeURIComponent(blob.name||"")+"&time="+(blob.lastModified||"");
+		let url = remoteDBUrl+`blob/`+hash+"?name="+encodeURIComponent(blob.name||"")+"&time="+(blob.lastModified||"");
 		let res;
 		try {
 			res = await fetch(url, {

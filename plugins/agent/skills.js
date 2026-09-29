@@ -2,8 +2,9 @@ import {getToolParameters, parseFrontmatter, registerToolset} from "/src/toolset
 import {debugSymbol} from "unconscious";
 import {fileAccess} from "./Mounts.js";
 import {createAsyncQueue} from "/common/pure-utils.js";
-import agentDescription from "/media/vfs/skills/agent-definition-howto/SKILL.md?raw";
-import skillDescription from "/media/vfs/skills/write-skill-howto/SKILL.md?raw";
+import agentsGuide from "/media/vfs/skills/agents-guide/SKILL.md?raw";
+import skillsGuide from "/media/vfs/skills/skills-guide/SKILL.md?raw";
+import aclGuide from "/media/vfs/skills/agents-guide/ACL.md?raw";
 import {EVENT_BUS} from "/src/states.js";
 
 const SKILL_INFO = debugSymbol("Skills");
@@ -57,23 +58,31 @@ export async function getSkillCache(conv) {
 
 		if (conv.activatedModules.has("Files")) {
 			// TODO zip vfs for it
-			const path = "~/.skills/write-skill-howto/SKILL.md";
+			const path = "~/.skills/skills-guide/SKILL.md";
 			try {
 				await statFile( {
 					path
 				}, 0, conv);
 			} catch {
-				await Promise.all([
+				const fs = conv.mnt['.skills'];
+				fs.fs_readonly = false;
+				const p = Promise.all([
 					writeFile({
 						path,
-						content: skillDescription
+						content: skillsGuide
 					}, 0, conv),
 					writeFile({
-						path: "~/.skills/agent-definition-howto/SKILL.md",
-						content: agentDescription
+						path: "~/.skills/agents-guide/SKILL.md",
+						content: agentsGuide
+					}, 0, conv),
+					writeFile({
+						path: "~/.skills/agents-guide/ACL.md",
+						content: aclGuide
 					}, 0, conv),
 					EVENT_BUS.post(['initSkills'], conv, writeFile)
 				]);
+				p.finally(() => fs.fs_readonly = true);
+				await p;
 			}
 		}
 
@@ -87,7 +96,7 @@ export async function getSkillCache(conv) {
 
 		const sortable = [];
 		const [enqueue, finish] = createAsyncQueue();
-		for (const [relPath, type] of skills) {
+		for (const [relPath] of skills) {
 			const path = "~/.skills/"+relPath;
 			await enqueue(async () => {
 				const str = await readFile({
@@ -131,7 +140,8 @@ registerToolset("Skills", "技能", [Skill], {
 		(conv.mnt || (conv.mnt = {}))[".skills"] = {
 			fs_builtin: true,
 			fs_base: "skills",
-			fs_name: "技能目录"
+			fs_name: "技能目录",
+			fs_readonly: true
 		};
 		return [Skill];
 	},

@@ -1,4 +1,5 @@
 import {
+	config,
 	EVENT_BUS,
 	messages,
 	onConversationLoaded,
@@ -16,7 +17,8 @@ import {showToast} from "./components/Toast.js";
 import {MCPClient} from "/common/MCPClient.js";
 import {parseJson5} from "unconscious/common/Json.js";
 import {highlightJsonLike} from "./markdown/highlight.js";
-import {getCombinedPreset, markMessageDirty} from "./database.js";
+import {markMessageDirty} from "./database.js";
+import {getCombinedPreset} from "./presets.js";
 
 export const TOOL_NAME = debugSymbol("ToolName");
 export const TOOL_IS_RUNNING = debugSymbol("Running");
@@ -44,7 +46,7 @@ export const setPlaceholder = (conv, key, val) => (conv[TEMPORARY_PLACEHOLDER] |
 export const defaultGroups = new Set(["Use"]);
 /**
  * 工具集摘要，在调用后激活工具
- * @type {Record<string, {description: string, tools: string[], skill?: string, hidden: boolean | 'manual', systemPrompt: string}>}
+ * @type {Record<string, {description: string, tools: string[], skill?: string, hidden: boolean | 'manual', systemPrompt: string, depend?: string[]}>}
  */
 export const toolset = {};
 /**
@@ -242,7 +244,12 @@ export const getAvailableTools = async (conversation) => {
 	}), systemPrompt.filter(Boolean).join("\n")];
 };
 
-const convertToCamelCase = str => str.replace(/-([a-z])/g, (match, letter) => letter.toUpperCase());
+const convertToCamelCase = str => {
+	if (str.match(/^(['"]).+\1$/)) {
+		str = parseJson5(str);
+	}
+	return str.replace(/-([a-z])/g, (match, letter) => letter.toUpperCase())
+};
 
 const YAML_BLOCK = /^[>|][+-]?$/;
 
@@ -331,31 +338,29 @@ export const parseFrontmatter = content => {
 			}
 
 			const isArray = value;
-			if (isArray) stack.push([ indent, container = {}, null ]);
+			if (isArray) stack.push([ MARK, container = {}, null ]);
 
 			key = convertToCamelCase(line.slice(0, index));
 			value = line.slice(index+1).trim();
 			if (!value) {
 				// 同级 a:\nb:
-				if (!isArray && prevIndent === indent) handleIndent(indent-1);
-				stack.push([ indent, null, key ]);
+				stack.push([ MARK, null, key ]);
 				continue;
 			}
 		}
 
 		const ch = value[0];
-		if (ch === "'") value = value.slice(1, -1).replaceAll("''", "'");
-		else if (ch === '"') value = parseJson5(value);
+		if (value.match(/^(['"]).+\1$/)) value = ch === '\'' ? value = value.slice(1, -1).replaceAll("''", "'") : parseJson5(value);
 		else if (YAML_BLOCK.test(value)) {
 			stack.push([ MARK, '', key, [value, 0] ]);
 			continue;
-		} else if (ch === '[' || ch === '{') {
-			try {
-				value = parseJson5(value);
-			} catch {
-				// literal string
-			}
 		}
+		else if (ch === '[' || ch === '{') value = parseJson5(value, { json5: true, yaml: true });
+		else if (value.match(/^(?:true|yes)$/i)) value = true;
+		else if (value.match(/^(?:false|no)$/i)) value = false;
+		else if (value.match(/^(?:~|null)$/i)) value = null;
+		else if (value.match(/^[+-]?(?:nan|inf)$/i)) value = (ch === '-' ? -1 : 1) * (value.match(/inf$/i) ? Infinity : NaN);
+		else if (value.match(/^[+-]?(?:0x[a-f\d]+|0b[01]+|0[0-7]+|\d+|\d*\.\d*(?:e[+-]?\d+)?)$/i)) value = value.includes('.') ? parseFloat(value) : parseInt(value);
 
 		if (container == null) ctx[1] = container = {};
 
@@ -530,7 +535,7 @@ export const addMCPServer = (mcpBaseUrl, mcpName, mcpDescription = "External too
 
 const CONV_REACTIVE_MAP = debugSymbol("UIStates");
 
-onConversationLoaded((conv, msg) => redoToolCalls(conv, msg, 0));
+onConversationLoaded((conv, path, msg) => redoToolCalls(conv, msg, 0));
 onConversationSwitchOut((conv) => delete conv[CONV_REACTIVE_MAP]);
 
 /**
@@ -580,6 +585,7 @@ const getToolUserInteractionLevel = async (conv, name, parameters) => {
 }
 
 const UNSAFE_TOOL_DENY_MESSAGE = "User doesn't permit this tool use. Nothing changed. STOP and wait for user.";
+const UNSAFE_TOOL_DENY_MESSAGE_AFK = "该操作需要用户审批. 用户当前不在.";
 
 /**
  *
@@ -591,7 +597,6 @@ const UNSAFE_TOOL_DENY_MESSAGE = "User doesn't permit this tool use. Nothing cha
  * @return {Promise<number>}
  */
 export const runTools = async (response,  conv, forceRerun, allowUnsafe, customRejectText) => {
-	markMessageDirty(response);
 	const {tool_calls, tool_responses} = response;
 
 	const signal = runningConversations.get(conv.id)?.abort.signal;
@@ -668,7 +673,7 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 				}
 			}
 
-			msg.time = Date.now();
+			const deny = customRejectText || (config.afkState === 2 ? UNSAFE_TOOL_DENY_MESSAGE_AFK : UNSAFE_TOOL_DENY_MESSAGE);
 			const uiLevel = await getToolUserInteractionLevel(conv, name, parameters);
 			if (uiLevel) {
 				flags |= 1; // INTERACTIVE
@@ -678,17 +683,17 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 						return;
 					}
 
-					if (!allowUnsafe) {
-						throw customRejectText||UNSAFE_TOOL_DENY_MESSAGE;
-					}
+					if (!allowUnsafe) throw deny;
 				}
 			} else if (false === allowUnsafe) {
-				throw customRejectText||UNSAFE_TOOL_DENY_MESSAGE;
+				throw deny;
 			}
+
+			msg.time = Date.now();
+			msg[TOOL_IS_RUNNING] = true;
 
 			await EVENT_BUS.post(['beforeToolCall', name], parameters, msg, conv);
 
-			msg[TOOL_IS_RUNNING] = true;
 			let result = fn.script(parameters, msg, conv, name);
 			if (result instanceof Promise) {
 				$update(updateMessageUI);
@@ -748,6 +753,7 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 		if (waitList.length) await Promise.all(waitList);
 	}
 
+	markMessageDirty(response);
 	return flags;
 };
 
@@ -809,26 +815,6 @@ export const redoToolCalls = (global, messages, first, includeTrue) => {
 				}
 			}
 		}
-	}
-};
-
-/**
- *
- * @param {string} system_prompt
- */
-export const setSystemPrompt = system_prompt => {
-	if (system_prompt) {
-		if (messages[0].role === "system") {
-			messages[0].content = system_prompt;
-		} else {
-			messages.unshift({
-				role: "system",
-				time: Date.now(),
-				content: system_prompt
-			});
-		}
-	} else if (messages[0].role === "system") {
-		messages.shift();
 	}
 };
 

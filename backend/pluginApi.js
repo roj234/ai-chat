@@ -1,6 +1,6 @@
 import MCPServer from "./utils/MCPServer.js";
 import {compressGeneric, decompressGeneric, KNOWN_KVS} from "./utils/compression.js";
-import {jsonFetch} from "../common/openai-api-utils.js";
+import {jsonFetch} from "../common/fetch-utils.js";
 import {cachePreparedSql} from "./utils/sqliteUtils.js";
 import {ZipReader} from "unconscious/common/zip-io.js";
 import {LRUCache} from "../common/LRUCache.js";

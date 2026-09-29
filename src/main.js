@@ -1,25 +1,24 @@
-import {
-	$computed,
-	$update,
-	$watch,
-	appendChild,
-	appendChildren,
-	AS_IS,
-	ONCE_EVENT,
-	ref,
-	unconscious
-} from 'unconscious';
+import {$derived, $update, $watch, appendChild, appendChildren, AS_IS, ONCE_EVENT, ref, unconscious} from 'unconscious';
 import {jsHide, prettyError, requestIdleCallback} from "./utils/utils.js";
 import {ConversationList} from "./components/ConversationList.jsx";
-import {SETTINGS} from "./settings.js";
-import {databaseError, getMessages, initialize, isIDB, listConversations, updateConversation} from "./database.js";
+import {GLOBAL_SETTINGS} from "./settings.js";
+import {
+	databaseError,
+	fetchMessages,
+	getMessages,
+	initialize,
+	isIDB,
+	listConversations,
+	remoteDBUrl,
+	updateConversation
+} from "./database.js";
 import {
 	abortCompletion,
+	auxSmallScreen,
 	config,
 	CONFIG_VERSION,
 	conversations,
 	EVENT_BUS,
-	isMobile,
 	lastScrollDirectionIsUp,
 	LOCKED,
 	messages,
@@ -41,7 +40,8 @@ import {onPluginLoaded} from "/plugins/PluginRegistry.js";
 import {DI, DID_TITLE_POSITION, injectCommonDI} from "./hooks.js";
 import {checkUpdate} from "../common/updater.js";
 import {setAllowHTMLTags} from "./markdown/markdown.js";
-import {sseFetch} from "../common/openai-api-utils.js";
+import {sseFetch} from "../common/fetch-utils.js";
+import {sleep} from "../common/pure-utils.js";
 
 const $ = sel => document.getElementById(sel);
 
@@ -55,7 +55,7 @@ const createApp = () => {
 		updateLink= ref(),
 		resizeHandle= ref();
 
-	const settings = createSettingDialog(SETTINGS, config, onSettingChanged);
+	const settings = createSettingDialog(GLOBAL_SETTINGS, config, onSettingChanged);
 
 	const doc = document;
 	/**
@@ -98,7 +98,7 @@ const createApp = () => {
 				<button className="ri-add-line btn ghost" title="开启新对话" onClick={resetConversation}></button>
 			</div>
 		</header>
-		<aside ref={sidebar} className="sidebar hide" style={isMobile ? "display:none;left:-100%":undefined}>
+		<aside ref={sidebar} className="sidebar hide" style={auxSmallScreen ? "display:none;left:-100%":undefined}>
 			<div className="sidebar-header row">
 				<button className="btn secondary" style="flex: 1" onClick={resetConversation}><i
 					className="ri-add-line"></i>开启新对话
@@ -108,12 +108,12 @@ const createApp = () => {
 			{virtualConversationList}
 			<div className="spacer"></div>
 			<div className="sidebar-header row">
-				<a style={{fontSize: "14px", userSelect: "none", fontWeight: 700, color: "var(--text)"}}
-				   ref={updateLink} target={"_blank"} title={"构建号: "+BUILD_NUMBER}>Aint | v{APP_VERSION}</a>
+				<a style={{fontSize: "14px", userSelect: "none", fontWeight: 700, color: "var(--text)", flex: 1}}
+				   ref={updateLink} target={"_blank"}>Aint | v{APP_VERSION}<span className="tooltip">{BUILD_NUMBER}</span></a>
 				<button className="ri-wrench-line btn ghost" title="设置" onClick={() => settings.show()}></button>
 			</div>
 			<div className={"bg"} onClick={toggleSidebar}></div>
-			{!isMobile && <div ref={resizeHandle} className={"resize ew"} style={"right:0"}></div>}
+			{!auxSmallScreen && <div ref={resizeHandle} className={"resize ew"} style={"right:0"}></div>}
 		</aside>
 		<div ref={scroller} className="chat scroll"
 			 onWheel.noPassive={e => {
@@ -134,8 +134,8 @@ const createApp = () => {
 		</div>
 	</>);
 
-	if (!isMobile) {
-		$watch($computed(() => config.sidebarWidth), () => {
+	if (!auxSmallScreen) {
+		$watch($derived(config.sidebarWidth), () => {
 			sidebar.style.width = config.sidebarWidth+"px";
 		});
 		resizeHandle.addEventListener("mousedown", () => {
@@ -240,30 +240,37 @@ const createApp = () => {
 				if (isFinite(id1) && id1 >= 0) id = id1;
 			}
 
-			listConversations().catch(err => {
-				if (err.error === "no such user") {
-					connectDatabase();
-				} else if (err.status === 401) {
-					return executeLogin();
-				} else {
-					databaseError(err);
-				}
-			}).then(arr => {
-				const loading = $("loading");
-				loading.classList.add("exiting");
-				loading.addEventListener("animationend", () => loading.remove());
-
-				if (!arr) return;
-
+			listConversations().then(async arr => {
 				if (!config.endpoint && !arr.length) import("./UserOnboard.js");
 
-				conversations.value = arr;
-				if (isIDB && id != null) {
-					selectedConversation.value = conversations.find(t => t.id === id);
+				if (id != null) {
+					const cid = arr.findIndex(t => t.id === id);
+					if (cid >= 0) {
+						if (isIDB) {
+							// idb 会一次拿到所有对话元数据，所以直接在这里读取就行
+							selectedConversation.value = arr[cid];
+						} else {
+							arr[cid] = unconscious(selectedConversation);
+							await sleep(0); // 等同一个批处理请求的getMessages回调结束
+						}
+					}
 				}
+				conversations.value = arr;
 
 				const event = ['loaded'];
 				EVENT_BUS.fire(event, $("app"));
+			}, err => {
+				if (err.error === "no such user") {
+					connectDatabase();
+				} else if (err.status === 401) {
+					executeLogin(remoteDBUrl);
+				} else {
+					databaseError(err);
+				}
+			}).finally(() => {
+				const loading = $("loading");
+				loading.classList.add("exiting");
+				loading.addEventListener("animationend", () => loading.remove());
 			});
 
 			let hookGetMessages = AS_IS;
@@ -281,7 +288,7 @@ const createApp = () => {
 						return
 					}
 
-					hookGetMessages(getMessages(conv)).then(data => {
+					hookGetMessages(conv.temporary ? getMessages(conv) : fetchMessages(conv)).then(data => {
 						conv.ready = true;
 
 						if (unconscious(selectedConversation) === conv) {
@@ -289,7 +296,7 @@ const createApp = () => {
 							messages.value = data;
 							scroller.scrollToBottom();
 						}
-					}).catch(err => {
+					}, err => {
 						showToast("消息读取失败\n"+prettyError(err), "error", 30000);
 						console.error(err);
 						selectedConversation.value = null;
@@ -316,7 +323,7 @@ const createApp = () => {
 					prevId = null;
 				}
 
-				if (isMobile && !sidebar.style.display) toggleSidebar();
+				if (auxSmallScreen && !sidebar.style.display) toggleSidebar();
 			}, false);
 
 			if (!isIDB) {
@@ -325,17 +332,12 @@ const createApp = () => {
 
 				// batch 优化 对话和消息放在同一个响应里
 				if (id != null) {
-					const stub = { id, ready: false };
-					selectedConversation.value = stub;
+					selectedConversation.value = {id, ready: false};
 
 					hookGetMessages = async (promise) => {
 						hookGetMessages = AS_IS;
 
 						const messages = await promise;
-
-						const index = conversations.findIndex(t => t.id === id);
-						if (index >= 0) conversations[index] = stub;
-
 						// 等待同步服务下发 LOCKED 对象
 						await wsConnected;
 						return messages;
@@ -360,22 +362,24 @@ const createApp = () => {
 					const promise = updateConversation(conv, unconscious(messages));
 					// insert new record
 					if (conv.id == null) promise.then(() => $update(selectedConversation));
-					// move to front
-					if (time !== conv.time) $update(updateConversationListUI);
+					promise.then(() => {
+						// move to front
+						if (time !== conv.time) $update(updateConversationListUI);
+					});
 				}
 			}, false);
 
-			$watch($computed(() => config.allowHTMLTags), () => {
+			$watch($derived(config.allowHTMLTags), () => {
 				setAllowHTMLTags(config.allowHTMLTags);
 			})
 		}
 	];
 };
 
-const executeLogin = () => new Promise((resolve, reject) => {
+const executeLogin = (server) => new Promise((resolve, reject) => {
 	const abort = new AbortController;
 	let modal;
-	sseFetch(config.db_server+"login", { signal: abort.signal }, ({code, token, skip}) => {
+	sseFetch(server+"login", { signal: abort.signal }, ({code, token, skip}) => {
 		if (code) {
 			modal = SimpleModal({
 				title: "交互式登录",
@@ -391,7 +395,7 @@ const executeLogin = () => new Promise((resolve, reject) => {
 			requestIdleCallback(() => location.reload());
 		}
 	}).catch((err) => {
-		if (err.status === 429) return setTimeout(executeLogin, Math.trunc(Math.random() * 2000));
+		if (err.status === 429) return setTimeout(() => executeLogin(server), Math.trunc(Math.random() * 2000));
 
 		modal?.remove();
 		if (err.name !== 'AbortError')
@@ -401,6 +405,8 @@ const executeLogin = () => new Promise((resolve, reject) => {
 });
 
 const connectDatabase = async () => {
+	$("loading")?.remove();
+
 	let apiEndpoint;
 	try {
 		const resp = await fetch(location.href, { method: "HEAD" });
@@ -425,14 +431,14 @@ const connectDatabase = async () => {
 			}
 			if (!value.endsWith('/')) value += '/';
 
-			config.db_server = value;
+			config.db_servers = [value];
 			if (pat) config.db_pat = pat;
 			config._new = true;
-			return executeLogin();
+			return executeLogin(value);
 		},
 		onCancel(value) {
 			if (DB_MODE !== 'mixed') return false;
-			config.db_server = ':idb:';
+			config.db_servers = [':idb:'];
 			config._new = true;
 			requestIdleCallback(() => location.reload());
 		}
@@ -441,21 +447,26 @@ const connectDatabase = async () => {
 
 // Mount
 addEventListener("load", () => {
-	onPluginLoaded.then(() => {
+	onPluginLoaded.then(async () => {
 		const [app, settings, messageContainer, onLoad_] = createApp();
 
 		const wrapper = $("app");
 		appendChildren(wrapper, app);
 
-		if (!isIDB && !config.db_server) {
-			connectDatabase();
-			return;
-		}
+		const serverCount = config.db_servers.length;
+		if (!isIDB && !serverCount) return connectDatabase();
+
+		if (serverCount > 1) await initialize(true);
 
 		injectCommonDI(settings, messageContainer);
 		EVENT_BUS.fire(['load'], wrapper);
 		onLoad_(wrapper);
 	}).catch(e => {
+		$("loading")?.remove();
+		if (e.name === 'AbortError') {
+			showToast("服务器不可用", 'error');
+			return
+		}
 		SimpleModal({
 			title: "系统加载失败",
 			message: prettyError(e),
@@ -491,8 +502,8 @@ if (import.meta.env.DEV) {
 		location.pathname = "/";
 }
 
-addEventListener("keypress", e => {
+addEventListener("keydown", e => {
 	const btn = e.target;
-	if (e.key === "Enter" && btn.matches("[tabindex]"))
+	if (e.key === "Enter" && btn.matches("[tabindex=\"0\"]"))
 		btn.click();
 });

@@ -1,13 +1,13 @@
-import {searchMessages} from "../src/database.js";
+import {searchMessages} from "/src/database.js";
 
 import "./search.css";
 import {formatDate} from "unconscious/common/Utils.js";
-import {conversations, selectedConversation, switchToConversation} from "../src/states.js";
-import {onLoad} from "../src/hooks.js";
-import {renderMarkdownToElement} from "../src/markdown/markdown.js";
-import {showToast} from "../src/components/Toast.js";
-import {openWindow} from "../src/components/Windows.jsx";
-import {Icon_search} from "../src/components/Icons.jsx";
+import {findConversation, selectedConversation, switchToConversation} from "/src/states.js";
+import {onLoad} from "/src/hooks.js";
+import {renderMarkdownToElement} from "/src/markdown/markdown.js";
+import {showToast} from "/src/components/Toast.js";
+import {openWindow} from "/src/components/Windows.jsx";
+import {Icon_search} from "/src/components/Icons.jsx";
 
 const searchBtn = <button className={"ri- btn ghost"} title={"搜索对话"} onClick={() => {
 	searchBtn.replaceWith(searchInput);
@@ -75,7 +75,7 @@ function AccordionItem(item) {
 					<span className="spacer" />
 					<button className={"btn ghost"} onClick.stop={() => {
 						if (selectedConversation.id !== item.id) {
-							const value = conversations.find(it => it.id === item.id);
+							const value = findConversation(item.id);
 							switchToConversation(value);
 						}
 					}}>转到</button>

@@ -5,7 +5,7 @@ import {$foreach, $update, unconscious} from "unconscious";
 import {
 	abortCompletion,
 	config,
-	ensureActiveConversation,
+	ensureConversation,
 	messages,
 	selectedConversation,
 	updateMessageUI
@@ -14,6 +14,7 @@ import {COMMAND_REGISTRY} from "/src/commands.js";
 
 import {UpdateVariable} from "../../rp_kit/Variables.js";
 import {runTools} from "/src/toolset.js";
+import {getRandomString} from "/src/utils/utils.js";
 
 const ID = 'my/storyTurn';
 
@@ -132,7 +133,7 @@ Operation semantics:
  * @param {string} prompt
  */
 const sendAction = async (messages, prompt) => {
-	await ensureActiveConversation();
+	await ensureConversation();
 	if (unconscious(abortCompletion)) return;
 
 	let schemaToLLM = schema;
@@ -168,7 +169,7 @@ const onCompleted = async (conv, messages, assistantResponse) => {
 	const variables = jsonData.variables;
 	if (variables) {
 		assistantResponse.tool_calls = variables.map(item => ({
-			id: "tc_"+Math.random().toString(36).slice(2),
+			id: "tc_"+getRandomString(8),
 			type: "function",
 			function: {
 				name: "UpdateVariable",
@@ -245,12 +246,11 @@ const renderer = (val) => {
  * 提示词构造函数
  * @param {AiChat.AssistantMessage & { content: StoryTurn }} msg
  * @param {OpenAI.Message[]} output
- * @param _
  * @param {number} index
  * @param {number} length
  * @param {AiChat.Conversation} conversation
  */
-const composer = (msg, output, _, index, length, conversation) => {
+const composer = (msg, output, index, length, conversation) => {
 	const {content, tool_calls, tool_responses} = msg;
 
 	if (content.suggested_choices) {

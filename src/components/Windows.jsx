@@ -1,7 +1,7 @@
 import "./Windows.css";
 
-import {$computed, $foreach, $state, $update, $watchWithCleanup, appendChild} from 'unconscious';
-import {EVENT_BUS, isMobile} from "../states.js";
+import {$computed, $foreach, $state, $update, $watchWithCleanup, appendChild, AS_IS} from 'unconscious';
+import {auxSmallScreen, EVENT_BUS} from "../states.js";
 
 /**
  * @typedef {Object} WindowState
@@ -25,13 +25,13 @@ const windowList = $state([]);
 let focusedWindow;
 
 /** 自增的 z-index 基准 */
-let topZ = 1000;
+let topZ = 0;
 
 const syncList = () => { windowList.value = [...windows.values()]; };
 
-const isWindowOpen = (id) => windows.has(id);
-
 export const getWindow = (id) => windows.get(id);
+
+const container = <div className="MDI" />;
 
 /** 由 FloatingWindow 在创建好 DOM 后调用，注册到管理器 */
 const registerWindow = (id, state) => {
@@ -54,16 +54,17 @@ export const focusWindow = (w) => {
 
 function syncFocused(w) {
 	if (focusedWindow === w) {
-		let top = null, topZ = -Infinity;
+		focusedWindow = null;
+		let topZ = -1;
 		for (const win of windows.values()) {
 			if (win.element.classList.contains(MINIMIZED)) continue;
-			const z = +win.element.style.zIndex || 0;
+			const z = +win.element.style.zIndex;
 			if (z > topZ) {
 				topZ = z;
-				top = win;
+				focusedWindow = win;
+				$update(windowList);
 			}
 		}
-		if (top) focusWindow(top);
 	}
 }
 
@@ -292,8 +293,8 @@ export const openWindow = ({
 	registerWindow(id, state);
 	EVENT_BUS.post(['openWindow', id], state);
 	focusWindow(state);
-	if (isMobile) handleMaximize();
-	document.body.append(root);
+	if (auxSmallScreen) handleMaximize();
+	container.append(root);
 	return state;
 };
 
@@ -318,8 +319,8 @@ const Taskbar = () => {
 					<span className="label">{cloneContent(w.title)}</span>
 					<button className="ri-close-line" title="关闭" onClick.stop={() => closeWindow(w.id)}></button>
 				</div>
-			}, w => w, {
-				morphChild(w, node) {
+			}, AS_IS, {
+				onReuse(node, w) {
 					node.className = 'item' + (w.element.className.slice(6)) + (w === focusedWindow ? ' active' : '');
 				}
 			})}
@@ -332,4 +333,5 @@ const mountTaskbar = () => {
 	if (mounted) return;
 	mounted = true;
 	appendChild(document.body, <Taskbar/>);
+	appendChild(document.body, container);
 };

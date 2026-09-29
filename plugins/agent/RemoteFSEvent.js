@@ -155,7 +155,7 @@ FileService restarted: PID ${callback.pid} cannot be tracked.
 };
 
 // 重新拉起轮询
-EVENT_BUS.on('conversationLoad', conv => {
+EVENT_BUS.on('convLoad', conv => {
 	const fsEvents = conv.fs_events;
 	if (fsEvents) registerEvents(conv, conv, fsEvents);
 	const mnt = conv.mnt;

@@ -12,8 +12,6 @@ body.taskbar-open { --taskbar: 1; }
 }
 
 .taskbar {
-    z-index: 2;
-
     position: fixed;
     left: 0;
     right: 0;

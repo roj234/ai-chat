@@ -1,0 +1,199 @@
+.ts {
+	--ts-accent: #d9ab84;
+	--ts-muted: #8e8e88;
+	--ts-rail: #3e3f41;
+	--ts-thumb-border: #242425;
+	--p: 25%;
+
+	.description-row {
+		display: flex;
+		align-items: baseline;
+		gap: 8px;
+	}
+
+	.signal {
+		display: flex;
+		align-items: flex-end;
+		flex: 0 0 auto;
+		gap: 2px;
+		height: 10px;
+
+		& > i {
+			display: block;
+			width: 2px;
+			border-radius: 1px;
+			background: #484744;
+			transition: background-color 150ms;
+
+			&.on {
+				background: var(--ts-accent);
+			}
+		}
+	}
+
+	.description {
+		margin: 0;
+		min-width: 0;
+		color: var(--ts-muted);
+		font-size: 12px;
+		line-height: 18px;
+		overflow-wrap: anywhere;
+	}
+
+	.trace {
+		height: 64px;
+		overflow: hidden;
+		mask-image: linear-gradient(to right, transparent, #000 7%, #000 93%, transparent);
+		-webkit-mask-image: linear-gradient(to right, transparent, #000 7%, #000 93%, transparent);
+	}
+
+	& canvas {
+		width: 100%;
+		height: 100%;
+	}
+
+	/* 轨道留出半个原生 thumb 的宽度，让可见圆点与命中位置重合。 */
+	.control {
+		position: relative;
+		height: 32px;
+		margin: 0 12px;
+		--lean: 0deg;
+	}
+
+	.fill {
+		position: absolute;
+		top: 50%;
+		transform: translateY(-50%);
+
+		height: 2px;
+		border-radius: 2px;
+		pointer-events: none;
+
+		left: 0;
+		width: var(--p);
+		background: var(--ts-accent);
+		opacity: .75;
+
+		z-index: 1;
+	}
+
+	.labels, .ticks {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+	}
+
+	.ticks {
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+
+		& > * {
+			width: 1px;
+			height: 8px;
+			background: #55504a;
+			z-index: 1;
+		}
+	}
+
+	& input[type="range"] {
+		-webkit-appearance: none;
+		appearance: none;
+
+		position: absolute;
+		inset: 0;
+		background: transparent;
+
+		--t: 0px;
+		--s: 1;
+		--k: 0;
+
+		&::after {
+			content: "";
+			position: absolute;
+			left: calc(var(--p) - 10px);
+			top: calc(13px + var(--t));
+			transform: translateX(calc(var(--p) * -1)) rotate(var(--lean));
+			z-index: 2;
+			width: 22px;
+			height: 5px;
+			border-right: 2px solid #655240;
+		}
+
+		&:active {
+			--t: -2px;
+			--s: 1.1;
+		}
+
+		&:active::-webkit-slider-thumb {
+			box-shadow: 0 0 0 1px var(--ts-accent), 0 5px 8px #0004;
+		}
+
+		&:focus-visible::-webkit-slider-thumb {
+			outline: 2px solid var(--ts-accent);
+			outline-offset: 4px;
+		}
+
+		&::-webkit-slider-thumb {
+			-webkit-appearance: none;
+			appearance: none;
+
+			position: relative;
+			top: var(--t);
+
+			z-index: 2;
+
+			width: 22px;
+			height: 22px;
+			border: 4px solid var(--ts-thumb-border);
+			border-radius: 50%;
+			background: #e5d1ba;
+			box-shadow: 0 0 0 1px #d9ab8470, 0 2px 5px #0004;
+			transform: translate(calc(var(--k) * 100%), -50%) scale(var(--s));
+			transition: box-shadow 150ms;
+		}
+
+		&::-webkit-slider-runnable-track { height: 2px; background: var(--ts-rail); }
+		&::-moz-range-track { height: 2px; background: var(--ts-rail); }
+	}
+
+	.labels {
+		position: relative;
+		height: 18px;
+		margin: 0 9px;
+		color: #777871;
+		font-size: 12px;
+		--half: 40px;
+	}
+
+	.level {
+		max-width: 120px;
+		padding: 0 3px 3px;
+		color: inherit;
+
+		&.chosen { color: var(--ts-accent); }
+		&:hover { color: #eee5da; }
+		&:focus-visible { outline: 1px solid var(--ts-accent); border-radius: 2px; }
+	}
+
+	.budget {
+		backdrop-filter: blur(2px);
+		position: absolute;
+		top: 0;
+		/* 中间跟随圆点；两端向内收，避免移动端溢出。 */
+		left: clamp(calc(var(--half) - 12px), var(--p), calc(100% - var(--half) + 12px));
+		max-width: calc(100% + 24px);
+		transform: translateX(-50%);
+		opacity: 0;
+		pointer-events: none;
+		color: var(--ts-accent);
+		font: 12px/16px ui-monospace, SFMono-Regular, Consolas, monospace;
+		font-variant-numeric: tabular-nums;
+		transition: opacity 120ms;
+	}
+
+	& .control.active + .labels .budget,
+	& .control:focus-within + .labels .budget {
+		opacity: 1;
+	}
+}

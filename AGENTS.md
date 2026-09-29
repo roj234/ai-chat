@@ -37,7 +37,7 @@ plugins/           前端插件
 backend/           可选 Node 后端
   routes/          HTTP 路由（agent、sse-proxy、database、vectordb…）
   init.js          路由与数据库装配
-  config.example.js  配置模板
+  config.default.js  配置模板
   tsdb/            自研日志数据库
 public/
   assets/          预先打包的静态资源（mermaid, pptx-js等）

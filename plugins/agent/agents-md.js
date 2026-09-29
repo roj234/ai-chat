@@ -1,6 +1,7 @@
 import {parseFrontmatter, PLACEHOLDERS, setPlaceholder} from "/src/toolset.js";
 import {fileAccess} from "./Mounts.js";
 import {getSkillCache} from "./skills.js";
+import {getRandomString} from "/src/utils/utils.js";
 
 const readFile = fileAccess("read");
 
@@ -18,7 +19,7 @@ PLACEHOLDERS["#AGENTS.md"] = async (conv) => {
 
 		let tag = 'project-context';
 		while (text.includes(`<${tag}>`)) {
-			tag += Math.random().toString(36)[3];
+			tag += getRandomString(1);
 		}
 
 		text = `<${tag}>

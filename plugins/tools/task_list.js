@@ -1,6 +1,6 @@
 import {getToolParameters, registerToolset, updateConversationState, watchConversationState} from "/src/toolset.js";
-import {config, messages, onConversationSwitchTo, selectedConversation} from "/src/states.js";
-import {$computed, $foreach, $state, unconscious} from "unconscious";
+import {onConversationSwitchOut, onConversationSwitchTo} from "/src/states.js";
+import {$foreach, $state} from "unconscious";
 import "./task_list.css";
 
 /**
@@ -24,7 +24,7 @@ const TaskCreate = {
 	},
 	script(par, resp, conv) {
 		const tasks = conv.tasks || (conv.tasks = []);
-		const nextTaskId = tasks.push({...par, status: par.statue ?? 'pending'});
+		const nextTaskId = tasks.push({...par, status: par.status ?? 'pending'});
 		resp.id = nextTaskId;
 		updateConversationState(conv, "TaskList:tasks");
 		return "Task #"+nextTaskId+" created.";
@@ -55,7 +55,8 @@ const taskUpdate_title = {
  */
 const TaskUpdate = {
 	name: 'TaskUpdate',
-	description: 'Update a task in the task list.',
+	description: 'Update a task in the task list. Call this IMMEDIATELY when a task\'s status actually changes: ' +
+		"`in_progress` when starting work, `completed` when finishing. ",
 	parameters: {
 		type: 'object',
 		properties: {
@@ -76,14 +77,33 @@ const TaskUpdate = {
 		},
 		required: ['id'],
 	},
+	fix(par) {
+		if (typeof par.id === 'string') {
+			const id = parseInt(par.id);
+			if (isFinite(id)) par.id = id;
+		}
+	},
 	script({id, ...par}, resp, conv) {
 		const tasks = conv.tasks || (conv.tasks = []);
 		const task = tasks[id-1];
 		if (!task) throw "Task #"+id+" not found";
 
+		let out = "Task #" + id + " updated.";
+		if (par.status === 'completed') {
+			if (task.status === 'pending') {
+				out += `\n[!] Task #${id} jumped from pending to completed without ever being in_progress. ` +
+					`If you are catching up on bookkeeping: mark in_progress when you begin a task, completed when you finish it.`;
+			}
+			/*const next = tasks.findIndex(t => t.status === 'pending');
+			if (next >= 0) {
+				out += `\nNext: #${next + 1} "${tasks[next].title}" — mark it in_progress when you start.`;
+			}*/
+		}
+
 		Object.assign(task, par);
 		updateConversationState(conv, "TaskList:tasks");
-		return "Task #"+id+" updated";
+
+		return out;
 	},
 	title(req, resp = {}) {
 		const {id, status} = getToolParameters(resp, req);
@@ -102,6 +122,11 @@ registerToolset(
 		default: true
 	}
 );
+
+onConversationSwitchOut(conv => {
+	taskDiv?.remove();
+	taskDiv = null;
+});
 
 onConversationSwitchTo((conv) => {
 	let done_r = $state(),
@@ -139,13 +164,6 @@ onConversationSwitchTo((conv) => {
 
 			if (taskDiv) return;
 
-			const contextUsage = $computed(() => selectedConversation.contextUsage, [messages]);
-			const contexMax = $computed(() => config.maxContext);
-			const contextUsagePct = $computed(() => {
-				const ctx = unconscious(contextUsage);
-				const pct = ((ctx / unconscious(contexMax)) * 100);
-				return isNaN(pct)?ctx||0:`${pct.toFixed(2)}%`;
-			});
 			taskDiv = (
 				<div className="rp-overlay TaskListPanel">
 					<div className="header">

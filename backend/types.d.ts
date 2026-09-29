@@ -71,6 +71,10 @@ namespace AiChatBackend {
         authorization: string,
         proxy?: string,
         headers?: import("node:http").OutgoingHttpHeaders,
-        trace?: boolean | 'packet'
+        // 注：只有前两者实现了
+        format?: 'openai' | 'responses' | 'anthropic' | 'gemini';
+        // 对于大部分模拟OpenAI Responses的API来说，previous_response_id是不被支持的，必须在这里填false
+        store?: boolean;
+        trace?: boolean;
     }
 }

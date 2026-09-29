@@ -2,7 +2,7 @@ import {runSchemaRole, USER_PROMPT} from "../core.js";
 import "./Translator.css";
 import {$once, createReactiveMarkdown, registerSchemaMessageRole, schemaToPrompt} from "/common/ReactiveJSON.js";
 import {$foreach, unconscious} from "unconscious";
-import {abortCompletion, config, ensureActiveConversation, messages} from "/src/states.js";
+import {abortCompletion, config, ensureConversation, messages} from "/src/states.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 
 const ID = 'aichat/translator';
@@ -83,7 +83,7 @@ const schema = {
  * @param {string} prompt
  */
 const sendAction = async (messages, prompt) => {
-	await ensureActiveConversation();
+	await ensureConversation();
 	if (unconscious(abortCompletion)) return;
 
 	const time = Date.now();
@@ -178,7 +178,7 @@ const renderer = (val) => {
  * @param {number} length
  * @param {AiChat.Conversation} conversation
  */
-const composer = (msg, output, _, index, length, conversation, hooks) => {
+const composer = (msg, output, index, length, conversation) => {
 	const {content} = msg;
 	const {some_variable, ...data} = content;
 

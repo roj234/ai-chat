@@ -2,22 +2,27 @@ import {ThinkBlock} from "./ThinkBlock.jsx";
 import {ToolCallCard} from "./ToolCallCard.jsx";
 import {
 	$computed,
+	$derived,
 	$foreach,
 	$state,
+	$unwatch,
 	$update,
 	$watch,
 	AppendObserver,
 	debugSymbol,
 	hasListener,
+	ref,
 	unconscious
 } from "unconscious";
 import {formatDate, formatSize, prettyTime} from "unconscious/common/Utils.js";
 import {copyCodeEventHandler, renderMarkdownToElement, renderMarkdownToString} from "../markdown/markdown.js";
 import {
 	abortCompletion,
+	auxKeyboardOnly,
+	auxMainlyTouch,
+	auxSmallScreen,
 	config,
 	EditableMessageRoles,
-	isMobile,
 	MessageCopyHandler,
 	MessageRoles,
 	messages,
@@ -26,39 +31,35 @@ import {
 	selectedConversation,
 	updateMessageUI
 } from "../states.js";
-import {isContentfulMessage, submitUserChatMessage} from "../api-request.js";
+import {submitUserChatMessage} from "../api-request.js";
 import {
 	copyButtonAnimation,
 	downloadFile,
 	errorBlock,
+	getRandomString,
 	getTextContent,
-	MORPH_CHILD_FUNCTION,
-	MORPH_CHILD_HANDLER,
+	onReuse_Callback,
 	prettyError,
+	ReuseDelegator,
 	showImageZoomView
 } from "../utils/utils.js";
 import "./MessageList.css";
 import "./TimelineDivider.css";
 import {getToolName, getToolParameters, toolScriptRegistry, undoToolCalls} from "../toolset.js";
-import {markMessageDirty} from "../database.js";
+import {getImmediateMessages, markMessageDirty} from "../database.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
-import {
-	cloneMessage,
-	copyBranchAt,
-	enableBranches,
-	getBranchIndexCount,
-	setBranchIndex,
-	setLastMessage
-} from "../utils/BranchManager.js";
+import {cloneMessage, enableBranches, switchBranch} from "../utils/BranchManager.js";
 import {ITEM_KEY, PINNED, VirtualList} from "unconscious/common/VirtualList.js";
 import {EditWidget} from "./EditWidget.jsx";
 import {AudioPlayer} from "./AudioPlayer.jsx";
 
-import morphdom from "morphdom";
 import SimpleModal from "./SimpleModal.jsx";
 import {ToolCallEditor} from "./ToolCallEditor.jsx";
 import {StatusPill} from "./StatusPill.jsx";
 import {UsageBlock} from "./UsageBlock.jsx";
+import {decodeObjects, encodeObjects} from "../utils/serialization.js";
+import {openJsonEditor} from "../json_editor/JsonEditDialog.js";
+import {inspect} from "unconscious/common/inspect.js";
 
 const CURRENT_EDITING = debugSymbol("EditingNow");
 const isEditing = message => (selectedConversation[CURRENT_EDITING] === message);
@@ -123,8 +124,8 @@ const chunkRenderer = m => {
 						展开余下 <span className="white">{item.steps}</span> 轮
 					</button>
 				</div>;
-				el[MORPH_CHILD_FUNCTION] = (key, node) => {
-					node.querySelector('.white').textContent = key.steps;
+				el[onReuse_Callback] = (node, item) => {
+					node.querySelector('.white').textContent = item.steps;
 				};
 				return el;
 			}
@@ -171,7 +172,7 @@ const chunkRenderer = m => {
 					return <img src={src} alt={file.name || '图片'} onClick={() => showImageZoomView(src, file.name)} />;
 				})}</div>;
 			case "think":
-				return <ThinkBlock message={item} edit={isEditing(m.key)}/>;
+				return <ThinkBlock {...item} edit={isEditing(m.key)}/>;
 			case "tool":
 				return isEditing(m.key) ? <ToolCallEditor {...item} /> : <ToolCallCard {...item} />;
 			case "tool_ui":
@@ -188,7 +189,14 @@ const chunkRenderer = m => {
 					<div className="branch-selector" onClick.delegate{'button'}={({delegateTarget}) => {
 						const branchIndex = item.current + parseInt(delegateTarget.dataset.step);
 						if (item.callback) item.callback(branchIndex);
-						else setBranchIndex(m.key, branchIndex);
+						else {
+							const conv = unconscious(selectedConversation);
+							const bm = getImmediateMessages(conv);
+							const old = [...bm];
+							bm.switchBranch(bm.parentOf(m.key), branchIndex);
+							switchBranch(old, bm, conv);
+							$update(messages);
+						}
 					}}>
 						<button data-step="-1" className="ri-play-reverse-fill" title="上一版本" disabled={() => item.current === 0 || unconscious(abortCompletion)}></button>
 						<span className="branch-count">{item.current+1} / {item.total}</span>
@@ -196,7 +204,7 @@ const chunkRenderer = m => {
 					</div>);
 		}
 	}, chunkKeyFunc.bind(currentKeys,m), {
-		morphChild: MORPH_CHILD_HANDLER,
+		onReuse: ReuseDelegator,
 		currentKeys
 	});
 };
@@ -244,13 +252,9 @@ const defaultRenderContent = (message, chunks, content) => {
  * @param {AiChat.Message[]} messages
  */
 const chunkGather = (message, chunks, index, messages) => {
-	let {think, reasoning_details, content, tool_calls, error, finish_reason} = message;
+	let {think, content, tool_calls, error, finish_reason} = message;
 
-	if (think) {
-		const child = { type: "think", think };
-		if (reasoning_details) child.reasoning_details = reasoning_details;
-		chunks.push(child);
-	}
+	if (think) chunks.push({ type: "think", think, message });
 
 	const role = message.role;
 	const renderContent = MessageRoles[role]?.renderContent;
@@ -328,23 +332,8 @@ function chunkKeyFunc(message, chunk) {
 	switch (type) {
 		default: keys.push(type); break;
 		case "progress": keys.push(chunk.data); break;
-		case "error": keys.push("error", chunk.error); break;
-		case "text": {
-			keys.push(chunk.text);
-
-			// really tricky, right?
-			/** @type{string} */
-			const trick = chunk.trick;
-			if (trick) {
-				const oldKey = [key, trick];
-				const node = this.get(oldKey);
-				if (node) {
-					this.set(keys, node);
-					this.delete(oldKey);
-				}
-			}
-		}
-		break;
+		case "error": keys.push(type, chunk.error); break;
+		case "text": keys.push(chunk.text); break;
 		case "think": add(chunk.think.title ? [chunk.think.title, chunk.think.content] : chunk.think); break;
 		case "tool": keys.push(chunk.tool); break;
 		case "tool_ui": {
@@ -371,13 +360,29 @@ function chunkKeyFunc(message, chunk) {
 		if (isEditing(message.key)) keys.push(1);
 	}
 
+	// really tricky, right?
+	/** @type{string} */
+	const swapKey = chunk.swap;
+	if (swapKey && swapKey !== keys.at(-1)) {
+		const oldKey = keys.slice(0, -1);
+		oldKey.push(swapKey);
+
+		const node = this.get(oldKey);
+		if (node) {
+			if (type !== 'think' || node.open) {
+				this.delete(oldKey);
+				this.set(keys, node);
+			}
+		}
+
+		delete chunk.swap;
+	}
+
 	//console.log(chunk, " => ", keys);
 	return keys;
 }
 //endregion
 //region 悬浮按钮处理
-let hoveringElement;
-let hoveringMessage;
 
 const regenBtn = <button data-action="regen" title="重新生成" className="ri-loop-right-line ghost" />;
 const deleteBtn = <button data-action="del" title="删除" className="ri-delete-bin-line ghost" />;
@@ -387,9 +392,9 @@ const editBtn = <button data-action="edit" title="编辑" className="ri-edit-2-f
 const branchBtn = <button data-action="branch" title="在此处分叉" className="ri-git-fork-line ghost" />
 const saveBtn = <button data-action="save" title="保存" className="ri-check-line ghost" />;
 const insertThinkBtn = <button data-action="think" title="插入思考块" className="ri-ai-generate-text ghost" />;
-const insertToolBtn = <button data-action="tool_ui" title="插入工具块" className="ri-tools-line ghost" />;
+const insertToolBtn = <button data-action="tool" title="插入工具块" className="ri-tools-line ghost" />;
 
-const orderedButtons = [editBtn, saveBtn, branchBtn, insertThinkBtn, insertToolBtn, copyBtn, undoBtn, regenBtn, deleteBtn];
+const buttonOrder = [editBtn, saveBtn, branchBtn, insertThinkBtn, insertToolBtn, undoBtn, regenBtn, copyBtn, deleteBtn];
 
 /**
  * 更新悬浮按钮
@@ -397,16 +402,6 @@ const orderedButtons = [editBtn, saveBtn, branchBtn, insertThinkBtn, insertToolB
  * @param {HTMLSpanElement} container
  */
 function updateButtons(m, container) {
-	if (hoveringElement && hoveringElement !== container) {
-		hoveringElement.className = "";
-		hoveringElement.replaceChildren();
-	}
-
-	hoveringMessage = m;
-	hoveringElement = container;
-
-	if (!container) return;
-
 	const {index, end_index, content, key} = m;
 	const role = key.role;
 
@@ -445,34 +440,36 @@ function updateButtons(m, container) {
 		}
 	}
 
-	hoveringElement.className = buttons.length ? "buttons" : "";
+	const children = [...container.children];
+	let j = 0;
 
-	let anchorNode = null;
-	for (const element of orderedButtons) {
-		if (!buttons.includes(element)) {
-			element.remove();
-			continue;
+	outer:
+	for (let i = 0; i < buttonOrder.length; i++){
+		const element = buttonOrder[i];
+		if (!buttons.includes(element)) continue;
+
+		while (j < children.length) {
+			const el = children[j++];
+			if (element.dataset.action === el.dataset.action) continue outer;
+			el.remove();
 		}
 
-		if (element.parentElement === container) {
-			anchorNode = element;
-			continue; // 未变化则跳过
-		}
-
-		if (!anchorNode) {
-			// 情况1：向上滚动
-			container.prepend(element);
-		} else {
-			// 情况2：向下滚动
-			anchorNode.after(element);
-		}
-		anchorNode = element;
+		container.append(element.cloneNode(true));
 	}
+
+	while (j < children.length) children[j++].remove();
+
+	container.style.display = buttons.length ? '' : 'none';
 }
 
 const BRANCH_TEMP_ID = -3;
 
-const buttonHandler = (e) => {
+/**
+ * @param {import("unconscious").Reactive<AiChat.Conversation>} selectedConversation
+ * @param {import("unconscious").Reactive<AiChat.Message[]>} messages
+ * @param {Event} e
+ */
+const buttonOnLeft = (selectedConversation, messages, e) => {
 	const btn = e.target.closest(".btn-line button[data-action]");
 	if (!btn) return;
 
@@ -484,9 +481,11 @@ const buttonHandler = (e) => {
 	 * }}
 	 */
 	let self = e.target.closest(".msg")._identity;
-	const msgArr = unconscious(messages);
+	const vl = e.target.closest("._vl")._vl;
 
-	const message = msgArr[self.end_index - 1] ?? self.key;
+	const conv = unconscious(selectedConversation);
+	const message = messages[self.end_index - 1] ?? self.key;
+	let msgs = unconscious(messages);
 
 	switch (btn.dataset.action) {
 		case "copy": {
@@ -503,38 +502,16 @@ const buttonHandler = (e) => {
 		}
 		break;
 		case "regen": {
-			if (!clickTwice(btn)) return;
-			const callback = (mode) => {
-				if (mode) {
-					if (!selectedConversation.bm_leaf) {
-						messages.value = enableBranches(selectedConversation, msgArr);
-					}
-
-					setLastMessage(messages[self.index-1]);
-				} else {
-					deleteMessage(self.index, msgArr.length);
-				}
-
-				submitUserChatMessage();
-			};
-
-			let mode = self.end_index !== msgArr.length ? true
-				: isContentfulMessage(message) ? (null != selectedConversation.bm_leaf || config.model !== message.model || config.branchRegen)
-					: false;
-			if (null == mode) {
-				SimpleModal({
-					title: "询问",
-					message: "是否为重新生成的对话创建分支。",
-					onConfirm() {
-						callback(true);
-					},
-					onCancel() {
-						callback(false);
-					}
-				});
-			} else {
-				callback(mode);
+			if (!selectedConversation.bm_leaf) {
+				messages.value = msgs = enableBranches(selectedConversation);
 			}
+
+			/** @type {AiChat.BranchManager} */
+			const old = [...msgs];
+			msgs.setLeaf(msgs[self.index-1]);
+			switchBranch(old, msgs, conv);
+			submitUserChatMessage();
+			$update(messages);
 		}
 		break;
 		case "undo": {
@@ -545,12 +522,12 @@ const buttonHandler = (e) => {
 		case "del": {
 			if (!clickTwice(btn)) return;
 			const end = self.end_index || (self.index + 1);
-			if (selectedConversation.bm_leaf && end !== msgArr.length) {
+			if (selectedConversation.bm_leaf && end !== msgs.length) {
 				SimpleModal({
 					title: "警告",
 					message: "您正在删除包含分支点的对话，继续将删除它和后续所有对话。",
 					onConfirm() {
-						deleteMessage(self.index, msgArr.length);
+						deleteMessage(self.index, msgs.length);
 					}
 				});
 				return;
@@ -567,13 +544,13 @@ const buttonHandler = (e) => {
 			$update(updateMessageUI);
 		}
 		break;
-		case "tool_ui": {
+		case "tool": {
 			if (!message.tool_calls) {
 				message.tool_calls = [];
 				message.tool_responses = [];
 			}
 			message.tool_calls.push({
-				id: Math.random().toString(36).slice(2),
+				id: "tc_"+getRandomString(8),
 				type: "function",
 				function: {}
 			});
@@ -583,10 +560,10 @@ const buttonHandler = (e) => {
 		break;
 		case "branch": {
 			if (!selectedConversation.bm_leaf) {
-				messages.value = enableBranches(selectedConversation, msgArr);
+				messages.value = msgs = enableBranches(selectedConversation);
 			}
 
-			const clonedMessages = [...messages];
+			const clonedMessages = [...msgs];
 			const clonedMessage = cloneMessage(message);
 			clonedMessage.id = BRANCH_TEMP_ID;
 			clonedMessage[PINNED] = true;
@@ -616,12 +593,80 @@ const buttonHandler = (e) => {
 			vl.setItem(vl.findIndex(self), self);
 
 			if (message.id === BRANCH_TEMP_ID) {
+				messages.value = msgs = getImmediateMessages(unconscious(selectedConversation));
 				delete message.id;
 				// cloned message
-				copyBranchAt(message);
+				const old = [...msgs];
+				msgs.branchAt(msgs.parentOf(message), message);
+				switchBranch(old, msgs, conv);
 			} else {
 				$update(messages);
 			}
+		}
+		break;
+	}
+};
+/**
+ * @param {import("unconscious").Reactive<AiChat.Conversation>} selectedConversation
+ * @param {import("unconscious").Reactive<AiChat.Message[]>} messages
+ * @param {Event} e
+ */
+const buttonOnRight = async (selectedConversation, messages, e) => {
+	const btn = e.target.closest(".btn-line button[data-action]");
+	if (!btn) return;
+
+	/**
+	 * @type {AiChat.Message & {
+	 *     index: number,
+	 *     end_index: number,
+	 *     key: AiChat.Message
+	 * }}
+	 */
+	let self = e.target.closest(".msg")._identity;
+
+	const message = messages[self.end_index - 1] ?? self.key;
+
+	switch (btn.dataset.action) {
+		case "edit": {
+			if (message.id < 0) return;
+
+			e.preventDefault();
+			let jsonText, update, onclose;
+			let updatePromise = async () => {
+				const mapping = new Map;
+				await encodeObjects(message, mapping);
+				jsonText = inspect(message, mapping.size ? (_, value) => mapping.get(value) ?? value : null);
+				update?.();
+			};
+			//conv[CURRENT_EDITING] = message;
+
+			let skipNext;
+			[update, onclose] = openJsonEditor("message#"+message.id,
+				() => jsonText,
+				async (obj) => {
+					const changedMessage = await decodeObjects(obj);
+
+					const id = message.id;
+
+					Object.keys(message).forEach(item => { delete message[item]; });
+					Object.assign(message, changedMessage);
+
+					message.id = id;
+					markMessageDirty(message);
+					$update(messages);
+					skipNext = true;
+				}
+			);
+			const syncToEditor = () => {
+				if (skipNext) skipNext = false;
+				else updatePromise();
+			};
+
+			$watch(messages, syncToEditor);
+			onclose(() => {
+				$unwatch(messages, syncToEditor);
+				//conv[CURRENT_EDITING] = null;
+			})
 		}
 		break;
 	}
@@ -636,7 +681,6 @@ function deleteMessage(start, end) {
 	const removed = messages.splice(start, end - start);
 	const global = unconscious(selectedConversation);
 	undoToolCalls(global, removed, 0);
-	$update(updateMessageUI);
 }
 
 const TIMEOUT = debugSymbol("_btnTimeout");
@@ -654,21 +698,18 @@ function clickTwice(btn) {
 }
 //endregion
 
-/**
- * @type {VirtualList}
- */
-let vl;
-
-function getBranchChunk(message, chunks) {
-	const [branchIndex, branchCount] = getBranchIndexCount(message);
-	if (branchCount > 1 && message.id !== BRANCH_TEMP_ID) {
+function getBranchChunk(messages, message, chunks) {
+	const info = messages.getBranchInfo?.(message);
+	if (info && message.id !== BRANCH_TEMP_ID) {
 		chunks.push({
 			type: "branch",
-			current: branchIndex,
-			total: branchCount
+			current: info[0],
+			total: info[1]
 		});
 	}
 }
+
+const TRAILER_TYPES = new Set(['branch', 'usage', 'progress']);
 
 class MessageListItem {
 	#list;
@@ -681,11 +722,9 @@ class MessageListItem {
 	//end_index;
 
 	/**
-	 * @param {AiChat.Message[]} messageList
 	 * @param {AiChat.Message} message
 	 */
-	constructor(messageList, message) {
-		this.#list = messageList;
+	constructor(message) {
 		this.key = message;
 	}
 
@@ -696,12 +735,16 @@ class MessageListItem {
 		return this.#content;
 	}
 
+	//get messages() {return this.#list;}
+
 	/**
 	 *
+	 * @param {AiChat.Message[]} messages
 	 * @param {number} startIndex
 	 * @param {number} endIndex
 	 */
-	markDirty(startIndex, endIndex) {
+	markDirty(messages, startIndex, endIndex) {
+		this.#list = messages;
 		this.index = startIndex;
 		//this.end_index = endIndex;
 
@@ -717,6 +760,7 @@ class MessageListItem {
 		const ref = this;
 		let message = ref.key;
 		let i = ref.index;
+		let lastGroup = 0;
 
 		const chunks = [];
 		chunkGather(message, chunks, i, messages);
@@ -725,12 +769,15 @@ class MessageListItem {
 		let generationEnded;
 
 		if (message.role === "assistant") {
+			i++;
+
 			if (config.combineToolCalls) {
 				const maxSize = CTC_BASE_COUNT + (message[CTC_EXPAND_COUNT] ?? 0);
 
-				for (i++; i < messages.length; i++) {
+				for (; i < messages.length; i++) {
 					if (!message.tool_calls || isEditing(messages[i]) || messages[i].role !== "assistant") break;
 					message = messages[i];
+					lastGroup = chunks.length;
 					chunkGather(message, chunks, i, messages);
 				}
 
@@ -740,6 +787,7 @@ class MessageListItem {
 						type: "divider",
 						steps: removeCount
 					});
+					lastGroup++;
 				}
 			}
 
@@ -751,29 +799,44 @@ class MessageListItem {
 			if (!generationEnded) chunks.push({ type: "progress", kind: message[PROGRESS_KIND], data: message[PROGRESS_VALUE] });
 			// show token usage & billing
 			else {
+				getBranchChunk(messages, messages[ref.index], chunks);
 				// 手动添加的消息不显示usage
 				if (message.finish_reason) chunks.push({type: "usage"});
-				getBranchChunk(messages[ref.index], chunks);
 			}
 		} else {
+			getBranchChunk(messages, message, chunks);
 			// 自定义消息角色
 			if (message.finish_reason) chunks.push({type: "usage"});
-			getBranchChunk(message, chunks);
 
 			ref[PINNED] = isEditing(message);
 		}
 
 		let prevChunks = this.#content;
 
-		// 如果这个markdown已经被流式渲染了，那么就不要再重新渲染一遍了（跳过本次key变化）
-		// 为了保证其它地方的修改能被正常应用，这里依赖了很多隐式条件，比如上面几行的usage和branch，还有用这个-1节省时间而不是findLast
-		if (generationEnded && i === messages.length) {
+		// 如果markdown已经渲染好了，那么跳过本次key变化
+		// 隐式条件：最后一条不是usage代表上次更新时还在生成
+		if (i === messages.length) {
 			const lastType = prevChunks.at(-1)?.type;
-			if (lastType !== 'usage' && lastType !== 'branch') {
-				const old = prevChunks.findLast(item => item.text != null);
-				const now = chunks.findLast(item => item.text === message.content);
-				if (old && now && old.text !== now.text) {
-					now.trick = old.text;
+			if (lastType && lastType !== 'usage') {
+				let j = prevChunks.length - 1;
+				if (TRAILER_TYPES.has(prevChunks[j].type)) j--;
+
+				let k = chunks.length - 1;
+				if (TRAILER_TYPES.has(chunks[k].type)) k--;
+
+				let prev = prevChunks[j], curr = chunks[k];
+				if (prev && curr) {
+					do {
+						const type = curr.type;
+						if (type === prev.type) {
+							if (type !== 'tool') {
+								curr.swap = prev[type];
+							}
+							break;
+						}
+
+						curr = chunks[--k];
+					} while (k >= lastGroup);
 				}
 			}
 		}
@@ -782,14 +845,6 @@ class MessageListItem {
 		this.#dirty = false;
 	}
 }
-
-$watch([messages, updateMessageUI, abortCompletion], () => {
-	if (hoveringElement?.isConnected) updateButtons(hoveringMessage, hoveringElement);
-	else {
-		hoveringMessage = null;
-		hoveringElement = null;
-	}
-}, false);
 
 /**
  *
@@ -801,6 +856,7 @@ function roleName(m) {
 	const role = msg.role;
 	if (role === "user") return msg.label || "你";
 	if (role === "system") return "系统";
+	if (role === "fold") return "上下文摘要";
 	return MessageRoles[role]?.name || msg.model || "AI";
 }
 
@@ -813,6 +869,102 @@ const roleSelection = ["system", "user", "assistant"];
  * @constructor
  */
 export function MessageList({messages}) {
+	let hoverElement;
+
+	function findButtonContainer(node) {
+		for (let child of node.children) {
+			if (child.matches(".btn-line")) {
+				return child.children[0];
+			}
+		}
+	}
+
+	$watch([messages, updateMessageUI, abortCompletion], () => {
+		if (auxMainlyTouch || auxKeyboardOnly) {
+			for (let node of vl.dom.children) {
+				updateButtons(node._identity, findButtonContainer(node));
+			}
+		} else {
+			if (!hoverElement?.isConnected) {
+				hoverElement = null;
+				return;
+			}
+			updateButtons(hoverElement._identity, findButtonContainer(hoverElement));
+		}
+	}, false);
+
+	function renderRole(item, allowEditRole) {
+		const msg = item.key;
+		return <div className={"role"}>
+			{allowEditRole && isEditing(msg) && roleSelection.includes(msg.role) ? <select onChange={e => {
+				const role = msg.role = e.target.selectedOptions[0].value;
+				const isAssistant = role === 'assistant';
+				if (!isAssistant) {
+					delete msg.think;
+					delete msg.tool_calls;
+					delete msg.tool_responses;
+				}
+				vl.setItem(vl.findIndex(item), item);
+				$update(updateMessageUI);
+			}}>
+				{roleSelection.map(name => <option selected={msg.role === name} value={name}>{name}</option>)}
+			</select> : <b className={"stroke"}>{roleName(item)}</b>}
+			<span className='time stroke'>{formatDate('Y-m-d H:i:s', msg.time ?? null)}</span>
+			<span className='spacer'></span>
+		</div>;
+	}
+
+	/**
+	 * @param {AiChat.MessageListItem} item
+	 * @return {JSX.Element}
+	 */
+	const renderBlock = (item) => {
+		let buttons = ref();
+		const msg = item.key;
+
+		const buttonDiv = <div className="btn-line"><span className="buttons" style="display:none" ref={buttons}></span></div>;
+		const isNormalConversation = !selectedConversation.noAI;
+		const div = <div onMouseEnter={() => {
+			if (hoverElement) {
+				findButtonContainer(hoverElement).style.display = "none";
+			}
+			hoverElement = div;
+			updateButtons(item, buttons);
+		}} className={`msg ${msg.role}`} _identity={item}>
+			{renderRole(item, isNormalConversation)}
+			{auxSmallScreen ? null : buttonDiv}
+			<div className="body">{chunkRenderer(item)}</div>
+			{!auxSmallScreen ? null : buttonDiv}
+		</div>;
+
+		if ((auxKeyboardOnly|auxMainlyTouch) || hoverElement?._identity === item)
+			updateButtons(item, buttons);
+		return div;
+	};
+
+	const vl = new VirtualList({
+		itemHeight: 1000,
+		overscan: 500,
+		keyFunc: (item) => [item.key, item.key.time],
+		reuseHook(node, newKey, item) {
+			const oldKey = node[ITEM_KEY];
+			const msg = item.key;
+
+			if (oldKey[0] !== msg) return false;
+			if (oldKey[1] === msg.time) return true;
+			if (msg.role === "assistant" && msg === messages.at(-1)) {
+				node.firstElementChild.replaceWith(renderRole(item));
+				return true;
+			}
+			return false;
+		},
+		renderer: renderBlock
+	});
+
+	vl.dom.addEventListener("click", buttonOnLeft.bind(null, selectedConversation, messages));
+	vl.dom.addEventListener("contextmenu", buttonOnRight.bind(null, selectedConversation, messages));
+	vl.dom.addEventListener("click", copyCodeEventHandler);
+
 	const blocks = $computed((oldBlocks) => {
 		const out = [];
 
@@ -829,7 +981,7 @@ export function MessageList({messages}) {
 			/** @type {MessageListItem} */
 			let item;
 			while (pos < lim && oldBlocks[pos].key !== message) pos++;
-			item = pos < lim ? oldBlocks[pos++] : new MessageListItem(arr, message);
+			item = pos < lim ? oldBlocks[pos++] : new MessageListItem(message);
 
 			if (config.combineToolCalls) {
 				for (; i < arr.length; i++) {
@@ -838,75 +990,16 @@ export function MessageList({messages}) {
 				}
 			}
 
-			item.markDirty(start, i);
+			item.markDirty(arr, start, i);
 			out.push(item);
 		}
 
+		vl.itemHeight = out.length > 10000 ? 17800000 / out.length : innerHeight;
 		return out;
 	}, [
 		messages, updateMessageUI,
-		$computed(() => config.combineToolCalls),
+		$derived(config.combineToolCalls),
 	]);
-
-	/**
-	 * @param {AiChat.MessageListItem} m
-	 * @return {JSX.Element}
-	 */
-	const renderBlock = (m) => {
-		let buttons;
-		const msg = m.key;
-
-		const callback = () => updateButtons(m, buttons);
-		const buttonDiv = <div className={"btn-line"}><span ref={buttons}></span></div>;
-		const isNormalConversation = !selectedConversation.noAI;
-		const div = <div onMouseEnter={callback} onTouchStart.passive={callback} className={`msg ${msg.role}`} _identity={m}>
-			<div className={"role"}>
-				{isNormalConversation && isEditing(msg) && roleSelection.includes(msg.role) ? <select onChange={e => {
-					const role = msg.role = e.target.selectedOptions[0].value;
-					const isAssistant = role==='assistant';
-					if (!isAssistant) {
-						delete msg.think;
-						delete msg.tool_calls;
-						delete msg.tool_responses;
-					}
-					vl.setItem(vl.findIndex(m), m);
-					$update(updateMessageUI);
-				}}>
-					{roleSelection.map(name => <option selected={msg.role === name} value={name}>{name}</option>)}
-				</select> : <b className={"stroke"}>{roleName(m)}</b>}
-				<span className='time stroke'>{formatDate('Y-m-d H:i:s', msg.time??null)}</span>
-				<span className='spacer'></span>
-			</div>
-			{isMobile ? null : buttonDiv}
-			<div className="body">{chunkRenderer(m)}</div>
-			{!isMobile ? null : buttonDiv}
-		</div>;
-
-		if (hoveringMessage === m) updateButtons(m, buttons);
-		return div;
-	};
-
-	vl = new VirtualList({
-		itemHeight: innerHeight,
-		overscan: 199,
-		keyFunc: (item) => [item.key, item.key.time],
-		// 又是tricky code过段时间要重构掉
-		isSameKey: (el, b) => {
-			const [key, time] = el[ITEM_KEY];
-			if (key !== b[0]) return false;
-			if (time === b[1]) return true;
-			if (key.role === "assistant" && key === messages.at(-1)) {
-				morphdom(el.querySelector(".role"), renderBlock(el._identity).children[0]);
-				return true;
-			}
-			return false;
-		},
-		renderer: renderBlock
-	});
-
-	vl.dom.addEventListener("click", buttonHandler);
-	vl.dom.addEventListener("click", copyCodeEventHandler);
-
 	$watch(blocks, () => {vl.setItems(unconscious(blocks));});
 
 	return new AppendObserver(self => {

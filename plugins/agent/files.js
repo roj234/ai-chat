@@ -1,8 +1,8 @@
-import {getToolParameters, prefixTitle, registerToolset} from "/src/toolset.js";
+import {getToolParameters, prefixTitle, registerToolset, toolset} from "/src/toolset.js";
 import {EVENT_BUS, inputText, messages, selectedConversation, updateMessageUI} from "/src/states.js";
 import {$state, $update, $watch, debugSymbol, unconscious} from "unconscious";
 import {AskUser} from "../rp_kit/AskUser.js";
-import {callFileSystemFunc, createFileSystem, fileAccess, FS_INSTANCE, getFileSystem,} from "./Mounts.js";
+import {callFileSystemFunc, createFileSystem, crossVFSCopyMove, fileAccess, FS_INSTANCE,} from "./Mounts.js";
 import {RunJS, SearchModules} from "./run_js.js";
 import {readAsString} from "/common/chardet.js";
 import {downloadFile, errorBlock} from "/src/utils/utils.js";
@@ -11,8 +11,7 @@ import {InspectImage} from "./inspect_image.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {prettyTime} from "unconscious/common/Utils.js";
 import {DiffHeader, HighlightBox, makeDiff, TextDiff} from "/src/components/TextDiff.jsx";
-import {createAsyncQueue} from "/common/pure-utils.js";
-import {getCombinedPreset, markMessageDirty} from "/src/database.js";
+import {markMessageDirty} from "/src/database.js";
 import {compileGrepPattern} from "/common/fs-common.js";
 import "./GrepCard.css";
 import {normalizePath} from "unconscious/common/path-utils.js";
@@ -20,6 +19,7 @@ import {getChangeableFiles} from "./overwrite-monitor.js";
 import {showToast} from "/src/components/Toast.js";
 import {shellPrompt, shellTools} from "./RemoteFSShell.js";
 import {vcsEnabledKey, vcsTools} from "./VCS.js";
+import {getCombinedPreset} from "/src/presets.js";
 
 const DIFF_CACHE = debugSymbol("Diff");
 /**
@@ -248,7 +248,7 @@ const Append = {
 	}
 };
 
-// ============ 解析器：Unified Diff Hunk → search/replace ============
+// ============ 解析器：Unified Diff Hunk → oldText/newText ============
 function parseUnifiedHunk(text) {
 	const lines = String(text == null ? "" : text).split("\n");
 	const hunks = [];
@@ -279,17 +279,17 @@ function parseUnifiedHunk(text) {
 		else { close(); }                                                               // 非法行，结束 hunk
 	}
 	close();
-	return hunks.map(h => ({ search: h.old.join("\n"), replace: h.new.join("\n") }));
+	return hunks.map(h => ({ oldText: h.old.join("\n"), newText: h.new.join("\n") }));
 }
 
 const patchHandler = fileAccess("patch");
 const patchDiffHandler = (par) => {
 	const diff = [];
 	parseUnifiedHunk(par.diff)
-		.filter(i => i.search !== i.replace)
-		.forEach(({search, replace}) => {
+		.filter(i => i.oldText !== i.newText)
+		.forEach(({oldText, newText}) => {
 			diff.push({ type: "hunk", text: par.path })
-			diff.push(...makeDiff(search, replace));
+			diff.push(...makeDiff(oldText, newText));
 		});
 	return diff;
 };
@@ -319,9 +319,9 @@ const Patch = {
 	}
 };
 
-const editDiffHandler = ({search, replace}) => {
-	if (search != null && replace != null && search !== replace) {
-		return makeDiff(search, replace);
+const editDiffHandler = ({oldText, newText}) => {
+	if (oldText != null && newText != null && oldText !== newText) {
+		return makeDiff(oldText, newText);
 	}
 }
 
@@ -330,7 +330,7 @@ const Edit = {
 	name: "Edit",
 	description:
 		"Atomically find and replace text within a file." +
-		" Use optional 1-based inclusive `startLine` and `endLine` to narrow the range (search/replace scope)." +
+		" Use optional 1-based inclusive `startLine` and `endLine` to narrow the scope." +
 		" When `replaceAll` is true, replaces all occurrences in that range." +
 		" When `replaceAll` is false, it must occur exactly once in that range.",
 	script: fileAccess("edit"),
@@ -339,17 +339,17 @@ const Edit = {
 
 	fix(par) {
 		const keys = Object.keys(par);
-		if (!par.search) {
+		if (!par.oldText) {
 			const res = keys.filter(key => key.includes("old"));
 			if (res.length === 1) {
-				par.search = par[res[0]];
+				par.oldText = par[res[0]];
 				delete par[res[0]];
 			}
 		}
-		if (!par.replace) {
+		if (!par.newText) {
 			const res = keys.filter(key => key.includes("new"));
 			if (res.length === 1) {
-				par.replace = par[res[0]];
+				par.newText = par[res[0]];
 				delete par[res[0]];
 			}
 		}
@@ -359,13 +359,13 @@ const Edit = {
 		type: "object",
 		properties: {
 			path: { type: "string" },
-			search: { type: "string" },
-			replace: { type: "string" },
+			oldText: { type: "string" },
+			newText: { type: "string" },
 			startLine: { type: "integer" },
 			endLine: { type: "integer" },
 			replaceAll: { type: "boolean", default: false }
 		},
-		required: ["path", "search", "replace"]
+		required: ["path", "oldText", "newText"]
 	}
 };
 /** @type {AiChat.FunctionTool} */
@@ -388,54 +388,10 @@ const Mkdir = {
 /** @type {AiChat.FunctionTool} */
 const CopyMove = {
 	name: "CopyMove",
-	description: "Copy file/directory, move them when `move` is true",
-	async script({src, dest, move}, ctx, conv) {
-		if (conv.fs_readonly) throw "Write-protect is enabled";
-		if (src === dest) throw 'src and dest are same';
-
-		let srcFileSystem, destFileSystem;
-		[src, srcFileSystem] = await getFileSystem(src, conv);
-		[dest, destFileSystem] = await getFileSystem(dest, conv);
-
-		if (srcFileSystem === destFileSystem) {
-			if (normalizePath(dest).join('/').startsWith(normalizePath(src).join('/')+"/"))
-				throw "Cannot move into descents";
-
-			return callFileSystemFunc(srcFileSystem, 'copy', {
-				src,
-				dest,
-				move
-			}, conv);
-		}
-
-		const fileType = await callFileSystemFunc(srcFileSystem, 'stat', { path: src });
-		if (fileType.startsWith('type: file')) {
-			const content = await callFileSystemFunc(srcFileSystem, 'readRaw', { path: src });
-			await callFileSystemFunc(destFileSystem, 'writeRaw', { path: dest, content });
-		} else {
-			const srcFiles = await callFileSystemFunc(srcFileSystem, 'list', {
-				path: src,
-				pattern: '**',
-				json: true,
-				showDir: false
-			}, conv);
-
-			const [enqueue, waitAll] = createAsyncQueue();
-
-			for (const [path] of srcFiles) {
-				await enqueue(async() => {
-					const content = await callFileSystemFunc(srcFileSystem, 'readRaw', {path});
-					await callFileSystemFunc(destFileSystem, 'writeRaw', { path, content });
-				});
-			}
-
-			await waitAll();
-		}
-
-		if (move) {
-			await callFileSystemFunc(srcFileSystem, 'delete', { path: src });
-		}
-
+	description: "Copy or move a file/directory",
+	async script(par, ctx, conv) {
+		await crossVFSCopyMove(par, ctx, conv);
+		await getChangeableFiles(conv, par.dest);
 		return 'Success';
 	},
 	title(req, ctx) {
@@ -509,6 +465,13 @@ b.txt
 			maxMatchesPerFile: { type: "integer", default: 10, minimum: 1, maximum: 100 },
 		},
 		required: ["pattern"],
+	},
+
+	fix(par) {
+		if (par.maxFilesPerFile) {
+			par.maxFiles = par.maxFilesPerFile;
+			delete par.maxFilesPerFile;
+		}
 	},
 
 	title(req, ctx) {
@@ -674,7 +637,14 @@ const Mounts = {
 	script(_, resp, conv) {
 		const arr = Object.entries(conv.mnt||{});
 		arr.unshift([".", conv]);
-		return "Total "+(arr.length)+"\n"+arr.map(([k, {fs_type, fs_base, fs_name}], i) => JSON.stringify(i ? "~/"+k : k)+" (type="+fs_type+", remote_path="+JSON.stringify(fs_base||"/")+", label="+JSON.stringify(fs_name||"")+")").join("\n");
+		return "Total "+(arr.length)+"\n"+arr.map(([k, {fs_type, fs_base, fs_name, fs_readonly, fs_ACL, fs_builtin}], i) => {
+			let str = `${JSON.stringify(i ? "~/" + k : k)} (type=${fs_type||'vfs'}, remote_path=${JSON.stringify(fs_base || "/")}`;
+			if (fs_name) str += `, label=${JSON.stringify(fs_name || "")}`;
+			if (fs_builtin) str += `, builtin`;
+			if (fs_readonly) str += `, readonly`;
+			if (fs_ACL) str += `, hasAccessController`;
+			return str+')';
+		}).join("\n");
 	},
 };
 //endregion
@@ -916,11 +886,11 @@ registerToolset(
 				shellFallbackTools.forEach(addTools);
 			}
 
-			if (activatedModules.has("InteractiveSimulation")) {
-				tools.add(RunJS.name);
-			}
+			vfsTools.forEach(isVirtualFileSystem ? addTools : removeTools);
 
-			vfsTools.forEach(isVirtualFileSystem || activatedModules.has("FileTransfer") ? addTools : removeTools);
+			activatedModules.forEach(item => {
+				toolset[item].tools?.forEach(name => tools.add(name));
+			});
 
 			return filesystemPrompt + auxPrompt;
 		},
@@ -999,6 +969,20 @@ COMMAND_REGISTRY["fsreset"] = [
 	},
 	"重置文件系统选择"
 ];
+
+COMMAND_REGISTRY["mount"] = [
+	async (args) => {
+		const conv = unconscious(selectedConversation);
+		if (!conv) return;
+		if (!args[0]) return;
+
+		const opt = {fs_label: args[0]};
+		await createFileSystem(opt);
+		(conv.mnt ??= {}) [args[0]] = opt;
+	},
+	"创建新的文件系统挂载点 /mnt <name>"
+];
+
 
 EVENT_BUS.on('resolveUrl', (path) => {
 	const conv = unconscious(selectedConversation);

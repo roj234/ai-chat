@@ -1,13 +1,21 @@
 // 聊天软件接口
-import {getToolName, registerToolset, runTools, toolInfo, toolScriptRegistry, toolset} from "/src/toolset.js";
-import {SETTINGS} from "/src/settings.js";
-import {config, conversations, messages} from "/src/states.js";
+import {
+	getToolInteractiveLevel,
+	getToolName,
+	registerToolset,
+	runTools,
+	toolInfo,
+	toolScriptRegistry,
+	toolset
+} from "/src/toolset.js";
+import {GLOBAL_SETTINGS} from "/src/settings.js";
+import {config, conversations, findConversation, messages} from "/src/states.js";
 import {agentLoop} from "/src/api-request.js";
 import {$stampLock, $state, $unwatch, $watch} from "unconscious";
 import {renderMarkdownToString} from "/src/markdown/markdown.js";
 import {showToast} from "/src/components/Toast.js";
 import {throttled} from "/common/pure-utils.js";
-import {getMessagesCacheFirst} from "/src/database.js";
+import {getMessages} from "/src/database.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {fileAccess} from "../agent/index.js";
 import {onLoad} from "/src/hooks.js";
@@ -167,11 +175,11 @@ class Chatbot {
 		let conversation = this.#conversation;
 		if (!conversation) {
 			const convId = this.#conversationId;
-			this.#conversation = conversation = conversations.find(item => item.id === convId);
+			this.#conversation = conversation = findConversation(convId);
 			if (!conversation) throw new Error("找不到对话 #"+convId);
 		}
 
-		const msgs = await getMessagesCacheFirst(conversation);
+		const msgs = await getMessages(conversation);
 		if (msgs !== this.#messages) {
 			this.#messages = msgs;
 			this.#lock = $stampLock(messages, msgs);
@@ -199,7 +207,7 @@ class Chatbot {
 						const tc = toolCalls[i];
 						const ctx = am.tool_responses[i];
 						let name = getToolName(ctx, tc);
-						const secure = toolScriptRegistry[name]?.interactive === 'secure';
+						const secure = getToolInteractiveLevel(ctx, tc, conversation) === 'secure';
 						try {
 							const title = toolScriptRegistry[name]?.title?.(tc, ctx);
 							if (title) name = title;
@@ -321,7 +329,7 @@ onLoad(() => {
 	if (config.chatbot_ws_url) $watch(conversations, handler, false);
 });
 
-SETTINGS.push({
+GLOBAL_SETTINGS.push({
 	id: "chatbot_ws_url",
 	name: "Chatbot WebSocket 服务器地址",
 	type: "input",

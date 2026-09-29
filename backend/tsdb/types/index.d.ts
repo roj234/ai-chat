@@ -1,5 +1,5 @@
 
-/** NULL owner 值（`0`）。追加时传入 `0` 会被视为 NULL 并拒绝。 */
+/** NULL owner 值（`0`）。追加时传入 `0` 会存储为无 owner 行；`getByOwnerId(0)` 直接返回 `undefined`。 */
 export const NULL_OWNER: 0;
 
 /**
@@ -106,6 +106,14 @@ export class TSDB {
     endTime: number,
     options?: FindByTimeOptions,
   ): Promise<LogRange | null>;
+
+  /**
+   * 批量重映射 owner。
+   * @param remap
+   * @param since 从哪个 owner 开始
+   * @returns 实际被修改的行数。
+   */
+  remapOwners(remap: (owner: number) => number, since: number = 0): Promise<number>;
 
   /**
    * 将 db.dat 的一段区间作为可读流输出。

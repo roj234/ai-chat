@@ -6,6 +6,7 @@ import FontFilter from "unconscious/postcss/font-filter.js";
 import OklchToRgb from "unconscious/postcss/oklch-to-rgb.js";
 import InlineVars from "unconscious/postcss/inline-vars.js";
 import {viteFontMinify} from 'unconscious/vite/font-minify.js';
+import {sandboxModules} from "./common/build-sandbox-modules.js";
 
 import packageInfo from "./package.json";
 
@@ -44,6 +45,7 @@ export default {
             ]
         }),
         viteFontMinify(),
+        sandboxModules(),
         globMacroPlugin(),
         {
             name: 'inject-build-time',

@@ -1,10 +1,11 @@
 import {
+	auxMainlyTouch,
 	config,
 	EVENT_BUS,
-	isMobile,
 	MessageRoles,
 	messages,
 	onConversationLoaded,
+	onConversationSwitchOut,
 	onConversationSwitchTo,
 	selectedConversation,
 	updateMessageUI
@@ -22,7 +23,7 @@ import {
 	debugSymbol,
 	unconscious
 } from "unconscious";
-import {SETTINGS} from "/src/settings.js";
+import {GLOBAL_SETTINGS} from "/src/settings.js";
 
 import {cloneNamed, downloadFile} from "/src/utils/utils.js";
 import {parseImageMeta} from "/common/imate.js";
@@ -55,6 +56,9 @@ import {PROMISE_CATCH} from "/common/pure-utils.js";
 
 import {closeWindow, openWindow} from "/src/components/Windows.jsx";
 import {Icon_save} from "/src/components/Icons.jsx";
+
+import "./BasicRoleplay.css";
+import {HighlightBox} from "/src/components/TextDiff.jsx";
 
 compileSchema(schema);
 
@@ -256,7 +260,7 @@ function createSchemaEditColumn(typeId, editorConstructor, defaultValue = {}) {
 			$watch(selectedItem, syncToEditor, false);
 			onClose(() => $unwatch(selectedItem, syncToEditor));
 		}}>
-		<span className={"tooltip"}>{isMobile ? "长按" : "右击"}编辑原始数据</span>
+		<span className={"tooltip"}>{auxMainlyTouch ? "长按" : "右击"}编辑原始数据</span>
 	</button>;
 
 	return [
@@ -330,22 +334,41 @@ const [lorebookBar, lorebookList, currentLorebook] = createSchemaEditColumn("st|
 export const exportForCV_openCharacterEditor = openCharacterEditor;
 
 //region 从角色卡新建对话
-charBar.append(<button className={"ri-book-open-line btn ghost"} disabled={() => {
-	const chr = unconscious(currentCharacter);
-	return !chr?.name || !unconscious(characterList).find(item => item.name === chr.name);
-}} onClick={() => {
-	exportForCV_createConversation(unconscious(currentCharacter));
-}} title="以选中角色开始故事"><span className="tooltip">以选中角色开始故事</span></button>);
+charBar.prepend(
+	<button className={"ri- btn ghost"} onClick={async () => {
+		openWindow({
+			id: "charViewer",
+			title: "橘色卡管理器",
+			element: (await import("./page/characterViewer.js")).default()
+		});
+	}} title="橘色卡管理器">
+		<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor">
+			<rect x="3" y="3" width="18" height="18" rx="2" stroke-width="2"/>
+			<line x1="14" y1="3" x2="14" y2="21" stroke-width="2"/>
+			<rect x="6" y="6" width="5.5" height="7" rx="1" fill="#f97316" stroke="none"/>
+			<line x1="6" y1="16" x2="11" y2="16" stroke-width="1.5" stroke-linecap="round"/>
+		</svg>
+	</button>,
+
+	<button className={"ri-book-open-line btn ghost"} disabled={() => {
+		const chr = unconscious(currentCharacter);
+		return !chr?.name || !unconscious(characterList).find(item => item.name === chr.name);
+	}} onClick={() => {
+		exportForCV_createConversation(unconscious(currentCharacter));
+	}} title="以选中角色开始故事"><span className="tooltip">以选中角色开始故事</span></button>
+);
+
 /**
  * 从角色新建对话
  * @param {AiChat.DnD.MyCharacter} char
  * @return {Promise<void>}
  */
 export async function exportForCV_createConversation(char) {
-	await importConversationData({
-		title: "[Char] "+char.name,
+	const conv = {
+		title: "[Char] " + char.name,
 		time: Date.now(),
-	}, [
+	};
+	const messages = [
 		{
 			role: "st|char",
 			content: {
@@ -355,21 +378,34 @@ export async function exportForCV_createConversation(char) {
 				greeting: 0
 			}
 		}
-	]);
+	];
 
-	showToast("已创建 "+char.name+" 的新对话", "ok");
+	if (config.temporaryChat) {
+		conv.temporary = true;
+		conv.title += ' (临时)';
+	}
+
+	await loadRPConversation(conv, messages, true);
+	await importConversationData(conv, messages);
+
+	if (config.temporaryChat) {
+		conv.id = "temporary-"+conv.time;
+	}
+
+	showToast("已创建 " + char.name + " 的新对话", "ok");
 }
+
 //endregion
 
 createTab("character", "角色", "ri-user-heart-line");
-SETTINGS.filter((item) => item._id === "import").forEach((item) => {
+GLOBAL_SETTINGS.filter((item) => item._id === "import").forEach((item) => {
 	if (!Array.isArray(item._tab)) {
 		item._tab = [item._tab || "general", "character"];
 	} else {
 		item._tab.push("character");
 	}
 });
-SETTINGS.push(
+GLOBAL_SETTINGS.push(
 	{
 		id: "nickname",
 		name: "你的名字",
@@ -446,23 +482,6 @@ SETTINGS.push(
 );
 
 onLoad(() => {
-	if (!isMobile && !IS_ANDROID_BUILD) {
-		charBar.append(<button className={"ri- btn ghost"} onClick={async () => {
-			openWindow({
-				id: "cardViewer",
-				title: "橘色卡管理器",
-				element: (await import("./page/characterViewer.js")).createCharacterViewer()
-			});
-		}} title="橘色卡管理器">
-			<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor">
-				<rect x="3" y="3" width="18" height="18" rx="2" stroke-width="2"/>
-				<line x1="14" y1="3" x2="14" y2="21" stroke-width="2"/>
-				<rect x="6" y="6" width="5.5" height="7" rx="1" fill="#f97316" stroke="none"/>
-				<line x1="6" y1="16" x2="11" y2="16" stroke-width="1.5" stroke-linecap="round"/>
-			</svg>
-		</button>);
-	}
-
 	kvListGetKeys("st|preset", presetList);
 	kvListGetKeys("st|char", characterList);
 	kvListGetKeys("st|lorebook", lorebookList);
@@ -505,7 +524,7 @@ onLoad(() => {
 				greeting: 0
 			}
 		});
-		return loadCB(conv, messages);
+		return loadRPConversation(conv, messages);
 	});
 })
 
@@ -563,14 +582,14 @@ registerToolset(RP_TOOLSET_ID, "", [FetchLorebook], {
 });
 //endregion
 
+const FIRST_LOAD = debugSymbol("CharacterFirstLoad");
 /**
  * 对话从数据库加载/切换到回调
- * FIXME: 初次打开时会调用两次，幂等但浪费性能（数据库加载/切换）
  * @param {AiChat.Conversation} conv
  * @param {AiChat.Message[]} messages
- * @param {string[]} [isLoadFromDB]
+ * @param {boolean} [isLoadFromDB]
  */
-const loadCB = (conv, messages, isLoadFromDB) => {
+const loadRPConversation = (conv, messages, isLoadFromDB) => {
 	/** @type {AiChat.DnD.MyCharConversation} */
 	const charInstance = messages[0];
 	const isCharacterCard = charInstance?.role === "st|char";
@@ -620,10 +639,16 @@ const loadCB = (conv, messages, isLoadFromDB) => {
 				content: charInstance
 			});
 		}
+		if (isLoadFromDB) conv[FIRST_LOAD] = true;
 	})
 };
-onConversationSwitchTo(loadCB);
-onConversationLoaded(loadCB);
+onConversationSwitchTo((conv, message) => {
+	return !conv[FIRST_LOAD] && loadRPConversation(conv, message);
+});
+onConversationSwitchOut((conv) => {
+	delete conv[FIRST_LOAD];
+});
+onConversationLoaded((conv, path, messages) => loadRPConversation(conv, messages, true));
 
 //region 数据导入
 /**
@@ -697,13 +722,7 @@ registerDataImportHandler("image/jpeg", imageLoader);
 //region UI组件
 MessageRoles["st|char"] = {
 	name: "角色卡",
-	/**
-	 *
-	 * @param {AiChat.DnD.MyCharConversation} self
-	 * @param output
-	 * @param callbacks
-	 */
-	compose(self, output, callbacks, _idx, _len, conv) {
+	preprocess(self, messages, conv) {
 		const {
 			/** @type {AiChat.DnD.MyCharacter} */
 			character: char,
@@ -781,101 +800,99 @@ MessageRoles["st|char"] = {
 				createFileSystemAsync(vfs, createVirtualFileSystem(map));
 			}
 
-			(conv.mnt || (conv.mnt = {})).lorebook = vfs;
+			(conv.mnt ??= {}).lorebook = vfs;
 		} else {
-
 			delete conv.mnt?.lorebook;
 		}
 
-		callbacks.push((input, output, body, prefill, conv) => {
-			// 宏环境
-			const macro = createSimpleMacroContext(char);
+		const output = messages.map(m => ({...m}));
 
-			//region 插入消息
-			if (char.autoMessages?.length) {
-				for (let {enabled, depth, content} of char.autoMessages) {
-					if (!enabled) continue;
+		// 宏环境
+		const macro = createSimpleMacroContext(char);
 
-					const msg = output[output.length - 1 - depth];
-					if (msg && (depth !== 0 || msg.role === "user")) insertText("\n\n"+applyMacro(content, macro), msg);
-				}
+		//region 插入消息
+		if (char.autoMessages?.length) {
+			for (let {enabled, depth, content} of char.autoMessages) {
+				if (!enabled) continue;
+
+				const msg = output[output.length - 1 - depth];
+				if (msg && (depth !== 0 || msg.role === "user")) insertText("\n\n"+applyMacro(content, macro), msg);
 			}
-			//endregion
-			//region 处理世界书
-			let worldInfoBefore = '', worldInfoAfter = '';
+		}
+		//endregion
+		//region 处理世界书
+		let worldInfoBefore = '', worldInfoAfter = '';
 
-			let depthTargets;
-			/**
-			 * @param {OpenAI.Role} role
-			 * @param {number} depth
-			 * @return {OpenAI.Message}
-			 */
-			const findDepthTarget = (role, depth) => {
-				if (!depthTargets) {
-					depthTargets = new Map;
-					for (let i = output.length - 1; i >= 0; i--) {
-						const o = output[i];
-						for (const key of ["", o.role]) {
-							const list = depthTargets.get(key);
-							if (list) list.push(o);
-							else depthTargets.set(key, [o]);
-						}
+		let depthTargets;
+		/**
+		 * @param {OpenAI.Role} role
+		 * @param {number} depth
+		 * @return {OpenAI.Message}
+		 */
+		const findDepthTarget = (role, depth) => {
+			if (!depthTargets) {
+				depthTargets = new Map;
+				for (let i = output.length - 1; i >= 0; i--) {
+					const o = output[i];
+					for (const key of ["", o.role]) {
+						const list = depthTargets.get(key);
+						if (list) list.push(o);
+						else depthTargets.set(key, [o]);
 					}
 				}
-
-				return depthTargets.get(role || "")?.[depth - 1];
-			};
-
-			const insertBook = book => {
-				const content = "\n\n"+applyMacro(book.content, macro);
-				if (book.position === "worldInfoBefore") worldInfoBefore += content;
-				else if (book.position === "worldInfoAfter") worldInfoAfter += content;
-				else {
-					const target = findDepthTarget(book.role, book.depth);
-					if (target) insertText(content, target);
-					else worldInfoAfter += content;
-				}
-			};
-			constantPages.forEach(insertBook);
-
-			if (lorebookImplType) {
-				if ('fs' === lorebookImplType) {
-					worldInfoBefore += "\n\n<lorebook>\nLorebook 在文件夹 `~/lorebook/` 中\n使用Read、Grep、Glob工具读取你的知识</lorebook>";
-				} else { // tool
-					worldInfoBefore += "\n\n<lorebook>\nLorebook 名称与关键词：\n"+lorebookCaches.toolKeys.join("\n")+"\n</lorebook>";
-				}
-			} else {
-				/** @type {LorebookMatcher} */
-				const matcher = lorebookCaches.matcher || (lorebookCaches.matcher = new LorebookMatcher(pages));
-				const activeBooks = matcher.match(output);
-				activeBooks.forEach(insertBook);
-				self[INST].activatedLorebookItems.value = activeBooks.map(k => k.name);
 			}
-			//endregion
 
+			return depthTargets.get(role || "")?.[depth - 1];
+		};
+
+		const insertBook = book => {
+			const content = "\n\n"+applyMacro(book.content, macro);
+			if (book.position === "worldInfoBefore") worldInfoBefore += content;
+			else if (book.position === "worldInfoAfter") worldInfoAfter += content;
+			else {
+				const target = findDepthTarget(book.role, book.depth);
+				if (target) insertText(content, target);
+				else worldInfoAfter += content;
+			}
+		};
+		constantPages.forEach(insertBook);
+
+		if (lorebookImplType) {
+			if ('fs' === lorebookImplType) {
+				worldInfoBefore += "\n\n<lorebook>\nLorebook 在文件夹 `~/lorebook/` 中\n使用Read、Grep、Glob工具读取你的知识</lorebook>";
+			} else { // tool
+				worldInfoBefore += "\n\n<lorebook>\nLorebook 名称与关键词：\n"+lorebookCaches.toolKeys.join("\n")+"\n</lorebook>";
+			}
+		} else {
+			/** @type {LorebookMatcher} */
+			const matcher = lorebookCaches.matcher || (lorebookCaches.matcher = new LorebookMatcher(pages));
+			const activeBooks = matcher.match(output);
+			activeBooks.forEach(insertBook);
+			self[INST].activatedLorebookItems.value = activeBooks.map(k => k.name);
+		}
+		//endregion
+		if (preset?.prompts?.length) {
+			macro.worldInfoBefore = worldInfoBefore;
+			macro.worldInfoAfter = worldInfoAfter;
+
+			return applyPreset(preset, macro, output);
+		} else {
 			let prefix = '';
 			const hasSystemMessage = output[0].role === "system";
 			if (hasSystemMessage) prefix = applyMacro(output[0].content, macro)+"\n\n";
 
-			if (preset?.prompts?.length) {
-				macro.worldInfoBefore = worldInfoBefore;
-				macro.worldInfoAfter = worldInfoAfter;
-
-				const content = applyPreset(preset, macro, output, prefill);
-				output.length = 0;
-				output.push(...content);
+			const content = prefix + makeStory(macro, worldInfoBefore, worldInfoAfter);
+			if (hasSystemMessage) {
+				output[0].content = content;
 			} else {
-				const content = prefix + makeStory(macro, worldInfoBefore, worldInfoAfter);
-				if (hasSystemMessage) {
-					output[0].content = content;
-				} else {
-					output.unshift({
-						role: "system",
-						content
-					})
-				}
+				output.unshift({
+					role: "system",
+					content
+				})
 			}
-		});
+		}
+
+		return output;
 	},
 	/**
 	 *
@@ -961,12 +978,12 @@ MessageRoles["st|char"] = {
 				const {name, pages} = lorebook;
 				chunks.push({
 					type: "html",
-					html: <details className={"think"}>
+					html: <details className="think">
 						<summary>
 							<span className="chevron ri-play-large-fill"></span>
 							世界书 ({name}) ({pages.length}项)
 						</summary>
-						<div className="think-content">
+						<div className="lorebooks">
 							{pages.map(_LorebookPage)}
 						</div>
 					</details>
@@ -1018,7 +1035,6 @@ MessageRoles["st|char"] = {
 
 MessageRoles["st|greeting"] = {
 	name: "开场白",
-	reactive: true,
 	/**
 	 * @param {AiChat.DnD.MyCharConversation} card
 	 * @param output
@@ -1161,46 +1177,71 @@ const StoryConfigPanel = self => {
  */
 const _LorebookPage = item => {
 	let {name, enabled, comment, content, regex, constant, recursion, triggers, window, position, depth} = item;
-	const attributes = [];
-	if (!enabled) attributes.push("禁用");
-	if (constant) attributes.push("常驻");
-	if (recursion) attributes.push("递归");
-	if (regex) attributes.push("正则");
-	if (window === 0) attributes.push("永久激活");
-	if (position === "depth") position += "@"+depth;
+	const badges = [];
 
-	const el = <details onClick.once={() => {
+	if (position === "depth") badges.push("深度"+depth);
+	else badges.push(position === "worldInfoAfter" ? "角色定义后" : "角色定义前");
+
+	if (window === 0) badges.push("永久激活");
+	if (regex) badges.push("正则");
+
+	if (constant) badges.push("常驻");
+	else if (recursion) badges.push("递归");
+
+	if (!enabled) badges.push("禁用");
+
+	const el = <details className="lorebook" onToggle.once={() => {
+		const filename = analyze(content);
 		appendChildren(el, <>
-			<pre className="code-block">
-				<div className="code-header sticky">
-					<span>注释和元数据</span>
-					<span className="buttons">
-						<button className="ri-file-copy-line ghost" data-action="copy" title="复制代码"></button>
-					</span>
-				</div>
-				<code className={"hljs"}>
-					名称：{name}<br/>
-					属性：{attributes.join(" ")}<br/>
-					位置：{position}<br/>
-					{constant ? null : <>触发词：<ul style={"margin:0"}>{triggers.map(s => <li>{s}</li>)}</ul></>}
-					{comment}
-				</code>
-			</pre>
-			<pre className="code-block">
-				<div className="code-header sticky">
-					<span>{name || "内容"}</span>
-					<span className="buttons">
-						<button className="ri-download-2-line ghost" data-action="download" title="下载代码"></button>
-						<button className="ri-file-copy-line ghost" data-action="copy" title="复制代码"></button>
-					</span>
-				</div>
-				<code className={"hljs"}>{content}</code>
-			</pre>
-		</>)
-		el.append();
+			<dl className="meta">
+				{comment && <>
+					<dt>注释</dt>
+					<dd>{comment}</dd>
+				</>}
+				{!constant && <>
+					<dt>触发词</dt>
+					<dd className="chips">{triggers.map(s => <span className="chip">{String(s)}</span>)}</dd>
+				</>}
+				<dt>格式</dt>
+				<dd>{filename} (启发式)</dd>
+			</dl>
+
+			<HighlightBox code={content} filename={filename}/>
+		</>);
 	}}>
-		<summary>{name || comment || `${triggers.map(JSON.stringify).join(" | ")}` || "无标题"}</summary>
+		<summary className="row">
+			<span className="title">{name || comment || triggers.map(JSON.stringify).join(" | ") || "无标题"}</span>
+			<span className="spacer" />
+			<span className="badges">{badges.map(b => <span>{b}</span>)}</span>
+		</summary>
 	</details>;
 	return el;
 };
+
+const XML_RE = /<(\/?)([A-Za-z_]{1,100}[\w.:-]*)((?:"[^"]*"|'[^']*'|[^"'>])*?)(\/?)>/gm;
+const YML_RE = /^-?\s*\S[^#:{}\[\]|>%@*]*: /gm;
+const MD_RE = /^(?:```|~~~)|^#{1,6}\s+\S|^>\s?|^\|.*\|$|^(?:-{3,}|\*{3,}|_{3,})\s*$|!?\[[^\]]*\]\([^)\s]*\)|\*\*[^*\n]+\*\*|__[^_\n]+__|`[^`\n]+`/gm;
+
+function score(text, re) {
+	re.lastIndex = 0;
+	let score = 0;
+	let m;
+	while ((m = re.exec(text)) !== null && score++ < 1000);
+	return score;
+}
+
+function analyze(text) {
+	const xml = score(text, XML_RE);
+	const yml = score(text, YML_RE);
+	const md = score(text, MD_RE);
+
+	let type = '.txt';
+	let best = 0;
+
+	if (xml >= 5 && xml > best) { type = '.xml'; best = xml; }
+	if (yml >= 5 && yml > best) { type = '.yml'; best = yml; }
+	if (md >= 0 && md > best) { type = '.md'; best = md; }
+
+	return type;
+}
 //endregion

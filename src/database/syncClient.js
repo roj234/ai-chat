@@ -1,22 +1,20 @@
 import {
-	BRANCH_MANAGER,
 	conversations,
 	EVENT_BUS,
 	findConversation,
 	LOCKED,
 	messages,
 	resetConversation,
-	runningConversations,
 	selectedConversation,
 	switchToConversation,
 	updateConversationListUI,
 	updateConversationUI,
 	updateMessageUI
 } from "../states.js";
-import {decodeObjects, serializeJSON} from "../utils/marshal.js";
+import {decodeObjects, serializeJSON} from "../utils/serialization.js";
 import {showToast} from "../components/Toast.js";
 import {$computed, $state, $update, ONCE_EVENT, unconscious} from "unconscious";
-import {DI, DID_RMI, DID_SYNC_LOCK, DID_SYNC_UNLOCK, DID_TITLE_POSITION, onLoad} from "../hooks.js";
+import {DI, DID_RMI, DID_TITLE_POSITION, onLoad} from "../hooks.js";
 
 import {
 	SYNC_CONFLICT,
@@ -33,13 +31,12 @@ import {
 	SYNC_MESSAGE,
 	SYNC_MESSAGE_DEL,
 	SYNC_PING,
-	SYNC_READERS,
 	SYNC_RELEASED,
 	SYNC_RESOLVE,
 	SYNC_RPC,
 	SYNC_UNLOCKED
 } from "/backend/sync.js";
-import {clearMessageDirty, DIFF_SNAPSHOT, listConversations, MESSAGES_CACHE} from "../database.js";
+import {clearMessageDirty, DIFF_SNAPSHOT, getImmediateMessages, listConversations} from "../database.js";
 import {deepEqual, patch} from "unconscious/common/deepEqual.js";
 import {decodeMsg} from "unconscious/common/msgpack.js";
 import {msgpack_schema} from "/common/wire-compression-schema.js";
@@ -47,8 +44,10 @@ import {highlightJsonLike} from "../markdown/highlight.js";
 import {prettyError} from "../utils/utils.js";
 import {initialize, serializeMsgpack, serverAcceptMsgpack} from "./remoteDB.js";
 import {enableBranches} from "../utils/BranchManager.js";
+import {setConversationTitle} from "../components/ConversationList.jsx";
+import {conversationLock, lockConversation, unlockConversation} from "../conversation-lock.js";
 
-let body;
+let bodyClass;
 
 /** @type {function} */
 let lockedToast;
@@ -80,7 +79,7 @@ const hideReadonlyUI = (id) => {
 	lockedToast?.();
 	lockedToast = null;
 	lockedToastOwner = null;
-	body.remove("_locked");
+	bodyClass.remove("_locked");
 };
 
 const showReadonlyUI = (id) => {
@@ -102,7 +101,7 @@ const showReadonlyUI = (id) => {
 	if (cb) lockedToast = () => (closer(), cb());
 	else lockedToast = closer;
 
-	body.add("_locked");
+	bodyClass.add("_locked");
 };
 
 const setLockStatus = (id, locked) => {
@@ -114,15 +113,13 @@ const setLockStatus = (id, locked) => {
 
 const checkConcurrentModification = conv => {
 	const convId = conv.id;
-	if (convId && locks.has(convId) && !conv[LOCKED]) {
+	if (convId && conversationLock.has(convId) && !conv[LOCKED]) {
 		showToast(`合并冲突：其它端修改了对话 #${convId}`, 'error');
 	}
 };
 
 export const initSync = (address) => new Promise((resolve, reject) => {
 	const RMI = DI[DID_RMI];
-	DI[DID_SYNC_LOCK] = lock;
-	DI[DID_SYNC_UNLOCK] = unlock;
 
 	ws = new WebSocket(address);
 	let closeToast;
@@ -149,14 +146,11 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 		reject();
 		RMI?.close();
 		EVENT_BUS.post(['syncEnd']);
-		lockedToast?.();
-		lockedToast = null;
-		stateListener = null;
 
 		const lastSuccessful = heartbeat != null;
 		if (lastSuccessful) {
 			clearInterval(heartbeat);
-			for (let key of locks.keys()) pendingEvents.push(`[${SYNC_LOCKED},${key}]`);
+			for (let key of conversationLock.keys()) pendingEvents.push(`[${SYNC_LOCKED},${key}]`);
 		}
 
 		let lastTimestamp = 0;
@@ -177,7 +171,7 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 					else switchToConversation(conv);
 				}
 				closeToast();
-			}).catch(err => {
+			}, err => {
 				if (err.status !== 304) html.value = highlightJsonLike(prettyError(err));
 				else closeToast();
 			}).finally(() => {
@@ -187,7 +181,7 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 		};
 		const btn = <button className={"btn primary"} onClick={handler}>重连</button>;
 
-		closeToast = showToast(<>同步服务已断开 {btn}{<div title={"服务器错误"} dangerouslySetInnerHTML={html}></div>}</>, "error", 0);
+		closeToast = showToast(<div>同步服务已断开 {btn}{<div title={"服务器错误"} dangerouslySetInnerHTML={html}></div>}</div>, "error", 0);
 		if (serverError) return;
 		if (document.hidden) document.addEventListener("visibilitychange", handler, ONCE_EVENT);
 		else if (lastSuccessful) handler();
@@ -218,7 +212,6 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 				showToast("同步服务已连接 (+"+clients.length+")", "ok");
 
 				RMI?.open(clients, clientId);
-				stateListener = RMI?.state;
 				resolve(clientId);
 
 				if (lockedToastOwner) {
@@ -231,11 +224,11 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 				}
 			}
 			break;
-			case SYNC_READERS: {
+			/*case SYNC_READERS: {
 				const [id, count] = data;
-				readerCount.set(id, count > 0);
+				showToast("对话 "+id+" 现在"+(count?"有":"无")+"读者");
 			}
-			break;
+			break;*/
 			case SYNC_LOCKED:
 			case SYNC_UNLOCKED: {
 				const conv = findConversation(data);
@@ -270,10 +263,7 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 				const conv = findConversation(owner);
 				if (!conv) return;
 
-				const bm = conv[BRANCH_MANAGER];
-				let msg = bm?.messages || conv[MESSAGES_CACHE];
-				const isCurrent = conv === unconscious(selectedConversation);
-				if (!msg && isCurrent) msg = unconscious(messages);
+				const msg = getImmediateMessages(conv);
 				if (!msg) return;
 
 				checkConcurrentModification(conv);
@@ -290,13 +280,8 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 				}
 				clearMessageDirty(conv, message.id, isUpdate && message);
 
-				if (isCurrent) {
-					if (bm) {
-						bm.setLeaf(nextEnd || msg[conv.bm_leaf] || msg.at(-1), true);
-						messages.value = bm.getMessages();
-					}
-					else $update(updateMessageUI);
-				}
+				const isCurrent = conv === unconscious(selectedConversation);
+				if (isCurrent) $update(updateMessageUI);
 				break;
 			}
 			// 对话状态更新
@@ -304,12 +289,7 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 			case SYNC_CONVERSATION_DEL: {
 				const convId = data.id;
 				const index = conversations.findIndex(item => item.id === convId);
-				let conv, removed, lastTime, lastLeaf;
-				if (index >= 0) {
-					conv = conversations[index];
-					lastLeaf = conv.bm_leaf;
-					lastTime = conv.time;
-				}
+				let conv = conversations[index], moved;
 
 				try {
 					conv = patch(conv, data);
@@ -320,17 +300,21 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 					}
 					// 有可能失败，因为不一定所有的客户端都拿到了完整的对话对象，可能只有list时的 id time title 三项
 				}
+				const diff = data.$ === '=' ? data.v : data;
 
 				// 如果时间没变化，就不插到开头（例如只修改标题）
-				if (lastTime !== conv.time || type === SYNC_CONVERSATION_DEL) {
+				if (diff.time != null || type === SYNC_CONVERSATION_DEL) {
 					if (index >= 0) conversations.splice(index, 1);
-					removed = true;
+					moved = true;
 				}
 
 				const isCurrent = convId === selectedConversation.id;
 				if (type === SYNC_CONVERSATION) {
-					if (removed) conversations.unshift(conv);
-					else $update(updateConversationListUI);
+					if (moved) conversations.unshift(conv);
+					else {
+						$update(updateConversationListUI);
+						if (diff.meta != null) $update(conversations);
+					}
 
 					$update(updateConversationUI);
 
@@ -340,28 +324,25 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 						conv[DIFF_SNAPSHOT] = structuredClone(conv);
 					}
 
-					const msgs = conv[MESSAGES_CACHE];
-					if (msgs) {
-						if (conv.bm_leaf != null && !conv[BRANCH_MANAGER]) {
-							const newMsgs = enableBranches(conv, msgs);
-							if (unconscious(messages) === msgs) messages.value = newMsgs;
-						} else if (isCurrent && lastLeaf !== conv.bm_leaf) {
-							const bm = conv[BRANCH_MANAGER];
-							bm.setLeaf(msgs[conv.bm_leaf] || msgs.at(-1), true);
-							messages.value = bm.getMessages();
-						}
-					}
+					if (diff.title != null) setConversationTitle(conv, conv.title, true);
 
-					if (!locks.has(convId)) {
-						// 如果没有打开这些消息，那么清除消息缓存
-						delete conv[MESSAGES_CACHE];
-						delete conv[BRANCH_MANAGER];
+					const msgs = getImmediateMessages(conv);
+					if (msgs) {
+						if (conv.bm_leaf != null) {
+							let bm = enableBranches(conv);
+							if (bm !== msgs && isCurrent) messages.value = bm;
+							bm.setLeaf(msgs[conv.bm_leaf] ?? msgs.at(-1), true);
+							if (isCurrent) $update(updateMessageUI);
+						} else {
+							// 刷新了也会自己关闭的，不管
+						}
 					}
 				}
 				else if (isCurrent) {
 					showToast("当前对话已被其它客户端删除", 'error', 0);
 					setLockStatus(convId, "DELETED");
 					showReadonlyUI(convId);
+					EVENT_BUS.post(['convDel', conv.id]);
 				}
 			}
 			break;
@@ -382,46 +363,11 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 	}
 });
 
-let stateListener;
-
-const readerCount = new Map;
-/** @type {Map<number, number>} */
-const locks = new Map;
-const lock = (id) => {
-	if (id == null) return;
-	let lockCount = (locks.get(id) || 0);
-	if (!lockCount) sendToSyncServer(SYNC_LOCKED, id);
-	locks.set(id, lockCount + 1);
-};
-const unlock = (id) => {
-	let lockCount = locks.get(id);
-	if (!lockCount) return;
-	if (lockCount === 1) {
-		sendToSyncServer(SYNC_UNLOCKED, id);
-		locks.delete(id);
-		readerCount.delete(id);
-	} else {
-		locks.set(id, lockCount - 1);
-	}
-};
+EVENT_BUS.on('lock', (id) => {sendToSyncServer(SYNC_LOCKED, id);});
+EVENT_BUS.on('unlock', (id) => {sendToSyncServer(SYNC_UNLOCKED, id);});
 
 onLoad((app) => {
-	body = app.classList;
-	const originalDelete = runningConversations.delete.bind(runningConversations);
-	const originalSet = runningConversations.set.bind(runningConversations);
-
-	runningConversations.delete = (id) => {
-		unlock(id);
-		stateListener?.(id, 0);
-		return originalDelete(id);
-	}
-	runningConversations.set = (id, value) => {
-		if (!runningConversations.has(id)) {
-			lock(id);
-			stateListener?.(id, 1);
-		}
-		return originalSet(id, value);
-	}
+	bodyClass = app.classList;
 
 	$computed((oldValue) => {
 		const conv = unconscious(selectedConversation);
@@ -429,11 +375,11 @@ onLoad((app) => {
 		if (oldValue !== convId) {
 			if (oldValue != null) {
 				hideReadonlyUI();
-				unlock(oldValue);
+				unlockConversation(oldValue);
 			}
 			if (conv) {
 				if (conv[LOCKED]) showReadonlyUI(convId);
-				lock(convId);
+				lockConversation(convId);
 			}
 		}
 		return convId;

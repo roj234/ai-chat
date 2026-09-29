@@ -7,8 +7,6 @@ import "./persistInputBox.js";
 import "./blobCache.js";
 // 对话原始数据编辑
 import "./conversationEditor.js";
-// 无痕模式弹窗
-import "./incognitoToast.js";
 // Blob管理器
 import "./managers/BlobManager.js";
 // 搜索消息
@@ -21,6 +19,8 @@ import "./modelIdCompletion.js";
 import "./managers/ToolManager.js";
 // 自定义背景和字体
 import "./customBackground.js";
+// 消息缓存管理
+import "./session-cache.js";
 
 // AGENTS.md 支持
 import "./agent/agents-md.js";
@@ -33,7 +33,7 @@ import "./agent/skills.js";
 // JSON编辑
 import "./tools/json_editor.js";
 // 上下文压缩
-import "./tools/subjective_context_compression.js";
+import "./context_mgmt/subjective-compaction.js";
 // 任务列表
 import "./tools/task_list.js";
 // 子代理
@@ -57,17 +57,16 @@ import {registerMultimediaGeneration} from "./tools/multimedia_generation.js";
 import {registerRemoteControl} from "./remoteControl.js";
 
 // 插件注册表
-import {SETTINGS} from "/src/settings.js";
+import {GLOBAL_SETTINGS} from "/src/settings.js";
 import {config, conversations, messages, selectedConversation} from "/src/states.js";
 import "./PluginRegistry.css";
-import morphdom from "morphdom";
 import {registerCodeBlockRenderer, renderMarkdownToElement} from "/src/markdown/markdown.js";
 import {createDragSort} from "/common/DragSort.js";
 import {registerSchemaMessageRole} from "/common/ReactiveJSON.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {GetTime} from "./rp_kit/interactive_simulation.js";
 import {markMessageDirty} from "/src/database.js";
-import {openWindow} from "../src/components/Windows.jsx";
+import {openWindow} from "/src/components/Windows.jsx";
 
 // 时间工具
 registerToolset("GetTime", "获取时间", [GetTime], {
@@ -154,6 +153,11 @@ const pluginDefinitions = [
 		description: "开发中",
 		load: () => import("./chatbot/chatbot.js")
 	},
+	{
+		name: "思考滑块",
+		description: "GPT 6.1 Sol 写的很Q弹的波形和滑块。",
+		load: () => import("./thinking_slider/thinking-slider.js")
+	},
 ];
 
 if (DB_MODE !== "local") {
@@ -209,7 +213,7 @@ const setDetails = (plugin, self) => {
 		{plugin.description && renderMarkdownToElement(<div className="md"/>, plugin.description)}
 	</main>;
 
-	morphdom(detailPanel, det);
+	detailPanel.replaceChildren(...det.childNodes);
 };
 
 const pluginManager = (<>
@@ -235,7 +239,7 @@ createDragSort(pluginListContainer, {
 	onMovedTo: updatePluginSet
 });
 
-SETTINGS.push({
+GLOBAL_SETTINGS.push({
 	id: "pluginOrder",
 	type: "element",
 	element: <div className={"choice-scroll"}>

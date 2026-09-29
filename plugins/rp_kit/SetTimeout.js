@@ -12,8 +12,8 @@ import {markMessageDirty} from "/src/database.js";
 export const SetTimeout = {
 	name: "SetTimeout",
 	description:
-		"Create a real-time timer and receive a message when it finishes. "
-		+ "If the user replies before the deadline, the tool call resolves with result: 'interrupt'. "
+		"Wait for user message or asynchronous notifications. "
+		+ "If a message was received before the deadline, the tool call resolves with result: 'interrupt'. "
 		+ "Otherwise the tool call resolves with result: 'timeout'. "
 		+ "\n"
 		+ "Use for timed interactions (QTE), reminders, or waiting real-time events. "
@@ -63,7 +63,7 @@ export const SetTimeout = {
 		response.time = Date.now();
 		response.deadline = ddl;
 
-		if (conv?.owner) {
+		if (conv?.meta?.owner) {
 			return new Promise((resolve) => {
 				setTimeout(() => resolve("timeout"), ddl - response.time);
 			});
@@ -83,7 +83,7 @@ export const SetTimeout = {
 		if (has_successor) return;
 
 		const args = getToolParameters(response, call);
-		const interactive = !selectedConversation.owner;
+		const interactive = !selectedConversation.meta?.owner;
 		if (interactive && null == response.success) {
 			response.success = true;
 			response.content = SetTimeout.script(args, response);

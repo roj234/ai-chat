@@ -1,10 +1,10 @@
-import {SETTINGS} from "/src/settings.js";
+import {GLOBAL_SETTINGS} from "/src/settings.js";
 import {isIDB} from "/src/database.js";
 
 import "./BlobManager.css";
 
 if (!isIDB) {
-	SETTINGS.push({
+	GLOBAL_SETTINGS.push({
 		type: "element",
 		_tab: ["general", "data"],
 		element: <div className={"choice-scroll"}>

@@ -1,6 +1,6 @@
-import {fileAccess} from "./Mounts.js";
+import {crossVFSCopyMove, fileAccess} from "./Mounts.js";
 import {showToast} from "/src/components/Toast.js";
-import {prettyError} from "/src/utils/utils.js";
+import {getRandomString, prettyError} from "/src/utils/utils.js";
 import {AS_IS} from "unconscious";
 import {createSandbox} from "unconscious/common/safe-worker/safe-worker.js";
 import {normalizePath} from "unconscious/common/path-utils.js";
@@ -10,6 +10,7 @@ import {deepEqual} from "unconscious/common/deepEqual.js";
 import {HighlightBox} from "/src/components/TextDiff.jsx";
 import {inspect} from "unconscious/common/inspect.js";
 import {config} from "/src/states.js";
+import {FSE_NotAllowed, FSE_NotFound, FSE_NotSupported, throwDOMException} from "../../common/pure-utils.js";
 
 /**
  *
@@ -49,9 +50,12 @@ export const JS_HOST_MODULES = {
 	})
 };
 
+/**
+ * @type {Record<string, { path?: string, url?: string, description: string, k?: string, alias?: string[] }>}
+ */
 export const JS_SANDBOX_MODULES = {
-	'json5': {
-		path: "assets/sandbox/json5.mjs",
+	'unconscious/common/Json.js': {
+		path: "assets/sandbox/Json.js",
 		description: `Fast Streaming JSON5 Parser
 export {
   createJsonParser(
@@ -96,8 +100,8 @@ export {
 }`,
 		k: "base64"
 	},
-	'SHA256': {
-		path: "assets/sandbox/SHA256.mjs",
+	'unconscious/common/SHA256.js': {
+		path: "assets/sandbox/SHA256.js",
 		description: `Ultrafast Streaming SHA256 Hasher
 export class SHA256 {
     update(data: string | Uint8Array): this;
@@ -108,8 +112,8 @@ export class SHA256 {
 }}`,
 		k: "sha hash"
 	},
-	'text-diff': {
-		path: "assets/diff.js",
+	'unconscious/common/text-diff.js': {
+		path: "assets/sandbox/text-diff.js",
 		description: `Myers diff algorithm.
 export {
   textDiff(a: string[], b: string[], trimSame = false): {
@@ -121,8 +125,8 @@ export {
 }`,
 		k: "diff"
 	},
-	'xml-parser': {
-		path: "assets/sandbox/xml-parser.min.mjs",
+	'unconscious/common/xml-parser.js': {
+		path: "assets/sandbox/xml-parser.js",
 		description: `Fast Streaming XML Parser.
 export {
   createXmlParser(
@@ -161,12 +165,12 @@ export {
 		k: "xml html"
 	},
 	jszip: {
-		path: "assets/sandbox/jszip-shim.min.mjs",
-		description: "Ultrafast JSZip v3 shim (30x faster)\nexport default JSZip;\nexport { crc32(data: Uint8Array): number }",
-		k: "archive zip compress decompress"
+		path: "assets/sandbox/JSZip.js",
+		description: "JSZip v3 shim\nexport default JSZip;\nexport { crc32(data: Uint8Array): number }",
+		k: "archive zip crc compress decompress"
 	},
 	mathjs: {
-		url: 'https://unpkg.com/mathjs@15.1.0/lib/browser/math.js',
+		//url: 'https://unpkg.com/mathjs@15.1.0/lib/browser/math.js',
 		path: "assets/sandbox/math.js",
 		description: "v15.1.0\nexport default math;",
 		k: "math compute matrix vector imagine formula"
@@ -178,7 +182,7 @@ export {
 	},
 	dayjs: {
 		alias: ['dayjs/locale/zh-cn', 'dayjs/plugin/isLeapYear'],
-		url: 'https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js',
+		//url: 'https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js',
 		path: "assets/sandbox/dayjs.min.js",
 		description: "v1.x\n- builtins: locale/zh-cn, plugin/isLeapYear (DO NOT IMPORT, THEY ARE ALREADY USABLE)",
 		k: "date time"
@@ -189,7 +193,7 @@ export {
 		k: "office table excel xlsx"
 	},
 	'pdf-lib': {
-		url: 'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js',
+		//url: 'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js',
 		path: "assets/sandbox/pdf-lib.min.cjs",
 		description: "v1.17.1\nexport { PDFDocument, rgb, StandardFonts, ... }\n- 无法渲染中文，需要自行提供中文字体",
 		k: "office print pdf"
@@ -200,54 +204,41 @@ export {
 		k: "office document docx wps"
 	},
 	lamejs: {
-		url: 'https://unpkg.com/lamejs@1.2.1/lame.min.js',
+		//url: 'https://unpkg.com/lamejs@1.2.1/lame.min.js',
 		path: "assets/lame.min.mjs",
 		description: "v1.2.1\nexport { Mp3Encoder, WavHeader }",
 		k: "lame audio encode mp3"
 	},
 	pptxgenjs: {
-		url: 'https://cdn.jsdelivr.net/gh/gitbrent/pptxgenjs/dist/pptxgen.min.js',
+		//url: 'https://cdn.jsdelivr.net/gh/gitbrent/pptxgenjs/dist/pptxgen.min.js',
 		path: "assets/sandbox/pptxgen.min.mjs",
 		description: "v4.0.1\nexport default pptxgen;\n- 用 addSlide() 而非 addNewSlide()\n- outputType 用 \"arraybuffer\" 或 \"uint8array\"，不能用 \"nodebuffer\"\n- 用 ChartType 而非 Charts",
 		k: "office powerpoint pptx"
 	},
+	'web-audio-engine': {
+		path: "assets/sandbox/offline-audio-context.js",
+		description: `export { AudioBuffer, AudioParam, OfflineAudioContext, AudioNode, GainNode, OscillatorNode,
+  BiquadFilterNode, DelayNode, ConvolverNode, StereoPannerNode, DynamicsCompressorNode,
+  AnalyserNode, AudioWorkletNode, AudioWorkletProcessor };
+export default OfflineAudioContext;`,
+		k: "audio sound oscillator stereo"
+	},
 
-	CompressionStream: {
-		description: "builtin DecompressionStream, mode: ['gzip' | 'deflate' | 'deflate-raw']",
-		k: "decompress archive deflate gzip"
-	},
-	OffscreenCanvas: {
-		description: "builtin FontFace createImageBitmap getContext()",
-		k: "jpg jpeg png bmp image font ttf otf render opengl"
-	},
-	"crypto.subtle": {
-		description: " builtin",
-		k: "hash uuid encrypt decrypt cipher sha md5"
-	}
 };
 const aliases = new Set(Object.values(JS_SANDBOX_MODULES).map(k => k.alias).filter(Boolean).flat());
-const loadSystemModule = (mod) => {
-	return fetch(mod.path || mod.url, {
-		referrerPolicy: 'no-referrer',
-	}).then(res => {
-		const content = res.headers.get('content-type');
-		if (!res.ok) throw new Error('Failed to fetch module ' + mod.path + ': HTTP ' + res.status);
-		if (!content?.includes("javascript")) throw new Error('Failed to fetch module ' + mod.path + ': illegal content-type ' + content);
-		return res.text();
-	});
-}
+
+const ESM_CDN = 'https://esm.sh/';
 
 // [ func, in, out ]
 const rpcMethods = {
 	open: [ (args) => ({ path: args[0], create: args[1] }), AS_IS ],
 	read: [ (args) => ({ path: args[0], noTruncate: true }), AS_IS ],
-	write: [ (args) => ({ path: args[0], content: args[1], overwrite: true }) ],
+	write: [ (args) => ({ path: args[0], content: args[1], overwrite: 'force' }) ],
 	append: [ (args) => ({ path: args[0], content: args[1], newline: false }) ],
-	mkdir: [ (args) => ({ path: args[0] }) ],
-	delete: [ (args) => ({ path: args[0] }) ],
+	mkdir: [ (args) => ({ path: args[0], recursive: args[1] }) ],
+	delete: [ (args) => ({ path: args[0], ...args[1] }) ],
 	list: [ (args) => ({ path: args[0], json: args[1], pattern: args[2] || '*', showHidden: true, exclude: args[3] }), AS_IS ],
 	stat: [ (args) => ({ path: args[0] }), AS_IS ],
-	copy: [ (args) => ({ src: args[0], dest: args[1], move: args[2] || false }) ],
 };
 
 rpcMethods["readRaw"] = [...rpcMethods['read']];
@@ -261,6 +252,8 @@ for (const key of ['write', 'append']) {
 for (const key in rpcMethods) {
 	rpcMethods[key].unshift(fileAccess(key));
 }
+
+rpcMethods['copy'] = [crossVFSCopyMove, (args) => ({ src: args[0], dest: args[1], move: args[2] || false })];
 
 const readFile = fileAccess("read");
 const appendFn = fileAccess("append");
@@ -276,10 +269,10 @@ export const RunJS = {
 	description: `Execute a JavaScript module (ESM) in sandbox.
 - ES2023+, top-level await, import, import attributes and dynamic import(), no live bindings.
 - Supports CommonJS-style \`module.exports\`. extension must be \`.cjs\`.
-- Node.js shim: Buffer, fs, path, process, fetch.
-- Not real Node.js: no require(), Only three modules: \`fs/promises\`, \`path\`, \`url\`.
+- Node.js shim (no require()): Buffer, process, fs, fetch, and modules \`fs/promises\`, \`path\`, \`url\`.
+- Globals without import: crypto.subtle, CompressionStream, OffscreenCanvas, FontFace.
 - After the module evaluated, the sandbox detaches — MUST await top-level Promises.
-- Permissions: "network" for fetch, "eval" for Function, wasm and http/data import().
+- Permissions: "network" for fetch/Websocket, "eval" for Function, wasm and remote import().
 - For Uint8Array, use \`fs.writeFile(path, data, { transfer: true })\` (or appendFile) to transfer the buffer ownership for better performance. The returned promise resolves to a new Uint8Array with the same content; the original buffer becomes invalid.`,
 	parameters: {
 		type: "object",
@@ -290,11 +283,12 @@ export const RunJS = {
 			},
 			code: {
 				type: "string",
-				description: "Inline code (deprecated). Mutually exclusive with `path`.",
+				description: "Inline code. Mutually exclusive with `path`.",
 			},
 			env: {
 				type: "object",
-				description: "\"process.env\", use this to pass data globally."
+				description: "\"process.env\", use this to pass data globally, 'CWD' key can also be used.",
+				additionalProperties: true
 			},
 			argv: {
 				type: "array",
@@ -303,11 +297,11 @@ export const RunJS = {
 					type: "string"
 				}
 			},
-			persist: {
+			/*persist: {
 				type: "boolean",
 				default: false,
 				description: "Cache loaded modules to improve performance."
-			},
+			},*/
 			permissions: {
 				type: "array",
 				items: {
@@ -383,7 +377,7 @@ export const RunJS = {
 			if (permissions?.includes('network')) realPermissions.push('net');
 			if (permissions?.includes('eval')) realPermissions.push('eval');
 
-			worker = createSandbox(handlers,  realPermissions, { hostModules, name: "AiChat-"+thread });
+			worker = createSandbox(handlers,  realPermissions, { hostModules, name: "Aint-"+thread });
 			worker.handlers = handlers;
 			workerPermissions = permissions || [];
 
@@ -397,23 +391,46 @@ export const RunJS = {
 		const hostModules = worker.handlers.hostModules;
 		for (const key in JS_HOST_MODULES) hostModules.set(key, JS_HOST_MODULES[key](conv));
 
-		const hangTimer = setTimeout(() => stopWorker("Timeout"), timeout * 1000);
+		const hangTimer = setTimeout(() => stopWorker(new DOMException(timeout.toFixed(2)+"s", "TimeoutError")), timeout * 1000);
 
 		worker.handlers.load = (path, systemModule) => {
-			if (systemModule) {
-				if (aliases.has(path)) {
-					worker.handlers.log('[WARN] Builtin module '+path+' is alias, DO NOT IMPORT, THEY ARE ALREADY USABLE.');
-					return '';
-				}
-				const mod = JS_SANDBOX_MODULES[path];
-				if (!mod) throw new Error('Module not found: '+path);
-				return loadSystemModule(mod);
-			}
-			const promise = readFile({
+			if (!systemModule || path.startsWith("~/")) return readFile({
 				path,
 				noTruncate: true
-			}, response, conv);
-			return promise.catch(e => { throw new Error("Could not fetch module "+path+"\n"+e.message) });
+			}, {}, conv).catch(e => {
+				throwDOMException("Failed to fetch module "+inspect(path)+": "+e.message)
+			});
+
+			if (aliases.has(path)) {
+				worker.handlers.log('[WARN] Builtin module '+path+' is alias, DO NOT IMPORT, THEY ARE ALREADY USABLE.');
+				return '';
+			}
+
+			const mod = JS_SANDBOX_MODULES[path];
+			if (mod) {
+				const src = mod.path;
+				return fetch(src, {
+					referrerPolicy: 'no-referrer',
+				}).then(res => {
+					const content = res.headers.get('content-type');
+					if (!res.ok) throwDOMException('Failed to fetch module '+src+': HTTP '+res.status, FSE_NotFound);
+					if (!content?.includes("javascript")) throwDOMException('Failed to fetch module '+src+': illegal content-type '+content, FSE_NotAllowed);
+					return res.text();
+				});
+			}
+
+			return readFile({ path: "node_modules/"+path }, {}, conv).catch(e => {
+				// npm 包名: [@scope/]pkg[@version][/subpath]
+				if (!/^(?:@[^/\s@]+\/)?[^/\s@]+(?:@[^/\s@]+)?(?:\/[^/\s@]+)*$/.test(path))
+					throwDOMException("Failed to fetch module "+inspect(path)+": Not a valid npm package", FSE_NotSupported);
+
+				const url = ESM_CDN + path;
+
+				if (!permissions?.includes('eval'))
+					throwDOMException("Failed to fetch module "+inspect(url)+": Requires 'eval' permission.");
+
+				return `export * from ${JSON.stringify(url)};\nexport {default} from ${JSON.stringify(url)};`;
+			})
 		}
 
 		// 文件 RPC 处理
@@ -439,6 +456,8 @@ export const RunJS = {
 		let logFile = null;
 
 		worker.handlers.log = (log) => {
+			if (import.meta.env.DEV && log === '[DEBUG] [vite] connected.') return;
+
 			const line = log + '\n';
 			totalChars += line.length;
 			tail += line;
@@ -447,7 +466,7 @@ export const RunJS = {
 				appendToLogFile(line);
 				tail = tail.slice(-HALF);
 			} else if (totalChars > MAX_OUTPUT_LENGTH) {
-				logFile = './code-log-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10) + '.log';
+				logFile = './runjs-' + Math.round(Date.now()/1000) + '-' + getRandomString(3) + '.log';
 
 				appendToLogFile(tail);
 				head = tail.slice(0, HALF);
@@ -493,6 +512,8 @@ export const RunJS = {
 				path,
 				code,
 				{
+					...config.fs_env,
+					...conv.fs_env,
 					...secretNames,
 					...env,
 					SCRIPT_TIMEOUT: timeout
@@ -564,7 +585,10 @@ export const SearchModules = {
 			}
 		}
 
-		if (!keys.length) return `No module found.`
+		if (!keys.length) return `No module found.
+Try directly import npm packages:
+  import z from "zod@3";  import "lodash/merge";  import {x} from "@scope/pkg";
+Remote imports need permissions: ["eval"].`;
 
 		return `Found ${keys.length} modules.
 ---

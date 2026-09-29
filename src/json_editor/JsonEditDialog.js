@@ -24,7 +24,6 @@ export function openJsonEditor(key, getValue, setValue) {
 	const onClose = callback => callbacks.push(callback);
 
 	const save = () => {
-		for (let callback of callbacks) callback();
 		const obj = editorState.obj;
 		if (obj) setValue(obj);
 	};

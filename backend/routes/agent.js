@@ -205,8 +205,8 @@ const getACL = async (root, targetDir) => {
 	return matcher;
 };
 
-async function glob(pattern, path, showHidden, acl, exclude) {
-	const result = compileGlobPattern(pattern, path, exclude);
+async function glob(pattern, path_, showHidden, acl, exclude) {
+	const result = compileGlobPattern(pattern, path_, exclude);
 	const handle = result.path;
 
 	try {
@@ -271,7 +271,7 @@ export async function registerFsRoutes(router, allowExec) {
 			const stats = await fs.stat(fullPath);
 
 			if (!isDir) {
-				if (stats.mtimeMs > modSince) {
+				if (stats.mtimeMs >= modSince) {
 					const item = [displayPath, "file", json ? stats.size : formatSize(stats.size)];
 					if (showModified || modSince) item.push(json ? stats.mtimeMs : stats.mtime.toISOString().slice(0, -5));
 					result.push(item);
@@ -316,7 +316,7 @@ export async function registerFsRoutes(router, allowExec) {
 	router.post('/ping', async (ctx) => {
 		const args = await ctx.readAsObject(1024);
 		const hash = createHash("sha256");
-		hash.update(args.nonce + 'AiChat');
+		hash.update(args.nonce + "AiChat[FS]");
 		ctx.send(200, { pong: hash.digest('hex') });
 	});
 
@@ -411,8 +411,8 @@ nlink: ${stats.nlink}`);
 
 	// 基础操作
 	router.post('/mkdir', async (ctx) => {
-		const { path: filePath } = await ctx.readAsObject();
-		await fs.mkdir(await pathFilterWithIgnore(ctx, filePath, true), { recursive: true });
+		const { path: filePath, recursive = true } = await ctx.readAsObject();
+		await fs.mkdir(await pathFilterWithIgnore(ctx, filePath, true), { recursive });
 		ctx.send(200, 'Success');
 	});
 	router.post('/copy', async (ctx) => {
@@ -428,11 +428,11 @@ nlink: ${stats.nlink}`);
 		ctx.send(200, 'Success');
 	});
 	router.post('/delete', async (ctx) => {
-		const { path: filePath } = await ctx.readAsObject();
+		const { path: filePath, recursive = true, force = false } = await ctx.readAsObject();
 		const safePath = await pathFilterWithIgnore(ctx, filePath, true);
 		if (safePath === ctx.fsRoot) return ctx.send(403, { error: 'Cannot delete root' });
 
-		await fs.rm(safePath, { recursive: true, force: true });
+		await fs.rm(safePath, { recursive, force });
 		teh.del(safePath);
 		ctx.send(200, 'Success');
 	});

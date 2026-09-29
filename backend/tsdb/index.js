@@ -1,1 +1,1 @@
-export { TSDB, NULL_OWNER } from './src/tsdb.js';
+export { TSDB, NULL_OWNER, HEADER_SIZE, ROW_SIZE } from './src/tsdb.js';

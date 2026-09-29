@@ -6,7 +6,7 @@ const inputTextObj = $store("inputText", {}, {persist: true});
 $watch(inputText, () => {
 	const conv = unconscious(selectedConversation);
 	const id = conv?.id;
-	if (id) {
+	if (typeof id === 'number') {
 		const input = unconscious(inputText);
 		if (input) inputTextObj[id] = input;
 		else delete inputTextObj[id];
@@ -14,7 +14,10 @@ $watch(inputText, () => {
 }, false);
 
 onConversationSwitchTo((conv) => {
-	inputText.value = inputTextObj[conv.id] || '';
+	const id = conv.id;
+	if (typeof id === 'number') {
+		inputText.value = inputTextObj[id] || '';
+	}
 });
 
 EVENT_BUS.on('loaded', () => {
