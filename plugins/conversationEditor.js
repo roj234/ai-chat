@@ -1,9 +1,15 @@
 import {duplicateConversation} from "/src/data-exchange.js";
 import {openJsonEditor} from "/src/json_editor/JsonEditDialog.js";
-import {messages, selectedConversation, updateConversationListUI, updateMessageUI} from "/src/states.js";
+import {
+	BRANCH_MANAGER,
+	messages,
+	selectedConversation,
+	updateConversationListUI,
+	updateMessageUI
+} from "/src/states.js";
 import {$unwatch, $update, $watch, unconscious} from "unconscious";
 import {decodeObjects, encodeObjects} from "/src/utils/marshal.js";
-import {getMessagesCacheFirst, markMessageDirty, updateConversation} from "/src/database.js";
+import {getMessages, markMessageDirty, updateConversation} from "/src/database.js";
 import {enableBranches} from "/src/utils/BranchManager.js";
 import {DI_settings, onLoad} from "/src/hooks.js";
 import {inspect} from "unconscious/common/inspect.js";
@@ -20,7 +26,7 @@ onLoad(() => {
 
 			const obj = {
 				...conv,
-				messages: (await getMessagesCacheFirst(conv)).map(message => (cloneNamed(message, MESSAGE_KEYS)))
+				messages: (await getMessages(conv)).map(message => (cloneNamed(message, MESSAGE_KEYS)))
 			};
 
 			const mapping = new Map;
@@ -45,9 +51,9 @@ onLoad(() => {
 				Object.keys(conv).forEach(item => { delete conv[item]; });
 				Object.assign(conv, conversation);
 
-				const messagesFromCache = await getMessagesCacheFirst(conv);
+				const mfc = await getMessages(conv);
 				const messageMap = new Map;
-				for (const msg of messagesFromCache) {
+				for (const msg of mfc) {
 					const id = msg.id;
 					if (id > 0) messageMap.set(id, msg);
 				}
@@ -64,26 +70,27 @@ onLoad(() => {
 
 					markMessageDirty(sys);
 				}
-				for (let i = messagesFromCache.length - 1; i >= 0; i--){
-					const value = messagesFromCache[i];
+				for (let i = mfc.length - 1; i >= 0; i--){
+					const value = mfc[i];
 					if (messageMap.has(value.id)) {
-						messagesFromCache.splice(i, 1);
+						mfc.splice(i, 1);
 					}
 				}
 
+				delete conv[BRANCH_MANAGER];
 				if (conversation.bm_leaf) {
-					messages.value = enableBranches(conv, messagesFromCache);
+					messages.value = enableBranches(conv, mfc);
 				} else {
 					const msg = unconscious(messages);
-					if (msg !== messagesFromCache) {
+					if (msg !== mfc) {
 						msg.length = 0;
-						msg.push(...messagesFromCache);
+						msg.push(...mfc);
 					} else {
 						$update(messages);
 					}
 				}
 
-				await updateConversation(conv, messagesFromCache, true);
+				await updateConversation(conv, mfc, true);
 
 				$update(updateMessageUI);
 				$update(updateConversationListUI);

@@ -2,7 +2,6 @@ import {$update, debugSymbol, unconscious} from "unconscious";
 import {showToast} from "../components/Toast.js";
 import {BRANCH_MANAGER, EVENT_BUS, messages as reactiveMessages, selectedConversation} from "../states.js";
 import {redoToolCalls, undoToolCalls} from "../toolset.js";
-import {MESSAGES_CACHE} from "../database.js";
 
 const INDEX = debugSymbol("INDEX");
 const CHILDREN = debugSymbol("CHILDREN");
@@ -76,17 +75,17 @@ function createBranchManager(conv, messages) {
 
 	/**
 	 * 删除/重排后更新 INDEX 并重算受影响的 parent 偏移
-	 * @param {AiChat.Message[]} newMessages
+	 * @param {AiChat.Message[]} oldIndices
 	 */
-	const _updateIndices = newMessages => {
+	const _updateIndices = (oldIndices) => {
 		const indices = new Map();
-		for (let i = 0; i < newMessages.length; i++) indices.set(newMessages[i], i);
+		for (let i = 0; i < messages.length; i++) indices.set(messages[i], i);
 
 		let branchPoints = 0;
-		for (let i = 1; i < newMessages.length; i++) {
-			const m = newMessages[i];
+		for (let i = 1; i < messages.length; i++) {
+			const m = messages[i];
 			if (m.parent != null) {
-				const newParentIndex = indices.get(messages[m[INDEX] - m.parent]);
+				const newParentIndex = indices.get(oldIndices[m[INDEX] - m.parent]);
 				if (null == newParentIndex) throw new Error('引用已删除的消息 '+i+','+m.parent);
 
 				if (newParentIndex === i - 1) {
@@ -165,9 +164,16 @@ function createBranchManager(conv, messages) {
 		};
 		dfs(message);
 
-		const newMessages = messages.filter(m => !toDelete.has(m));
-		const haveBranches = _updateIndices(newMessages);
-		messages = newMessages;
+		const bak = [...messages];
+
+		let j = 0;
+		for (let i = 0; i < messages.length; i++) {
+			const m = messages[i];
+			if (toDelete.has(m)) continue;
+			messages[j++] = m;
+		}
+		messages.length = j;
+		const haveBranches = _updateIndices(bak);
 
 		try {
 			const siblings = parent[CHILDREN];
@@ -198,10 +204,8 @@ function createBranchManager(conv, messages) {
 				path.length = 0;
 
 				// 不需要删除 [INDEX] 虽然可以删
-				const rawMessages = messages.slice(1);
-				reactiveMessages.value = rawMessages;
-				conv[MESSAGES_CACHE] = rawMessages;
-				//updateConversation(conv, rawMessages);
+				messages.shift();
+				//updateConversation(conv, messages);
 			}
 		}
 	};
@@ -257,12 +261,11 @@ function createBranchManager(conv, messages) {
 					}
 				}
 
-				const copy = [...messages];
-				copy.splice(start + 1, 0, ...addItems);
-				_updateIndices(copy);
+				const bak = [...messages];
+				messages.splice(start + 1, 0, ...addItems);
+				_updateIndices(bak);
 
 				if (start === path.length) leaf = addItems.at(-1);
-				messages = copy;
 			}
 
 			const removed = Array.prototype.splice.call(path, start, deleteCount);
@@ -277,7 +280,7 @@ function createBranchManager(conv, messages) {
 
 	// ---------- 返回闭包对象 ----------
 	return {
-		get messages() { return messages; },
+		get raw() { return messages; },
 
 		/**
 		 * @param {number} v
@@ -344,7 +347,7 @@ export const copyBranchAt = message => {
 	const conv = unconscious(selectedConversation);
 	/** @type {AiChat.BranchManager} */
 	const bm = conv[BRANCH_MANAGER];
-	bm.branchAt(bm.messages[resolveParent(message)], message);
+	bm.branchAt(bm.raw[resolveParent(message)], message);
 	setMessages(bm.getMessages(), conv);
 };
 

@@ -428,11 +428,11 @@ nlink: ${stats.nlink}`);
 		ctx.send(200, 'Success');
 	});
 	router.post('/delete', async (ctx) => {
-		const { path: filePath } = await ctx.readAsObject();
+		const { path: filePath, recursive, force } = await ctx.readAsObject();
 		const safePath = await pathFilterWithIgnore(ctx, filePath, true);
 		if (safePath === ctx.fsRoot) return ctx.send(403, { error: 'Cannot delete root' });
 
-		await fs.rm(safePath, { recursive: true, force: true });
+		await fs.rm(safePath, { recursive, force });
 		teh.del(safePath);
 		ctx.send(200, 'Success');
 	});

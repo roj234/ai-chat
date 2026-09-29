@@ -2,7 +2,7 @@ import {serializeJSON} from "/src/utils/marshal.js";
 import {
 	deleteConversation,
 	getKV,
-	getMessagesCacheFirst,
+	getMessages,
 	kvListDel,
 	kvListGet,
 	kvListGetKeys,
@@ -97,7 +97,7 @@ for (const type of kvsTypes) {
 
 const convHandler = {
 	async read(convObj) {
-		await getMessagesCacheFirst(convObj);
+		await getMessages(convObj);
 		return serializeJSON(convObj, 2);
 	},
 	async write(convObj, data) {
@@ -111,13 +111,13 @@ const convHandler = {
 /** 为指定对话 id 创建 messages 处理器 */
 const convMessageHandler = {
 	async read([conv, id]) {
-		const msgs = await getMessagesCacheFirst(conv);
+		const msgs = await getMessages(conv);
 		const msg = msgs.find(m => m.id === id);
 		if (!msg) throw (`Message ${id} not found`);
 		return serializeJSON(msg, 2);
 	},
 	async write([conv, id], data) {
-		const msgs = await getMessagesCacheFirst(conv);
+		const msgs = await getMessages(conv);
 		const index = msgs.findIndex(m => m.id === id);
 		if (index < 0) throw (`Message ${id} not found`);
 		msgs[index] = JSON.parse(data);
@@ -133,7 +133,7 @@ CFG_ROOTS.set([".", "conversations", 0, "messages"], {
 	},
 	async *entries(self) {
 		const conv = self.path.at(-2);
-		for (const message of await getMessagesCacheFirst(conv)) {
+		for (const message of await getMessages(conv)) {
 			yield [message.id+".json", FAKE_FILE_CONSTANT];
 		}
 	},
@@ -141,7 +141,7 @@ CFG_ROOTS.set([".", "conversations", 0, "messages"], {
 		const conv = self.path.at(-2);
 		const id = parseInt(checkJson(name), 10);
 
-		const msgs = await getMessagesCacheFirst(conv);
+		const msgs = await getMessages(conv);
 		const index = msgs.findIndex(m => m.id === id);
 		if (index < 0) throw (`Message ${id} not found`);
 		msgs.splice(index, 1);

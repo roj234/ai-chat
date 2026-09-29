@@ -154,7 +154,12 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 		const atBottom = DI_messageContainer.scrollHeight - DI_messageContainer.clientHeight - DI_messageContainer.scrollTop;
 
-		markdownRenderer(isThinking ? textContent : schemaPreprocess(textContent), container, isThinking ? DONT_PARSE_HTML_IN_THINKING : null);
+		try {
+			markdownRenderer(isThinking ? textContent : schemaPreprocess(textContent), container, isThinking ? DONT_PARSE_HTML_IN_THINKING : null);
+		} catch (e) {
+			console.error(e);
+			showToast("Markdown更新出错\n"+prettyError(e), 'error');
+		}
 
 		if (atBottom < 250 && !unconscious(lastScrollDirectionIsUp)) DI_messageContainer.vl.scrollTo(DI_messageContainer.scrollHeight);
 	};

@@ -1,7 +1,7 @@
 import {sendToSyncServer} from "/src/database/syncClient.js";
 import {SYNC_RPC, SYNC_SEND_TO_OWNER} from "/backend/sync.js";
 import {config, conversations, inputText, isMobile, selectedConversation, switchToConversation} from "/src/states.js";
-import {$state, $update, $vforeach, $watch, unconscious} from "unconscious";
+import {$state, $unwatch, $update, $vforeach, $watch, unconscious} from "unconscious";
 import {showToast} from "/src/components/Toast.js";
 import {DI, DID_RMI, DID_SEND_BUTTON, onLoad} from "/src/hooks.js";
 import {delta, patch, rep} from "unconscious/common/deepEqual.js";
@@ -262,13 +262,21 @@ const RMI = {
 					return;
 				}
 				switchToConversation(conv);
-				break;
+
+				const cb = () => {
+					if (selectedConversation.ready) {
+						$unwatch(selectedConversation, cb);
+						reply("");
+					}
+				};
+				$watch(selectedConversation, cb, false);
+				return;
 
 			default:
 				reply({ error: "未知操作" });
 				return;
 		}
-		reply("OK");
+		reply("");
 	},
 };
 

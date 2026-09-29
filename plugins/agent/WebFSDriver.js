@@ -145,9 +145,14 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			return str;
 		},
 
-		async delete({path}) {
-			const [ parent, name, handle ] = await myResolveHandle(path, WRITE);
-			await parent.removeEntry(name, RECURSIVE);
+		async delete({path, recursive = true, force}) {
+			try {
+				const [ parent, name, handle ] = await myResolveHandle(path, WRITE);
+				await parent.removeEntry(name, recursive ? RECURSIVE : undefined);
+			} catch (e) {
+				if ((recursive || force) && e.name === FSE_NotFound) {}
+				else throw e;
+			}
 			return 'Success';
 		},
 
@@ -348,7 +353,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 	return {
 		...api,
 		...teh,
-		open: async ({ path, create }) => (await myResolveHandle(path, READ | WRITE | REQUIRE_FILE | (create * (CREATE|CREATE_LEAF))))[2],
+		open: async ({ path, create }) => (await myResolveHandle(path, READ | REQUIRE_FILE | (create * (CREATE|CREATE_LEAF|WRITE))))[2],
 		readRaw: ({path}) => resolveFile(path),
 		writeRaw: ({path, content}) => fsCommonApi.write(path, content, null, 1).then(() => teh.del(path)),
 		appendRaw: api.append,
@@ -418,7 +423,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 				acl1.compile();
 
 				const entries = await glob(rootHandle._upper, path, "", true, acl1);
-				const pattern = new RegExp("^"+parseGlobPattern(path, true), 'ui');
+				const pattern = new RegExp("^"+parseGlobPattern(path, true)+"$", 'ui');
 
 				let prefix = '';
 
@@ -438,16 +443,17 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 						break;
 					}
 
+					const h = await resolveHandle(realHandle, displayPath, 0).catch(e => {});
+
 					deleted.delete(displayPath);
 					if (handle.kind === 'file') {
 						const file = await handle.getFile();
-						const h = await resolveHandle(realHandle, displayPath, 0).catch(e => {});
 						const item = [h ? "modify" : "add", displayPath];
 						item.push(new Date(file.lastModified).toISOString().slice(0, -5)+'Z');
 						result.push(item);
 					} else {
 						deleted.delete(displayPath+'/');
-						result.push(["dir", displayPath]);
+						if (!h) result.push(["dir", displayPath]);
 					}
 				}
 

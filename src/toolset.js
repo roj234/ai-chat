@@ -813,26 +813,6 @@ export const redoToolCalls = (global, messages, first, includeTrue) => {
 };
 
 /**
- *
- * @param {string} system_prompt
- */
-export const setSystemPrompt = system_prompt => {
-	if (system_prompt) {
-		if (messages[0].role === "system") {
-			messages[0].content = system_prompt;
-		} else {
-			messages.unshift({
-				role: "system",
-				time: Date.now(),
-				content: system_prompt
-			});
-		}
-	} else if (messages[0].role === "system") {
-		messages.shift();
-	}
-};
-
-/**
  * 获取缓存的解析的工具参数对象
  * @param {AiChat.ToolResponse} response
  * @param {OpenAI.ToolCall} toolcall

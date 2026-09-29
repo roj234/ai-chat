@@ -1,10 +1,10 @@
 import "./actime.css";
-import {messages, selectedConversation} from "/src/states.js";
+import {selectedConversation} from "/src/states.js";
 import {unconscious} from "unconscious";
-import {getBillingLog} from "/src/database.js";
+import {getBillingLog, getMessages} from "/src/database.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
-import {showToast} from "/src/components/Toast.js";
 import {LLM_COST_SCALE} from "/backend/sync.js";
+import {openWindow} from "../../src/components/Windows.jsx";
 
 
 function buildData(messages, logs) {
@@ -142,9 +142,8 @@ const fmtMs = (ms) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms.toFixed
 
 let maxBars = 80;
 
-async function render() {
-	const conv = unconscious(selectedConversation);
-	const msgs = unconscious(messages);
+async function render(conv) {
+	const msgs = await getMessages(conv);
 	const logs = await Promise.all(msgs.map(m => getBillingLog(m.id)));
 	const d =  buildData(msgs, logs);
 
@@ -163,11 +162,6 @@ async function render() {
 	</div>);
 
 	return <article className="run-card">
-		<header className="header">
-			<h1 className="title">{conv.title || '无标题会话'}</h1>
-			<p className="meta">{new Date(conv.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p>
-		</header>
-
 		<section className="section">
 			<h2 className="section-title">耗时
 				<span className={"spacer"}></span>
@@ -226,10 +220,16 @@ async function render() {
 
 COMMAND_REGISTRY['actime'] = [
 	() => {
-		render().then(elem => {
-			elem.addEventListener('contextmenu', () => elem.remove());
-			showToast("长按以关闭")
-			document.body.append(<div style={"position:absolute;right:0;z-index:1"}>{elem}</div>);
+		const conv = unconscious(selectedConversation);
+		render(conv).then(elem => {
+			openWindow({
+				id: "bd-"+conv.id,
+				title: `会话分析 (${conv.title || '无标题会话'}) at ${new Date(conv.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`,
+				element: elem,
+				height: 0.5,
+				width: 460,
+				//dock: 'right'
+			})
 		});
 	},
 	"显示耗时详情卡片便于炫耀"

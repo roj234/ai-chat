@@ -1,5 +1,5 @@
 
-/** NULL owner 值（`0`）。追加时传入 `0` 会被视为 NULL 并拒绝。 */
+/** NULL owner 值（`0`）。追加时传入 `0` 会存储为无 owner 行；`getByOwnerId(0)` 直接返回 `undefined`。 */
 export const NULL_OWNER: 0;
 
 /**

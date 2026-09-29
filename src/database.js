@@ -131,19 +131,17 @@ const throttledPromise = (fn) => {
 	}
 };
 
-const getMessages_ = throttledPromise(db.getMessages);
+const fetchMessagesFromDB = throttledPromise(db.getMessages);
 
 /**
  * 获取一个会话的消息，缓存优先
  * @param {AiChat.Conversation} conversation 对话
- * @param {boolean} [noStore] 结果不保存到缓存 (警告，可能有bug)
  * @returns {Promise<AiChat.Message[]>}
  */
-export const getMessagesCacheFirst = async (conversation, noStore) => {
+export const getMessages = async (conversation) => {
 	const bm = conversation[BRANCH_MANAGER];
 	if (bm) return bm.getMessages();
-
-	return (conversation[MESSAGES_CACHE] || (noStore ? getMessages_(conversation) : getMessages(conversation)));
+	return (conversation[MESSAGES_CACHE] || fetchMessages(conversation));
 };
 
 /**
@@ -151,9 +149,11 @@ export const getMessagesCacheFirst = async (conversation, noStore) => {
  * @param {AiChat.Conversation} conversation 对话
  * @returns {Promise<AiChat.Message[]>}
  */
-export const getMessages = throttledPromise(async conversation => {
-	let messages = await getMessages_(conversation);
+export const fetchMessages = throttledPromise(async conversation => {
+	let messages = await fetchMessagesFromDB(conversation);
 	conversation[DIFF_SNAPSHOT] = structuredClone(conversation);
+
+	const isBranchConversation = conversation.bm_leaf != null;
 
 	if (messages !== conversation[MESSAGES_CACHE]) {
 		/** @type {Map<number, AiChat.Message>} */
@@ -168,13 +168,14 @@ export const getMessages = throttledPromise(async conversation => {
 			message[MESSAGE_IS_CLEAN] = true;
 		}
 
-		if (conversation.bm_leaf) {
+		delete conversation[BRANCH_MANAGER];
+		if (isBranchConversation) {
 			messages = enableBranches(conversation, messages);
-		} else {
-			delete conversation[BRANCH_MANAGER];
 		}
 
 		await EVENT_BUS.post(['conversationLoad'], conversation, messages);
+	} else {
+		if (isBranchConversation) return enableBranches(conversation, messages);
 	}
 
 	return messages;
@@ -232,17 +233,17 @@ const updateConversation_ = async (conversation, messages, keepTime) => {
 	}
 
 	if (messages) {
-		if (conversation[BRANCH_MANAGER]) messages = conversation[BRANCH_MANAGER].messages;
+		if (conversation[BRANCH_MANAGER]) messages = conversation[BRANCH_MANAGER].raw;
 
 		if (import.meta.env.DEV) {
 			if (messages !== conversation[MESSAGES_CACHE] && undefined !== conversation[MESSAGES_CACHE]) {
 				showToast("传入的消息数组不正确", "error");
-				console.error(messages, conversation[MESSAGES_CACHE]);
+				console.trace(messages, conversation[MESSAGES_CACHE]);
 			}
 		}
 
 		if (undefined === conversation[MESSAGES_CACHE]) conversation[MESSAGES_CACHE] = messages;
-		//else messages = conversation[MESSAGES_CACHE];
+		//else conversation[MESSAGES_CACHE] = messages;
 
 		/**
 		 * @type {Map<number, AiChat.Message>}

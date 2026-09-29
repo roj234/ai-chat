@@ -44,7 +44,7 @@ export const TextDiff = ({ start, diff, filename = '' }) => {
 	const hasLines = start.length;
 	let ls;
 
-	if (hasLines && !(ls = diff.at(-1).line)) {
+	if (hasLines && !(ls = diff.at(-1)?.line)) {
 		ls = 0;
 		let addLine = start[0];
 		let delLine = addLine;

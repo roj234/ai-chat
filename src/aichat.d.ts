@@ -734,21 +734,20 @@ declare namespace AiChat {
     }
 
     class BranchManager {
-        readonly conversation: Conversation;
-        readonly messages: Message[];
-        leaf: Message;
+        readonly raw: Message[];
 
         constructor(conversation: Conversation, messages: Message[]);
+
+        /**
+         * @param {number} v
+         * @param {boolean=} sync 从原始数据编辑器同步
+         */
+        setLeaf(v: number, sync: boolean): void;
 
         /**
          * 获取当前分支的所有消息
          */
         getMessages(): Message[];
-
-        /**
-         * 获取当前分支的所有消息并删除分支管理器的所有相关字段
-         */
-        toArray(): Message[];
 
         /**
          * 在指定消息处创建新分支

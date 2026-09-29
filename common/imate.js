@@ -395,8 +395,8 @@ export const compressImage = async (blob, cfg) => {
 	const maxSide = cfg.imageLongLimit;
 	const maxSize = Math.round(cfg.imageSizeLimit * 1048576);
 
-	let {width, height} = await parseImageMeta(blob);
-	if (width <= maxSide && height <= maxSide && blob.size <= maxSize) return blob;
+	let {width, height, type} = await parseImageMeta(blob);
+	if (type !== 'bmp' && width <= maxSide && height <= maxSide && blob.size <= maxSize) return blob;
 
 	[width, height] = limitMaxSide(width, height, maxSide);
 

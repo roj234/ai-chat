@@ -1,36 +1,11 @@
-/* ==========================================================================
-   run-card.css
-   ─ 数据驱动：样式只认 class + CSS 变量；所有数值（高度/宽度/百分比）
-     由调用方以 inline style 注入（height / width / --avg 等）。
-   ─ 语义颜色集中在 .run-card 作用域，方便换肤，不污染宿主全局。
-   ========================================================================== */
 
 .run-card {
-	/* ---- 语义变量（全部作用在 .run-card 上） ---- */
-	--card-bg:    #ffffff;
-	--panel:      rgba(107, 114, 128, .07);
 	--c-thinking: #6b7aff;
 	--c-tool:     #12b886;
 	--c-subagent: #f59f00;
 	--c-waiting:  #adb5bd;
-}
 
-@media (prefers-color-scheme: dark) {
-	.run-card {
-		--card-bg:   #171a21;
-		--panel:     rgba(154,163,175,.08);
-		box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.5);
-	}
-}
-
-.run-card {
-	/* ---- 卡片本体 ---- */
-	width: min(460px, 100%);
-	background: var(--card-bg);
-	border: 1px solid var(--border);
-	border-radius: 14px;
-	box-shadow: 0 1px 2px rgba(16,24,40,.05), 0 4px 16px rgba(16,24,40,.07);
-	padding: 20px 20px 14px;
+	padding: 0 20px;
 	color: var(--text);
 	font-size: 13px;
 
@@ -66,7 +41,7 @@
 
 	/* ---------- 2) Tokens ---------- */
 	.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-	.stat { background: var(--panel); border-radius: 10px; padding: 10px 12px; }
+	.stat { background: var(--chip-bg); border-radius: 10px; padding: 10px 12px; }
 	.stat .label { font-size: 12px; color: var(--muted); }
 	.stat .value {
 		font-size: 17px;  margin-top: 2px;

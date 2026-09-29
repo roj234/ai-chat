@@ -13,12 +13,13 @@ const swc = navigator.serviceWorker;
 
 if (DB_MODE !== 'local' && swc) {
 	SETTINGS.push({
+		_tab: "data",
 		type: "element",
 		name: "远程文件缓存",
-		_tab: "data",
 		element: <div className={"choice-scroll"} ref={element} />
 	});
 	SETTINGS.push({
+		_tab: "data",
 		id: "blobCacheCapacity",
 		type: "number",
 		name: "容量限制（MB）",
@@ -26,7 +27,7 @@ if (DB_MODE !== 'local' && swc) {
 		max: 500,
 		step: 10,
 		default: 100,
-		_tab: "data"
+		inline: true,
 	});
 
 	const cb = () => {

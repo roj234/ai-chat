@@ -26,13 +26,13 @@ import {
 } from "./VCS_shared.js";
 import {ITEM_KEY} from "unconscious/common/VirtualList.js";
 import {readAsString} from "/common/chardet.js";
-import {prettyError} from "/src/utils/utils.js";
+import {prettyError, showImageZoomView} from "/src/utils/utils.js";
+import {formatSize} from "unconscious/common/Utils.js";
 import {compileGlobPattern} from "/common/fs-glob.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {EVENT_BUS} from "/src/states.js";
-
-//
-const throttledPromise = s => s;
+import {SHA256} from "unconscious/common/SHA256.js";
+import {sleep, throttledPromiseLast} from "../../common/pure-utils.js";
 
 export const showVCSDialog = (conv) => {
 	return openWindow({
@@ -42,12 +42,18 @@ export const showVCSDialog = (conv) => {
 		width: 1000,
 		height: 600,
 		element: (handle) => {
-			const el = createVCSDialog(conv);
+			const upd = $state();
+			const el = createVCSDialog(conv, upd);
+
+			const off3 = EVENT_BUS.onoff(['loopEnd'], (conv_) => {
+				if (conv_ === conv) $update(upd);
+			});
 
 			const off = EVENT_BUS.onoff(['conversationDeleted', conv.id], () => closeWindow(handle));
 			const off2 = EVENT_BUS.onoff(['closeWindow', handle.id], () => {
 				off();
 				off2();
+				off3();
 			});
 
 			return el;
@@ -55,19 +61,41 @@ export const showVCSDialog = (conv) => {
 	});
 };
 
-const DiffPane = ({filename, left, right}) => {
+const DiffPane = ({filename, left, right, bin}) => {
 	const diff = makeDiff(left, right);
-	return <section className="diff-pane">
+	return <section className="vcs-diff-pane">
 		<div className="row">
 			<span>{filename}</span>
 			<span className="spacer"/>
-			<DiffHeader diff={diff} />
+			{bin ? <span className="bin">二进制</span> : <DiffHeader diff={diff}/>}
 		</div>
 		<TextDiff start={[1]} diff={diff} />
 	</section>
 };
 
-const createVCSDialog = (conv) => {
+/**
+ * 图像版本比对的单侧面板：显示文件在某一层（base / overlay）中的版本。
+ * @param {string} variant 面板变体（base / overlay），用于着色
+ * @param {Blob|null} blob 该层中的文件；null 表示此层中不存在
+ */
+const ImagePane = ({variant, overlay, blob}) => {
+	const meta = $state(formatSize(blob.size));
+
+	return <figure>
+		<figcaption>
+			<span className={"layer "+variant}>{overlay}</span>
+			<span className="meta ellipsis">{meta}</span>
+		</figcaption>
+		<div>
+			<img src={blob.toUrl()} alt={overlay+" 图像"}
+				 onClick={() => showImageZoomView(blob.toUrl(), blob.name)}
+				 onLoad={({target}) => {meta.value = `${target.naturalWidth}×${target.naturalHeight} · ${formatSize(blob.size)}`}}
+				 onError={() => {meta.value = "无法解码";}}/>
+		</div>
+	</figure>
+};
+
+const createVCSDialog = (conv, state) => {
 	const fileSystems = ['./', ...Object.keys(conv.mnt ?? {}).map(name => '~/'+name+'/')];
 	const selectedFileSystem = $state("./");
 	const viewingOverlay = $state(VCS_BASE_BRANCH);
@@ -86,17 +114,22 @@ const createVCSDialog = (conv) => {
 
 		return callFileSystemFunc(fs, "vcs", {mode: VCS_LIST_BRANCHES, json: true}, conv);
 	}, selectedFileSystem);
-	$update(selectedFileSystem);
+
 	const filterText = $state("");
 
 	let glob = '';
-	const changes = $asyncState(throttledPromise(async mnt => {
+	const changes = $asyncState(throttledPromiseLast(async mnt => {
 		if (mnt === VCS_BASE_BRANCH) return [];
 		const [path, fs] = await getFileSystem(mnt, conv);
-		return callFileSystemFunc(fs, "vcs", {mode: VCS_DIFF, path: glob || '*', json: true}, conv);
+		return callFileSystemFunc(fs, "vcs", {mode: VCS_DIFF, path: glob || '**', json: true}, conv);
 	}), viewingOverlay, []);
 
 	const selectedFile = $state("");
+
+	$watch(state, () => {
+		$update(selectedFileSystem);
+		$update(viewingOverlay);
+	})
 
 	const BranchMenu = () => <div className="dropdown">
 		<div className="fa-search" onClick.stop={() => {}}>
@@ -261,14 +294,49 @@ const createVCSDialog = (conv) => {
 
 				const [blobA, blobB] = await callVCS({mode: VCS_QUERY, path: file});
 
-				const a = blobA ? await readAsString(blobA) : "";
-				const b = blobB ? await readAsString(blobB) : "";
+				if (/\.(jpg|bmp|jpeg|png|gif|webp)$/i.test(file)) {
+					return <section className="vcs-diff-pane">
+						<div className="row">
+							<span className="ellipsis">{file}</span>
+							<span className="spacer"/>
+							<span className="bin-tag">图像</span>
+						</div>
+						<div className="images">
+							{blobA && <ImagePane variant='l' overlay="原始" blob={blobA}/>}
+							{blobB && <ImagePane variant='r' overlay="当前" blob={blobB}/>}
+						</div>
+					</section>
+				}
 
-				return <DiffPane filename={file} left={a} right={b} />
+				try {
+					const a = blobA ? await readAsString(blobA) : "";
+					const b = blobB ? await readAsString(blobB) : "";
+					return <DiffPane filename={file} left={a} right={b}/>
+				} catch (err) {
+					const hash = async (blob) => {
+						const hasher = new SHA256();
+
+						const reader = blob.stream().getReader();
+						while (true) {
+							await sleep(0);
+							const {done, value} = await reader.read();
+							if (done) break;
+							hasher.update(value);
+						}
+
+						return hasher.digest('hex');
+					};
+
+					return <DiffPane
+						filename={file} bin={true}
+						left={!blobA ? '' : `[Blob ${blobA.size} bytes\nsha256=${await hash(blobA)}]`}
+						right={!blobB ? '' : `[Blob ${blobB.size} bytes\nsha256=${await hash(blobB)}]`}
+					/>
+				}
 			}, selectedFile), () => <section className="vcs-diff-pane">
 				<div className="row spin-before">{unconscious(selectedFile)}</div>
-			</section>, (e) => <section className="diff-pane">
-				<div className="row">{unconscious(selectedFile)}<span className={"error"}>发生错误。</span></div>
+			</section>, (e) => <section className="vcs-diff-pane">
+				<div className="row">{unconscious(selectedFile)}<span className="error">发生错误。</span></div>
 				<HighlightBox code={prettyError(e)} />
 			</section>)}
 		</div>

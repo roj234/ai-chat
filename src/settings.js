@@ -827,7 +827,8 @@ if (isMobile) {
 		default: 300,
 		min: 200,
 		max: 1000,
-		step: 50
+		step: 50,
+		inline: true
 	})
 }
 

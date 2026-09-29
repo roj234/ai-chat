@@ -1,4 +1,4 @@
-import {getMessagesCacheFirst} from "/src/database.js";
+import {getMessages} from "/src/database.js";
 import {getToolParameters} from "/src/toolset.js";
 import {EVENT_BUS} from "/src/states.js";
 import {debugSymbol} from "unconscious";
@@ -19,7 +19,7 @@ export async function getChangeableFiles(conv, path) {
 		if (path) return;
 
 		files = conv[NEWLY_CREATED_FILES] = new Set;
-		for (const message of await getMessagesCacheFirst(conv)) {
+		for (const message of await getMessages(conv)) {
 			const resp = message.tool_responses;
 			if (resp) {
 				for (let i = 0; i < resp.length; i++) {

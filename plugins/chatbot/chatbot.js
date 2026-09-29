@@ -7,7 +7,7 @@ import {$stampLock, $state, $unwatch, $watch} from "unconscious";
 import {renderMarkdownToString} from "/src/markdown/markdown.js";
 import {showToast} from "/src/components/Toast.js";
 import {throttled} from "/common/pure-utils.js";
-import {getMessagesCacheFirst} from "/src/database.js";
+import {getMessages} from "/src/database.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {fileAccess} from "../agent/index.js";
 import {onLoad} from "/src/hooks.js";
@@ -171,7 +171,7 @@ class Chatbot {
 			if (!conversation) throw new Error("找不到对话 #"+convId);
 		}
 
-		const msgs = await getMessagesCacheFirst(conversation);
+		const msgs = await getMessages(conversation);
 		if (msgs !== this.#messages) {
 			this.#messages = msgs;
 			this.#lock = $stampLock(messages, msgs);

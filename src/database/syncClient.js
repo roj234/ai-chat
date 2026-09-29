@@ -47,6 +47,7 @@ import {highlightJsonLike} from "../markdown/highlight.js";
 import {prettyError} from "../utils/utils.js";
 import {initialize, serializeMsgpack, serverAcceptMsgpack} from "./remoteDB.js";
 import {enableBranches} from "../utils/BranchManager.js";
+import {setConversationTitle} from "../components/ConversationList.jsx";
 
 let body;
 
@@ -273,7 +274,7 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 				const bm = conv[BRANCH_MANAGER];
 				let msg = bm?.messages || conv[MESSAGES_CACHE];
 				const isCurrent = conv === unconscious(selectedConversation);
-				if (!msg && isCurrent) msg = unconscious(messages);
+				/*DEPRECATED*/if (!msg && isCurrent) msg = unconscious(messages);
 				if (!msg) return;
 
 				checkConcurrentModification(conv);
@@ -304,11 +305,12 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 			case SYNC_CONVERSATION_DEL: {
 				const convId = data.id;
 				const index = conversations.findIndex(item => item.id === convId);
-				let conv, removed, lastTime, lastLeaf;
+				let conv, removed, lastTime, lastLeaf, lastTitle;
 				if (index >= 0) {
 					conv = conversations[index];
 					lastLeaf = conv.bm_leaf;
 					lastTime = conv.time;
+					lastTitle = conv.title;
 				}
 
 				try {
@@ -339,6 +341,9 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 					if (conv[DIFF_SNAPSHOT]) {
 						conv[DIFF_SNAPSHOT] = structuredClone(conv);
 					}
+
+					if (lastTitle !== conv.title)
+						setConversationTitle(conv, conv.title, true);
 
 					const msgs = conv[MESSAGES_CACHE];
 					if (msgs) {

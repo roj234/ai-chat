@@ -173,7 +173,7 @@ EVENT_BUS.on(['kvs', CHAR_TYPE], (name) => {
 	if (idx >= 0) $update(currentPage);
 });
 
-export function createCharacterViewer() {
+export default function() {
 	currentPage.value = 1;
 	$update(currentPage);
 

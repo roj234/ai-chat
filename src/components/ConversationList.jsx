@@ -260,7 +260,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 	const groupAndConvArr = [];
 	const vl = new VirtualList({
 		element: list,
-		itemHeight: 36+8,
+		itemHeight: 32+8,
 		gap: 8,
 		data: groupAndConvArr,
 		keyFunc,

@@ -8,10 +8,11 @@ import {loadPreset, presets} from "../src/presets.js";
 const getLockedPresetName = () => {
 	const p = selectedConversation.presets;
 	if (!p) return;
-	return Array.isArray(p) ? p.join(" ") : p;
+	return Array.isArray(p) ? p.join(" ") : presets.find(item => item.name === p)?.meta ?? p;
 };
 
 export const registerPresetFastSwitch = () => {
+	const currentPreset = $computed(() => getLockedPresetName() ?? ((config._dirty||'') + (config.name || config.model)));
 	const main = <div className={"pretty-select preset-switch up"} style={"width: auto; max-width: 200px"}>
 		<div className="input" tabIndex={0} role="button" title={"预设切换菜单"} onClick.stop={() => main.classList.toggle("open")}>
 			<span className={"ri-lock-line"} title={"锁定当前对话的预设"}
@@ -22,13 +23,13 @@ export const registerPresetFastSwitch = () => {
 				if (conv.presets) {
 					delete selectedConversation.presets;
 				} else {
-					selectedConversation.presets = config.name;
+					selectedConversation.presets = config.provider+'/'+config.model;
 				}
 				markCombinedPresetDirty(conv);
 				updateConversation(conv);
 			}} />
-			{() => getLockedPresetName() ?? ((config._dirty||'') + (config.name || config.model))}
-			<span className={"arrow-icon ri-arrow-down-s-line"}></span>
+			<span className="ellipsis" title={currentPreset}>{currentPreset}</span>
+			<span className="arrow-icon ri-arrow-down-s-line"></span>
 		</div>
 
 		<ul className="dropdown" role="list" onClick.stop.delegate{"li"}={(e) => {

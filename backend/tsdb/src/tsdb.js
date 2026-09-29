@@ -315,7 +315,6 @@ export class TSDB {
 			while (this.#pending[0].time <= time) {
 				const r = this.#pending.shift();
 				await this.#doAppend(r.data, r.owner, r.time);
-				this.#lookup.delete(r.owner);
 
 				if (!this.#pending.length) {
 					await fs.rm(this.#basePath+'.wal', { force: true });
@@ -366,6 +365,10 @@ export class TSDB {
 
 		await this.#index.truncate(len);
 		await this.#data.truncate(this.#dataLen);
+
+		for (const r of this.#pending) {
+			if (r.owner !== NULL_OWNER) this.#lookup.delete(r.owner);
+		}
 	}
 
 	/**
@@ -537,9 +540,7 @@ export class TSDB {
 
 			const writeData = async () => {
 				for (const row of rows) {
-					let data = row.data;
-					if (row.changed && row.owner !== NULL_OWNER) this.#lookup.delete(row.owner);
-					if (!dataStream.write(data)) await new Promise(r => dataStream.once('drain', r));
+					if (!dataStream.write(row.data)) await new Promise(r => dataStream.once('drain', r));
 				}
 
 				await new Promise(r => dataStream.close(r));
@@ -564,6 +565,9 @@ export class TSDB {
 			};
 
 			await Promise.all([writeData(), writeIndex()]);
+
+			// 不是很想追踪了
+			this.#lookup.clear();
 
 			this.#dataCache.invalidate(firstMeta.off, this.#dataLen - firstMeta.off);
 			this.#dataLen = dataOffset;
@@ -632,8 +636,9 @@ export class TSDB {
 			row = await this.#get(mid);
 			o = row.owner;
 			if (o === NULL_OWNER) {
-				o = await this.#findOwner(mid);
-				if (o === NULL_OWNER) return;
+				row = await this.#findOwner(mid);
+				if (row == null) return;
+				o = row.owner;
 			}
 
 			if (o === owner) { found = true; break; }
@@ -669,7 +674,7 @@ export class TSDB {
 
 	/**
 	 * @param {number} center
-	 * @returns {Promise<number>}
+	 * @returns {Promise<Object>}
 	 */
 	async #findOwner(center) {
 		for (let d = 1; ; d++) {
@@ -677,17 +682,17 @@ export class TSDB {
 			const i = center + d;
 			if (i < this.#rowCount) {
 				const row = await this.#get(i);
-				if (row.owner !== NULL_OWNER) return row.owner;
+				if (row.owner !== NULL_OWNER) return row;
 				hasNext = 1;
 			}
 			const j = center - d;
 			if (j >= 0) {
 				const row = await this.#get(j);
-				if (row.owner !== NULL_OWNER) return row.owner;
+				if (row.owner !== NULL_OWNER) return row;
 				hasNext = 1;
 			}
 
-			if (!hasNext) return NULL_OWNER;
+			if (!hasNext) return;
 		}
 	}
 

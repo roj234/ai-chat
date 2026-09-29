@@ -43,7 +43,9 @@
         border-radius: 8px;
 
         overflow: auto;
-        scrollbar-gutter: stable;
+        &:not(.CodeEditor) {
+            scrollbar-gutter: stable;
+        }
     }
 
     & button:not(.btn)[class^="ri-"] {

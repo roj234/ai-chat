@@ -1,13 +1,6 @@
 import {config, conversations, messages, selectedConversation} from "./states.js";
 import {showToast} from "./components/Toast.js";
-import {
-	deleteDatabase,
-	getMessagesCacheFirst,
-	isIDB,
-	kvListGetValues,
-	kvListSet,
-	updateConversation
-} from "./database.js";
+import {deleteDatabase, getMessages, isIDB, kvListGetValues, kvListSet, updateConversation} from "./database.js";
 import {downloadFile, prettyError} from "./utils/utils.js";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {ZipReader, ZipWriter} from "unconscious/common/zip-io.js";
@@ -301,7 +294,7 @@ const cleanMessages = messages => messages.map(({id, ...rest}) => id < 0 ? null 
 const serializeToJSONLine = async (conv, zw) => {
 	const { id: _a, ready: _b, ...stripped } = conv;
 	stripped.id = APP_NAME;
-	const messages = cleanMessages(await getMessagesCacheFirst(conv));
+	const messages = cleanMessages(await getMessages(conv));
 
 	let jsonData = await serializeJSON(stripped, 0, zw);
 	for (const message of messages) {

@@ -100,7 +100,7 @@ const conversationLoadedCallbacks = [];
 const conversationBeforeunloadCallbacks = [];
 
 /**
- * @param {function(AiChat.Conversation, AiChat.Message[]): void} callback
+ * @param {function(AiChat.Conversation, string[], AiChat.Message[]): void | Promise<void>} callback
  */
 export const onConversationLoaded = callback => EVENT_BUS.on('conversationLoad', callback);
 

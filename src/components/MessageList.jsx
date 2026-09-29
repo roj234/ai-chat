@@ -725,10 +725,12 @@ class MessageListItem {
 		let generationEnded;
 
 		if (message.role === "assistant") {
+			i++;
+
 			if (config.combineToolCalls) {
 				const maxSize = CTC_BASE_COUNT + (message[CTC_EXPAND_COUNT] ?? 0);
 
-				for (i++; i < messages.length; i++) {
+				for (; i < messages.length; i++) {
 					if (!message.tool_calls || isEditing(messages[i]) || messages[i].role !== "assistant") break;
 					message = messages[i];
 					chunkGather(message, chunks, i, messages);

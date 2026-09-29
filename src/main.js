@@ -12,7 +12,7 @@ import {
 import {jsHide, prettyError, requestIdleCallback} from "./utils/utils.js";
 import {ConversationList} from "./components/ConversationList.jsx";
 import {SETTINGS} from "./settings.js";
-import {databaseError, getMessages, initialize, isIDB, listConversations, updateConversation} from "./database.js";
+import {databaseError, fetchMessages, initialize, isIDB, listConversations, updateConversation} from "./database.js";
 import {
 	abortCompletion,
 	config,
@@ -281,7 +281,7 @@ const createApp = () => {
 						return
 					}
 
-					hookGetMessages(getMessages(conv)).then(data => {
+					hookGetMessages(fetchMessages(conv)).then(data => {
 						conv.ready = true;
 
 						if (unconscious(selectedConversation) === conv) {

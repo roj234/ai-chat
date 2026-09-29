@@ -21,10 +21,7 @@
 
     justify-content: space-between;
 }
-
 .sidebar-list > ._vl {
-    flex: 1;
-    overflow-y: auto;
     padding-left: var(--spacing-md);
     padding-right: var(--spacing-xs);
     gap: var(--spacing-sm);

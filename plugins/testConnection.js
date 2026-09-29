@@ -82,12 +82,12 @@ const test = async (body, flag, err1) => {
 
 const reason_switch_keys = [
 	[
-		{ chat_template_kwargs: { enable_thinking: false },},
-		"/chat_template_kwargs/enable_thinking"
-	],
-	[
 		{ reasoning: { enabled: false },},
 		""
+	],
+	[
+		{ chat_template_kwargs: { enable_thinking: false },},
+		"/chat_template_kwargs/enable_thinking"
 	],
 	[
 		{ thinking: { type: "disabled" },},
@@ -133,7 +133,11 @@ async function checkModelCapability() {
 		for (const [v, k] of reason_switch_keys) {
 			const body = hello();
 			Object.assign(body, v);
-			json = await test(body, 2);
+			try {
+				json = await test(body, 2);
+			} catch {
+				continue;
+			}
 			if (!isThinking(json)) {
 				config.reasoningPath = k;
 				break foundAny;
@@ -155,7 +159,11 @@ async function checkModelCapability() {
 				messages: [{role: "user", content: "Compute 375*293"}]
 			}
 			Object.assign(body, v);
-			json = await test(body, 3);
+			try {
+				json = await test(body, 3);
+			} catch {
+				continue;
+			}
 			if (json) {
 				config.reasoningEffortPath = k;
 				reasoningBudget = '支持';

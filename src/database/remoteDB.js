@@ -329,7 +329,12 @@ export const kvListGet = async (type, name) => {
 	const cacheKey = type+":"+name;
 	let val = kvsCache.get(cacheKey);
 	if (!val) {
-		val = await u_getKVList([type, name]);
+		const p = u_getKVList([type, name]);
+
+		kvsCache.set(cacheKey, p);
+		p.catch(() => kvsCache.delete(cacheKey));
+
+		val = await p;
 		if (val) {
 			delete val.type;
 			val[DIFF_SNAPSHOT] = structuredClone(val);

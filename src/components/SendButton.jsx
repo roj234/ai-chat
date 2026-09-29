@@ -48,8 +48,8 @@ export function ContextRing(sendBtn) {
 
 	bar.style.strokeDasharray = CIRCUMFERENCE;
 	const max = $computed(() => config.maxContext);
-	const used = $computed(() => selectedConversation.contextUsage);
-	$watchWithCleanup([updateConversationUI, used, max], () => {
+	const used = $computed(() => selectedConversation.contextUsage, [updateConversationUI, selectedConversation]);
+	$watchWithCleanup([used, max], () => {
 		let pct = unconscious(used) / unconscious(max);
 		tooltipDiv.style.display = isNaN(pct) ? 'none' : '';
 		if (pct > 1) pct = 1;

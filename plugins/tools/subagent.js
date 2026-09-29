@@ -6,13 +6,7 @@ import {
 	registerToolset,
 	toolScriptRegistry,
 } from "/src/toolset.js";
-import {
-	getMessagesCacheFirst,
-	kvListGet,
-	markCombinedPresetDirty,
-	markMessageDirty,
-	updateConversation
-} from "/src/database.js";
+import {getMessages, kvListGet, markCombinedPresetDirty, markMessageDirty, updateConversation} from "/src/database.js";
 import {agentLoop} from "/src/api-request.js";
 import {$asyncState, $cleanup, $state, $update, $watch, debugSymbol, unconscious} from "unconscious";
 import {
@@ -56,7 +50,7 @@ const nestDepth = async (conv) => {
 	while (conv.owner != null) {
 		conv = findConversation(conv.owner);
 		depth++;
-		await getMessagesCacheFirst(conv);
+		await getMessages(conv);
 	}
 	return depth;
 }
@@ -68,7 +62,7 @@ const nestDepth = async (conv) => {
  */
 const isOwned = async (conv, target) => {
 	while (1) {
-		await getMessagesCacheFirst(conv);
+		await getMessages(conv);
 		const owner = conv.owner;
 		if (owner == null) return false;
 		if (owner === target) return true;
@@ -91,7 +85,7 @@ const findOwnAgent = async (par, conv) => {
  */
 const hasLoop = async (start) => {
 	let tortoise = start;
-	if (null == start.owner) await getMessagesCacheFirst(start);
+	if (null == start.owner) await getMessages(start);
 	let hare = findConversation(start.owner);
 	if (!hare) return false;
 
@@ -106,7 +100,7 @@ const hasLoop = async (start) => {
 			lam = 0;
 		}
 
-		if (null == hare.owner) await getMessagesCacheFirst(hare);
+		if (null == hare.owner) await getMessages(hare);
 		hare = findConversation(hare.owner);
 		if (!hare) return false;
 
@@ -329,7 +323,7 @@ const createSubagentWrapper = async (ctx, par, conv) => {
  * @return {Promise<{id: number, error: boolean, content: string}|{id: number, error: boolean, content: string | OpenAI.ContentPart[]}>}
  */
 const subagentLoop = async agent => {
-	const messages = await getMessagesCacheFirst(agent);
+	const messages = await getMessages(agent);
 	if (agent.sa_terminated) return { id: -1, error: true, content: TERMINATED_MESSAGE };
 
 	let lastMessage = messages.at(-1);
@@ -620,7 +614,7 @@ const CreateSubagent = {
 
 			subagentLoopWrapper(ctx);
 
-			const lastMessage = (await getMessagesCacheFirst(conversation)).at(-1);
+			const lastMessage = (await getMessages(conversation)).at(-1);
 			const finishReason = lastMessage.finish_reason;
 			if (finishReason === 'tool_calls') return [ 'running', '运行中' ];
 			if (finishReason !== 'stop') return [ 'error', '错误' ];
@@ -684,7 +678,7 @@ const NotifyAgent = {
 		if (!state) {
 			subagentLoopWrapper(par);
 
-			const messages = await getMessagesCacheFirst(agent);
+			const messages = await getMessages(agent);
 			const lastMessage = messages.at(-1);
 			const finishReason = lastMessage.finish_reason;
 			if (finishReason !== 'stop') return `Agent was terminated (reason=${finishReason})`;

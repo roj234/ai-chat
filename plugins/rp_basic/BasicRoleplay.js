@@ -5,6 +5,7 @@ import {
 	MessageRoles,
 	messages,
 	onConversationLoaded,
+	onConversationSwitchOut,
 	onConversationSwitchTo,
 	selectedConversation,
 	updateMessageUI
@@ -330,12 +331,30 @@ const [lorebookBar, lorebookList, currentLorebook] = createSchemaEditColumn("st|
 export const exportForCV_openCharacterEditor = openCharacterEditor;
 
 //region 从角色卡新建对话
-charBar.append(<button className={"ri-book-open-line btn ghost"} disabled={() => {
-	const chr = unconscious(currentCharacter);
-	return !chr?.name || !unconscious(characterList).find(item => item.name === chr.name);
-}} onClick={() => {
-	exportForCV_createConversation(unconscious(currentCharacter));
-}} title="以选中角色开始故事"><span className="tooltip">以选中角色开始故事</span></button>);
+charBar.prepend(
+	<button className={"ri- btn ghost"} onClick={async () => {
+		openWindow({
+			id: "charViewer",
+			title: "橘色卡管理器",
+			element: (await import("./page/characterViewer.js")).default()
+		});
+	}} title="橘色卡管理器">
+		<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor">
+			<rect x="3" y="3" width="18" height="18" rx="2" stroke-width="2"/>
+			<line x1="14" y1="3" x2="14" y2="21" stroke-width="2"/>
+			<rect x="6" y="6" width="5.5" height="7" rx="1" fill="#f97316" stroke="none"/>
+			<line x1="6" y1="16" x2="11" y2="16" stroke-width="1.5" stroke-linecap="round"/>
+		</svg>
+	</button>,
+
+	<button className={"ri-book-open-line btn ghost"} disabled={() => {
+		const chr = unconscious(currentCharacter);
+		return !chr?.name || !unconscious(characterList).find(item => item.name === chr.name);
+	}} onClick={() => {
+		exportForCV_createConversation(unconscious(currentCharacter));
+	}} title="以选中角色开始故事"><span className="tooltip">以选中角色开始故事</span></button>
+);
+
 /**
  * 从角色新建对话
  * @param {AiChat.DnD.MyCharacter} char
@@ -343,7 +362,7 @@ charBar.append(<button className={"ri-book-open-line btn ghost"} disabled={() =>
  */
 export async function exportForCV_createConversation(char) {
 	await importConversationData({
-		title: "[Char] "+char.name,
+		title: "[Char] " + char.name,
 		time: Date.now(),
 	}, [
 		{
@@ -357,8 +376,9 @@ export async function exportForCV_createConversation(char) {
 		}
 	]);
 
-	showToast("已创建 "+char.name+" 的新对话", "ok");
+	showToast("已创建 " + char.name + " 的新对话", "ok");
 }
+
 //endregion
 
 createTab("character", "角色", "ri-user-heart-line");
@@ -446,23 +466,6 @@ SETTINGS.push(
 );
 
 onLoad(() => {
-	if (!isMobile && !IS_ANDROID_BUILD) {
-		charBar.append(<button className={"ri- btn ghost"} onClick={async () => {
-			openWindow({
-				id: "cardViewer",
-				title: "橘色卡管理器",
-				element: (await import("./page/characterViewer.js")).createCharacterViewer()
-			});
-		}} title="橘色卡管理器">
-			<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor">
-				<rect x="3" y="3" width="18" height="18" rx="2" stroke-width="2"/>
-				<line x1="14" y1="3" x2="14" y2="21" stroke-width="2"/>
-				<rect x="6" y="6" width="5.5" height="7" rx="1" fill="#f97316" stroke="none"/>
-				<line x1="6" y1="16" x2="11" y2="16" stroke-width="1.5" stroke-linecap="round"/>
-			</svg>
-		</button>);
-	}
-
 	kvListGetKeys("st|preset", presetList);
 	kvListGetKeys("st|char", characterList);
 	kvListGetKeys("st|lorebook", lorebookList);
@@ -563,12 +566,12 @@ registerToolset(RP_TOOLSET_ID, "", [FetchLorebook], {
 });
 //endregion
 
+const FIRST_LOAD = debugSymbol("CharacterFirstLoad");
 /**
  * 对话从数据库加载/切换到回调
- * FIXME: 初次打开时会调用两次，幂等但浪费性能（数据库加载/切换）
  * @param {AiChat.Conversation} conv
  * @param {AiChat.Message[]} messages
- * @param {string[]} [isLoadFromDB]
+ * @param {boolean} [isLoadFromDB]
  */
 const loadCB = (conv, messages, isLoadFromDB) => {
 	/** @type {AiChat.DnD.MyCharConversation} */
@@ -620,10 +623,16 @@ const loadCB = (conv, messages, isLoadFromDB) => {
 				content: charInstance
 			});
 		}
+		if (isLoadFromDB) conv[FIRST_LOAD] = true;
 	})
 };
-onConversationSwitchTo(loadCB);
-onConversationLoaded(loadCB);
+onConversationSwitchTo((conv, message) => {
+	return !conv[FIRST_LOAD] && loadCB(conv, message);
+});
+onConversationSwitchOut((conv) => {
+	delete conv[FIRST_LOAD];
+});
+onConversationLoaded((conv, path, messages) => loadCB(conv, messages, true));
 
 //region 数据导入
 /**

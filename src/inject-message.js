@@ -1,6 +1,6 @@
 import {$update, unconscious} from "unconscious";
 import {EVENT_BUS, LOCKED, messages, runningConversations, selectedConversation, updateMessageUI} from "/src/states.js";
-import {getMessagesCacheFirst, updateConversation} from "/src/database.js";
+import {getMessages, updateConversation} from "/src/database.js";
 import {submitUserChatMessage} from "./api-request.js";
 
 /**
@@ -18,7 +18,7 @@ export const injectMessages = async (conv, ...items) => {
 		return false;
 	}
 
-	const msgs = await getMessagesCacheFirst(conv);
+	const msgs = await getMessages(conv);
 	if (msgs.at(-1)?.error) return false;
 
 	const last =  msgs.at(-1);
