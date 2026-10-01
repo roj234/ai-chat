@@ -1,12 +1,12 @@
 import './ConversationList.css';
-import {$state, $update, $watch, $watchWithCleanup, debugSymbol, ONCE_EVENT, unconscious} from 'unconscious';
+import {$state, $update, $watchWithCleanup, debugSymbol, ONCE_EVENT, unconscious} from 'unconscious';
 import {ITEM_KEY, VirtualList} from 'unconscious/common/VirtualList.js';
 import {formatDate} from 'unconscious/common/Utils.js';
 import {deepEqual} from "unconscious/common/deepEqual.js";
-import {deleteConversation, getKV, setKV, updateConversation} from "../database.js";
+import {deleteConversation, updateConversation} from "../database.js";
 import {
+	auxMainlyTouch,
 	conversations,
-	isMobile,
 	LOCKED,
 	resetConversation,
 	runningConversations,
@@ -21,8 +21,6 @@ import "/plugins/rp_basic/TagList.css";
 import {showToast} from "./Toast.js";
 import {deleteWithDrawback, prettyError} from "../utils/utils.js";
 
-let PINNED_ITEMS = new Set;
-
 const closeHoverMenu = (e) => {
 	if (hoverMenu.isConnected) {
 		requestAnimationFrame(() => hoverMenu.remove(true));
@@ -33,28 +31,21 @@ const closeHoverMenu = (e) => {
 
 /**
  *
- * @type {import("unconscious").Reactive<number>}
+ * @type {import("unconscious").Reactive<AiChat.Conversation>}
  */
-const hoverConversationIndex = $state({});
+const hoverConversation = $state({});
 const hoverMenu = <div className={"dropdown"} style={"position:fixed;z-index:1"}>
 	<div className="list mid" style={"display:block;"}>
 		<label data-action={"edit"}>编辑标题</label>
 		<label data-action={"export"}>导出</label>
-		<label data-action={"pin"}>{() => PINNED_ITEMS.has(unconscious(hoverConversationIndex)) ? "取消置顶" : "置顶"}</label>
+		<label data-action={"pin"}>{() => hoverConversation.meta?.pinned ? "取消置顶" : "置顶"}</label>
 		<label data-action={"multi"}>多选</label>
-		{() => unconscious(hoverConversationIndex) ? <label data-action={"delete"}>删除</label> : null}
+		{() => unconscious(hoverConversation) ? <label data-action={"delete"}>删除</label> : null}
 	</div>
 </div>;
 
 onLoad((app) => {
 	app.addEventListener("click", closeHoverMenu, {capture: true});
-
-	const tmp = $state();
-	getKV("pinned", tmp);
-	$watch(tmp, () => {
-		PINNED_ITEMS = new Set(unconscious(tmp) || []);
-		$update(conversations);
-	}, false);
 });
 
 const GROUP_LABELS = ["置顶", "今天", "昨天", "7天内", "30天内"];
@@ -73,7 +64,7 @@ const groupConversations = () => {
 
 		let groupName;
 
-		if (PINNED_ITEMS.has(conv.id)) {
+		if (conv.meta?.pinned) {
 			groupName = 0;
 		} else {
 			const date = new Date(conv.time);
@@ -132,7 +123,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 			<button className={"btn ghost"} onClick={e => {
 				conversations.forEach(item => item[SELECTED] = 0);
 				vl.dom.replaceChildren();
-				vl.render();
+				//vl.render();
 			}}>清空
 			</button>
 			<button className={"btn danger"} onClick={e => {
@@ -154,7 +145,6 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 				groupAndConvArr.shift();
 				conversations.forEach(item => { delete item[SELECTED]; })
 				vl.dom.replaceChildren();
-				vl.render();
 			}}>退出
 			</button>
 		</div>);
@@ -176,15 +166,15 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 					inSelectionMode = 1;
 					prependMultiselectControl();
 					vl.dom.replaceChildren();
-					vl.render();
 					return;
 				case "pin":
-					if (!PINNED_ITEMS.delete(conv.id)) {
-						PINNED_ITEMS.add(conv.id);
-					}
-					setKV("pinned", PINNED_ITEMS.size ? [...PINNED_ITEMS] : undefined);
-					$update(conversations);
-					$update(hoverConversationIndex);
+					const meta = conv.meta ??= {};
+					if (!meta.pinned) meta.pinned = true;
+					else delete meta.pinned;
+					updateConversation(conv).then(() => {
+						$update(conversations);
+						$update(hoverConversation);
+					})
 					return;
 				case "edit":
 					SimpleModal({
@@ -213,6 +203,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 						resetConversation();
 					}
 
+					const isKeyboard = e.detail === 0;
 					deleteWithDrawback(`${conv.title||'无标题'} (#${conv.id})`, () => {
 						deleteConversation(conv).then(() => {
 							const noUpdate = unconscious(conversations);
@@ -229,7 +220,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 
 						delete conv[DELETING];
 						$update(conversations);
-					})
+					}, isKeyboard);
 				}
 				return;
 			}
@@ -247,7 +238,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 		const closest = e.target.closest('.chat-item');
 		if (closest === hoverMenu.closest('.chat-item')) return;
 		closest.addEventListener("mouseleave", closeHoverMenu, ONCE_EVENT);
-		hoverConversationIndex.value = closest._conv.id;
+		hoverConversation.value = closest._conv;
 
 		hoverMenu.style.left = e.pageX+"px";
 		hoverMenu.style.top = Math.min(innerHeight - 180, e.pageY)+"px";
@@ -274,7 +265,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 			if (conv.nodeType) return conv;
 
 			const btn = conv.id === 0 ? <button className="ri-folder-transfer-fill" title={"文件传输助手"}/> : <button className={"edit-btn ri-menu-line"} title={"菜单"} />;
-			btn.addEventListener(isMobile ? 'click' : 'mouseover', mouseHandler);
+			btn.addEventListener(auxMainlyTouch ? 'click' : 'mouseover', mouseHandler);
 			const running = runningConversations.has(conv.id);
 
 			// 多选删除 删除未使用的文件

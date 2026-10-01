@@ -14,7 +14,8 @@ SETTINGS.push({
 	min: 0,
 	max: 1048576,
 	step: 1024,
-	default: 262144
+	default: 262144,
+	unit: "Tok"
 });
 
 const ID = "__dcp"

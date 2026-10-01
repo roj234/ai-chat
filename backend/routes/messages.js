@@ -1,5 +1,6 @@
 import {
 	compressConversation,
+	compressGeneric,
 	compressMessage,
 	decompressConversation,
 	decompressMessage,
@@ -19,18 +20,22 @@ export function registerMessageRoutes(batcher) {
 			const modCheck = db.prepare('SELECT time FROM conversations WHERE time >= ? LIMIT 2').all(timestamp);
 			if (modCheck.length === 1 && modCheck[0].time === timestamp) return { error: { status: 304 } };
 		}
-		return db.prepare('SELECT id, title, time FROM conversations ORDER BY time DESC').all();
+		return db.prepare('SELECT id, title, time, meta FROM conversations ORDER BY time DESC').all().map(deserializeRow);
 	};
 
 	// 增加或修改对话
 	batcher["conversation/upsert"] = async ({ id, ...diff }, ctx) => {
 		const setConversationId = ctx.setVariable("conversationId");
 
+		let updateBigBlob = true;
 		if (diff.$ === '=') {
 			diff = diff.v;
 		} else {
 			if (Number.isFinite(id)) {
-				const row = ctx.db.prepare('SELECT title, time, data FROM conversations WHERE id = ?').get(id);
+				const keys = Object.keys(diff);
+				updateBigBlob = keys.length > 1 || keys[0] !== 'meta';
+
+				const row = ctx.db.prepare(`SELECT title, time, meta ${updateBigBlob?",data":""} FROM conversations WHERE id = ?`).get(id);
 				if (!row) return { error: 'no such id' };
 
 				const conv = deserializeRow(row, decompressConversation);
@@ -38,22 +43,28 @@ export function registerMessageRoutes(batcher) {
 			}
 		}
 		if (typeof diff !== 'object') return { error: 'data must be object' };
+		if ("error" in diff || "id" in diff || "version" in diff) return { error: 'reserved field in data' };
 
 		const {
 			title = '', time = Date.now(),
-			id: reserved1, version: reserved2,
+			meta,
 			...data
 		} = diff;
-		if (reserved1 !== undefined || reserved2 !== undefined) return { error: 'cannot use reserved field' };
+
+		const metaBytes = meta == null || typeof meta !== 'object' || !Object.keys(meta).length ? null : await compressGeneric(meta);
+		if (metaBytes?.length > 255) return { error: '"meta" too big, exceeds 255B limit' }
 
 		if (Number.isFinite(id)) {
-			ctx.db.prepare('UPDATE conversations SET title = ?, time = ?, data = ? WHERE id = ?')
-				.run(title, time, await compressConversation(data), id);
+			if (updateBigBlob) {
+				ctx.db.prepare('UPDATE conversations SET title = ?, time = ?, meta = ?, data = ? WHERE id = ?').run(title, time, metaBytes, await compressConversation(data), id);
+			} else {
+				ctx.db.prepare('UPDATE conversations SET title = ?, time = ?, meta = ? WHERE id = ?').run(title, time, metaBytes, id);
+			}
 		} else {
 			if (id !== undefined) return { error: "illegal id" };
 
-			const info = ctx.db.prepare('INSERT INTO conversations (title, time, data) VALUES (?, ?, ?)')
-				.run(title, time, await compressConversation(data));
+			const info = ctx.db.prepare('INSERT INTO conversations (title, time, meta, data) VALUES (?, ?, ?, ?)')
+				.run(title, time, metaBytes, await compressConversation(data));
 
 			id = Number(info.lastInsertRowid);
 		}
@@ -69,7 +80,6 @@ export function registerMessageRoutes(batcher) {
 		if (vectorDB) {
 			deletedRows.forEach(({id}) => {
 				vectorDB.delete('m#'+id.toString(36));
-				vectorDB.delete('M#'+id.toString(36));
 			});
 		}
 		const info = db.prepare('DELETE FROM conversations WHERE id = ?').run(id);
@@ -142,12 +152,14 @@ export function registerMessageRoutes(batcher) {
 		if (typeof content !== "string") {
 			data.content = content;
 			if (Array.isArray(content)) {
-				const strContent = content.findIndex(item => typeof item.text === "string");
-				if (strContent < 0) {
+				const stringIdx = content.findIndex(item => typeof item.text === "string");
+				if (stringIdx < 0) {
 					content = '';
 				} else {
-					content = data.content[strContent].text;
-					data.content[strContent] = { type: 'row' };
+					data.content = [...content];
+					const text = content[stringIdx].text;
+					content[stringIdx] = { type: 'row' };
+					content = text;
 				}
 			} else {
 				content = '';
@@ -175,20 +187,11 @@ export function registerMessageRoutes(batcher) {
 
 		if (vectorDB) {
 			const isSearchable = data.role === "user" || data.role === "assistant";
-
 			if (isSearchable && content) {
 				if (content !== oldContent)
 					vectorDB.set('m#'+id.toString(36), content);
 			}
 			else vectorDB.delete('m#'+id.toString(36));
-
-			const thinkContent = data.think?.content;
-			if (isSearchable && thinkContent) {
-				if (thinkContent !== oldThink)
-					vectorDB.set('M#'+id.toString(36), thinkContent);
-			}
-			// maybe if(oldThink) here
-			else vectorDB.delete('M#'+id.toString(36));
 		}
 
 		setMessageId(id);
@@ -205,7 +208,6 @@ export function registerMessageRoutes(batcher) {
 
 		if (vectorDB) {
 			vectorDB.delete('m#'+id.toString(36));
-			vectorDB.delete('M#'+id.toString(36));
 		}
 		return result.owner;
 	};

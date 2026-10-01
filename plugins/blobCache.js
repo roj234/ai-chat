@@ -22,11 +22,12 @@ if (DB_MODE !== 'local' && swc) {
 		_tab: "data",
 		id: "blobCacheCapacity",
 		type: "number",
-		name: "容量限制（MB）",
+		name: "容量限制",
 		min: 10,
 		max: 500,
 		step: 10,
 		default: 100,
+		unit: "MiB",
 		inline: true,
 	});
 

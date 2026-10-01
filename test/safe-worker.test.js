@@ -297,29 +297,60 @@ function testExportConstLetVar() {
 }
 
 // ==========================================================================
-// Test 12: RPC via fs module (round-trip test)
+// Test 12: RPC 模拟 fs
 // ==========================================================================
-function testFsRPC() {
-	console.log('\n--- Test 12: fs RPC round-trip ---');
-	var modules = new Map();
-	modules.set('entry', `
-    import * as fs from 'fs';
-    export async function writeAndRead() {
-      await fs.writeFile('/test.txt', 'hello rpc');
-      const content = await fs.readFile('/test.txt', 'utf-8');
-      await fs.rm('/test.txt');
-      return content;
-    }
-  `);
-	return testWorker(modules, 'entry', function (mod) {
-		// Note: fs RPC depends on handlers.rpc being set up.
-		// This test validates the module resolution path for 'fs'.
-		// Without an actual rpc handler, writeFile/readFile will throw.
-		return mod.writeAndRead().then(
-			(r) => assert(false, 'should have thrown without rpc handler'),
-			(e) => assert(true, 'fs without rpc handler correctly throws') // expected
-		);
-	});
+function testFsEmulation() {
+	const files = new Map([['dir/a.txt', 'hello'], ['dir/sub/b.txt', 'world']]);
+	const sandbox = createSandbox({
+		load() { throw new Error('Module not found'); },
+		log() {},
+		rpc(method, args) {
+			switch (method) {
+				case 'list': {
+					const [p, , pattern] = args;
+					if (p === '.') return [['dir', 'dir (descents skipped)'], ['root.txt', 'file']];
+					if (p === 'dir' && pattern === '**/*.txt') return [['a.txt', 'file'], ['sub/b.txt', 'file']];
+					if (p === 'dir') return [['a.txt', 'file'], ['sub', 'dir']];
+					throw new Error('list ' + JSON.stringify(p));
+				}
+				case 'stat': {
+					const [p] = args;
+					if (p === 'dir' || p === 'dir/sub') return 'type: dir';
+					if (files.has(p)) return 'type: file\nsize: ' + files.get(p).length + '\nmtime: 2024-01-02T03:04:05.000Z';
+					throw new DOMException('No such file or directory', 'NotFoundError');
+				}
+				case 'read':
+					if (files.has(args[0])) return files.get(args[0]);
+					throw new DOMException('No such file or directory', 'NotFoundError');
+				case 'write':
+					files.set(args[0], args[1]);
+					return 'Success';
+			}
+			throw new Error('unknown rpc ' + method);
+		}
+	}, ['fs']);
+
+	return sandbox.initialize().then(() => {
+		return sandbox.execute('test', `
+      import * as fs from 'fs/promises';
+      const out = [];
+      const ents = await fs.readdir('.', { withFileTypes: true });
+      out.push(ents[0].isDirectory(), ents[0].isFile(), ents[0].isSymbolicLink(), ents[0].parentPath);
+      const st = await fs.stat('/dir');
+      out.push(st.isDirectory(), typeof st.size, st.size, st.mtimeMs);
+      // 绝对路径 / 相对路径等价（cwd 为 '/'）
+      await fs.writeFile('/dir/c.txt', 'abc');
+      out.push(await fs.readFile('dir/c.txt', 'utf8'));
+      out.push(await fs.readFile('./dir/c.txt', 'utf-8'));
+      // 符号链接族 API
+      out.push(await fs.realpath('dir/a.txt'));
+      out.push((await fs.glob('**/*.txt', { cwd: '/dir' })).join('|'));
+      return out.join('|');
+    `);
+	}).then((r) => {
+		const expect = 'true|false|false|.|true|number|0|0|abc|abc|/dir/a.txt|a.txt|sub/b.txt';
+		assert(r === expect, 'fs emulation: ' + r + '\nexpected: ' + expect);
+	}).finally(() => sandbox.destroy());
 }
 
 // ==========================================================================
@@ -351,8 +382,8 @@ var tests = [
 	testTemplateNesting,
 	testExportNamed,
 	testExportConstLetVar,
-	testFsRPC,
 	testThisContext,
+	testFsEmulation,
 ];
 
 for (var i = 0; i < tests.length; i++) {

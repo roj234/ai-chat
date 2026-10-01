@@ -21,12 +21,11 @@ class LoadingMOTD extends HTMLElement {
 	#timer;
 
 	connectedCallback() {
-		this.textContent = phrases[this.#index++];
+		this.#render(phrases[this.#index++ % phrases.length]);
 		if (phrases.length > 1 && config.afkState < 2) {
 			this.#timer = setInterval(() => {
-				this.#index = (this.#index + 1) % phrases.length;
-				this.#render();
-			}, 4000);
+				this.#render(phrases[this.#index++ % phrases.length]);
+			}, 6000);
 		}
 	}
 
@@ -34,27 +33,15 @@ class LoadingMOTD extends HTMLElement {
 		clearInterval(this.#timer);
 	}
 
-	/*setAttribute(qualifiedName, value) {
-		if (qualifiedName === "text") {
-			this.#phrases = [value];
-		}
-	}*/
-
-	#render() {
-		// 使用 requestAnimationFrame 或简单的 transition 配合滤镜
-		const style = this.style;
-
-		style.transition = 'all 0.6s cubic-bezier(0.4, 0, 0.2, 1)';
-		style.opacity = '0';
-		style.filter = 'blur(10px)'; // 文字散开效果
-		style.letterSpacing = "5px";
-
-		setTimeout(() => {
-			this.textContent = phrases[this.#index];
-			style.opacity = '';
-			style.filter = '';
-			style.letterSpacing = '';
-		}, 400); // 稍微长一点的停顿会让切换更有质感
+	/**
+	 * 每个字符渲染为独立的 span，索引写入 CSS 变量 --i：
+	 * 弹跳登场的延迟与波浪浮动的相位均按 --i 错开，动画全部由 CSS 驱动。
+	 * @param {string} text 目标文本
+	 */
+	#render(text) {
+		this.replaceChildren(...Array.from(text, (ch, i) => {
+			return <span className="c" style={"--delay:"+i}>{ch}</span>;
+		}));
 	}
 }
 

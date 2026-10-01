@@ -81,6 +81,7 @@ export const TextDiff = ({ start, diff, filename = '' }) => {
 		element: container,
 		data: diff,
 		itemHeight: 21,
+		keyFunc: item => item.html ?? item.text,
 		renderer: ({type, html, text, line}, i) => {
 			return (type === 'hunk'
 				? <div className={"line hunk"}>{text}</div>
@@ -101,7 +102,6 @@ export const TextDiff = ({ start, diff, filename = '' }) => {
 				diff[i].html = lights[i];
 			}
 
-			vl.dom.replaceChildren();
 			vl.render();
 		}, () => !container.isConnected));
 	}
@@ -124,6 +124,7 @@ export const HighlightBox = ({ start = 1, code, filename = '' }) => {
 		element: container,
 		data: lines,
 		itemHeight: 21,
+		keyFunc: item => item.html ?? item.text,
 		renderer: ({html, text}, line) => {
 			return <div className={'line'}>
 				<span className={"no"}>{(line+start) > 0 && (line+start) + " "}</span>
@@ -142,7 +143,6 @@ export const HighlightBox = ({ start = 1, code, filename = '' }) => {
 				lines[i].html = lights[i];
 			}
 
-			vl.dom.replaceChildren();
 			vl.render();
 		}, () => !container.isConnected));
 	}

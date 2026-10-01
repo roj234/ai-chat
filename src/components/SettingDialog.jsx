@@ -9,7 +9,7 @@ import {immutableObjectMap} from "unconscious/common/Utils.js";
 import {isIDB, kvListGet, kvListSet} from "../database.js";
 import {resolveDBRelativeURL} from "../utils/utils.js";
 import {AsyncButton} from "./AsyncButton.jsx";
-import {config, CONFIG_VERSION, LOCKED} from "../states.js";
+import {auxSmallScreen, config, CONFIG_VERSION, LOCKED} from "../states.js";
 import {PRESET_KVS_ID, presets, PromptDropdown, ProviderDropdown} from "../presets.js";
 
 let currentTab = $state("general");
@@ -60,6 +60,8 @@ createTab("tools", "工具", "ri-wrench-line");
  * @return {{showHide: showHide, show(): void, byId: (function(string): HTMLElement), sync(boolean, boolean)}}
  */
 export function createSettingDialog(optionsArray, settings, onSettingChanged) {
+	if (auxSmallScreen) optionsArray.forEach(item => delete item.inline);
+
 	/** @type {import("unconscious/common/components/Filter").FilterInstance} */
 	const oldUI = <Filter config={optionsArray} choices={settings} onChange={onSettingChanged}/>;
 
@@ -173,8 +175,9 @@ export function createSettingDialog(optionsArray, settings, onSettingChanged) {
 					}
 				}
 
-				const modelName = data.name;
-				if (modelName != null) data.meta = modelName;
+				const modelName = modelTab && set.name;
+				if (modelName) data.meta = modelName;
+				else delete data.meta;
 
 				return kvListSet(data, PRESET_KVS_ID, name).then(() => {
 					config[CONFIG_VERSION] = (config[CONFIG_VERSION] || 0) + 1;

@@ -375,7 +375,9 @@ body._fileUI .hide-human {
             display: flex;
             justify-content: center;
             align-items: center;
-            font-size: 36px;
+            & > span {
+                font-size: 36px;
+            }
             padding-bottom: 24px;
         }
     }
@@ -388,7 +390,7 @@ body._fileUI .hide-human {
 
 .scroll-spy {
     position: relative;
-    bottom: 250px;
+    bottom: 100px;
 }
 
 .panel>._vl {

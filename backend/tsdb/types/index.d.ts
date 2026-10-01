@@ -108,6 +108,14 @@ export class TSDB {
   ): Promise<LogRange | null>;
 
   /**
+   * 批量重映射 owner。
+   * @param remap
+   * @param since 从哪个 owner 开始
+   * @returns 实际被修改的行数。
+   */
+  remapOwners(remap: (owner: number) => number, since: number = 0): Promise<number>;
+
+  /**
    * 将 db.dat 的一段区间作为可读流输出。
    *
    * @param offset 起始字节偏移。

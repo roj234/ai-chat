@@ -67,7 +67,7 @@ const makeHeaders = (data, key) => {
  * @param {string=} key
  * @param {boolean=true} json
  * @param {RequestInit} data
- * @param {function(OpenAI.Response, string): void} onChunk
+ * @param {function(OpenAI.Response | Object, string): void} onChunk
  * @return {Promise<Response>}
  */
 export const sseFetch = (url, {key = "", json = true, ...data} = {}, onChunk) => FETCH(url, {

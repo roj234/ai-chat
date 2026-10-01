@@ -578,6 +578,55 @@ export class TSDB {
 	}
 
 	/**
+	 * @param {(owner: number) => number} remap
+	 * @param {number} since
+	 * @returns {Promise<number>} 实际被修改的行数
+	 */
+	remapOwners(remap, since = 0) {
+		return this.#enqueue(async () => {
+			let lo = 0;
+			if (since > 0) {
+				let hi = this.#rowCount;
+				while (lo < hi) {
+					const mid = (lo + hi) >>> 1;
+					const owner = (await this.#get(mid)).owner;
+					if (owner !== NULL_OWNER && owner < since) lo = mid + 1;
+					else hi = mid;
+				}
+			}
+
+			const total = HEADER_SIZE + this.#rowCount * ROW_SIZE;
+			const buf = Buffer.allocUnsafe(4096);
+			let changed = 0;
+			const pageStart = Math.floor((HEADER_SIZE + lo * ROW_SIZE) / 4096) * 4096;
+			const firstPageOffset = (HEADER_SIZE + lo * ROW_SIZE) % 4096;
+
+			for (let page = pageStart; page < total; page += 4096) {
+				const { bytesRead } = await this.#index.read(buf, 0, 4096, page);
+				if (bytesRead === 0) break;
+
+				let dirty = false;
+				for (let off = page === pageStart ? firstPageOffset : 0; off <= bytesRead - ROW_SIZE; off += ROW_SIZE) {
+					const owner = buf.readUInt32BE(off + 6);
+					const next = remap(owner);
+					if (next === owner) continue;
+					buf.writeUInt32BE(next, off + 6);
+					dirty = true;
+					changed++;
+				}
+
+				if (dirty) {
+					await this.#index.write(buf, 0, bytesRead, page);
+					this.#indexCache.invalidate(page, bytesRead);
+				}
+			}
+
+			if (changed) this.#lookup.clear();
+			return changed;
+		});
+	}
+
+	/**
 	 *
 	 * @param {number} id
 	 * @return {Promise<{time: number, owner: number, off: number, len: number}>}
@@ -636,8 +685,9 @@ export class TSDB {
 			row = await this.#get(mid);
 			o = row.owner;
 			if (o === NULL_OWNER) {
-				row = await this.#findOwner(mid);
+				row = await this.#findOwner(mid, lo, hi);
 				if (row == null) return;
+				mid = row.id;
 				o = row.owner;
 			}
 
@@ -674,21 +724,29 @@ export class TSDB {
 
 	/**
 	 * @param {number} center
+	 * @param {number} lo
+	 * @param {number} hi
 	 * @returns {Promise<Object>}
 	 */
-	async #findOwner(center) {
+	async #findOwner(center, lo, hi) {
 		for (let d = 1; ; d++) {
 			let hasNext = 0;
 			const i = center + d;
-			if (i < this.#rowCount) {
+			if (i < hi) {
 				const row = await this.#get(i);
-				if (row.owner !== NULL_OWNER) return row;
+				if (row.owner !== NULL_OWNER) {
+					row.id = i;
+					return row;
+				}
 				hasNext = 1;
 			}
 			const j = center - d;
-			if (j >= 0) {
+			if (j >= lo) {
 				const row = await this.#get(j);
-				if (row.owner !== NULL_OWNER) return row;
+				if (row.owner !== NULL_OWNER) {
+					row.id = j;
+					return row;
+				}
 				hasNext = 1;
 			}
 

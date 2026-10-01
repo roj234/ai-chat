@@ -5,7 +5,7 @@ import {lightSync, loadLanguage} from "/src/markdown/highlight.js";
 import {SetTimeout} from "../rp_kit/SetTimeout.js";
 import {kvListGet} from "/src/database.js";
 import {BACKEND_SERVER_KVLIST_ID} from "./RemoteFSDriver.js";
-import {jsonFetch} from "/common/openai-api-utils.js";
+import {jsonFetch} from "/common/fetch-utils.js";
 import {prettyError} from "/src/utils/utils.js";
 
 /** @type {AiChat.FunctionTool} */

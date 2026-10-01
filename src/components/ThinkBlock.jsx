@@ -2,7 +2,6 @@ import {$computed, $state, $watch, isReactive} from "unconscious";
 import './ThinkBlock.css';
 import {renderMarkdownToElement} from "../markdown/markdown.js";
 import {EditWidget} from "./EditWidget.jsx";
-import {copyButtonAnimation} from "../utils/utils.js";
 import {config} from "../states.js";
 import {JsonEditor} from "./JsonEditor.jsx";
 
@@ -81,6 +80,7 @@ export function ThinkBlock({message, edit}) {
 				}
 				container.replaceWith(...arr);
 			} else {
+				container.replaceChildren();
 				renderMarkdownToElement(container, content, DONT_PARSE_HTML_IN_THINKING);
 			}
 		}
@@ -88,8 +88,10 @@ export function ThinkBlock({message, edit}) {
 
 	const title = think.title;
 	return (
-		<details className={'think'} class:thinking={() => !!think.start} open={config.expandThinkBlock && isReactive(think)}>
-			<summary title={title || '展开思考过程'} onClick.once={renderContentAtFirstOpen}>
+		<details className={'think'} class:thinking={() => !!think.start}
+				 open={config.expandThinkBlock && isReactive(think)}
+				 onToggle.once={renderContentAtFirstOpen}>
+			<summary title={title || '展开思考过程'}>
 				<span className="chevron ri-play-large-fill"></span>
 				{title || $computed(() => {
 					let duration = think.duration;
@@ -100,11 +102,11 @@ export function ThinkBlock({message, edit}) {
 				})}
 				{edit && " (点击编辑思维链)"}
 			</summary>
-			<div ref={container} className="think-content md">
-				<button className={"ri-file-copy-line ghost"} title={"复制"} onClick={({target}) => {
-					copyButtonAnimation(think.content, target);
-				}}></button>
-			</div>
+			<div ref={container} className="md"><p>加载中……</p></div>
+			<button className="ri-collapse-vertical-line ghost" title="收起"
+					onClick={({target}) => {
+						target.closest("details").open = false;
+					}}></button>
 		</details>
 	);
 }

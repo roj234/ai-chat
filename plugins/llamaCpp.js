@@ -3,7 +3,7 @@ import {$asyncState, $cleanup, $computed, $foreach, $state, $unwatch, $update, $
 import {isLanAddress} from "/common/isLanAddress.js";
 import "./llamaCpp.css";
 import {prettyError, resolveDBRelativeURL} from "/src/utils/utils.js";
-import {jsonFetch} from "/common/openai-api-utils.js";
+import {jsonFetch} from "/common/fetch-utils.js";
 import {SETTINGS} from "/src/settings.js";
 import {showToast} from "/src/components/Toast.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";

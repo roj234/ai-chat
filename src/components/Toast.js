@@ -1,5 +1,5 @@
 import './Toast.css';
-import {noPointer} from "../states.js";
+import {auxKeyboardOnly} from "../states.js";
 
 export class PausableTimer {
 	#callback;
@@ -67,7 +67,7 @@ export const showToast = (message, type, timeout = 5000, {onClose, closeBtn} = {
 	let el;
 
 	if (timeout > 0) {
-		if (noPointer) timeout *= 100;
+		if (auxKeyboardOnly) timeout *= 100;
 
 		timer = new PausableTimer(closeToast, timeout);
 

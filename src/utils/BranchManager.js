@@ -2,6 +2,7 @@ import {$update, debugSymbol, unconscious} from "unconscious";
 import {showToast} from "../components/Toast.js";
 import {BRANCH_MANAGER, EVENT_BUS, messages as reactiveMessages, selectedConversation} from "../states.js";
 import {redoToolCalls, undoToolCalls} from "../toolset.js";
+import {FSE_NotAllowed, throwDOMException} from "../../common/pure-utils.js";
 
 const INDEX = debugSymbol("INDEX");
 const CHILDREN = debugSymbol("CHILDREN");
@@ -21,9 +22,10 @@ const resolveParent = (m) => m[INDEX] - (m.parent ?? 1);
  * @returns {AiChat.BranchManager}
  */
 function createBranchManager(conv, messages) {
-	messages.unshift({
+	const SENTRY = {
 		id: -1 // 不保存到数据库
-	});
+	};
+	messages.unshift(SENTRY);
 
 	const appendChild = (parent, child) => {
 		let children = parent[CHILDREN];
@@ -45,10 +47,10 @@ function createBranchManager(conv, messages) {
 			m[INDEX] = index;
 
 			const parent = m.parent;
-			if (index > 0 && parent) {
+			if (index > 0 && parent != null) {
 				const parentIndex = index - parent;
 				const parentMessage = messages[parentIndex];
-				if (!parentMessage) {
+				if (parent <= 0 || !parentMessage) {
 					showToast(`分支管理器启用失败
 找不到 #${index} 的父节点 #${parentIndex}
 请尝试编辑原始数据`, "error");
@@ -108,6 +110,8 @@ function createBranchManager(conv, messages) {
 		let m = leaf;
 		while (m !== messages[0]) {
 			push_.call(path, m);
+			if (import.meta.env.DEV && path.length > 5000)
+				debugger;
 			m = messages[resolveParent(m)];
 		}
 		path.reverse();
@@ -205,6 +209,8 @@ function createBranchManager(conv, messages) {
 
 				// 不需要删除 [INDEX] 虽然可以删
 				messages.shift();
+				if (unconscious(reactiveMessages) === path)
+					reactiveMessages.value = messages;
 				//updateConversation(conv, messages);
 			}
 		}
@@ -227,6 +233,7 @@ function createBranchManager(conv, messages) {
 		}
 		splice(start, deleteCount, ...addItems) {
 			if (!deleteCount && !addItems.length) return [];
+			if (messages[0] !== SENTRY) throwDOMException("Branch manager was destroyed", "InvalidStateError");
 
 			const len = path.length;
 
@@ -239,9 +246,9 @@ function createBranchManager(conv, messages) {
 
 			if (deleteCount) {
 				if (start + deleteCount !== this.length)
-					throw new Error("无法部分修改分支消息");
+					throwDOMException("无法部分修改分支消息", FSE_NotAllowed);
 				if (addItems.some(item => item.id > 0))
-					throw new Error("不能加入已入库的消息");
+					throwDOMException("不能加入已入库的消息", FSE_NotAllowed);
 
 				const last = path.at(-deleteCount);
 				if (last) {
@@ -250,12 +257,12 @@ function createBranchManager(conv, messages) {
 				}
 			} else {
 				if (!addItems.every(item => item.id < 0))
-					throw new Error("只能在开头插入虚拟（不入库）消息");
+					throwDOMException("只能在开头插入虚拟（不入库）消息", FSE_NotAllowed);
 
 				for (let i = 0; i < path.length; i++) {
 					if (path[i][CHILDREN]) {
 						if (start > i) {
-							throw new Error("虚拟消息只能插入在第一个分支点前");
+							throwDOMException("虚拟消息只能插入在第一个分支点前", FSE_NotAllowed);
 						}
 						break;
 					}
@@ -269,8 +276,12 @@ function createBranchManager(conv, messages) {
 			}
 
 			const removed = Array.prototype.splice.call(path, start, deleteCount);
-			path.length = 0;
-			fillMessages(path);
+
+			if (messages[0] === SENTRY) {
+				path.length = 0;
+				fillMessages(path);
+			}
+
 			return removed;
 		}
 
@@ -400,7 +411,7 @@ export const setBranchIndex = (message, branchIndex) => {
 	const conv = unconscious(selectedConversation);
 	/** @type {AiChat.BranchManager} */
 	const bm = conv[BRANCH_MANAGER];
-	bm.switchBranch(bm.messages[resolveParent(message)], branchIndex);
+	bm.switchBranch(bm.raw[resolveParent(message)], branchIndex);
 	setMessages(bm.getMessages(), conv);
 };
 

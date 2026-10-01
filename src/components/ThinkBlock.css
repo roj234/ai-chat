@@ -56,20 +56,22 @@
   100% { transform: translateX(300%) skewX(-20deg); }
 }
 
-.think .think-content {
-    margin-top: var(--spacing-sm);
-    padding: 0 var(--spacing-md);
-    background: var(--panel-2);
-    border: 1px solid var(--border);
-    border-radius: var(--border-radius-md);
-    font-size: 12px;
-    min-height: 26px;
-
+.think {
     position: relative;
+
     & > .ghost {
         position: absolute;
-        right: 0;
-        top: 0;
+        left: 50%;
+        bottom: -10px;
         padding: var(--spacing-xs);
+    }
+
+    & > .md {
+        margin-top: var(--spacing-sm);
+        padding: 0 var(--spacing-md);
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: var(--border-radius-md);
+        font-size: 12px;
     }
 }

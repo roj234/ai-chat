@@ -241,7 +241,7 @@ const loadSystemModule = (mod) => {
 const rpcMethods = {
 	open: [ (args) => ({ path: args[0], create: args[1] }), AS_IS ],
 	read: [ (args) => ({ path: args[0], noTruncate: true }), AS_IS ],
-	write: [ (args) => ({ path: args[0], content: args[1], overwrite: true }) ],
+	write: [ (args) => ({ path: args[0], content: args[1], overwrite: 'force' }) ],
 	append: [ (args) => ({ path: args[0], content: args[1], newline: false }) ],
 	mkdir: [ (args) => ({ path: args[0] }) ],
 	delete: [ (args) => ({ path: args[0], ...args[1] }) ],
@@ -397,7 +397,7 @@ export const RunJS = {
 		const hostModules = worker.handlers.hostModules;
 		for (const key in JS_HOST_MODULES) hostModules.set(key, JS_HOST_MODULES[key](conv));
 
-		const hangTimer = setTimeout(() => stopWorker("Timeout"), timeout * 1000);
+		const hangTimer = setTimeout(() => stopWorker(new DOMException(timeout.toFixed(2)+"s", "TimeoutError")), timeout * 1000);
 
 		worker.handlers.load = (path, systemModule) => {
 			if (systemModule) {
@@ -439,6 +439,8 @@ export const RunJS = {
 		let logFile = null;
 
 		worker.handlers.log = (log) => {
+			if (import.meta.env.DEV && log === '[DEBUG] [vite] connected.') return;
+
 			const line = log + '\n';
 			totalChars += line.length;
 			tail += line;

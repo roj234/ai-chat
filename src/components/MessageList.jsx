@@ -15,9 +15,9 @@ import {formatDate, formatSize, prettyTime} from "unconscious/common/Utils.js";
 import {copyCodeEventHandler, renderMarkdownToElement, renderMarkdownToString} from "../markdown/markdown.js";
 import {
 	abortCompletion,
+	auxSmallScreen,
 	config,
 	EditableMessageRoles,
-	isMobile,
 	MessageCopyHandler,
 	MessageRoles,
 	messages,
@@ -328,23 +328,8 @@ function chunkKeyFunc(message, chunk) {
 	switch (type) {
 		default: keys.push(type); break;
 		case "progress": keys.push(chunk.data); break;
-		case "error": keys.push("error", chunk.error); break;
-		case "text": {
-			keys.push(chunk.text);
-
-			// really tricky, right?
-			/** @type{string} */
-			const trick = chunk.trick;
-			if (trick) {
-				const oldKey = [key, trick];
-				const node = this.get(oldKey);
-				if (node) {
-					this.set(keys, node);
-					this.delete(oldKey);
-				}
-			}
-		}
-		break;
+		case "error": keys.push(type, chunk.error); break;
+		case "text": keys.push(chunk.text); break;
 		case "think": add(chunk.think.title ? [chunk.think.title, chunk.think.content] : chunk.think); break;
 		case "tool": keys.push(chunk.tool); break;
 		case "tool_ui": {
@@ -369,6 +354,24 @@ function chunkKeyFunc(message, chunk) {
 
 	if (type === "text" || type === "think") {
 		if (isEditing(message.key)) keys.push(1);
+	}
+
+	// really tricky, right?
+	/** @type{string} */
+	const swapKey = chunk.swap;
+	if (swapKey && swapKey !== keys.at(-1)) {
+		const oldKey = keys.slice(0, -1);
+		oldKey.push(swapKey);
+
+		const node = this.get(oldKey);
+		if (node) {
+			if (type !== 'think' || node.open) {
+				this.delete(oldKey);
+				this.set(keys, node);
+			}
+		}
+
+		delete chunk.swap;
 	}
 
 	//console.log(chunk, " => ", keys);
@@ -670,6 +673,8 @@ function getBranchChunk(message, chunks) {
 	}
 }
 
+const TRAILER_TYPES = new Set(['branch', 'usage', 'progress']);
+
 class MessageListItem {
 	#list;
 	/** @type {import("unconscious").Reactive<AiChat.ResponseContentPart[]>} */
@@ -717,6 +722,7 @@ class MessageListItem {
 		const ref = this;
 		let message = ref.key;
 		let i = ref.index;
+		let lastGroup = 0;
 
 		const chunks = [];
 		chunkGather(message, chunks, i, messages);
@@ -733,6 +739,7 @@ class MessageListItem {
 				for (; i < messages.length; i++) {
 					if (!message.tool_calls || isEditing(messages[i]) || messages[i].role !== "assistant") break;
 					message = messages[i];
+					lastGroup = chunks.length;
 					chunkGather(message, chunks, i, messages);
 				}
 
@@ -742,6 +749,7 @@ class MessageListItem {
 						type: "divider",
 						steps: removeCount
 					});
+					lastGroup++;
 				}
 			}
 
@@ -753,29 +761,44 @@ class MessageListItem {
 			if (!generationEnded) chunks.push({ type: "progress", kind: message[PROGRESS_KIND], data: message[PROGRESS_VALUE] });
 			// show token usage & billing
 			else {
+				getBranchChunk(messages[ref.index], chunks);
 				// 手动添加的消息不显示usage
 				if (message.finish_reason) chunks.push({type: "usage"});
-				getBranchChunk(messages[ref.index], chunks);
 			}
 		} else {
+			getBranchChunk(message, chunks);
 			// 自定义消息角色
 			if (message.finish_reason) chunks.push({type: "usage"});
-			getBranchChunk(message, chunks);
 
 			ref[PINNED] = isEditing(message);
 		}
 
 		let prevChunks = this.#content;
 
-		// 如果这个markdown已经被流式渲染了，那么就不要再重新渲染一遍了（跳过本次key变化）
-		// 为了保证其它地方的修改能被正常应用，这里依赖了很多隐式条件，比如上面几行的usage和branch，还有用这个-1节省时间而不是findLast
-		if (generationEnded && i === messages.length) {
+		// 如果markdown已经渲染好了，那么跳过本次key变化
+		// 隐式条件：最后一条不是usage代表上次更新时还在生成
+		if (i === messages.length) {
 			const lastType = prevChunks.at(-1)?.type;
-			if (lastType !== 'usage' && lastType !== 'branch') {
-				const old = prevChunks.findLast(item => item.text != null);
-				const now = chunks.findLast(item => item.text === message.content);
-				if (old && now && old.text !== now.text) {
-					now.trick = old.text;
+			if (lastType && lastType !== 'usage') {
+				let j = prevChunks.length - 1;
+				if (TRAILER_TYPES.has(prevChunks[j].type)) j--;
+
+				let k = chunks.length - 1;
+				if (TRAILER_TYPES.has(chunks[k].type)) k--;
+
+				let prev = prevChunks[j], curr = chunks[k];
+				if (prev && curr) {
+					do {
+						const type = curr.type;
+						if (type === prev.type) {
+							if (type !== 'tool') {
+								curr.swap = prev[type];
+							}
+							break;
+						}
+
+						curr = chunks[--k];
+					} while (k >= lastGroup);
 				}
 			}
 		}
@@ -879,9 +902,9 @@ export function MessageList({messages}) {
 				<span className='time stroke'>{formatDate('Y-m-d H:i:s', msg.time??null)}</span>
 				<span className='spacer'></span>
 			</div>
-			{isMobile ? null : buttonDiv}
+			{auxSmallScreen ? null : buttonDiv}
 			<div className="body">{chunkRenderer(m)}</div>
-			{!isMobile ? null : buttonDiv}
+			{!auxSmallScreen ? null : buttonDiv}
 		</div>;
 
 		if (hoveringMessage === m) updateButtons(m, buttons);

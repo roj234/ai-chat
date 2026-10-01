@@ -42,8 +42,19 @@
         "kind": {
           "type": "string"
         },
+        "acl": {
+          "type": "string"
+        },
+        "ignore": {
+          "type": "string"
+        },
         "mounts": {
           "type": "object",
+          "properties": {
+            "...": {
+              "const": true
+            }
+          },
           "additionalProperties": {
             "type": "object",
             "properties": {

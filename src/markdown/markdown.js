@@ -37,6 +37,8 @@ export const setAllowHTMLTags = (tagTypes) => {
 	mdParserOptions.allowedTags = arr;
 }
 
+const SLICE_PER_FRAME = 10000;
+
 /**
  *
  * @param {HTMLElement} container
@@ -50,11 +52,10 @@ export const renderMarkdownToElement = (container, md, options = {}) => {
 		...options
 	});
 
-	const CHUNK = 10000;
+	let i = 0;
 	const chunkedRender = () => {
-		parser.write(md.slice(0, CHUNK));
-		md = md.slice(CHUNK);
-		if (!md) parser.end();
+		parser.write(md.slice(i, i += SLICE_PER_FRAME));
+		if (i >= md.length) parser.end();
 		else requestAnimationFrame(chunkedRender);
 	};
 	chunkedRender();
@@ -156,28 +157,58 @@ export const createStreamingMarkdownParser = (output, options) => {
 	);
 };
 
+function STATE(parser) {
+	let buf = '';
+	let pos = 0;
+	let end = false;
+
+	const update = () => {
+		let lim = pos + SLICE_PER_FRAME;
+		const len = buf.length;
+		parser.write(buf.slice(pos, Math.min(lim, len)));
+		if (lim >= len) {
+			lim = len;
+			if (end) parser.end();
+		} else {
+			requestAnimationFrame(update)
+		}
+		pos = lim;
+	}
+
+	return {
+		set(text) {
+			buf = text;
+			update();
+		},
+		end() {
+			if (pos === buf.length) parser.end();
+			end = true;
+		}
+	}
+}
+
+/**
+ *
+ * @return {(function(string, HTMLElement, Object): void)|*}
+ */
 export const createMarkdownStream = () => {
 	let parser;
-	let prevOutput;
-	let bufferIndex;
+	let prevDOM;
 
-	/**
-	 * @param {string} buffer
-	 * @param {HTMLElement} output
-	 */
-	return (buffer, output, options) => {
-		if (prevOutput !== output) {
-			if (parser) parser.end();
-			if (!(prevOutput = output)) return;
+	return (str, dom, options) => {
+		if (prevDOM !== dom) {
+			if (parser) {
+				parser.end();
+				parser = null;
+			}
+			if (!(prevDOM = dom)) return;
 
-			// 给AntiSlop的重试循环用
-			output.replaceChildren();
-			parser = createStreamingMarkdownParser(output, options);
-			bufferIndex = 0;
+			dom.replaceChildren();// 这个给AntiSlop的重试循环用
+
+			parser = STATE(createStreamingMarkdownParser(dom, options));
 		}
-		if (!buffer || !parser) return;
+		if (!str || !parser) return;
 
-		parser.write(buffer.slice(bufferIndex));
-		bufferIndex = buffer.length;
+		parser.set(str);
 	};
 };

@@ -1,7 +1,7 @@
 import {getTextContent} from "../utils/utils.js";
 import {IndexedDBAccess} from "../utils/dbAccess.js";
-import {EVENT_BUS} from "../states.js";
 import {LLM_COST_SCALE} from "/backend/sync.js";
+import {EVENT_BUS} from "../states.js";
 
 const [transaction, deleteDatabase] = IndexedDBAccess('AiChat', 9, (event) => {
 	const db = event.target.result;
@@ -171,7 +171,7 @@ export const getKV = (key, callback) => {
 export const setKV = (key, value) => transaction(tx => {
 	const store = tx.objectStore('kv');
 	return value === undefined ? store.delete(key) : store.put(value, key);
-}, true, 'kv').then(() => EVENT_BUS.post(['kv', key], value));
+}, true, 'kv');
 
 /**
  * @param {string} type
@@ -228,7 +228,7 @@ export const kvListSet = (value, type, name) => {
  * @param {string} name
  * @returns {Promise<void>}
  */
-export const kvListDel = (type, name) => transaction(tx => tx.objectStore('kvs').delete([type, name]), true, 'kvs').then(() => EVENT_BUS.post(['kvs', type, 'del'], name));
+export const kvListDel = (type, name) => transaction(tx => tx.objectStore('kvs').delete([type, name]), true, 'kvs');
 
 /**
  * @param {AiChat.BillingLog} log

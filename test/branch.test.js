@@ -15,7 +15,7 @@ const ri = n => Math.floor(rnd() * n);
 function fail(msg) { console.log("FAIL:", msg); throw new Error(msg); }
 
 function validate(bm, conv, tag) {
-	const msgs = bm.messages;
+	const msgs = bm.raw;
 	// 1. INDEX 一致性
 	msgs.forEach((m,i)=>{ if(idx(m)!==i) fail(tag+" INDEX mismatch at "+i); });
 	// 2. 每个消息的父节点必须存在且指向它的消息在数组里
@@ -78,7 +78,7 @@ function runTrial(trial){
 	for (let step=0; step<40; step++){
 		const op = rnd();
 		let bm = conv[BRANCH_MANAGER];
-		const msgs = bm.messages;
+		const msgs = bm.raw;
 		try {
 			if (msgs.length <= 1) {
 				// 只剩虚拟根，只能添加消息
@@ -108,10 +108,10 @@ function runTrial(trial){
 		}
 
 		if (!conv[BRANCH_MANAGER]) {
-			const rawMsgs = bm.messages.slice(1);
+			const rawMsgs = bm.raw.slice(1);
 			enableBranches(conv, rawMsgs);
 		}
-		validate(conv[BRANCH_MANAGER], conv, `trial${trial} step${step}(op=${op.toFixed(2)},len=${conv[BRANCH_MANAGER].messages.length})`);
+		validate(conv[BRANCH_MANAGER], conv, `trial${trial} step${step}(op=${op.toFixed(2)},len=${conv[BRANCH_MANAGER].raw.length})`);
 	}
 }
 

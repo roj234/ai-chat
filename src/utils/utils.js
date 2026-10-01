@@ -2,7 +2,7 @@ import {showToast} from "../components/Toast.js";
 import {$watch, debugSymbol, unconscious} from "unconscious";
 import {highlightJsonLike} from "../markdown/highlight.js";
 import {webviewDownloadFile} from "/vendor/jsBridge.js";
-import {config, noPointer} from "../states.js";
+import {auxKeyboardOnly, config} from "../states.js";
 import {isIDB} from "../database.js";
 import SimpleModal from "../components/SimpleModal.jsx";
 
@@ -154,8 +154,15 @@ export const showImageZoomView = (src, title) => {
 	})
 }
 
-export const deleteWithDrawback = (message, confirm, cancel) => {
-	if (noPointer) {
+/**
+ *
+ * @param {string} message
+ * @param {Function} confirm
+ * @param {Function} cancel
+ * @param {boolean} [isKeyboard]
+ */
+export const deleteWithDrawback = (message, confirm, cancel, isKeyboard) => {
+	if (isKeyboard || auxKeyboardOnly) {
 		SimpleModal({
 			message: '确认删除"'+message+'？',
 			accent: 'danger',

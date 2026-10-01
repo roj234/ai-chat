@@ -72,7 +72,7 @@ const SimpleModal = ({
 
 	const modal = <dialog className={"modal " + className} onClick={(e) => {
 		// 排除键盘导致的点击事件
-		if (e.pointerId < 0) return;
+		if (e.pointerId < 0 || !modal.isConnected) return;
 
 		// 检测点击是否落在 dialog 自身（而非内部子元素）
 		const rect = modal.getBoundingClientRect();
@@ -82,7 +82,7 @@ const SimpleModal = ({
 			e.clientY >= rect.top &&
 			e.clientY <= rect.bottom;
 
-		if (!inside && onConfirm && !ignoreCancel) modal.remove();
+		if (!inside && onConfirm && !ignoreCancel) handleClose();
 	}} role="dialog" aria-modal="true">
 		<div className="header"><b>{title}</b></div>
 		<div className="body">

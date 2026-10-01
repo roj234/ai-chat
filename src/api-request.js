@@ -4,7 +4,6 @@ import {cloneNamed, getTextContent, prettyError, resolveDBRelativeURL} from "./u
 import {setWakeLock} from "./utils/wakeLock.js";
 import {
 	abortCompletion,
-	config,
 	EVENT_BUS,
 	getCurrentTheme,
 	inputText,
@@ -30,14 +29,23 @@ import {
 	TEMPORARY_PLACEHOLDER,
 	toolScriptRegistry
 } from "./toolset.js";
-import {$stampLock, $state, $update, $watch, AS_IS, debugSymbol, isReactive, unconscious} from "unconscious";
+import {
+	$stampLock,
+	$state,
+	$update,
+	$watch,
+	AS_IS,
+	debugSymbol,
+	isReactive,
+	ONCE_EVENT,
+	unconscious
+} from "unconscious";
 import {showToast} from "./components/Toast.js";
 import failure from "../media/failure.js";
 import complete from "../media/complete.js";
 import {
 	appendBillingLog,
 	DONE,
-	getCombinedPreset,
 	isIDB,
 	kvListGet,
 	markMessageDirty,
@@ -51,16 +59,15 @@ import SimpleModal from "./components/SimpleModal.jsx";
 import {highlightJsonLike} from "./markdown/highlight.js";
 import {setConversationTitle} from "./components/ConversationList.jsx";
 import {deepEntries, jsonEval} from "unconscious/common/json-schema-utils.js";
-import {applyDelta, jsonFetch, ORIGINAL_ERROR, sseFetch} from "/common/openai-api-utils.js";
+import {applyDelta, jsonFetch, ORIGINAL_ERROR, sseFetch} from "/common/fetch-utils.js";
 import {base64DecodeToUint8Array} from "unconscious/common/Base64.js";
 import {DI, DI_messageContainer, DI_messageVirtualList, DID_SYNC_LOCK, DID_SYNC_UNLOCK} from "./hooks.js";
-import {objectIdentityHash} from "/common/object-hash.js";
-import {encodeObjects} from "./utils/marshal.js";
+import {encodeObjects, objectIdentityHash} from "./utils/serialization.js";
 import {SHA256} from "unconscious/common/SHA256.js";
 import {DONT_PARSE_HTML_IN_THINKING} from "./components/ThinkBlock.jsx";
 import {LLM_COST_SCALE} from "/backend/sync.js";
 import {SP_CONNECT, SP_GENERATE, SP_PREFILL, SP_WAIT} from "./components/StatusPill_state.js";
-import {isLlamaCppBackend, PRESET_KVS_ID} from "./presets.js";
+import {getCombinedPreset, isLlamaCppBackend, PRESET_KVS_ID} from "./presets.js";
 
 /**
  * @param {boolean} [loop]
@@ -97,7 +104,7 @@ const RETRY_COUNT = debugSymbol("RetryCount");
  * @returns {Promise<false|string>}
  */
 export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
-	if (runningConversations.has(conversation.id)) throw new Error("Loop already running");
+	if (runningConversations.has(conversation.id)) throw new DOMException("agentLoop is running for "+conversation.id);
 
 	const abort = $state(new AbortController());
 	runningConversations.set(conversation.id, {
@@ -112,11 +119,13 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 	let markdownRenderer = cfg.afkState === 2 ? (content, container) => container && (container.textContent = content) : createMarkdownStream();
 	let updateCount = 0;
 	let lastMessage;
+	let lastDetails;
 	let _waitingFor;
 
 	const roleId = conversation.roleId;
 	const schemaPreprocess = roleId ? s => "```"+roleId+"\n"+s : AS_IS;
 
+	const forceRender = () => render(lastMessage, true);
 	const render = (message, force) => {
 		lastMessage = message;
 
@@ -133,12 +142,11 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		if (!force) {
 			const details = container.closest("details:not([open])");
 			if (details) {
-				if (!details.classList.contains("m")) {
-					details.classList.add("m");
-					details.addEventListener("click", () => render(message, true));
+				if (lastDetails == null) {
+					lastDetails = details;
+					details.addEventListener("click", forceRender, ONCE_EVENT);
+					// 只在展开时解析思考块的markdown
 				}
-
-				// 只在展开时解析思考块的markdown
 				return;
 			}
 
@@ -150,6 +158,11 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 				if (wasUpdatedAfterCheckpoint) render(message);
 			});
 			updateCount++;
+		}
+
+		if (lastDetails) {
+			lastDetails.removeEventListener("click", forceRender);
+			lastDetails = null;
 		}
 
 		const atBottom = DI_messageContainer.scrollHeight - DI_messageContainer.clientHeight - DI_messageContainer.scrollTop;
@@ -291,7 +304,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			}
 
 			const needLog = result.request_id && (finishReason !== 'error' || result.input_tokens);
-			if (config.incognito) {
+			if (conversation.temporary) {
 				assistantMessage.log = result;
 			} else
 
@@ -507,7 +520,7 @@ export const findStreamingContainer = think => {
 		const element = loading.previousElementSibling;
 		if (element) {
 			if (think) {
-				if (element.matches(".think")) return element.lastElementChild;
+				if (element.matches(".think")) return element.children[1];
 			} else {
 				if (element.matches(".md")) return element;
 			}
@@ -632,7 +645,7 @@ async function sendCompletionRequest(
 		thinkState.duration += Date.now() - thinkState.start;
 		delete thinkState.start;
 		delete thinkState.index;
-		thinkState = assistantMessage.think = {...thinkState};
+		thinkState = assistantMessage.think = unconscious(thinkState);
 	};
 
 	const progressKind = $state(SP_CONNECT);
@@ -713,6 +726,7 @@ async function sendCompletionRequest(
 					progressValue.value = progress;
 					return;
 				}
+				progressKind.value = SP_WAIT;
 			}
 
 			const timings = json.timings;
@@ -752,6 +766,7 @@ async function sendCompletionRequest(
 
 				const reasoningDetails = delta.reasoning_details;
 				if (reasoningDetails) {
+					reasoning_text ??= '';
 					assistantMessage.reasoning_details = applyDelta(assistantMessage.reasoning_details, reasoningDetails);
 					reasoning_format = 'rd';
 				} else if (delta.reasoning_content) {
@@ -789,7 +804,7 @@ async function sendCompletionRequest(
 						$update(tc);
 					}
 					if (hasNewToolCalls) onProgress?.(MARKDOWN_END);
-				}
+				} else if (text == null && reasoning_text == null) return;
 			} else {
 				text = chunk.text;
 				if (!text) return;
@@ -1438,8 +1453,7 @@ const streamResponseCompleted = (assistantMessage, genImages) => {
 	if (isReactive(think)) {
 		think.duration += Date.now() - think.start;
 		delete think.start;
-
-		assistantMessage.think = {...think};
+		assistantMessage.think = unconscious(think);
 	}
 
 	if (genImages?.length) {

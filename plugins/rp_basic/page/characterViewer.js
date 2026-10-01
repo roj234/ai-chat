@@ -1,6 +1,6 @@
 import {$asyncState, $foreach, $state, $update, unconscious} from "unconscious";
 import {createMarkdownStream, HTMLTagKinds, renderMarkdownToElement} from "/src/markdown/markdown.js";
-import {sseFetch} from "/common/openai-api-utils.js";
+import {sseFetch} from "/common/fetch-utils.js";
 import "/src/database.js";
 import {requestBackend} from "/src/database/remoteDB.js";
 import {config, EVENT_BUS} from "/src/states.js";
@@ -86,7 +86,6 @@ Only output the translation result, no explanations, no additional text.`,
 		],
 		reasoning: false,
 		stream: true,
-		temperature: 0.3,
 	});
 
 	let accumulated = '';
@@ -156,13 +155,14 @@ async function showDetail(c) {
 	})
 }
 
-function confirmDelete(name) {
+function confirmDelete(name, e) {
+	const isKeyboard = e.detail === 0;
 	deleteWithDrawback("角色 "+JSON.stringify(name), () => {
 		kvListDel(CHAR_TYPE, name).then(() => {
 			const idx = cards.findIndex(s => s.name === name);
 			if (idx >= 0) $update(currentPage);
 		});
-	}, () => {});
+	}, () => {}, isKeyboard);
 }
 
 const characters = $state([]);
@@ -227,7 +227,7 @@ export default function() {
 					<div className="card-actions">
 						<button className="btn" title="导出角色卡数据" onClick={() => saveCard(c.name)}>导出</button>
 						<button className="btn" title="编辑人设" onClick={() => showEditModal(c.name)}>编辑</button>
-						<button className="btn delete" title="删除角色卡" onClick={() => confirmDelete(c.name)}>删除</button>
+						<button className="btn delete" title="删除角色卡" onClick={(e) => confirmDelete(c.name, e)}>删除</button>
 					</div>
 				</div>
 			}, JSON.stringify)}</div>

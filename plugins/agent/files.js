@@ -12,7 +12,7 @@ import {COMMAND_REGISTRY} from "/src/commands.js";
 import {prettyTime} from "unconscious/common/Utils.js";
 import {DiffHeader, HighlightBox, makeDiff, TextDiff} from "/src/components/TextDiff.jsx";
 import {createAsyncQueue} from "/common/pure-utils.js";
-import {getCombinedPreset, markMessageDirty} from "/src/database.js";
+import {markMessageDirty} from "/src/database.js";
 import {compileGrepPattern} from "/common/fs-common.js";
 import "./GrepCard.css";
 import {normalizePath} from "unconscious/common/path-utils.js";
@@ -20,6 +20,7 @@ import {getChangeableFiles} from "./overwrite-monitor.js";
 import {showToast} from "/src/components/Toast.js";
 import {shellPrompt, shellTools} from "./RemoteFSShell.js";
 import {vcsEnabledKey, vcsTools} from "./VCS.js";
+import {getCombinedPreset} from "../../src/presets.js";
 
 const DIFF_CACHE = debugSymbol("Diff");
 /**
@@ -248,7 +249,7 @@ const Append = {
 	}
 };
 
-// ============ 解析器：Unified Diff Hunk → search/replace ============
+// ============ 解析器：Unified Diff Hunk → oldText/newText ============
 function parseUnifiedHunk(text) {
 	const lines = String(text == null ? "" : text).split("\n");
 	const hunks = [];
@@ -279,17 +280,17 @@ function parseUnifiedHunk(text) {
 		else { close(); }                                                               // 非法行，结束 hunk
 	}
 	close();
-	return hunks.map(h => ({ search: h.old.join("\n"), replace: h.new.join("\n") }));
+	return hunks.map(h => ({ oldText: h.old.join("\n"), newText: h.new.join("\n") }));
 }
 
 const patchHandler = fileAccess("patch");
 const patchDiffHandler = (par) => {
 	const diff = [];
 	parseUnifiedHunk(par.diff)
-		.filter(i => i.search !== i.replace)
-		.forEach(({search, replace}) => {
+		.filter(i => i.oldText !== i.newText)
+		.forEach(({oldText, newText}) => {
 			diff.push({ type: "hunk", text: par.path })
-			diff.push(...makeDiff(search, replace));
+			diff.push(...makeDiff(oldText, newText));
 		});
 	return diff;
 };
@@ -319,9 +320,9 @@ const Patch = {
 	}
 };
 
-const editDiffHandler = ({search, replace}) => {
-	if (search != null && replace != null && search !== replace) {
-		return makeDiff(search, replace);
+const editDiffHandler = ({oldText, newText}) => {
+	if (oldText != null && newText != null && oldText !== newText) {
+		return makeDiff(oldText, newText);
 	}
 }
 
@@ -330,7 +331,7 @@ const Edit = {
 	name: "Edit",
 	description:
 		"Atomically find and replace text within a file." +
-		" Use optional 1-based inclusive `startLine` and `endLine` to narrow the range (search/replace scope)." +
+		" Use optional 1-based inclusive `startLine` and `endLine` to narrow the scope." +
 		" When `replaceAll` is true, replaces all occurrences in that range." +
 		" When `replaceAll` is false, it must occur exactly once in that range.",
 	script: fileAccess("edit"),
@@ -339,17 +340,17 @@ const Edit = {
 
 	fix(par) {
 		const keys = Object.keys(par);
-		if (!par.search) {
+		if (!par.oldText) {
 			const res = keys.filter(key => key.includes("old"));
 			if (res.length === 1) {
-				par.search = par[res[0]];
+				par.oldText = par[res[0]];
 				delete par[res[0]];
 			}
 		}
-		if (!par.replace) {
+		if (!par.newText) {
 			const res = keys.filter(key => key.includes("new"));
 			if (res.length === 1) {
-				par.replace = par[res[0]];
+				par.newText = par[res[0]];
 				delete par[res[0]];
 			}
 		}
@@ -359,13 +360,13 @@ const Edit = {
 		type: "object",
 		properties: {
 			path: { type: "string" },
-			search: { type: "string" },
-			replace: { type: "string" },
+			oldText: { type: "string" },
+			newText: { type: "string" },
 			startLine: { type: "integer" },
 			endLine: { type: "integer" },
 			replaceAll: { type: "boolean", default: false }
 		},
-		required: ["path", "search", "replace"]
+		required: ["path", "oldText", "newText"]
 	}
 };
 /** @type {AiChat.FunctionTool} */
@@ -674,7 +675,14 @@ const Mounts = {
 	script(_, resp, conv) {
 		const arr = Object.entries(conv.mnt||{});
 		arr.unshift([".", conv]);
-		return "Total "+(arr.length)+"\n"+arr.map(([k, {fs_type, fs_base, fs_name}], i) => JSON.stringify(i ? "~/"+k : k)+" (type="+fs_type+", remote_path="+JSON.stringify(fs_base||"/")+", label="+JSON.stringify(fs_name||"")+")").join("\n");
+		return "Total "+(arr.length)+"\n"+arr.map(([k, {fs_type, fs_base, fs_name, fs_readonly, fs_ACL, fs_builtin}], i) => {
+			let str = `${JSON.stringify(i ? "~/" + k : k)} (type=${fs_type}, remote_path=${JSON.stringify(fs_base || "/")}`;
+			if (fs_name) str += `, label=${JSON.stringify(fs_name || "")}`;
+			if (fs_builtin) str += `, builtin`;
+			if (fs_readonly) str += `, readonly`;
+			if (fs_ACL) str += `, hasAccessController`;
+			return str+')';
+		}).join("\n");
 	},
 };
 //endregion

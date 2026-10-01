@@ -1,7 +1,7 @@
 import './ToolCallCard.css';
 import {getToolInteractiveLevel, getToolName, runTools, TOOL_IS_RUNNING, toolScriptRegistry} from "../toolset.js";
-import {config, LOCKED, messages, selectedConversation} from "../states.js";
-import {$state, $update, $watch, appendChildren, debugSymbol, isReactive, unconscious} from "unconscious";
+import {LOCKED, messages, selectedConversation} from "../states.js";
+import {$state, $update, $watch, appendChildren, debugSymbol, isReactive, ref, unconscious} from "unconscious";
 import {MORPH_CHILD_FUNCTION, showImageZoomView} from "../utils/utils.js";
 import morphdom from "morphdom";
 import {highlight, highlightJsonLike} from "../markdown/highlight.js";
@@ -10,6 +10,8 @@ import {markMessageDirty, updateConversation} from "../database.js";
 import {BorderSpinner} from "./BorderSpinner.jsx";
 
 const RESP_SYMBOL = debugSymbol("ToolResponseUpdate");
+const AUTO_EXPAND = debugSymbol("AutoExpandForApproval");
+const OPENED = debugSymbol("OpenedDuringGeneration");
 
 const formatDuration = ms => {
     if (!ms) return '';
@@ -39,12 +41,13 @@ export function ToolCallCard(props) {
         const input = <pre className="args" />, output = <pre className="args" />;
         const duration = $state();
 
+        let _response = ref();
         appendChildren(base, <>
             <div className="tool-body">
                 <div className="args-title">参数</div>
                 {input}
             </div>
-            <div className="tool-body">
+            <div className="tool-body" ref={_response}>
                 <div className="args-title">结果 {duration}
                     {isReactive(tool) ? null : <button className={"rerun-btn"} onClick={({target}) => {
                         const runOperation = () => {
@@ -80,6 +83,7 @@ export function ToolCallCard(props) {
             $watch(tool, () => {
                 highlight(tool.function.arguments, "json", input);
             });
+            tool[OPENED] = true;
         } else {
             const renderOutput =  toolScriptRegistry[name]?.renderOutput;
 
@@ -90,12 +94,14 @@ export function ToolCallCard(props) {
 
                 if (toolResponse && renderOutput && !base.classList.contains("pending")) {
                     try {
+                        const _elementAtOutput = _response.lastElementChild;
                         const result = renderOutput(toolResponse, output, isRunning, tool, message);
                         if (result !== false) {
-                            output.replaceWith(result);
+                            _elementAtOutput.replaceWith(result);
                             return;
                         }
-                        base.lastElementChild.lastElementChild.replaceWith(output);
+
+                        _elementAtOutput.replaceWith(output);
                     } catch (e) {
                         console.error("工具内容渲染失败", e);
                     }
@@ -139,22 +145,24 @@ export function ToolCallCard(props) {
         }
     };
 
+    const generating = isReactive(tool);
+
     let title;
     try {
-        title = !isReactive(tool) && toolScriptRegistry[name]?.title?.(tool, message.tool_responses[idx] || {});
+        title = !generating && toolScriptRegistry[name]?.title?.(tool, message.tool_responses[idx] || {});
     } catch (e) {
         console.error("工具标题渲染失败", e);
     }
-    const base = <details className={"tool-call"} onClick.once={initializeHtml}>
-        <summary className="tool-header" title={"展开工具参数\n"+name}>{title || name}</summary>
+    const base = <details className={"tool-call"} onToggle.once={initializeHtml}>
+        <summary className="tool-header" title={"展开调用详情\n"+name}>{title || name}</summary>
     </details>;
 
     morphToolCallCard(props, base);
     base[MORPH_CHILD_FUNCTION] = morphToolCallCard;
 
-    if (config.expandToolCall && isReactive(tool)) {
+    if (!generating && tool[OPENED]) {
         base.open = true;
-        base.click();
+        delete tool[OPENED];
     }
     return base;
 }
@@ -197,11 +205,16 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
         classList.add(needApproval);
 
         let rejectReasonText;
-        const setAuditState = (target, allowUnsafe) => runTools(message, conv, idx, allowUnsafe, rejectReasonText).then(() => $update(messages));
+        const setAuditState = (target, allowUnsafe) => {
+            delete element[AUTO_EXPAND];
+            return runTools(message, conv, idx, allowUnsafe, rejectReasonText).then(() => $update(messages));
+        };
         const granted = conv.grantedTools?.has(tool_name);
 
-        element.open = true;
-        element.click();
+        if (!element.open) {
+            element[AUTO_EXPAND] = element.open = true;
+            element.dispatchEvent(new Event('toggle'));
+        }
         element.append(<div className={"tool-body"+(secure?" audit":"")}>
             <div className="args-title">{secure ? "敏感操作需要批准" : "工具执行已暂停"}</div>
             <div className={"audit-box"}>
@@ -236,6 +249,12 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
     } else if (!pending && classList.contains(needApproval)) {
         classList.remove(needApproval);
         element.lastElementChild.remove();
+
+        // 把自动展开收回
+        if (element[AUTO_EXPAND]) {
+            delete element[AUTO_EXPAND];
+            element.open = false;
+        }
     }
 
     const title = element.firstElementChild;
@@ -252,7 +271,6 @@ const morphToolCallCard = ({tool, message, idx}, element) => {
     } else {
         if (message === messages.at(-1) && is_errored) {
             element.open = true;
-            element.click(); // call initializeHtml
         }
     }
 }

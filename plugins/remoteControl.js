@@ -1,6 +1,13 @@
 import {sendToSyncServer} from "/src/database/syncClient.js";
 import {SYNC_RPC, SYNC_SEND_TO_OWNER} from "/backend/sync.js";
-import {config, conversations, inputText, isMobile, selectedConversation, switchToConversation} from "/src/states.js";
+import {
+	auxMainlyTouch,
+	config,
+	conversations,
+	inputText,
+	selectedConversation,
+	switchToConversation
+} from "/src/states.js";
 import {$state, $unwatch, $update, $vforeach, $watch, unconscious} from "unconscious";
 import {showToast} from "/src/components/Toast.js";
 import {DI, DID_RMI, DID_SEND_BUTTON, onLoad} from "/src/hooks.js";
@@ -125,8 +132,8 @@ const RMI = {
 				sendToSyncServer(SYNC_SEND_TO_OWNER, [id, [INPUT, 0, delta(clientState.text, fakeInputBox.value)]]);
 			}}
 			onKeyDown={(e) => {
-				if (isMobile) return;
-				if (e.key === 'Enter' && !e.shiftKey) {
+				if (auxMainlyTouch) return;
+				if (e.isComposing && e.key === 'Enter' && !e.shiftKey) {
 					e.preventDefault();
 					e.stopImmediatePropagation();
 					fakeSendButton.click();

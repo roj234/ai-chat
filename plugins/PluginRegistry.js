@@ -7,8 +7,6 @@ import "./persistInputBox.js";
 import "./blobCache.js";
 // 对话原始数据编辑
 import "./conversationEditor.js";
-// 无痕模式弹窗
-import "./incognitoToast.js";
 // Blob管理器
 import "./managers/BlobManager.js";
 // 搜索消息

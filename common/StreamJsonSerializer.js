@@ -36,7 +36,7 @@ export const createJsonSerializer = (replacer) => {
 			if (val.size <= 0) throw new Error("附件 "+(val.name||val.hash)+" 丢失或损坏");
 
 			let isAudio;
-			if (key === 'url' || (isAudio = key === 'data')) {
+			if (key === 'image_url' || key === 'url' || (isAudio = key === 'data')) {
 				// image or audio
 				yield symbols[QUOTE];
 

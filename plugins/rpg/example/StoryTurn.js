@@ -5,7 +5,7 @@ import {$foreach, $update, unconscious} from "unconscious";
 import {
 	abortCompletion,
 	config,
-	ensureActiveConversation,
+	ensureConversation,
 	messages,
 	selectedConversation,
 	updateMessageUI
@@ -132,7 +132,7 @@ Operation semantics:
  * @param {string} prompt
  */
 const sendAction = async (messages, prompt) => {
-	await ensureActiveConversation();
+	await ensureConversation();
 	if (unconscious(abortCompletion)) return;
 
 	let schemaToLLM = schema;

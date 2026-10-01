@@ -205,8 +205,8 @@ const getACL = async (root, targetDir) => {
 	return matcher;
 };
 
-async function glob(pattern, path, showHidden, acl, exclude) {
-	const result = compileGlobPattern(pattern, path, exclude);
+async function glob(pattern, path_, showHidden, acl, exclude) {
+	const result = compileGlobPattern(pattern, path_, exclude);
 	const handle = result.path;
 
 	try {
@@ -271,7 +271,7 @@ export async function registerFsRoutes(router, allowExec) {
 			const stats = await fs.stat(fullPath);
 
 			if (!isDir) {
-				if (stats.mtimeMs > modSince) {
+				if (stats.mtimeMs >= modSince) {
 					const item = [displayPath, "file", json ? stats.size : formatSize(stats.size)];
 					if (showModified || modSince) item.push(json ? stats.mtimeMs : stats.mtime.toISOString().slice(0, -5));
 					result.push(item);
@@ -428,7 +428,7 @@ nlink: ${stats.nlink}`);
 		ctx.send(200, 'Success');
 	});
 	router.post('/delete', async (ctx) => {
-		const { path: filePath, recursive, force } = await ctx.readAsObject();
+		const { path: filePath, recursive = true, force = false } = await ctx.readAsObject();
 		const safePath = await pathFilterWithIgnore(ctx, filePath, true);
 		if (safePath === ctx.fsRoot) return ctx.send(403, { error: 'Cannot delete root' });
 

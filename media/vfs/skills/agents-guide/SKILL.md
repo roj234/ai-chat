@@ -1,6 +1,6 @@
 ---
-name: 'agent-definition-howto'
-description: 'How to write Agent definitions for CreateAgent.'
+name: 'agent-guide'
+description: 'How to write Agent definition, mounts, ACL, turn limit and more.'
 ---
 
 # 编写子代理
@@ -28,17 +28,14 @@ maxTurns: 500
 # 文件系统配置（见下文） 默认继承
 mounts:
    '/': { fs_type: "api", fs_server: "沙箱1" }
-   '.skills': { fs_type: "db", fs_base: "skills" }
+   '.skills': { fs_type: "db", fs_base: "skills", fs_readonly: true }
    # 使用这个（扩展运算符），继承文件系统，而不是覆盖
    '...': true
 
-# 你可以指定子代理的文件系统
-overlay: { mode: 'master' }
-
-# 控制子代理的文件系统权限
+# 控制子代理的根文件系统权限
 acl: 'path/to/acl/file'
 
-# 使用 gitignore 语法在 Glob 中排除项目
+# 使用 gitignore 语法在根文件系统的 Glob 中排除项目
 ignore: 'path/to/gitignore'
 
 
@@ -86,6 +83,7 @@ kind: basic
         fs_base?: string; // 可选，设置根目录为某个子目录
         fs_server?: string; // 仅 api 类型需要：服务器名
         fs_name?: string; // 文件系统名称
+        fs_readonly?: true; // 只读模式
     }
 ```
 
@@ -105,6 +103,14 @@ kind: basic
 - `a` (其他所有): 挂载到 `~/a`
 - `...`: 代码检测特殊键名，不是真实路径
 
+### 权限控制
+
+支持ACL：local opfs
+支持.ignore：db api local opfs
+支持OverlayFS：local
+
+[ACL 语法参考](./ACL.md)
+
 ## 工具
 
 想让子代理的输出符合特定格式，简单点可以给它 `ValidateJson` 和 schema 路径，然后让它写入文件并自己验证。  
@@ -118,24 +124,24 @@ kind: basic
 
 ```js
 const redirectSchema = {
-    oneOf: [
-        {
-            type: "object",
-            properties: {
-                target: { enum: ["file", "javascript"] },
-                path: { type: "string" },
-                id: { type: "integer", description: "Agent id to send ping notifications to." }
-            },
-            required: ["target", "path", "id"]
-        },
-        {
-            type: "object",
-            properties: {
-                target: { const: "agent" },
-                id: { type: "integer" }
-            }
-        },
-    ]
+  oneOf: [
+    {
+      type: "object",
+      properties: {
+        target: { enum: ["file", "javascript"] },
+        path: { type: "string" },
+        id: { type: "integer", description: "Agent id to send ping notifications to." }
+      },
+      required: ["target", "path", "id"]
+    },
+    {
+      type: "object",
+      properties: {
+        target: { const: "agent" },
+        id: { type: "integer" }
+      }
+    },
+  ]
 };
 ```
 
@@ -149,10 +155,10 @@ id: 在脚本或文件写入完成后发送消息给这个代理，脚本的控�
 
 target=javascript 时，path必须指向（子代理文件系统中的）ESM模块，它 runs in an isolated basic (permissions=[]) RunJS sandbox with 60 seconds timeout and:
 - process.env environments:
-    - AGENT_ID: number # 子代理 ID
-    - AGENT_OWNER: number # 子代理创建者 ID
-    - AGENT_ERROR: boolean
-    - AGENT_RESPONSE: string # 代理的回复内容，或者错误详情
+  - AGENT_ID: number # 子代理 ID
+  - AGENT_OWNER: number # 子代理创建者 ID
+  - AGENT_ERROR: boolean
+  - AGENT_RESPONSE: string # 代理的回复内容，或者错误详情
 - "agents" module:
   ```js
   import { notifyAgent, retry } from "agents";
@@ -172,7 +178,7 @@ target=javascript 时，path必须指向（子代理文件系统中的）ESM模�
 每行一条规则
 语法：`!?[+-][rwl]+ <pattern>`
 
-- `!`: 重要，使用该标记的规则无法被非重要规则覆盖。  
+- `!`: 重要，使用该标记的规则无法被非重要规则覆盖。
 - `+`: 允许权限
 - `-`: 拒绝权限
 - 拒绝优先允许，所以被重要规则拒绝的路径无法再次开放

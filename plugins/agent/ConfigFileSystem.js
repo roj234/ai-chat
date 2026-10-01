@@ -1,20 +1,20 @@
-import {serializeJSON} from "/src/utils/marshal.js";
+import {serializeJSON} from "/src/utils/serialization.js";
 import {
-	deleteConversation,
-	getKV,
 	getMessages,
 	kvListDel,
 	kvListGet,
 	kvListGetKeys,
 	kvListSet,
-	setKV,
+	markMessageDirty,
 	updateConversation
 } from "/src/database.js";
-import {conversations, selectedConversation} from "/src/states.js";
+import {conversations, findConversation, LOCKED, selectedConversation} from "/src/states.js";
 import {VirtualDirectory, VirtualFile} from "./VirtualFileSystem.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
 import {createWebFileSystem} from "./WebFSDriver.js";
 import {resolveDirectory} from "./WebFSUtils.js";
+import {$update, unconscious} from "unconscious";
+import {FSE_AccessDenied, FSE_NotFound, throwDOMException} from "../../common/pure-utils.js";
 
 const BLACKLIST_CHARS = new RegExp('[| &=?#{}<>:,]', 'g');
 
@@ -23,7 +23,7 @@ const FAKE_FILE_CONSTANT = {
 	kind: "file",
 	getFile() {
 		return {
-			size: "unknown",
+			size: -1,
 			lastModified: 0
 		}
 	}
@@ -44,35 +44,27 @@ const checkJson = (name) => {
 
 const CFG_ROOTS = new NestedMap();
 
-const kvTypes = ["memories"];
-const kvsTypes = ["st|char", "st|preset", "st|lorebook"];
-
-const kvHandler = {
-	read: async (type) => serializeJSON(await getKV(type), 2),
-	write: (type, value) => setKV(type, JSON.parse(value))
-};
-
-CFG_ROOTS.set([".", "kv"], {
-	file(name, create) {
-		const path = checkJson(name);
-		if (kvTypes.includes(path))
-			return new VirtualFile(kvHandler, decodeURI(path));
-	},
-	*entries() {
-		for (const type of kvTypes) {
-			yield [type+".json", FAKE_FILE_CONSTANT];
-		}
-	}
-});
+const kvsTypes = ["st|char", "st|preset", "st|lorebook", "preset"];
 
 const kvsHandler = {
 	read: async ([type, name]) => serializeJSON(await kvListGet(type, name), 2),
 	write: ([type, name], value) => kvListSet(JSON.parse(value), type, name)
 };
+
+CFG_ROOTS.set([".handlers", 0], {
+	file(name, create, self) {
+		const type = self.path.at(-2);
+		return new VirtualFile(kvsHandler, [type, self.path.at(-1)]);
+	},
+	async *entries() {
+		yield ["data.json", FAKE_FILE_CONSTANT];
+	}
+});
+
 for (const type of kvsTypes) {
 	const handler = {
-		file(name, create) {
-			return new VirtualFile(kvsHandler, [type, checkJson(name)]);
+		dir(name) {
+			return new VirtualDirectory(CFG_ROOTS, [".", "kvs", type, name], CFG_ROOTS.getChildren([".handlers", 0]));
 		},
 		/**
 		 *
@@ -83,7 +75,7 @@ for (const type of kvsTypes) {
 		async *entries(path, fs) {
 			const keys = await kvListGetKeys(type);
 			for (const {name} of keys) {
-				yield [name+".json", FAKE_FILE_CONSTANT];
+				yield [name, this.dir(name)];
 			}
 		},
 		del(name) {
@@ -91,7 +83,6 @@ for (const type of kvsTypes) {
 		}
 	};
 
-	//registry.set([".", "kvs", type], handler);
 	CFG_ROOTS.set([".", "kvs", fileEscape(type)], handler);
 }
 
@@ -110,32 +101,50 @@ const convHandler = {
 
 /** 为指定对话 id 创建 messages 处理器 */
 const convMessageHandler = {
-	async read([conv, id]) {
-		const msgs = await getMessages(conv);
-		const msg = msgs.find(m => m.id === id);
-		if (!msg) throw (`Message ${id} not found`);
-		return serializeJSON(msg, 2);
+	async read([conv, msgs, id]) {
+		if (id < 0) return "<write-only sink>";
+		return serializeJSON(msgs[id], 2);
 	},
-	async write([conv, id], data) {
-		const msgs = await getMessages(conv);
-		const index = msgs.findIndex(m => m.id === id);
-		if (index < 0) throw (`Message ${id} not found`);
-		msgs[index] = JSON.parse(data);
+	async write([conv, msgs, index], data) {
+		const obj = JSON.parse(data);
+		if (index === -1) {
+			delete obj.id;
+			delete obj.parent;
+			msgs.push(obj);
+		} else {
+			if (obj.id !== msgs[index].id) throwDOMException(`ID mismatch, from name=${msgs[index].id}, from data=${obj.id}`, FSE_AccessDenied);
+			const parent = msgs[index].parent;
+			if (parent != null) obj.parent = parent;
+			msgs[index] = obj;
+		}
+		markMessageDirty(obj);
 		await updateConversation(conv, msgs);
 	},
 }
 
 
-CFG_ROOTS.set([".", "conversations", 0, "messages"], {
-	file(name, create, self) {
+CFG_ROOTS.set([".handlers", 1], {
+	async file(name, create, self) {
 		const conv = self.path.at(-2);
-		return new VirtualFile(convMessageHandler, [conv, parseInt(checkJson(name), 10)]);
+		const msgs = await getMessages(conv);
+
+		if (name === 'insert') {
+			if (create) return new VirtualFile(convMessageHandler, [conv, msgs, -1]);
+			throwDOMException(`This is a write-only sink`, FSE_NotFound);
+		}
+
+		const id =  parseInt(checkJson(name), 10);
+		const index = msgs.findIndex(m => m.id === id);
+		if (index < 0) throwDOMException(`Message #${id}`, FSE_NotFound);
+
+		return new VirtualFile(convMessageHandler, [conv, msgs, index]);
 	},
 	async *entries(self) {
 		const conv = self.path.at(-2);
 		for (const message of await getMessages(conv)) {
 			yield [message.id+".json", FAKE_FILE_CONSTANT];
 		}
+		yield ["insert", FAKE_FILE_CONSTANT];
 	},
 	async del(name, recursive, self) {
 		const conv = self.path.at(-2);
@@ -148,9 +157,9 @@ CFG_ROOTS.set([".", "conversations", 0, "messages"], {
 		await updateConversation(conv, msgs, 1);
 	}
 });
-CFG_ROOTS.set([".", "conversations", 0], {
+CFG_ROOTS.set([".handlers", 2], {
 	async file(name, create, self) {
-		if (name === "conversation.json") {
+		if (name === "session.json") {
 			const conv = self.path.at(-1);
 			return new VirtualFile(convHandler, conv);
 		}
@@ -158,34 +167,28 @@ CFG_ROOTS.set([".", "conversations", 0], {
 	dir(name, create, self) {
 		if (name === "messages") {
 			const conv = self.path.at(-1);
-			return new VirtualDirectory(CFG_ROOTS, [".", "conversations", conv, name], CFG_ROOTS.getChildren([".", "conversations", 0, name]));
+			return new VirtualDirectory(CFG_ROOTS, [".", "sessions", conv, name], CFG_ROOTS.getChildren([".handlers", 1]));
 		}
 	},
 	*entries(self) {
-		yield ["conversation.json", FAKE_FILE_CONSTANT];
+		yield ["session.json", FAKE_FILE_CONSTANT];
 		yield ["messages", this.dir("messages", false, self)];
 	}
 });
 
-CFG_ROOTS.set([".", "conversations"], {
+CFG_ROOTS.set([".", "sessions"], {
 	dir(name, create) {
 		const id = parseInt(name, 10);
-		if (id === selectedConversation.id) throw "Not allowed: modifying ACTIVE conversation will cause data loss";
-
-		const conv = unconscious(conversations).find(c => c.id === id);
-		if (conv) return new VirtualDirectory(CFG_ROOTS, [".", "conversations", conv], CFG_ROOTS.getChildren([".", "conversations", 0]));
+		const conv = findConversation(id);
+		if (conv) {
+			if (id === selectedConversation.id || conv[LOCKED]) throw new DOMException("This conversation is opening", "ReadOnlyError");
+			return new VirtualDirectory(CFG_ROOTS, [".", "sessions", conv], CFG_ROOTS.getChildren([".handlers", 2]));
+		}
 	},
 	*entries() {
 		for (const {id} of unconscious(conversations)) {
 			yield [String(id), FAKE_DIR_CONSTANT];
 		}
-	},
-	async del(name) {
-		const id = parseInt(name, 10);
-		const idx = unconscious(conversations).findIndex(c => c.id === id);
-		if (idx < 0) throw 'Not exist';
-		const conv = conversations.splice(idx, 1)[0];
-		return deleteConversation(conv);
 	}
 });
 
@@ -193,7 +196,7 @@ const configFS_root = new VirtualDirectory(CFG_ROOTS);
 
 /**
  * 基于应用配置数据库的虚拟文件系统
- * @param {string} base - 根路径约束（如 "conversations"）
+ * @param {string} base - 根路径约束（如 "sessions"）
  * @param {AiChat.Mount} options
  * @returns {Promise<AiChat.FileSystemInstance>}
  */

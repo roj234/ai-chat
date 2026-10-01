@@ -1,3 +1,4 @@
+import {FSE_AccessDenied, throwDOMException} from "./pure-utils.js";
 
 /**
  * 转换gitignore模式为正则表达式
@@ -66,9 +67,6 @@ const compilePattern = pattern => {
 export const READ = 1 << 0, WRITE = 1 << 1, LIST = 1 << 2;
 const NO_READ = 1 << 3, NO_WRITE = 1 << 4, NO_LIST/* not really used */ = 1 << 5;
 const IMPORTANT = 1 << 6, NO_MATCH = 1 << 7, NAME_ONLY = 1 << 8;
-
-export const FSE_NotFound = "NotFoundError", FSE_AccessDenied = "SecurityError", FSE_IsDir = "TypeMismatchError";
-export const throwDOMException = (message, name) => {throw new DOMException(message, name);}
 
 export class ACL {
 	/** @type {Map<string, number>} */
@@ -140,6 +138,7 @@ export class ACL {
 				if (path.length === 1) {
 					if (flag&IMPORTANT) throwDOMException("IMPORTANT on defaultRule", "NotSupportedError");
 					this.#defaultRule = flag;
+					continue;
 				}
 			} else {
 				if (c !== '/' && path.slice(0, -1).includes('/'))

@@ -1,5 +1,5 @@
 import {config, EVENT_BUS} from "../states.js";
-import {decodeObjects, encodeObjects, serializeJSON} from "../utils/marshal.js";
+import {decodeObjects, encodeObjects, serializeJSON} from "../utils/serialization.js";
 import {initSync} from "./syncClient.js";
 import {decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
 import {msgpack_schema, msgpack_schema_version} from "/common/wire-compression-schema.js";
@@ -197,6 +197,8 @@ export const deleteConversation = batched("conversation/delete");
 const u_getConversation = batched("conversation", true);
 const u_messages = batched("messages", true);
 
+export const getConversation = conv => u_getConversation([conv.id]);
+
 export const getMessages = async conversation => {
 	const id = conversation.id;
 	const metadata = u_getConversation([id, conversation[MESSAGES_CACHE] && conversation.time]);
@@ -235,6 +237,10 @@ const showIncompatibleDialog = backendVersion => {
 };
 
 export const initialize = () => {
+	EVENT_BUS.on(['kvs'], (name, path) => {
+		kvsCache.delete(path[1]+':'+name);
+	});
+
 	batched("version")().catch(err => {
 		if (err.startsWith?.("unknown")) return ['Legacy'];
 		throw err;
@@ -273,7 +279,7 @@ export const getKV = (key, val) => {
 	});
 	return promise;
 };
-export const setKV = (key, value) => value === undefined ? u_deleteKV(key) : u_setKV([key, value]).then(() => EVENT_BUS.post(['kv', key], value));
+export const setKV = (key, value) => value === undefined ? u_deleteKV(key) : u_setKV([key, value]);
 
 // values这个接口主要是给备份(导出)用的
 export const kvListGetValues = batched("kvs/values", true);
@@ -314,10 +320,6 @@ const u_deleteKVList = batched("kvs/delete");
 /** @type {Map<string, AiChat.IDBKVList & Object>} */
 const kvsCache = new LRUCache(100);
 
-EVENT_BUS.on(['kvs'], (name, path) => {
-	kvsCache.delete(path[1]+':'+name);
-});
-
 /**
  * @param {string} type
  * @param {string} name
@@ -339,7 +341,6 @@ export const kvListGet = async (type, name) => {
 			delete val.type;
 			val[DIFF_SNAPSHOT] = structuredClone(val);
 			kvsCache.set(cacheKey, val);
-			EVENT_BUS.post(['kvsGot', type, name], val);
 		}
 	}
 	return val;
@@ -396,7 +397,7 @@ export const kvListSet = async (value, type, name) => {
 		});
 };
 
-export const kvListDel = (type, name) => u_deleteKVList([type, name]).then(() => EVENT_BUS.post(['kvs', type, 'del'], name));
+export const kvListDel = (type, name) => u_deleteKVList([type, name]);
 
 export const appendBillingLog = batched("log/insert");
 export const getBillingLog = batched("log");
@@ -465,7 +466,7 @@ export const uploadBlob = async blob => {
 
 	const hash = await blobHash(blob);
 	if (blob.hash === hash) return hash;
-	blob.hash = hash;
+	Object.defineProperty(blob, 'hash', { value: hash, });
 
 	try {
 		await u_getBlobInfo(hash);

@@ -6,12 +6,11 @@ import {
 	registerToolset,
 	toolScriptRegistry,
 } from "/src/toolset.js";
-import {getMessages, kvListGet, markCombinedPresetDirty, markMessageDirty, updateConversation} from "/src/database.js";
+import {getMessages, markMessageDirty, updateConversation} from "/src/database.js";
 import {agentLoop} from "/src/api-request.js";
 import {$asyncState, $cleanup, $state, $update, $watch, debugSymbol, unconscious} from "unconscious";
 import {
 	config,
-	conversations,
 	EVENT_BUS,
 	findConversation,
 	LOCKED,
@@ -30,10 +29,12 @@ import {injectMessages} from "/src/inject-message.js";
 import {SETTINGS} from "/src/settings.js";
 import {createAsyncQueue} from "/common/pure-utils.js";
 import schema from "./subagent_schema.json";
+import {markCombinedPresetDirty} from "../../src/presets.js";
 
 compileSchema(schema);
 
 const readFile = fileAccess("read");
+const statFile = fileAccess("stat");
 const glob = fileAccess("list");
 const appendFile = fileAccess("append");
 
@@ -169,15 +170,19 @@ async function createSubagent(par, response, conv, tools) {
 			noTruncate: true
 		}, response, conv));
 
-		let { tools: tools1, model = 'inherit', maxToolTurns, maxTurns, redirect, mounts, skills, background, mcpServers, kind = 'basic' } = info;
+		let {
+			tools: tools1, model = 'inherit',
+			maxToolTurns, maxTurns,
+			redirect, mounts, skills,
+			background, mcpServers,
+			kind = 'basic',
+			acl, ignore
+		} = info;
 
 		const error = validateAndShowError(info, schema.$defs.AgentDefinition);
 		if (error) throw "Agent definition format error:\n"+error;
 
-		if (model !== 'inherit') {
-			const preset = await kvListGet("preset", model);
-			Object.assign(agent.overrides, preset);
-		}
+		if (model !== 'inherit') agent.presets = model;
 
 		if (mounts) {
 			const {'/': root, '...': rest, ...m} = mounts;
@@ -190,6 +195,9 @@ async function createSubagent(par, response, conv, tools) {
 
 			if (!rest) hasFileSystem = true;
 		}
+
+		if (acl) (agent.fs_ACL ??= {}).acl = acl;
+		if (ignore) (agent.fs_ACL ??= {}).ignore = ignore;
 
 		// Array
 		if (mcpServers) {
@@ -282,6 +290,12 @@ async function createSubagent(par, response, conv, tools) {
 		systemPrompt += "\n\n"+includes;
 	}
 
+	const fsACL = agent.fs_ACL;
+	if (fsACL) {
+		if (fsACL.acl) await statFile({ path: fsACL.acl }, response, agent);
+		if (fsACL.ignore) await statFile({ path: fsACL.ignore }, response, agent);
+	}
+
 	// 有些太耦合了。不过都是内置插件，大概也无所谓，但是以后肯定要改
 	const modules1 = agent.activatedModules;
 	const exist = modules1.has("Files");
@@ -292,7 +306,7 @@ async function createSubagent(par, response, conv, tools) {
 	agent.tools.clear();
 	for (let t of tools) {
 		if (!toolScriptRegistry[t = t.trim()])
-			throw "Tool "+t+" not found";
+			throw "Tool "+JSON.stringify(t)+" not found";
 		agent.tools.add(t);
 	}
 
@@ -302,7 +316,6 @@ async function createSubagent(par, response, conv, tools) {
 
 	await updateConversation(agent, messages);
 
-	conversations.unshift(agent);
 	response.agentId = agent.id;
 	response.time = Date.now();
 	return response[CONVERSATION_CACHE] = agent;
@@ -806,6 +819,8 @@ registerToolset(
 	{
 		default: true,
 		async systemPrompt(conv) {
+			if (!conv.activatedModules.has("Files")) return;
+
 			const agentList = (await initAgentCache(conv)).prompt;
 			return agentList;
 			//return (agentList?agentList+'\n':'')+`<agent-id>${conv.id}</agent-id>`;

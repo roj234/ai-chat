@@ -1,7 +1,7 @@
 import {ContentPart, prefixTitle} from "/src/toolset.js";
 import {fileAccess} from "./Mounts.js";
-import {getCombinedPreset} from "/src/database.js";
 import {compressImage} from "/common/imate.js";
+import {getCombinedPreset} from "../../src/presets.js";
 
 const readImage = fileAccess("readRaw");
 

@@ -13,7 +13,7 @@ import {
 	updateConversationUI,
 	updateMessageUI
 } from "../states.js";
-import {decodeObjects, serializeJSON} from "../utils/marshal.js";
+import {decodeObjects, serializeJSON} from "../utils/serialization.js";
 import {showToast} from "../components/Toast.js";
 import {$computed, $state, $update, ONCE_EVENT, unconscious} from "unconscious";
 import {DI, DID_RMI, DID_SYNC_LOCK, DID_SYNC_UNLOCK, DID_TITLE_POSITION, onLoad} from "../hooks.js";
@@ -305,13 +305,7 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 			case SYNC_CONVERSATION_DEL: {
 				const convId = data.id;
 				const index = conversations.findIndex(item => item.id === convId);
-				let conv, removed, lastTime, lastLeaf, lastTitle;
-				if (index >= 0) {
-					conv = conversations[index];
-					lastLeaf = conv.bm_leaf;
-					lastTime = conv.time;
-					lastTitle = conv.title;
-				}
+				let conv = conversations[index], moved;
 
 				try {
 					conv = patch(conv, data);
@@ -322,17 +316,21 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 					}
 					// 有可能失败，因为不一定所有的客户端都拿到了完整的对话对象，可能只有list时的 id time title 三项
 				}
+				const diff = data.$ === '=' ? data.v : data;
 
 				// 如果时间没变化，就不插到开头（例如只修改标题）
-				if (lastTime !== conv.time || type === SYNC_CONVERSATION_DEL) {
+				if (diff.time != null || type === SYNC_CONVERSATION_DEL) {
 					if (index >= 0) conversations.splice(index, 1);
-					removed = true;
+					moved = true;
 				}
 
 				const isCurrent = convId === selectedConversation.id;
 				if (type === SYNC_CONVERSATION) {
-					if (removed) conversations.unshift(conv);
-					else $update(updateConversationListUI);
+					if (moved) conversations.unshift(conv);
+					else {
+						$update(updateConversationListUI);
+						if (diff.meta != null) $update(conversations);
+					}
 
 					$update(updateConversationUI);
 
@@ -342,15 +340,14 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 						conv[DIFF_SNAPSHOT] = structuredClone(conv);
 					}
 
-					if (lastTitle !== conv.title)
-						setConversationTitle(conv, conv.title, true);
+					if (diff.title != null) setConversationTitle(conv, conv.title, true);
 
 					const msgs = conv[MESSAGES_CACHE];
 					if (msgs) {
 						if (conv.bm_leaf != null && !conv[BRANCH_MANAGER]) {
 							const newMsgs = enableBranches(conv, msgs);
 							if (unconscious(messages) === msgs) messages.value = newMsgs;
-						} else if (isCurrent && lastLeaf !== conv.bm_leaf) {
+						} else if (isCurrent && diff.bm_leaf != null) {
 							const bm = conv[BRANCH_MANAGER];
 							bm.setLeaf(msgs[conv.bm_leaf] || msgs.at(-1), true);
 							messages.value = bm.getMessages();
@@ -393,7 +390,7 @@ const readerCount = new Map;
 /** @type {Map<number, number>} */
 const locks = new Map;
 const lock = (id) => {
-	if (id == null) return;
+	if (typeof id !== 'number') return;
 	let lockCount = (locks.get(id) || 0);
 	if (!lockCount) sendToSyncServer(SYNC_LOCKED, id);
 	locks.set(id, lockCount + 1);

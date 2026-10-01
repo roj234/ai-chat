@@ -1,4 +1,4 @@
-import {isMobile, selectedConversation} from "../states.js";
+import {auxSmallScreen, selectedConversation} from "../states.js";
 import {$state, unconscious} from "unconscious";
 import {setConversationTitle} from "./ConversationList.jsx";
 
@@ -19,7 +19,7 @@ export function TitleEditor() {
 	};
 
 	let editBtn;
-	if (isMobile) {
+	if (auxSmallScreen) {
 		editBtn = <button className={"ri-pencil-line btn ghost"} title={"编辑"} style={"font-size:smaller;color:var(--muted)"} onClick={handler}></button>;
 	} else {
 		title.addEventListener("click", handler);

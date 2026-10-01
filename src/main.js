@@ -12,14 +12,22 @@ import {
 import {jsHide, prettyError, requestIdleCallback} from "./utils/utils.js";
 import {ConversationList} from "./components/ConversationList.jsx";
 import {SETTINGS} from "./settings.js";
-import {databaseError, fetchMessages, initialize, isIDB, listConversations, updateConversation} from "./database.js";
+import {
+	databaseError,
+	fetchMessages,
+	getMessages,
+	initialize,
+	isIDB,
+	listConversations,
+	updateConversation
+} from "./database.js";
 import {
 	abortCompletion,
+	auxSmallScreen,
 	config,
 	CONFIG_VERSION,
 	conversations,
 	EVENT_BUS,
-	isMobile,
 	lastScrollDirectionIsUp,
 	LOCKED,
 	messages,
@@ -41,7 +49,7 @@ import {onPluginLoaded} from "/plugins/PluginRegistry.js";
 import {DI, DID_TITLE_POSITION, injectCommonDI} from "./hooks.js";
 import {checkUpdate} from "../common/updater.js";
 import {setAllowHTMLTags} from "./markdown/markdown.js";
-import {sseFetch} from "../common/openai-api-utils.js";
+import {sseFetch} from "../common/fetch-utils.js";
 
 const $ = sel => document.getElementById(sel);
 
@@ -98,7 +106,7 @@ const createApp = () => {
 				<button className="ri-add-line btn ghost" title="开启新对话" onClick={resetConversation}></button>
 			</div>
 		</header>
-		<aside ref={sidebar} className="sidebar hide" style={isMobile ? "display:none;left:-100%":undefined}>
+		<aside ref={sidebar} className="sidebar hide" style={auxSmallScreen ? "display:none;left:-100%":undefined}>
 			<div className="sidebar-header row">
 				<button className="btn secondary" style="flex: 1" onClick={resetConversation}><i
 					className="ri-add-line"></i>开启新对话
@@ -113,7 +121,7 @@ const createApp = () => {
 				<button className="ri-wrench-line btn ghost" title="设置" onClick={() => settings.show()}></button>
 			</div>
 			<div className={"bg"} onClick={toggleSidebar}></div>
-			{!isMobile && <div ref={resizeHandle} className={"resize ew"} style={"right:0"}></div>}
+			{!auxSmallScreen && <div ref={resizeHandle} className={"resize ew"} style={"right:0"}></div>}
 		</aside>
 		<div ref={scroller} className="chat scroll"
 			 onWheel.noPassive={e => {
@@ -134,7 +142,7 @@ const createApp = () => {
 		</div>
 	</>);
 
-	if (!isMobile) {
+	if (!auxSmallScreen) {
 		$watch($computed(() => config.sidebarWidth), () => {
 			sidebar.style.width = config.sidebarWidth+"px";
 		});
@@ -281,7 +289,7 @@ const createApp = () => {
 						return
 					}
 
-					hookGetMessages(fetchMessages(conv)).then(data => {
+					hookGetMessages(conv.temporary ? getMessages(conv) : fetchMessages(conv)).then(data => {
 						conv.ready = true;
 
 						if (unconscious(selectedConversation) === conv) {
@@ -316,7 +324,7 @@ const createApp = () => {
 					prevId = null;
 				}
 
-				if (isMobile && !sidebar.style.display) toggleSidebar();
+				if (auxSmallScreen && !sidebar.style.display) toggleSidebar();
 			}, false);
 
 			if (!isIDB) {
@@ -491,8 +499,8 @@ if (import.meta.env.DEV) {
 		location.pathname = "/";
 }
 
-addEventListener("keypress", e => {
+addEventListener("keydown", e => {
 	const btn = e.target;
-	if (e.key === "Enter" && btn.matches("[tabindex]"))
+	if (e.key === "Enter" && btn.matches("[tabindex=\"0\"]"))
 		btn.click();
 });

@@ -8,7 +8,7 @@ import {
 	updateMessageUI
 } from "/src/states.js";
 import {$unwatch, $update, $watch, unconscious} from "unconscious";
-import {decodeObjects, encodeObjects} from "/src/utils/marshal.js";
+import {decodeObjects, encodeObjects} from "/src/utils/serialization.js";
 import {getMessages, markMessageDirty, updateConversation} from "/src/database.js";
 import {enableBranches} from "/src/utils/BranchManager.js";
 import {DI_settings, onLoad} from "/src/hooks.js";

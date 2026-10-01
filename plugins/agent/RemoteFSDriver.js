@@ -1,4 +1,4 @@
-import {jsonFetch} from "/common/openai-api-utils.js";
+import {jsonFetch} from "/common/fetch-utils.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {prettyError} from "/src/utils/utils.js";
 import {kvListSet} from "/src/database.js";

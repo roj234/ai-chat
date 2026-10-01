@@ -7,7 +7,7 @@ import {renderMarkdownToElement} from "/src/markdown/markdown.js";
 
 import "./ToolManager.css";
 import "../rp_basic/PresetPanel.css";
-import {ensureActiveConversation, selectedConversation} from "/src/states.js";
+import {ensureConversation, selectedConversation} from "/src/states.js";
 import {CUSTOM_CONTROLS} from "/src/settings.js";
 import {onLoad} from "/src/hooks.js";
 import {showToast} from "/src/components/Toast.js";
@@ -60,7 +60,7 @@ function createList() {
 	const list = <ul onClick.delegate{"input[type=checkbox]"}={async ({delegateTarget}) => {
 		const key = delegateTarget.closest("li").dataset.name;
 
-		await ensureActiveConversation();
+		await ensureConversation();
 		const conv = unconscious(selectedConversation);
 		if (!conv.activatedModules) {
 			conv.tools = new Set;
@@ -77,6 +77,22 @@ function createList() {
 			if (!state) {
 				await Use.script({modules}, {}, conv);
 			} else {
+				const mods = new Set(conv.activatedModules);
+				while (true) {
+					let changed = false;
+					for (const item of mods) {
+						for (const key of modules) {
+							if (toolset[item].depend?.includes(key)) {
+								changed = true;
+								mods.delete(item);
+								modules.push(item);
+							}
+						}
+					}
+
+					if (!changed) break;
+				}
+
 				Use.undo({modules}, conv);
 			}
 		} catch (e) {
@@ -229,7 +245,7 @@ async function addMCPServerDialog() {
 
 CUSTOM_CONTROLS.find(el => el.matches(".ri-robot-2-line")).addEventListener("click", async (e) => {
 	e.preventDefault();
-	await ensureActiveConversation();
+	await ensureConversation();
 
 	const conv = unconscious(selectedConversation);
 	const open = getWindow("skillManager");

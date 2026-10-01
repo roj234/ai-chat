@@ -115,13 +115,6 @@ export function createTextFileEditHelper(fs) {
 		const firstBody = first.slice(baseIndent.length);
 		if (!firstBody) return { matches: [], reason: 'the first search line contains only whitespace' };
 
-		// Blank lines carry no meaningful indentation. Every other line must be
-		// at least as deeply indented as the first so rebasing cannot change the
-		// relative structure by removing non-whitespace characters.
-		if (searchLines.some(line => line.trim() && leadingWhitespace(line).length < baseIndent.length)) {
-			return { matches: [], reason: 'a later search line is less indented than the first line' };
-		}
-
 		const firstCandidates = [];
 		for (let i = 0; i < lines.length; i++) {
 			if (lines[i].trimStart() === firstBody) firstCandidates.push(i);
@@ -132,7 +125,11 @@ export function createTextFileEditHelper(fs) {
 			const targetIndent = leadingWhitespace(lines[index]);
 			const rebase = sourceLines => sourceLines.map(line => {
 				if (!line.trim()) return line;
-				return targetIndent + line.slice(Math.min(baseIndent.length, leadingWhitespace(line).length));
+				const indent = leadingWhitespace(line);
+				const body = line.slice(indent.length);
+				const delta = indent.length - baseIndent.length;
+				if (delta >= 0) return targetIndent + indent.slice(baseIndent.length) + body;
+				return targetIndent.slice(0, Math.max(0, targetIndent.length + delta)) + body;
 			});
 			const rebasedSearch = rebase(searchLines);
 			let matched = index + rebasedSearch.length <= lines.length;
@@ -211,18 +208,18 @@ export function createTextFileEditHelper(fs) {
 		let errors = [];
 
 		for (let i = 0; i < changes.length; i++) {
-			const {search, replace} = changes[i];
-			if (search === replace) continue;
-			if (!search) {
+			const {oldText, newText} = changes[i];
+			if (oldText === newText) continue;
+			if (!oldText) {
 				errors.push(`Hunk #${i + 1} is invalid: search is empty.`);
 				continue;
 			}
 
-			let searchLines = search.split('\n');
-			let replaceLines = replace.split('\n');
+			let oldLines = oldText.split('\n');
+			let newLines = newText.split('\n');
 
-			const n = searchLines.length;
-			let matches = findLineBlockMatches(lines, searchLines);
+			const n = oldLines.length;
+			let matches = findLineBlockMatches(lines, oldLines);
 			if (matches.length > 1) {
 				errors.push(`Hunk #${i + 1} is ambiguous: ${matches.length} matches were found at line(s) ${formatLineRanges(matches, n)}.
 Add more unchanged context around this hunk so it identifies one location.`);
@@ -231,15 +228,15 @@ Add more unchanged context around this hunk so it identifies one location.`);
 
 			let reindent;
 			if (!matches.length) {
-				reindent = findReindentedMatches(lines, searchLines, replaceLines);
+				reindent = findReindentedMatches(lines, oldLines, newLines);
 				matches = reindent.matches.map(match => match.index);
 				if (reindent.matches.length === 1) {
-					searchLines = reindent.matches[0].searchLines;
-					replaceLines = reindent.matches[0].replaceLines;
+					oldLines = reindent.matches[0].searchLines;
+					newLines = reindent.matches[0].replaceLines;
 				}
 			}
 			if (matches.length > 1) {
-				errors.push(`Hunk #${i + 1} is ambiguous: Exact search failed, and automatic reindent found ${reindent.firstCandidates.length} matches at line(s): ${formatLineRanges(reindent.firstCandidates, 1)}.
+				errors.push(`Hunk #${i + 1} is ambiguous: Exact search failed, and automatic reindent found ${matches.length} matches at line(s): ${formatLineRanges(matches, n)}.
 Add more unchanged context and/or correct indentation for this hunk so it identifies one location.`);
 				continue;
 			}
@@ -257,7 +254,7 @@ Add more unchanged context and/or correct indentation for this hunk so it identi
 				continue;
 			}
 
-			patches.push([ matches[0], matches[0] + n, replaceLines ]);
+			patches.push([ matches[0], matches[0] + n, newLines ]);
 		}
 
 		if (errors.length)
@@ -313,9 +310,9 @@ totalLines: ${newLines.length} (${delta >= 0 ? '+': ''}${delta})`;
 		return count;
 	};
 
-	const edit = async ({ path, search, replace, replaceAll, startLine, endLine }, ctx) => {
-		if (search === replace) throw ('"search" cannot equals to "replace"');
-		if (!search) throw '"search" is empty';
+	const edit = async ({ path, oldText, newText, replaceAll, startLine, endLine }, ctx) => {
+		if (oldText === newText) throw ('"oldText" cannot equals to "newText"');
+		if (!oldText) throw '"oldText" is empty';
 
 		const lines = await readLines(path, ctx);
 		const actualStart = (startLine ?? 1) - 1;
@@ -329,44 +326,44 @@ totalLines: ${newLines.length} (${delta >= 0 ? '+': ''}${delta})`;
 
 		let newContent;
 		if (replaceAll) {
-			let lastIdx = content.indexOf(search);
-			if (lastIdx < 0) throw (`"search" was not found in lines ${actualStart + 1}-${actualEnd}.`);
+			let lastIdx = content.indexOf(oldText);
+			if (lastIdx < 0) throw (`"oldText" was not found in lines ${actualStart + 1}-${actualEnd}.`);
 
 			const prefix = content.slice(0, lastIdx);
-			newContent = prefix + replace + content.slice(lastIdx + search.length).replaceAll(search, replace);
+			newContent = prefix + newText + content.slice(lastIdx + oldText.length).replaceAll(oldText, newText);
 			delta = countLines(newContent) - countLines(content);
 		} else {
 			let count = 0, lastIdx = -1, idx = -1;
-			while ((idx = content.indexOf(search, idx + 1)) !== -1) {
+			while ((idx = content.indexOf(oldText, idx + 1)) !== -1) {
 				count++;
 				lastIdx = idx;
 			}
 			if (count > 1) {
-				const matchLines = findStringMatchLines(content, search, actualStart);
-				throw (`Found ${count} occurrences of the search string at line(s) ${formatLineRanges(matchLines, countLines(search))}.
-The search must identify one location; add distinguishing surrounding lines or narrow startLine/endLine.
+				const matchLines = findStringMatchLines(content, oldText, actualStart);
+				throw (`Found ${count} occurrences of the search string at line(s) ${formatLineRanges(matchLines, countLines(oldText))}.
+The oldText must identify one location; add distinguishing surrounding lines or narrow startLine/endLine.
 No changes were written.`);
 			}
 
-			let effectiveSearch = search;
-			let effectiveReplace = replace;
+			let effectiveSearch = oldText;
+			let effectiveReplace = newText;
 			if (count === 0) {
 				const wholeFile = lines.join('\n');
-				if (wholeFile.indexOf(search) >= 0) {
-					const matchLines = findStringMatchLines(wholeFile, search);
+				if (wholeFile.indexOf(oldText) >= 0) {
+					const matchLines = findStringMatchLines(wholeFile, oldText);
 					if (matchLines.length > 1) {
-						throw (`"search" exists outside the requested lines ${actualStart + 1}-${actualEnd}, at line(s) ${formatLineRanges(matchLines, countLines(search))}.
+						throw (`"oldText" exists outside the requested lines ${actualStart + 1}-${actualEnd}, at line(s) ${formatLineRanges(matchLines, countLines(oldText))}.
 Adjust startLine/endLine or omit them.
 No changes were written.`);
 					}
-					return edit({ path, search, replace }, ctx);
+					return edit({ path, search: oldText, replace: newText }, ctx);
 				}
 
-				const reindent = findReindentedMatches(slice, search.split('\n'), replace.split('\n'));
+				const reindent = findReindentedMatches(slice, oldText.split('\n'), newText.split('\n'));
 				if (reindent.matches.length > 1) {
 					const positions = reindent.matches.map(match => match.index + actualStart);
-					throw (`Exact search failed, and automatic reindent found ${positions.length} matches at line(s) ${formatLineRanges(positions, countLines(search))}.
-Add more unchanged context and/or correct indentation for "search" so it identifies one location.
+					throw (`Exact search failed, and automatic reindent found ${positions.length} matches at line(s) ${formatLineRanges(positions, countLines(oldText))}.
+Add more unchanged context and/or correct indentation for "oldText" so it identifies one location.
 No changes were written.`);
 				}
 				if (!reindent.matches.length) {
@@ -378,7 +375,7 @@ No changes were written.`);
 						info += `\nIndentation-insensitive candidate(s): ${formatLineRanges(reindent.firstCandidates, 1)}.`;
 					}
 
-					throw `"search" was not found in lines ${actualStart + 1}-${actualEnd}.${info}
+					throw `"oldText" was not found in lines ${actualStart + 1}-${actualEnd}.${info}
 No changes were written.`;
 				}
 
@@ -428,7 +425,7 @@ totalLines: ${lines.length + delta} (${delta >= 0 ? '+': ''}${delta})`;
 
 			let cached = cache.get(absPath);
 			// TODO 搞一个 Diff 工具返回本地文件系统和缓存的差异，这样fsync也可以用上了
-			if (cached && cached.mtime < mtime - 150) throw "File modified externally, Read it.";
+			if (overwrite !== 'force' && cached && cached.mtime < mtime - 150) throw "File modified externally, Read it.";
 		}
 		await fs.write(absPath, content, ctx, 1);
 

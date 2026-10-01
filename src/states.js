@@ -5,44 +5,20 @@ export const PAGE_TITLE = document.title;
 
 export const EVENT_BUS = new EventBus();
 
-const createMediaState = (query) => {
-	const state = $state();
+const createMediaState = (query, change) => {
 	const mediaQuery = matchMedia(query);
-	const cb = () => {
-		state.value = mediaQuery.matches;
-	};
+	const cb = () => change(mediaQuery.matches);
 	mediaQuery.onchange = cb;
 	cb();
-	return state;
 };
 
 /**
  * @type {boolean}
  */
-export let isMobile = IS_ANDROID_BUILD;
-
-if (!IS_ANDROID_BUILD) {
-	const isMobileQuery = matchMedia('(max-width: 768px)');
-	const cb = () => {
-		isMobile = isMobileQuery.matches;
-	};
-	isMobileQuery.onchange = cb;
-	cb();
-}
-
-/**
- * @type {boolean}
- */
-export let noPointer;
-
-{
-	const noPointerQuery = matchMedia('(any-pointer: none)');
-	const cb = () => {
-		noPointer = noPointerQuery.matches;
-	};
-	noPointerQuery.onchange = cb;
-	cb();
-}
+export let auxSmallScreen = IS_ANDROID_BUILD, auxMainlyTouch, auxKeyboardOnly;
+if (!IS_ANDROID_BUILD) createMediaState('(max-width: 768px)', (v) => auxSmallScreen = v);
+createMediaState('(pointer: coarse)', (v) => auxMainlyTouch = v);
+createMediaState('(any-pointer: none)', (v) => auxKeyboardOnly = v);
 
 /**
  *
@@ -139,7 +115,7 @@ export const resetConversation = () => {
 	messages.value = [];
 };
 
-export const ensureActiveConversation = async () => {
+export const ensureConversation = async () => {
 	if (null == unconscious(selectedConversation)) {
 		// 创建新对话
 		const conv = {
@@ -148,10 +124,12 @@ export const ensureActiveConversation = async () => {
 			ready: true
 		};
 
-		if (config.incognito) conv.id = -1;
-		//else await updateConversation(conv, unconscious(messages), true);
+		if (config.temporaryChat) {
+			conv.id = "temporary-"+Date.now();
+			conv.title = "临时对话";
+			conv.temporary = true;
+		}
 
-		conversations.unshift(conv);
 		selectedConversation.value = conv;
 	}
 };

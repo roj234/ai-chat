@@ -1,10 +1,10 @@
 import {DI_settings, onLoad} from "./hooks.js";
 import {kvListDel, kvListGet, kvListGetKeys, kvListSet} from "./database.js";
-import {$asyncState, $computed, $state, $update, unconscious} from "unconscious";
+import {$asyncState, $computed, $state, $update, debugSymbol, unconscious} from "unconscious";
 import {cloneNamed, prettyError, resolveDBRelativeURL} from "./utils/utils.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
-import {jsonFetch} from "../common/openai-api-utils.js";
-import {config, CONFIG_VERSION, LOCKED} from "./states.js";
+import {jsonFetch} from "../common/fetch-utils.js";
+import {config, CONFIG_VERSION, EVENT_BUS, LOCKED} from "./states.js";
 import {showToast} from "./components/Toast.js";
 import {throttledPromiseLast} from "../common/pure-utils.js";
 import {Dropdown} from "./components/Dropdown.jsx";
@@ -56,12 +56,7 @@ export const updateModels = force => {
 	return models;
 };
 
-/**
- *
- * @param {string} name
- * @return {Promise<void>}
- */
-const setPreset = async name => {
+async function applyPreset(name, target) {
 	const isPrompt = name[0] === ':';
 	const isModel = name.indexOf('/');
 	let p = [
@@ -72,17 +67,24 @@ const setPreset = async name => {
 	let data = (await Promise.all(p)).reduce(Object.assign);
 	data.name = data.meta;
 
-	const set = unconscious(config);
-
 	for (const category of isPrompt ? ["prompt"] : isModel > 0 ? ["model", "sampling", "provider"] : ["provider"]) {
 		const catData = presetCategories[category];
 		const keys = catData.keys;
 		for (let i = 0; i < keys.length; i++) {
 			const key = keys[i];
-			set[key] = data[key] ?? catData.values[i].default;
+			target[key] = data[key] ?? catData.values[i].default;
 		}
 	}
+}
 
+/**
+ *
+ * @param {string} name
+ * @return {Promise<void>}
+ */
+const setPreset = async name => {
+	const set = unconscious(config);
+	await applyPreset(name, set);
 	delete config._dirty;
 	DI_settings.sync();
 	$update(config);
@@ -173,9 +175,46 @@ export function PromptDropdown() {
 
 					const cfg = cloneNamed(config, presetCategories["prompt"].keys);
 
-					config[CONFIG_VERSION] = (config[CONFIG_VERSION] || 0) + 1;
 					kvListSet(cfg, PRESET_KVS_ID, ":" + value);
 				}
 			});
 	}}/>;
+}
+
+const MERGED_CONFIG = debugSymbol("MergedConfig");
+
+EVENT_BUS.on(['kvs', PRESET_KVS_ID, 'set'], () => {
+	config[CONFIG_VERSION] = (config[CONFIG_VERSION] || 0) + 1;
+});
+
+/**
+ *
+ * @param {AiChat.Conversation} conv
+ * @return {Promise<AiChat.LocalPreset>}
+ */
+export const getCombinedPreset = async (conv) => {
+	const globalPreset = unconscious(config);
+	const presets = conv.presets;
+	const overrides = conv.overrides;
+	if (!overrides && !presets) return globalPreset;
+
+	let combined = conv[MERGED_CONFIG];
+	if (!combined || combined[CONFIG_VERSION] !== globalPreset[CONFIG_VERSION]) {
+		combined = conv[MERGED_CONFIG] = {...globalPreset};
+		if (presets) {
+			if (Array.isArray(presets)) {
+				for (const preset of presets) {
+					await applyPreset(preset, combined);
+				}
+			} else {
+				await applyPreset(presets, combined);
+			}
+		}
+		if (overrides) Object.assign(combined, overrides);
+	}
+	return combined;
+}
+
+export const markCombinedPresetDirty = (conv) => {
+	delete conv[MERGED_CONFIG];
 }

@@ -1,6 +1,6 @@
 import {readAsString} from "/common/chardet.js";
 import {createTextFileEditHelper} from "/common/fs-common.js";
-import {ACL, FSE_NotFound, LIST, READ, throwDOMException, WRITE} from "/common/ACL.js";
+import {ACL, LIST, READ, WRITE} from "/common/ACL.js";
 import {formatSize} from "unconscious/common/Utils.js";
 import {AS_IS, UTF8_TEXT_ENCODER} from "unconscious";
 import {
@@ -16,7 +16,7 @@ import {
 import {createOverlayFileSystem, OVERLAYFS_INTERNAL} from "./OverlayFileSystem.js";
 import {compileGlobPattern, emptyAsyncGenerator, generateGlobCode, parseGlobPattern} from "/common/fs-glob.js";
 // noinspection ES6UnusedImports
-import {mpscScheduler} from "/common/pure-utils.js";
+import {FSE_NotFound, mpscScheduler, throwDOMException} from "/common/pure-utils.js";
 import {
 	VCS_BASE_BRANCH,
 	VCS_COMMIT,
@@ -256,7 +256,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 
 				if (handle.kind === 'file') {
 					const file = await handle.getFile();
-					if (file.lastModified > modSince) {
+					if (file.lastModified >= modSince) {
 						const item = [displayPath, "file", json ? file.size : formatSize(file.size)];
 						if (showModified || modSince) item.push(json ? file.lastModified : new Date(file.lastModified).toISOString().slice(0, -5)+'Z');
 						result.push(item);
@@ -299,12 +299,13 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 		async write(path, data, _ctx, _overwrite) {
 			const [ parent, name, handle ] = await myResolveHandle(path, WRITE | CREATE | REQUIRE_FILE);
 
-			if (handle) try {
+			// 这是一个 hack，浏览器处理几MB的文件时可能会报错无法写，所以先删再写。至于为什么不无条件删除，hmm，为了沙箱恢复方便
+			if (handle && (await handle.getFile()).size > 1048576) try {
 				await parent.removeEntry(name);
 			} catch (e) {
 				if (e.name === FILE_TOO_BIG) throw "Failed to write file, it might locked by user.";
 				if (e.name === "NoModificationAllowedError") throwDOMException("Write file in parallel", "ConcurrentModificationError");
-				throw e;
+				if (e.name !== 'NotSupportedError') throw e;
 			}
 
 			const fileHandle = await parent.getFileHandle(name, CREATE_OPT);
@@ -396,7 +397,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			}
 
 			if (mode === VCS_SWITCH) {
-				if (/[\x00-\x1F\x7F|<>"*?:\\/]/.test(path)) throw new Error("Illegal character in branch name");
+				if (/[\x00-\x1F\x7F|<>"*?:\\/]/.test(path)) throwDOMException("Illegal character in branch name", "SyntaxError");
 
 				await disableOverlay();
 
@@ -473,7 +474,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 				if (mode === VCS_COMMIT) {
 					let targetFS;
 					if (target && target !== VCS_BASE_BRANCH) {
-						if (target === branch) throw "Commit 目标不能是当前暂存区.";
+						if (target === branch) throwDOMException("提交目标不能是当前暂存区", "InvalidModificationError");
 						targetFS = await createOverlayFileSystem(await realHandle.getDirectoryHandle(OVERLAYFS_INTERNAL+target), realHandle);
 					}
 					const changed = await rootHandle.commit({ clean: true, path, lower: targetFS });

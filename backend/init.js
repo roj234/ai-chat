@@ -10,7 +10,7 @@ import {registerDatabaseRoutes} from "./routes/database.js";
 import {registerFsRoutes} from "./routes/agent.js";
 import {BLOB_HASH_REGEX, registerBlobRoutes} from "./routes/blob-storage.js";
 import {registerVectorDBRoutes} from "./routes/vectordb.js";
-import {proxyHandler, registerSSEProxyRoutes} from "./routes/sse-proxy.js";
+import {proxyHandler, registerSSEProxyRoutes} from "./routes/api-proxy-openai.js";
 
 import {
 	ALLOW_USER_NAMES,

@@ -5,7 +5,7 @@ import {downloadFile, prettyError} from "./utils/utils.js";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {ZipReader, ZipWriter} from "unconscious/common/zip-io.js";
 import {$computed, $state, $update, unconscious} from "unconscious";
-import {decodeObjects, serializeJSON} from "./utils/marshal.js";
+import {decodeObjects, serializeJSON} from "./utils/serialization.js";
 import {PRIVATE_CONFIG_KEY, SETTINGS} from "./settings.js";
 import {DI_settings} from "./hooks.js";
 import {createJsonParser} from "unconscious/common/Json.js";
@@ -75,8 +75,6 @@ const loadBackupZip = async file => {
 			return;
 		}
 	}
-
-	config.incognito = 0;
 
 	const kvList = await zipFile.getText("kvList.json");
 	if (kvList) {
@@ -332,7 +330,7 @@ SETTINGS.push(
 		name: "导入对话、预设、备份及更多格式",
 		element: <div className={"choice-scroll"}>
 			<label className="btn ghost" tabIndex={0} role={"button"}>导入
-				<input type="file" accept="application/zip,application/json,image/png,image/jpeg" style="display:none;" multiple onChange={importConversation}/>
+				<input type="file" accept=".zip,.json,.jsonl,image/png,image/jpeg" style="display:none;" multiple onChange={importConversation}/>
 			</label>
 		</div>
 	},

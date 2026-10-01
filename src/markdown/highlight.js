@@ -86,15 +86,18 @@ export const splitMultilineHTML = (rawHtml, openTagsStack = []) => {
 
 const getOrCreateVL = node => {
 	let vl = node._vl;
-	if (!vl) {
-		node._vl = vl = new VirtualList({
+	if (!vl?._wrapper) {
+		vl = node._vl = new VirtualList({
 			overscan: 50,
 			itemHeight: null,
 			data: [{text: ""}],
 			renderer: (item, index) => <div className={'line'} dangerouslySetInnerHTML={item.text ?? item}/>,
 			keyFunc: (item) => item.text ?? item
 		});
-		$cleanup(node, () => vl.destroy());
+		$cleanup(node, () => {
+			vl.destroy();
+			delete node._vl;
+		});
 	}
 	return vl;
 };
@@ -141,7 +144,9 @@ export const highlight = (code, language, node, is_finished) => {
 		}
 
 		let cache = node._cache;
-		if (!cache) {
+		if (!cache || !node._vl) {
+			if (!node.isConnected) return;
+
 			const virtualList = getOrCreateVL(node);
 			node._cache = cache = { work: <span/>, pos: 0 };
 			node.replaceChildren(virtualList.dom);

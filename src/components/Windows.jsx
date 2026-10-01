@@ -1,7 +1,7 @@
 import "./Windows.css";
 
 import {$computed, $foreach, $state, $update, $watchWithCleanup, appendChild} from 'unconscious';
-import {EVENT_BUS, isMobile} from "../states.js";
+import {auxSmallScreen, EVENT_BUS} from "../states.js";
 
 /**
  * @typedef {Object} WindowState
@@ -292,7 +292,7 @@ export const openWindow = ({
 	registerWindow(id, state);
 	EVENT_BUS.post(['openWindow', id], state);
 	focusWindow(state);
-	if (isMobile) handleMaximize();
+	if (auxSmallScreen) handleMaximize();
 	document.body.append(root);
 	return state;
 };

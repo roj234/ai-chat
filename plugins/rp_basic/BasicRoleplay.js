@@ -1,7 +1,7 @@
 import {
+	auxMainlyTouch,
 	config,
 	EVENT_BUS,
-	isMobile,
 	MessageRoles,
 	messages,
 	onConversationLoaded,
@@ -56,6 +56,9 @@ import {PROMISE_CATCH} from "/common/pure-utils.js";
 
 import {closeWindow, openWindow} from "/src/components/Windows.jsx";
 import {Icon_save} from "/src/components/Icons.jsx";
+
+import "./BasicRoleplay.css";
+import {HighlightBox} from "../../src/components/TextDiff.jsx";
 
 compileSchema(schema);
 
@@ -257,7 +260,7 @@ function createSchemaEditColumn(typeId, editorConstructor, defaultValue = {}) {
 			$watch(selectedItem, syncToEditor, false);
 			onClose(() => $unwatch(selectedItem, syncToEditor));
 		}}>
-		<span className={"tooltip"}>{isMobile ? "长按" : "右击"}编辑原始数据</span>
+		<span className={"tooltip"}>{auxMainlyTouch ? "长按" : "右击"}编辑原始数据</span>
 	</button>;
 
 	return [
@@ -361,10 +364,11 @@ charBar.prepend(
  * @return {Promise<void>}
  */
 export async function exportForCV_createConversation(char) {
-	await importConversationData({
+	const conv = {
 		title: "[Char] " + char.name,
 		time: Date.now(),
-	}, [
+	};
+	const messages = [
 		{
 			role: "st|char",
 			content: {
@@ -374,7 +378,19 @@ export async function exportForCV_createConversation(char) {
 				greeting: 0
 			}
 		}
-	]);
+	];
+
+	if (config.temporaryChat) {
+		conv.temporary = true;
+		conv.title += ' (临时)';
+	}
+
+	await loadRPConversation(conv, messages, true);
+	await importConversationData(conv, messages);
+
+	if (config.temporaryChat) {
+		conv.id = "temporary-"+conv.time;
+	}
 
 	showToast("已创建 " + char.name + " 的新对话", "ok");
 }
@@ -508,7 +524,7 @@ onLoad(() => {
 				greeting: 0
 			}
 		});
-		return loadCB(conv, messages);
+		return loadRPConversation(conv, messages);
 	});
 })
 
@@ -573,7 +589,7 @@ const FIRST_LOAD = debugSymbol("CharacterFirstLoad");
  * @param {AiChat.Message[]} messages
  * @param {boolean} [isLoadFromDB]
  */
-const loadCB = (conv, messages, isLoadFromDB) => {
+const loadRPConversation = (conv, messages, isLoadFromDB) => {
 	/** @type {AiChat.DnD.MyCharConversation} */
 	const charInstance = messages[0];
 	const isCharacterCard = charInstance?.role === "st|char";
@@ -627,12 +643,12 @@ const loadCB = (conv, messages, isLoadFromDB) => {
 	})
 };
 onConversationSwitchTo((conv, message) => {
-	return !conv[FIRST_LOAD] && loadCB(conv, message);
+	return !conv[FIRST_LOAD] && loadRPConversation(conv, message);
 });
 onConversationSwitchOut((conv) => {
 	delete conv[FIRST_LOAD];
 });
-onConversationLoaded((conv, path, messages) => loadCB(conv, messages, true));
+onConversationLoaded((conv, path, messages) => loadRPConversation(conv, messages, true));
 
 //region 数据导入
 /**
@@ -970,12 +986,12 @@ MessageRoles["st|char"] = {
 				const {name, pages} = lorebook;
 				chunks.push({
 					type: "html",
-					html: <details className={"think"}>
+					html: <details className="think">
 						<summary>
 							<span className="chevron ri-play-large-fill"></span>
 							世界书 ({name}) ({pages.length}项)
 						</summary>
-						<div className="think-content">
+						<div className="lorebooks">
 							{pages.map(_LorebookPage)}
 						</div>
 					</details>
@@ -1170,46 +1186,71 @@ const StoryConfigPanel = self => {
  */
 const _LorebookPage = item => {
 	let {name, enabled, comment, content, regex, constant, recursion, triggers, window, position, depth} = item;
-	const attributes = [];
-	if (!enabled) attributes.push("禁用");
-	if (constant) attributes.push("常驻");
-	if (recursion) attributes.push("递归");
-	if (regex) attributes.push("正则");
-	if (window === 0) attributes.push("永久激活");
-	if (position === "depth") position += "@"+depth;
+	const badges = [];
 
-	const el = <details onClick.once={() => {
+	if (position === "depth") badges.push("深度"+depth);
+	else badges.push(position === "worldInfoAfter" ? "角色定义后" : "角色定义前");
+
+	if (window === 0) badges.push("永久激活");
+	if (regex) badges.push("正则");
+
+	if (constant) badges.push("常驻");
+	else if (recursion) badges.push("递归");
+
+	if (!enabled) badges.push("禁用");
+
+	const el = <details className="lorebook" onToggle.once={() => {
+		const filename = analyze(content);
 		appendChildren(el, <>
-			<pre className="code-block">
-				<div className="code-header sticky">
-					<span>注释和元数据</span>
-					<span className="buttons">
-						<button className="ri-file-copy-line ghost" data-action="copy" title="复制代码"></button>
-					</span>
-				</div>
-				<code className={"hljs"}>
-					名称：{name}<br/>
-					属性：{attributes.join(" ")}<br/>
-					位置：{position}<br/>
-					{constant ? null : <>触发词：<ul style={"margin:0"}>{triggers.map(s => <li>{s}</li>)}</ul></>}
-					{comment}
-				</code>
-			</pre>
-			<pre className="code-block">
-				<div className="code-header sticky">
-					<span>{name || "内容"}</span>
-					<span className="buttons">
-						<button className="ri-download-2-line ghost" data-action="download" title="下载代码"></button>
-						<button className="ri-file-copy-line ghost" data-action="copy" title="复制代码"></button>
-					</span>
-				</div>
-				<code className={"hljs"}>{content}</code>
-			</pre>
-		</>)
-		el.append();
+			<dl className="meta">
+				{comment && <>
+					<dt>注释</dt>
+					<dd>{comment}</dd>
+				</>}
+				{!constant && <>
+					<dt>触发词</dt>
+					<dd className="chips">{triggers.map(s => <span className="chip">{String(s)}</span>)}</dd>
+				</>}
+				<dt>格式</dt>
+				<dd>{filename} (启发式)</dd>
+			</dl>
+
+			<HighlightBox code={content} filename={filename}/>
+		</>);
 	}}>
-		<summary>{name || comment || `${triggers.map(JSON.stringify).join(" | ")}` || "无标题"}</summary>
+		<summary className="row">
+			<span className="title">{name || comment || triggers.map(JSON.stringify).join(" | ") || "无标题"}</span>
+			<span className="spacer" />
+			<span className="badges">{badges.map(b => <span>{b}</span>)}</span>
+		</summary>
 	</details>;
 	return el;
 };
+
+const XML_RE = /<(\/?)([A-Za-z_]{1,100}[\w.:-]*)((?:"[^"]*"|'[^']*'|[^"'>])*?)(\/?)>/gm;
+const YML_RE = /^-?\s*\S[^#:{}\[\]|>%@*]*: /gm;
+const MD_RE = /^(?:```|~~~)|^#{1,6}\s+\S|^>\s?|^\|.*\|$|^(?:-{3,}|\*{3,}|_{3,})\s*$|!?\[[^\]]*\]\([^)\s]*\)|\*\*[^*\n]+\*\*|__[^_\n]+__|`[^`\n]+`/gm;
+
+function score(text, re) {
+	re.lastIndex = 0;
+	let score = 0;
+	let m;
+	while ((m = re.exec(text)) !== null && score++ < 1000);
+	return score;
+}
+
+function analyze(text) {
+	const xml = score(text, XML_RE);
+	const yml = score(text, YML_RE);
+	const md = score(text, MD_RE);
+
+	let type = '.txt';
+	let best = 0;
+
+	if (xml >= 5 && xml > best) { type = '.xml'; best = xml; }
+	if (yml >= 5 && yml > best) { type = '.yml'; best = yml; }
+	if (md >= 0 && md > best) { type = '.md'; best = md; }
+
+	return type;
+}
 //endregion

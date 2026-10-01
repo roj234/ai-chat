@@ -1,4 +1,4 @@
-import {isMobile} from "../states.js";
+import {auxMainlyTouch} from "../states.js";
 
 /**
  * @type {AudioContext|Promise<void>|WakeLockSentinel}
@@ -9,7 +9,7 @@ let wakelock;
  * @param {boolean} active
  */
 export const setWakeLock = (active) => {
-	if (isMobile) {
+	if (auxMainlyTouch) {
 		if (!active === !wakelock) return;
 
 		if (active) {

@@ -84,13 +84,12 @@ export function createMarkdownRenderer(root, options = {}) {
 						options.noHighlight ? <pre /> :
 						(<pre className="code-block">
 							<div className={"sticky"} style={"top:var(--bar-height)"}>
-							<div className="code-header">
-								<span></span>
-								<span className="buttons">
-									<button className="ri-download-2-line ghost" data-action="save" title="下载代码"></button>
-									<button className="ri-file-copy-line ghost" data-action="copy" title="复制代码"></button>
-								</span>
-							</div>
+								<div className="code-header">
+									<span className="buttons">
+										<button className="ri-download-2-line ghost" data-action="save" title="下载代码"></button>
+										<button className="ri-file-copy-line ghost" data-action="copy" title="复制代码"></button>
+									</span>
+								</div>
 							</div>
 						</pre>)
 					);
@@ -220,14 +219,16 @@ export function createMarkdownRenderer(root, options = {}) {
 			const node = nodes.at(-1);
 
 			if (name === fastmd.LANG && !options.noHighlight) {
-				const owner = node.closest("pre.code-block");
 				let [language, filename] = value.split(":", 2);
 
-				const span = owner.querySelector("span");
+				const owner = node.previousElementSibling.querySelector(".code-header");
+				let span = owner.firstElementChild;
+				if (span.className) owner.prepend(span = <span />);
 				if (filename) span.dataset.name = filename;
 				span.innerText = filename || language;
+
 				value = language;
-				owner.setAttribute(name, value);
+				node.closest("pre.code-block").setAttribute(name, value);
 			}
 
 			if (!options.trusted) {
@@ -240,7 +241,7 @@ export function createMarkdownRenderer(root, options = {}) {
 					if (value.toLowerCase().startsWith("javascript:")) return;
 
 					if (value[0] !== '#') {
-						if (/^https?:\/\//i.test(name)) {
+						if (/^https?:\/\//i.test(value)) {
 							node.target = "_blank";
 							node.rel = "noopener noreferrer";
 						} else {

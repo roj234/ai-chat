@@ -2,6 +2,9 @@ import {getBlob, uploadBlob} from "../database.js";
 import {deepEntries} from "unconscious/common/json-schema-utils.js";
 import {showToast} from "../components/Toast.js";
 import {prettyError} from "./utils.js";
+import {SHA256} from "unconscious/common/SHA256.js";
+import {encodeRawMsg} from "unconscious/common/msgpack.js";
+import {base64Encode} from "unconscious/common/Base64.js";
 
 let uploadingHashes = 0;
 let closeToast;
@@ -138,4 +141,19 @@ export const serializeJSON = async (obj, space, zipWriter) => {
 	const mapping = new Map;
 	await encodeObjects(obj, mapping, zipWriter);
 	return JSON.stringify(obj, mapping.size ? (_, value) => mapping.get(value) ?? value : null, space);
+};
+
+/**
+ * @param {Object} obj
+ * @returns {Promise<string>}
+ */
+export const objectIdentityHash = async obj => {
+	const mapping = new Map;
+	await encodeObjects(obj, mapping);
+	const hasher = new SHA256();
+	encodeRawMsg(obj, (data) => hasher.update(data), {
+		sortKeys: true,
+		replacer: mapping.size ? (value) => mapping.get(value) ?? value : null
+	});
+	return base64Encode(new Uint8Array(hasher.digest()), true);
 };

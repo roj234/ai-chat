@@ -4,7 +4,7 @@ import {provider_presets} from "/media/provider_presets.js";
 import {DI_settings, onLoad} from "/src/hooks.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {jsonEval, jsonGet} from "unconscious/common/json-schema-utils.js";
-import {applyDelta, sseFetch} from "/common/openai-api-utils.js";
+import {applyDelta, sseFetch} from "/common/fetch-utils.js";
 import {highlightJsonLike} from "/src/markdown/highlight.js";
 import {AsyncButton} from "/src/components/AsyncButton.jsx";
 import {renderMarkdownToElement} from "/src/markdown/markdown.js";
