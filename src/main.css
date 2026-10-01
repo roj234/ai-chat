@@ -375,7 +375,9 @@ body._fileUI .hide-human {
             display: flex;
             justify-content: center;
             align-items: center;
-            font-size: 36px;
+            & > span {
+                font-size: 36px;
+            }
             padding-bottom: 24px;
         }
     }

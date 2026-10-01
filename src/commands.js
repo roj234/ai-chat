@@ -1,11 +1,12 @@
 import {showToast} from "./components/Toast.js";
 import {config, messages, resetConversation, selectedConversation} from "./states.js";
-import {kvListGet, markCombinedPresetDirty, updateConversation} from "./database.js";
+import {kvListGet, updateConversation} from "./database.js";
 import {$update, unconscious} from "unconscious";
 import {tokenize} from "unconscious/common/StringTokenizer.js";
 import {submitUserChatMessage} from "./api-request.js";
 import {setConversationTitle} from "./components/ConversationList.jsx";
 import SimpleModal from "./components/SimpleModal.jsx";
+import {markCombinedPresetDirty} from "./presets.js";
 
 /**
  * 指令处理器定义

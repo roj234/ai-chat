@@ -170,23 +170,30 @@ export const throttled = (fn, wait = 300) => {
  * @return {T}
  */
 export const throttledPromiseLast = (fn) => {
-	let p;
+	let inP, outP, rr, re;
 	let latestArgs;
 
 	const invoke = (argArray) => {
-		p = fn(...argArray).finally(() => {
+		inP = fn(...argArray).finally(() => {
 			if (latestArgs) {
-				invoke(latestArgs);
+				const n = latestArgs;
 				latestArgs = null;
+				return invoke(n);
 			} else {
-				p = null;
+				inP.then(rr, re);
+				rr = re = inP = outP = null;
 			}
 		})
 	};
 
 	return (...args) => {
-		if (!p) invoke(args);
+		if (!outP) {
+			outP = new Promise((resolve, reject) => { rr = resolve; re = reject; });
+			invoke(args);
+		}
 		else latestArgs = args;
+
+		return outP;
 	};
 };
 

@@ -2,8 +2,8 @@ import {CUSTOM_CONTROLS} from "/src/settings.js";
 import {$computed, $vforeach, unconscious} from "unconscious";
 import {config, selectedConversation} from "/src/states.js";
 import "./PresetFastSwitch.css";
-import {markCombinedPresetDirty, updateConversation} from "/src/database.js";
-import {loadPreset, presets} from "../src/presets.js";
+import {updateConversation} from "/src/database.js";
+import {loadPreset, markCombinedPresetDirty, presets} from "../src/presets.js";
 
 const getLockedPresetName = () => {
 	const p = selectedConversation.presets;

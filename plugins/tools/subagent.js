@@ -6,7 +6,7 @@ import {
 	registerToolset,
 	toolScriptRegistry,
 } from "/src/toolset.js";
-import {getMessages, kvListGet, markCombinedPresetDirty, markMessageDirty, updateConversation} from "/src/database.js";
+import {getMessages, kvListGet, markMessageDirty, updateConversation} from "/src/database.js";
 import {agentLoop} from "/src/api-request.js";
 import {$asyncState, $cleanup, $state, $update, $watch, debugSymbol, unconscious} from "unconscious";
 import {
@@ -30,6 +30,7 @@ import {injectMessages} from "/src/inject-message.js";
 import {SETTINGS} from "/src/settings.js";
 import {createAsyncQueue} from "/common/pure-utils.js";
 import schema from "./subagent_schema.json";
+import {markCombinedPresetDirty} from "../../src/presets.js";
 
 compileSchema(schema);
 

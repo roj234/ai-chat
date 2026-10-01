@@ -1,5 +1,6 @@
 
-.blob-manager {
+.blobManager {
+    & .text-input { border-radius: 0; }
     & table { width: 100%; border-collapse: collapse; }
     & th, & td { text-align: left; padding: 6px }
     & td {
@@ -44,7 +45,6 @@
         background: var(--bg);
         border: 1px solid var(--border);
     }
+
+    .pagination { display: flex; gap: 10px; align-items: center; justify-content: center; }
 }
-
-
-.pagination { display: flex; gap: 10px; align-items: center; justify-content: center; }

@@ -11,10 +11,10 @@ import {DI_settings, onLoad} from "/src/hooks.js";
 import {parseJson5} from "unconscious/common/Json.js";
 
 import {compressImage, limitMaxSide} from "/common/imate.js";
-import {getCombinedPreset} from "/src/database.js";
 import {fileAccess} from "../agent/index.js";
 import {TemplateFormatter} from "/common/template-formatter.js";
 import {normalizePath} from "unconscious/common/path-utils.js";
+import {getCombinedPreset} from "../../src/presets.js";
 
 /**
  * 将 ComfyUI 流程模板发送至服务器并获取生成的图像 Blob

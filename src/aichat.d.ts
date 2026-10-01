@@ -38,6 +38,8 @@ declare namespace AiChat {
         title: string,
         time: number,
 
+        temporary?: true,
+
         /** 消息是否从DB加载完成 */
         ready?: boolean,
 
@@ -249,7 +251,7 @@ declare namespace AiChat {
         blobCacheCapacity: number,
         subagentDepth: number,
 
-        incognito: boolean,
+        temporaryChat: boolean,
 
         nickname: string;
 

@@ -1,4 +1,4 @@
-import {$asyncState, $computed, $foreach, $state, $update, unconscious} from "unconscious";
+import {$asyncState, $computed, $foreach, $state, $update, $watch, unconscious} from "unconscious";
 import {config} from "/src/states.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {formatSize, prettyTime} from "unconscious/common/Utils.js";
@@ -19,10 +19,15 @@ let table;
 const blobs = $asyncState(async currentPage => {
 	const term = unconscious(searchTerm);
 	const result = await requestBackend(`blobs?page=${currentPage}&limit=${pageSize}${term ? `&term=${encodeURIComponent(term)}` : ''}`);
-	selectedItems.value = 0;
 	total.value = result.total;
 	return result.data;
 }, currentPage);
+
+$watch(blobs, () => {
+	queueMicrotask(() => {
+		selectedItems.value = [...table.querySelectorAll('.row-check:checked')].length;
+	});
+}, false);
 
 const deleteItem = hash => {
 	SimpleModal({
@@ -77,7 +82,7 @@ const container = <>
 		}}/>
 	</div>
 
-	<div className={"blob-manager"} style={"overflow:auto"} ref={scrollWin}>
+	<div style={"overflow:auto"} ref={scrollWin}>
 		<table>
 			<thead>
 			<tr>
@@ -101,8 +106,7 @@ const container = <>
 							{item.name || '临时对象'}
 						</a>
 						<div>
-							<span className={"hash"}>{item.hash.slice(0, 6)}...{item.hash.slice(-6)}<span
-								className={"tooltip"}>{item.hash}</span></span>
+							<span className="hash" title={item.hash}>{item.hash.slice(0, 6)}...{item.hash.slice(-6)}</span>
 							<button className="ri-file-copy-line ghost" title={"复制哈希"} onClick={({target}) => {
 								copyButtonAnimation("![blob]("+item.hash+")", target)
 							}}></button>
@@ -144,7 +148,7 @@ export const display = () => {
 	openWindow({
 		id: "blobManager",
 		icon: <i className="ri-database-2-line" />,
-		title: "附件管理器",
+		title: "附件管理",
 		element: container,
 		actions: <>
 			<button className="ri-loop-right-line ghost" title={"刷新"} onClick={() => $update(currentPage)}></button>

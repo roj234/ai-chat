@@ -173,8 +173,9 @@ export function createSettingDialog(optionsArray, settings, onSettingChanged) {
 					}
 				}
 
-				const modelName = data.name;
-				if (modelName != null) data.meta = modelName;
+				const modelName = modelTab && set.name;
+				if (modelName) data.meta = modelName;
+				else delete data.meta;
 
 				return kvListSet(data, PRESET_KVS_ID, name).then(() => {
 					config[CONFIG_VERSION] = (config[CONFIG_VERSION] || 0) + 1;

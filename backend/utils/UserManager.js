@@ -121,6 +121,10 @@ PRAGMA user_version = `+DB_VERSION);
 				db.exec(`ALTER TABLE kvs ADD COLUMN meta BLOB NULL DEFAULT NULL`);
 			}
 
+			if (user_version <= 5) {
+				db.exec(`ALTER TABLE conversations ADD COLUMN meta BLOB NULL DEFAULT NULL; DELETE FROM kv WHERE key = "pinned"`);
+			}
+
 			console.log("更新成功");
 			db.exec(`PRAGMA user_version = `+DB_VERSION);
 		}
@@ -138,13 +142,14 @@ PRAGMA user_version = `+DB_VERSION);
 }
 
 // 数据库版本号
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 const createConversations = `
 	CREATE TABLE conversations (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		title TEXT NOT NULL DEFAULT '',
 		time INTEGER NOT NULL,
+        meta BLOB NULL DEFAULT NULL,
 		data BLOB NOT NULL
 	);
 	CREATE INDEX idx_conversations_time ON conversations(time);

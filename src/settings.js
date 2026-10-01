@@ -207,12 +207,13 @@ export const SETTINGS = [
 		_tab: "model",
 		_group: 'model',
 		id: "max_completion_tokens",
-		name: "最大回复长度 (Max Tokens)",
-		title: "单次回复的最大 token 数量。过小会导致回答被截断。\n设为 0 表示无限制（不推荐）。",
+		name: "最大回复长度 (max_tokens)",
+		title: "单次回复的最大 token 数量。过小会导致回答被截断。\n0 为无限制（服务商默认值）。",
 		type: "number",
 		min: 0,
 		max: 65536,
-		default: 20000
+		default: 20000,
+		unit: "Tok"
 	},
 	{
 		_tab: "model",
@@ -245,25 +246,27 @@ export const SETTINGS = [
 		_tab: "model",
 		_group: 'model',
 		id: "imageLongLimit",
-		name: "图像长边限制 (px)",
+		name: "图像长边限制",
 		type: "number",
-		min: 0,
+		min: 512,
 		max: 4096,
 		step: 256,
 		default: 2048,
-		title: "自动缩小读取的图片，0禁用。"
+		unit: "px",
+		title: "超过时按长边等比缩小。"
 	},
 	{
 		_tab: "model",
 		_group: 'model',
 		id: "imageSizeLimit",
-		name: "图像大小限制 (MiB)",
+		name: "图像体积限制",
 		type: "number",
-		min: 0,
+		min: 0.1,
 		max: 10,
 		step: 0.1,
 		default: 0.5,
-		title: "自动压缩读取的图片，0禁用。",
+		title: "超过时降低质量压缩体积。",
+		unit: "MiB",
 		inline: true,
 	},
 	{
@@ -652,25 +655,37 @@ export const SETTINGS = [
 		choices: {
 			"请求审核": "reviewRequest",
 			"记录响应": "logSSE",
-			"隔离模式": "incognito",
-			"延迟发送消息": "reviewMessage",
+			"临时对话": "temporaryChat",
+			"不立即发送": "reviewMessage",
 		},
 		title: {
-			"请求审核": "每次API调用前弹窗预览请求体",
+			"请求审核": "在API调用前预览请求体",
 			"记录响应": "在控制台输出原始SSE流",
-			"隔离模式": "对话的修改不写入数据库，在刷新后丢失\n（其它修改如 KV 或 KVList 会正常保存！）",
-			"延迟发送消息": "点击发送按钮仅插入消息\n第二次点击请求LLM",
+			"不立即发送": "点击发送按钮仅插入消息\n第二次点击请求LLM",
 		}
 	},
 	{
 		id: "maxToolTurns",
 		_tab: "tools",
-		name: "模型自主调用工具的最长轮数 0 为全自动",
+		name: "自动工具调用轮数",
+		title: "无需人工确认连续调用工具的轮数上限。0 表示不限制。",
 		type: "number",
 		min: 0,
 		max: 50,
 		step: 1,
 		default: 1
+	},
+	{
+		id: "toolRetryLimit",
+		_tab: "tools",
+		name: "工具失败重试次数",
+		type: "number",
+		min: 0,
+		max: 3,
+		step: 1,
+		default: 1,
+		inline: true,
+		title: "工具参数不合法时，自动重新生成几次。0 表示不用。"
 	},
 	{
 		id: "afkState",
@@ -686,17 +701,6 @@ export const SETTINGS = [
 		title: {
 			"无人值守": '省电 (1 + 禁用 markdown 解析)'
 		}
-	},
-	{
-		id: "toolRetryLimit",
-		_tab: "tools",
-		name: "工具调用重试次数 (实验性)",
-		type: "number",
-		min: 0,
-		max: 5,
-		step: 1,
-		default: 1,
-		title: "向模型发送工具错误前，先简单重试几次。建议0(不使用)或1"
 	},
 	{
 		id: "permittedTools",
@@ -813,21 +817,23 @@ if (isMobile) {
 	SETTINGS.push({
 		id: "width",
 		_tab: "customize",
-		name: "对话框宽度（像素）",
+		name: "对话框宽度",
 		type: "number",
 		min: 500,
 		max: 1500,
 		step: 50,
-		default: 800
+		default: 800,
+		unit: "px"
 	}, {
 		id: "sidebarWidth",
 		_tab: "customize",
-		name: "侧边栏宽度（像素）",
+		name: "侧边栏宽度",
 		type: "number",
 		default: 300,
 		min: 200,
 		max: 1000,
 		step: 50,
+		unit: "px",
 		inline: true
 	})
 }

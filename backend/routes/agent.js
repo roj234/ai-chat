@@ -205,8 +205,8 @@ const getACL = async (root, targetDir) => {
 	return matcher;
 };
 
-async function glob(pattern, path, showHidden, acl, exclude) {
-	const result = compileGlobPattern(pattern, path, exclude);
+async function glob(pattern, path_, showHidden, acl, exclude) {
+	const result = compileGlobPattern(pattern, path_, exclude);
 	const handle = result.path;
 
 	try {

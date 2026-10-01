@@ -49,7 +49,6 @@ export function registerKVRoutes(batcher) {
 	batcher["kvs/upsert"] = async ({ type, name, ...diff }, {db}) => {
 		if (!type || !name) return { error: 'type and name required' };
 
-		let meta;
 		let updateBigBlob = true;
 		if (diff.$ === '=') {
 			diff = diff.v;
@@ -57,7 +56,7 @@ export function registerKVRoutes(batcher) {
 			const keys = Object.keys(diff);
 			updateBigBlob = keys.length > 1 || keys[0] !== 'meta';
 
-			const row = db.prepare(`SELECT ${updateBigBlob?"data,":""} meta FROM kvs WHERE type = ? AND name = ?`).get(type, name);
+			const row = db.prepare(`SELECT meta ${updateBigBlob?",data":""} FROM kvs WHERE type = ? AND name = ?`).get(type, name);
 			if (!row) return { error: `${type} ${JSON.stringify(name)} not found` };
 
 			diff = patch(deserializeRow(row, decompressorKVS(type)), diff);
@@ -65,7 +64,7 @@ export function registerKVRoutes(batcher) {
 		if (typeof diff !== 'object') return { error: 'data must be object' };
 		if ("error" in diff) return { error: '"error" in data' };
 
-		meta = diff.meta;
+		const meta = diff.meta;
 		delete diff.type;
 		delete diff.name;
 		delete diff.meta;

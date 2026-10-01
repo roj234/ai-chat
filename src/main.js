@@ -12,7 +12,15 @@ import {
 import {jsHide, prettyError, requestIdleCallback} from "./utils/utils.js";
 import {ConversationList} from "./components/ConversationList.jsx";
 import {SETTINGS} from "./settings.js";
-import {databaseError, fetchMessages, initialize, isIDB, listConversations, updateConversation} from "./database.js";
+import {
+	databaseError,
+	fetchMessages,
+	getMessages,
+	initialize,
+	isIDB,
+	listConversations,
+	updateConversation
+} from "./database.js";
 import {
 	abortCompletion,
 	config,
@@ -281,7 +289,7 @@ const createApp = () => {
 						return
 					}
 
-					hookGetMessages(fetchMessages(conv)).then(data => {
+					hookGetMessages(conv.temporary ? getMessages(conv) : fetchMessages(conv)).then(data => {
 						conv.ready = true;
 
 						if (unconscious(selectedConversation) === conv) {
@@ -491,8 +499,8 @@ if (import.meta.env.DEV) {
 		location.pathname = "/";
 }
 
-addEventListener("keypress", e => {
+addEventListener("keydown", e => {
 	const btn = e.target;
-	if (e.key === "Enter" && btn.matches("[tabindex]"))
+	if (e.key === "Enter" && btn.matches("[tabindex=\"0\"]"))
 		btn.click();
 });

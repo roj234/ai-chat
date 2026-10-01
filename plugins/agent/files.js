@@ -12,7 +12,7 @@ import {COMMAND_REGISTRY} from "/src/commands.js";
 import {prettyTime} from "unconscious/common/Utils.js";
 import {DiffHeader, HighlightBox, makeDiff, TextDiff} from "/src/components/TextDiff.jsx";
 import {createAsyncQueue} from "/common/pure-utils.js";
-import {getCombinedPreset, markMessageDirty} from "/src/database.js";
+import {markMessageDirty} from "/src/database.js";
 import {compileGrepPattern} from "/common/fs-common.js";
 import "./GrepCard.css";
 import {normalizePath} from "unconscious/common/path-utils.js";
@@ -20,6 +20,7 @@ import {getChangeableFiles} from "./overwrite-monitor.js";
 import {showToast} from "/src/components/Toast.js";
 import {shellPrompt, shellTools} from "./RemoteFSShell.js";
 import {vcsEnabledKey, vcsTools} from "./VCS.js";
+import {getCombinedPreset} from "../../src/presets.js";
 
 const DIFF_CACHE = debugSymbol("Diff");
 /**

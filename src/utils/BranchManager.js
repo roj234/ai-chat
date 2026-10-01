@@ -21,9 +21,10 @@ const resolveParent = (m) => m[INDEX] - (m.parent ?? 1);
  * @returns {AiChat.BranchManager}
  */
 function createBranchManager(conv, messages) {
-	messages.unshift({
+	const SENTRY = {
 		id: -1 // 不保存到数据库
-	});
+	};
+	messages.unshift(SENTRY);
 
 	const appendChild = (parent, child) => {
 		let children = parent[CHILDREN];
@@ -108,6 +109,8 @@ function createBranchManager(conv, messages) {
 		let m = leaf;
 		while (m !== messages[0]) {
 			push_.call(path, m);
+			if (import.meta.env.DEV && path.length > 5000)
+				debugger;
 			m = messages[resolveParent(m)];
 		}
 		path.reverse();
@@ -205,6 +208,8 @@ function createBranchManager(conv, messages) {
 
 				// 不需要删除 [INDEX] 虽然可以删
 				messages.shift();
+				if (unconscious(reactiveMessages) === path)
+					reactiveMessages.value = messages;
 				//updateConversation(conv, messages);
 			}
 		}
@@ -227,6 +232,7 @@ function createBranchManager(conv, messages) {
 		}
 		splice(start, deleteCount, ...addItems) {
 			if (!deleteCount && !addItems.length) return [];
+			if (messages[0] !== SENTRY) throw new DOMException("Branch manager was destroyed");
 
 			const len = path.length;
 
@@ -239,9 +245,9 @@ function createBranchManager(conv, messages) {
 
 			if (deleteCount) {
 				if (start + deleteCount !== this.length)
-					throw new Error("无法部分修改分支消息");
+					throw new DOMException("无法部分修改分支消息");
 				if (addItems.some(item => item.id > 0))
-					throw new Error("不能加入已入库的消息");
+					throw new DOMException("不能加入已入库的消息");
 
 				const last = path.at(-deleteCount);
 				if (last) {
@@ -250,12 +256,12 @@ function createBranchManager(conv, messages) {
 				}
 			} else {
 				if (!addItems.every(item => item.id < 0))
-					throw new Error("只能在开头插入虚拟（不入库）消息");
+					throw new DOMException("只能在开头插入虚拟（不入库）消息");
 
 				for (let i = 0; i < path.length; i++) {
 					if (path[i][CHILDREN]) {
 						if (start > i) {
-							throw new Error("虚拟消息只能插入在第一个分支点前");
+							throw new DOMException("虚拟消息只能插入在第一个分支点前");
 						}
 						break;
 					}
@@ -269,8 +275,12 @@ function createBranchManager(conv, messages) {
 			}
 
 			const removed = Array.prototype.splice.call(path, start, deleteCount);
-			path.length = 0;
-			fillMessages(path);
+
+			if (messages[0] === SENTRY) {
+				path.length = 0;
+				fillMessages(path);
+			}
+
 			return removed;
 		}
 

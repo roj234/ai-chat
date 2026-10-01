@@ -1,5 +1,5 @@
 import {debugSymbol, unconscious} from 'unconscious';
-import {BRANCH_MANAGER, config, CONFIG_VERSION, EVENT_BUS, LOCKED} from "./states.js";
+import {BRANCH_MANAGER, config, conversations, EVENT_BUS, LOCKED} from "./states.js";
 import {deepEqual, delta} from "unconscious/common/deepEqual.js";
 import {prettyError} from "./utils/utils.js";
 import * as idb from "./database/indexedDB.js";
@@ -42,13 +42,6 @@ export const {
 	 * @returns {Promise<any>}
 	 */
 	getKV,
-	/**
-	 * 创建、更新或删除KV存储
-	 * @param {string} key
-	 * @param {Object & Partial<AiChat.IDBKVList>} value
-	 * @returns {Promise<void>}
-	 */
-	setKV,
 
 	/**
 	 * 获取KV列表中的一项
@@ -57,21 +50,6 @@ export const {
 	 * @returns {Promise<Object & AiChat.IDBKVList>}
 	 */
 	kvListGet,
-	/**
-	 * 创建或更新KV列表的项目
-	 * @param {Object & AiChat.IDBKVList} value
-	 * @param {string=} type
-	 * @param {string=} name
-	 * @returns {Promise<void>}
-	 */
-	kvListSet,
-	/**
-	 * 删除KV列表一项
-	 * @param {string} type
-	 * @param {string} name
-	 * @returns {Promise<void>}
-	 */
-	kvListDel,
 	/**
 	 * 读取KV列表的keys
 	 * @param {string} type
@@ -86,11 +64,26 @@ export const {
 	 */
 	kvListGetValues,
 
+	/**
+	 * 创建或更新KV列表的项目
+	 * 由于事件派发顺序问题，必须把代码写在数据库驱动里面
+	 * @param {Object & AiChat.IDBKVList} value
+	 * @param {string=} type
+	 * @param {string=} name
+	 * @returns {Promise<void>}
+	 */
+	kvListSet,
+
 	uploadBlob,
 	getBlob,
 
 	getBillingLog,
-	listBillingLogs
+	listBillingLogs,
+	/**
+	 * @param {AiChat.BillingLog} log
+	 * @return {Promise<void>}
+	 */
+	appendBillingLog
 } = db;
 
 /**
@@ -191,7 +184,8 @@ const DIFF_IGNORE_KEYS = new Set(["id", "ready"]);
  * @returns {Promise<void>}
  */
 export const updateConversation = async (conversation, messages, keepTime) => {
-	if (config.incognito || conversation[LOCKED]) return;
+	if (conversation.temporary && undefined === conversation[MESSAGES_CACHE]) { conversation[MESSAGES_CACHE] = messages; return; }
+	if (conversation[LOCKED]) return;
 
 	// 串行化
 	let promise = conversation[PENDING_UPDATE] || DONE;
@@ -223,13 +217,23 @@ const updateConversation_ = async (conversation, messages, keepTime) => {
 		conversation[MESSAGES_SNAPSHOT] = new Map;
 		const {ready, ...rest} = conversation;
 		conversation.id = null;
-		//调用方会传时间，而且要考虑从备份导入的问题
-		//conversation.time = Date.now();
 		const promise = changed(rest).then(id => {
 			conversation.id = id;
+			conversations.unshift(conversation);
 		});
 		if (isIDB) await promise;
 		// 后端事务会自动提取新增的id，前端不需要处理
+	} else if (null == conversation[DIFF_SNAPSHOT]) {
+		if (isIDB) conversation[DIFF_SNAPSHOT] = structuredClone(conversation);
+		else {
+			const data = conversation[DIFF_SNAPSHOT] = await db.getConversation(conversation);
+
+			const copy = {...data};
+			delete copy.name;
+			delete copy.meta;
+
+			Object.assign(conversation, copy);
+		}
 	}
 
 	if (messages) {
@@ -334,53 +338,23 @@ const updateConversation_ = async (conversation, messages, keepTime) => {
  * @returns {Promise<void>}
  */
 export const deleteConversation = conversation => {
-	if (config.incognito) return DONE;
+	if (conversation.temporary) return DONE;
 	conversation[LOCKED] = "DELETED"; // 忽略后续的数据库写入
 	const id = conversation.id;
 	return db.deleteConversation(id).then(() => EVENT_BUS.post(['conversationDeleted', id], conversation));
 };
 
 /**
- *
- * @param {AiChat.BillingLog} log
- * @return {Promise<void>}
+ * 创建、更新或删除KV存储
+ * @param {string} key
+ * @param {Object & Partial<AiChat.IDBKVList>} value
+ * @returns {Promise<void>}
  */
-export const appendBillingLog = log => {
-	if (config.incognito) return DONE;
-	return db.appendBillingLog(log);
-};
-
-const MERGED_CONFIG = debugSymbol("MergedConfig");
-
+export const setKV = (key, value) => db.setKV(key, value).then(() => EVENT_BUS.post(['kv', key], value));
 /**
- *
- * @param {AiChat.Conversation} conv
- * @return {Promise<AiChat.LocalPreset>}
+ * 删除KV列表一项
+ * @param {string} type
+ * @param {string} name
+ * @returns {Promise<void>}
  */
-export const getCombinedPreset = async (conv) => {
-	const globalPreset = unconscious(config);
-	const presets = conv.presets;
-	const overrides = conv.overrides;
-	if (!overrides && !presets) return globalPreset;
-
-	// FIXME 在 kvList preset 自身更新时，这些数据不会改变
-	let combined = conv[MERGED_CONFIG];
-	if (!combined || combined[CONFIG_VERSION] !== globalPreset[CONFIG_VERSION]) {
-		combined = conv[MERGED_CONFIG] = {...globalPreset};
-		if (presets) {
-			if (Array.isArray(presets)) {
-				for (const preset of presets) {
-					Object.assign(combined, await kvListGet('preset', preset));
-				}
-			} else {
-				Object.assign(combined, await kvListGet('preset', presets));
-			}
-		}
-		if (overrides) Object.assign(combined, overrides);
-	}
-	return combined;
-}
-
-export const markCombinedPresetDirty = (conv) => {
-	delete conv[MERGED_CONFIG];
-}
+export const kvListDel = (type, name) => db.kvListDel(type, name).then(() => EVENT_BUS.post(['kvs', type, 'del'], name));

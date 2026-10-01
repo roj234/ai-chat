@@ -16,7 +16,8 @@ import {showToast} from "./components/Toast.js";
 import {MCPClient} from "/common/MCPClient.js";
 import {parseJson5} from "unconscious/common/Json.js";
 import {highlightJsonLike} from "./markdown/highlight.js";
-import {getCombinedPreset, markMessageDirty} from "./database.js";
+import {markMessageDirty} from "./database.js";
+import {getCombinedPreset} from "./presets.js";
 
 export const TOOL_NAME = debugSymbol("ToolName");
 export const TOOL_IS_RUNNING = debugSymbol("Running");
@@ -669,6 +670,8 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 			}
 
 			msg.time = Date.now();
+			msg[TOOL_IS_RUNNING] = true;
+
 			const uiLevel = await getToolUserInteractionLevel(conv, name, parameters);
 			if (uiLevel) {
 				flags |= 1; // INTERACTIVE
@@ -688,7 +691,6 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 
 			await EVENT_BUS.post(['beforeToolCall', name], parameters, msg, conv);
 
-			msg[TOOL_IS_RUNNING] = true;
 			let result = fn.script(parameters, msg, conv, name);
 			if (result instanceof Promise) {
 				$update(updateMessageUI);

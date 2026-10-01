@@ -139,7 +139,7 @@ export const resetConversation = () => {
 	messages.value = [];
 };
 
-export const ensureActiveConversation = async () => {
+export const ensureConversation = async () => {
 	if (null == unconscious(selectedConversation)) {
 		// 创建新对话
 		const conv = {
@@ -148,10 +148,12 @@ export const ensureActiveConversation = async () => {
 			ready: true
 		};
 
-		if (config.incognito) conv.id = -1;
-		//else await updateConversation(conv, unconscious(messages), true);
+		if (config.temporaryChat) {
+			conv.id = "temporary-"+Date.now();
+			conv.title = "临时对话";
+			conv.temporary = true;
+		}
 
-		conversations.unshift(conv);
 		selectedConversation.value = conv;
 	}
 };

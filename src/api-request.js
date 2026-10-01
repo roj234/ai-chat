@@ -4,7 +4,6 @@ import {cloneNamed, getTextContent, prettyError, resolveDBRelativeURL} from "./u
 import {setWakeLock} from "./utils/wakeLock.js";
 import {
 	abortCompletion,
-	config,
 	EVENT_BUS,
 	getCurrentTheme,
 	inputText,
@@ -37,7 +36,6 @@ import complete from "../media/complete.js";
 import {
 	appendBillingLog,
 	DONE,
-	getCombinedPreset,
 	isIDB,
 	kvListGet,
 	markMessageDirty,
@@ -60,7 +58,7 @@ import {SHA256} from "unconscious/common/SHA256.js";
 import {DONT_PARSE_HTML_IN_THINKING} from "./components/ThinkBlock.jsx";
 import {LLM_COST_SCALE} from "/backend/sync.js";
 import {SP_CONNECT, SP_GENERATE, SP_PREFILL, SP_WAIT} from "./components/StatusPill_state.js";
-import {isLlamaCppBackend, PRESET_KVS_ID} from "./presets.js";
+import {getCombinedPreset, isLlamaCppBackend, PRESET_KVS_ID} from "./presets.js";
 
 /**
  * @param {boolean} [loop]
@@ -291,7 +289,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			}
 
 			const needLog = result.request_id && (finishReason !== 'error' || result.input_tokens);
-			if (config.incognito) {
+			if (conversation.temporary) {
 				assistantMessage.log = result;
 			} else
 

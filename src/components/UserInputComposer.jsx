@@ -1,7 +1,7 @@
 import {
 	abortCompletion,
 	config,
-	ensureActiveConversation,
+	ensureConversation,
 	inputText,
 	isMobile,
 	lastScrollDirectionIsUp,
@@ -16,9 +16,10 @@ import {bind} from "../utils/utils.js";
 import {$computed, $state, $update, $watch, unconscious} from "unconscious";
 import {handleCommand} from "../commands.js";
 import SimpleModal from "./SimpleModal.jsx";
-import {getBlob, getCombinedPreset} from "../database.js";
+import {getBlob} from "../database.js";
 import {webviewUploadImage} from "/vendor/jsBridge.js";
 import {Recorder} from "/plugins/voiceInput/Recorder.jsx";
+import {getCombinedPreset} from "../presets.js";
 
 export const createUserInputComposer = (scroller) => {
 	/** @type {import("unconscious").Reactive<OpenAI.ContentPart[]>} */
@@ -66,8 +67,10 @@ export const createUserInputComposer = (scroller) => {
 		if (blob) blobToContentPart(blob, 0 === selectedConversation.id, attachments);
 	};
 
+	const debon = $computed(() => config.temporaryChat);
 	const element = (<div className="composer" class:hidden={() => isMobile && unconscious(lastScrollDirectionIsUp)}>
-		<div className="logo hide-human">
+		<div className="logo col hide-human">
+			{() => unconscious(debon) ? <div className="row"><i className="ri-eye-off-line" />临时<span className="tooltip">新对话的数据不会保存，并将在刷新后丢失</span></div> : null}
 			<span style={{
 				display: "flex",
 				alignItems: "flex-end",
@@ -307,7 +310,7 @@ export const createUserInputComposer = (scroller) => {
 
 		if (noAI) return;
 
-		await ensureActiveConversation();
+		await ensureConversation();
 
 		if (config.reviewMessage && input) return;
 		submitUserChatMessage(true);

@@ -45,9 +45,6 @@ export function registerSearchRoutes(router) {
 
 					// 索引内容
 					if (row.content) await addTask(() => vectorDB.set('m#'+idStr, row.content));
-					// 索引思考过程
-					const thinking = body.think?.content;
-					if (thinking) await addTask(() => vectorDB.set('M#'+idStr, thinking));
 
 					lastId = row.id;
 				}
