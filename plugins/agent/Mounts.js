@@ -24,10 +24,7 @@ import {addRemoteFileSystem, BACKEND_SERVER_KVLIST_ID, createRemoteFileSystem} f
 import {Icon_search, Icon_warning} from "/src/components/Icons.jsx";
 import {normalizePath} from "unconscious/common/path-utils.js";
 
-/** @type {Map<string, {
- * handle: FileSystemDirectoryHandle,
- * fss: Map<string, AiChat.FileSystemInstance>
- }>} */
+/** @type {Map<string, FileSystemDirectoryHandle>} */
 const localFileSystemCache = new Map;
 
 const FOLDER_STORE_NAME = 'folders';
@@ -87,11 +84,11 @@ const materializeFileSystem = async (mount) => {
 			const paths = fs_base?.split("/") || [];
 			const base = paths.shift();
 
-			let inst = localFileSystemCache.get(base);
-			if (!inst) {
+			let handle = localFileSystemCache.get(base);
+			if (!handle) {
 				const folder = await folderDB((tx) => tx.objectStore(FOLDER_STORE_NAME).get(base), false, FOLDER_STORE_NAME);
 				if (folder) {
-					const handle = folder.handle;
+					handle = folder.handle;
 					while (true) {
 						let result;
 						try {
@@ -120,23 +117,13 @@ const materializeFileSystem = async (mount) => {
 					}
 
 					await (await handle.entries()).next();
-					localFileSystemCache.set(folder.name, inst = {handle, fss: new Map});
+					localFileSystemCache.set(folder.name, handle);
 				} else {
 					throwDOMException("文件路径 "+base+" 不存在", FSE_NotFound);
 				}
 			}
 
-			const hasACL = mount.fs_ACL;
-
-			let fs = inst.fss.get(fs_base);
-			if (!fs || hasACL) {
-				fs = await createWebFileSystem(await resolveDirectory(inst.handle, paths), mount);
-				// ACL 不缓存
-				if (hasACL) return fs;
-
-				inst.fss.set(fs_base, fs);
-			}
-			return fs;
+			return createWebFileSystem(await resolveDirectory(handle, paths), mount);
 		}
 		case "opfs": {
 			let baseDir = await navigator.storage.getDirectory();
@@ -159,7 +146,7 @@ const materializeFileSystem = async (mount) => {
  * @return {Promise<AiChat.FileSystemInstance>}
  */
 async function callFBI(mount) {
-	if (config.fs_autoMount && mount.fs_builtin) {
+	if (mount.fs_builtin) {
 		if (!isIDB) {
 			// 有云端就用云端
 			mount.fs_type = 'db';
@@ -544,7 +531,7 @@ async function callFBI(mount) {
 										const value = input.value;
 										if (value) {
 											await callFileSystemFunc(mount[FS_INSTANCE], "mkdir", {
-												path: pathStack.slice(2).join('/')+'/'+ value
+												path: pathStack.length > 2 ? pathStack.slice(2).join('/')+'/'+value : value
 											});
 											activeItem.value = null;
 											return enterDir_doubleClick();
@@ -753,7 +740,6 @@ const state = $state();
 const updateEstimate = () => navigator.storage.estimate().then(t => state.value = formatSize(t.usage) + "/" + formatSize(t.quota));
 const opfsDialog = <div className={"choice-scroll"}>
 	<button className={"btn ghost"} onClick={() => callFBI({fs_label: "管理文件系统"}).catch(PROMISE_CATCH)}>管理文件系统</button>
-	<button className={"btn ghost"} onClick={() => localFileSystemCache.clear()}>清理ACL缓存</button>
 	<button className={"btn danger"} onClick={() => {
 		SimpleModal({
 			title: "清空私库（OPFS）？",
@@ -777,15 +763,4 @@ GLOBAL_SETTINGS.push({
 	_tab: "tools",
 	type: "element",
 	element: opfsDialog
-}, {
-	id: "fs_autoMount",
-	_tab: "tools",
-	name: "自动映射内置挂载点",
-	title: "仅影响新对话，开启后技能/记忆等内置挂载点将是全局的",
-	type: "radio",
-	required: true,
-	choices: {
-		'自动映射': true,
-		'手动选择': false,
-	}
 });

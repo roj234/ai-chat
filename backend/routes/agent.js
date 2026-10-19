@@ -248,7 +248,7 @@ export async function registerFsRoutes(router, allowExec) {
 		const safePath = pathFilter(filePath, ctx);
 		const acl = await getACL(ctx.fsRoot, safePath);
 
-		if (!(await fs.stat(safePath)).isDirectory()) throw new Error("Path is not a directory");
+		if (!(await fs.stat(safePath)).isDirectory()) throw new Error("Path is a file, cannot use glob");
 
 		let prefix = '';
 		let modSince = modifiedSince ? +new Date(modifiedSince) : 0;
@@ -486,7 +486,7 @@ nlink: ${stats.nlink}`);
 			const pos = events.findIndex(e => e.id > since);
 			return {
 				runId: RUN_ID,
-				events: events.slice(pos),
+				events: pos < 0 ? [] : events.slice(pos),
 				next: eventId,
 			};
 		};

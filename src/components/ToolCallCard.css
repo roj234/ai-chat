@@ -74,7 +74,7 @@
     }
 
     &:not(.t-success):not(.t-error):not(.running):not(.editing) {
-        & .rerun-btn, & > :nth-child(3) {
+        & .rerun-btn, & > .o {
             display: none;
         }
     }

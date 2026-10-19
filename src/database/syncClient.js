@@ -109,6 +109,13 @@ const setLockStatus = (id, locked) => {
 	if (!conv) return;
 	conv[LOCKED] = locked;
 	$update(updateConversationListUI);
+	if (locked) {
+		if (id === selectedConversation.id) {
+			showReadonlyUI(id);
+		}
+	} else {
+		hideReadonlyUI(id);
+	}
 };
 
 const checkConcurrentModification = conv => {
@@ -231,20 +238,13 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 			break;*/
 			case SYNC_LOCKED:
 			case SYNC_UNLOCKED: {
-				const conv = findConversation(data);
-				if (conv) {
-					conv[LOCKED] = type === SYNC_LOCKED;
-					$update(updateConversationListUI);
-				}
+				setLockStatus(data, type !== SYNC_UNLOCKED);
 			}
 			break;
 			// 独占锁和冲突处理
 			case SYNC_CONFLICT:
 			case SYNC_RESOLVE: {
 				setLockStatus(data, true);
-				if (data === selectedConversation.id) {
-					showReadonlyUI(data);
-				}
 			}
 			break;
 			case SYNC_RELEASED: {
@@ -253,7 +253,6 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 					selectedConversation.ready = false;
 					$update(updateMessageUI);
 				}
-				hideReadonlyUI(data);
 			}
 			break;
 			// 消息状态更新

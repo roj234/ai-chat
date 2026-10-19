@@ -32,7 +32,7 @@ export const SetTimeout = {
 			timeout: {
 				type: "integer",
 				description: "Real-world duration in seconds.",
-				minimum: 10,
+				minimum: 5,
 				maximum: 300
 			},
 			deadline: {

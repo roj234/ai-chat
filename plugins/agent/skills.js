@@ -6,6 +6,7 @@ import agentsGuide from "/media/vfs/skills/agents-guide/SKILL.md?raw";
 import skillsGuide from "/media/vfs/skills/skills-guide/SKILL.md?raw";
 import aclGuide from "/media/vfs/skills/agents-guide/ACL.md?raw";
 import {EVENT_BUS} from "/src/states.js";
+import {isIDB} from "../../src/database.js";
 
 const SKILL_INFO = debugSymbol("Skills");
 const glob = fileAccess("list");
@@ -131,7 +132,7 @@ export async function getSkillCache(conv) {
 
 registerToolset("Skills", "技能", [Skill], {
 	hidden: 'manual',
-	//default: true,
+	default: !isIDB,
 	async systemPrompt(conv) {
 		return (await getSkillCache(conv)).prompt;
 	},

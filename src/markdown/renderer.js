@@ -5,6 +5,7 @@ import {SafeImage} from "../components/SafeImage.jsx";
 import {unconscious} from "unconscious";
 import {highlight} from "./highlight.js";
 import {once} from "/common/pure-utils.js";
+import {EVENT_BUS} from "../states.js";
 
 const customCodeRenderer = {};
 /**
@@ -245,7 +246,9 @@ export function createMarkdownRenderer(root, options = {}) {
 						if (/^https?:\/\//i.test(value)) {
 							node.target = "_blank";
 							node.rel = "noopener noreferrer";
-						} else {
+						} else if (!options.external) {
+							node.style.cursor = 'pointer';
+							node.addEventListener('click', () => EVENT_BUS.post(['viewUrl'], value, node));
 							return;
 						}
 					}

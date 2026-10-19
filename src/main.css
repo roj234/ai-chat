@@ -264,10 +264,11 @@ body.no-motion {
 }
 
 /* Z-index 层级表 */
-.taskbar {z-index: 1;}
-.MDI {z-index: 2;}
+.sidebar {z-index: 1;}
+.taskbar {z-index: 2;}
+.MDI {z-index: 3;}
 /* 注意，模态框 SimpleDialog 用的是 dialog 天生有着最大的 zindex 无法降低 */
-.toasts {z-index: 3;}
+.toasts {z-index: 4;}
 
 
 /* 统一按钮 */
@@ -398,7 +399,7 @@ body._fileUI .hide-human {
 
 .scroll-spy {
     position: relative;
-    bottom: 100px;
+    bottom: 10px;
 }
 
 .panel>._vl {

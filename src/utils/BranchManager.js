@@ -493,9 +493,10 @@ function createBranchManager(conv, messages) {
 		 * @param {number} end
 		 * @param {Object} payload
 		 * @param {string} [foldId]
-		 * @returns {AiChat.FoldedMessage}
+		 * @param {boolean} [skipUpdate]
+		 * @returns {AiChat.FoldedMessage | void}
 		 */
-		fold(start, end, payload, foldId) {
+		fold(start, end, payload, foldId, skipUpdate) {
 			if (messages[0] !== SENTRY) throwDOMException(DESTROYED_MESSAGE_SHOULD_NOT_HAPPEN, "InvalidStateError");
 
 			for (let k = start; k <= end; k++) {
@@ -534,8 +535,8 @@ function createBranchManager(conv, messages) {
 				}
 			}
 
+			if (skipUpdate) return;
 			updatePath();
-
 			return path[start];
 		},
 		/**
@@ -565,6 +566,8 @@ function createBranchManager(conv, messages) {
 
 			return folded;
 		},
+
+		update: updatePath,
 	}
 
 	for (const name in proto) {
@@ -578,6 +581,10 @@ function createBranchManager(conv, messages) {
 
 	// 初始化时更新
 	updatePath();
+
+	if (unconscious(reactiveMessages) === messages)
+		reactiveMessages.value = path;
+
 	return path;
 }
 

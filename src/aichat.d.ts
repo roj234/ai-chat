@@ -381,6 +381,11 @@ declare namespace AiChat {
         parallel?: boolean | 'same';
 
         /**
+         * 在折叠模式也要渲染，因为类型是输出（仅 tool_ui 模式）
+         */
+        artifact?: 'i' | 'o' | 'io';
+
+        /**
          * 生成工具调用标题
          * @param request
          * @param context
@@ -812,9 +817,10 @@ declare namespace AiChat {
          * @param end
          * @param data 写入原始消息的载荷字段，例如content
          * @param foldId
+         * @param skipUpdate
          * @returns 占位消息
          */
-        fold(start: number, end: number, data: Object & { content: string }, foldId?: string): Message;
+        fold(start: number, end: number, data: Object & { content: string }, foldId?: string, skipUpdate?: boolean): Message | void;
 
         /**
          * 解压折叠块

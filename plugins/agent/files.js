@@ -1,12 +1,10 @@
 import {getToolParameters, prefixTitle, registerToolset, toolset} from "/src/toolset.js";
-import {EVENT_BUS, inputText, messages, selectedConversation, updateMessageUI} from "/src/states.js";
-import {$state, $update, $watch, debugSymbol, unconscious} from "unconscious";
+import {messages, selectedConversation, updateMessageUI} from "/src/states.js";
+import {$state, $update, debugSymbol, unconscious} from "unconscious";
 import {AskUser} from "../rp_kit/AskUser.js";
 import {callFileSystemFunc, createFileSystem, crossVFSCopyMove, fileAccess, FS_INSTANCE,} from "./Mounts.js";
 import {RunJS, SearchModules} from "./run_js.js";
-import {readAsString} from "/common/chardet.js";
-import {downloadFile, errorBlock} from "/src/utils/utils.js";
-import {ZipWriter} from "unconscious/common/zip-io.js";
+import {errorBlock} from "/src/utils/utils.js";
 import {InspectImage} from "./inspect_image.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {prettyTime} from "unconscious/common/Utils.js";
@@ -552,7 +550,7 @@ b.txt
  */
 const Mount = {
 	name: "Mount",
-	description: "Mount a new VFS, new workspace, new project, and even a new computer.",
+	description: "Mount a new VFS, new workspace, new project, and even a new computer.\nUI command: `/mount`",
 	parameters: {
 		type: "object",
 		properties: {
@@ -631,7 +629,7 @@ const Mounts = {
 	name: "Mounts",
 	description: "List all mounted VFSs" +
 		"Return: `\"<mount-point>\" (type=<type>, remote_path=<base>, label=<label>)`.\n" +
-		"Non-root mount points are accessed via `~/<mount-point>/`.",
+		"Non-root mount points are accessed via `~/<mount-point>/`.\nClear all VFSs: UI command \`/fsreset\`.",
 	title: () => "列出文件系统",
 
 	script(_, resp, conv) {
@@ -656,165 +654,16 @@ const filesystemPrompt = `<file-editing>
 - DO NOT read file to verify edits, tool will return error details if edit failed.
 - If a path is URI encoded, keep it, don't decode.
 - Line-numbered output from any tool follows the format \`lineNumber\x1Fcontent\`
-- Use Markdown hyperlink to reference existing files \`[Report](path/to/file)\`
+- Link artifacts with Markdown so the user can view or download it, image hyperlinks can also be used.
 </file-editing>`;
 
 const shellFallbackTools = [RunJS, SearchModules];
-
-//region VFS tools
-const binaryWrite = fileAccess('writeRaw');
-const binaryRead = fileAccess("readRaw");
-
-/**
- * 请求用户提供文件内容。用户可直接输入或上传。
- * @type {AiChat.FunctionTool}
- */
-const RequestFile = {
-	name: "RequestFile",
-	description: "Ask the user to upload file to \`path\`. Example: config, prose, data, image.",
-	parameters: {
-		type: "object",
-		properties: {
-			path: {type: "string",},
-			type: {
-				enum: ["text", "binary"]
-			},
-			label: {
-				type: "string",
-				description: "Short human-readable instruction telling the user what content to provide and why.",
-			},
-		},
-		required: ["path", "type", "label"],
-	},
-	title: prefixTitle("上传"),
-
-	interactive: true,
-	script() {},
-
-	keyFunc(keys, response, frozen) {
-		keys.push(frozen);
-
-		const obj = response.fc;
-		if (obj) {
-			delete response.fc;
-			binaryWrite(obj, response, unconscious(selectedConversation));
-		}
-	},
-
-	renderer(response, frozen, tc, message) {
-		if (frozen) return;
-
-		const data = getToolParameters(response, tc);
-		const content = $state("");
-
-		$watch(content, () => {
-			response.success = true;
-			response.content = unconscious(content) ? "File saved to "+data.path : null;
-			response.fc = {
-				path: data.path,
-				content: unconscious(content)
-			};
-			markMessageDirty(message);
-			$update(inputText);
-		}, false);
-
-		if (data.type === 'binary') {
-			return (<div>
-				<div style="font-weight:600;margin-bottom:8px;">✦ {data.label}</div>
-				上传文件
-				<input type={"file"} onChange={async (e) => {
-					content.value = e.target.files[0];
-				}}/>
-			</div>);
-		}
-
-		let ta;
-		return (<div>
-			<div style="font-weight:600;margin-bottom:8px;">✦ {data.label}</div>
-
-			<textarea
-				ref={ta}
-				rows={8}
-				placeholder="在此输入内容…"
-				className={"text-input"}
-				style={`height:auto`}
-				onInput={() => (content.value = ta.value)}
-				value={content}
-			/>
-
-			或上传文件
-			<input type={"file"} accept={"text/*"} onChange={async (e) => {
-			const file = e.target.files[0];
-			content.value = await readAsString(file)
-		}}/>
-		</div>);
-	},
-};
-
-/**
- * 将工作区中的文件或文件夹提供给用户下载（文件夹自动打包为 Zip）。
- * @type {AiChat.FunctionTool}
- */
-const SendFile = {
-	name: "SendFile",
-	description: "Provide a workspace file or folder for the user to download. Folders are automatically zipped. Call when the user asks to retrieve files (artifact).",
-	parameters: {
-		type: "object",
-		properties: {
-			path: {type: "string",},
-		},
-		required: ["path"],
-	},
-	title: (tc, response = {}) => {
-		const path = getToolParameters(response, tc).path;
-		const fileName = path.split("/").pop();
-
-		const handleDownload = async () => {
-			const conv = unconscious(selectedConversation);
-			let blob;
-
-			try {
-				blob = await binaryRead({ path }, response, conv);
-				blob = new File([blob], fileName, { type: blob.type });
-			} catch {
-				const files = await Glob.script({ path, pattern: "**", json: true }, response, conv);
-				const zw = ZipWriter();
-
-				for (const [relPath] of files) {
-					const fullPath = path + "/" + relPath;
-					const result = await binaryRead({ path: fullPath }, response, conv);
-					await zw.add(relPath, result, { compression: true });
-				}
-
-				blob = zw.finish();
-				blob.name = fileName + ".zip";
-			}
-
-			downloadFile(blob);
-		};
-
-		return <>
-			展示 {path}
-			<button
-				onClick={handleDownload}
-				className={"btn primary"}
-				style={"margin-left:8px"}
-			>下载</button>
-		</>;
-	},
-
-	async script(opt, ctx, conv) {
-		await statFile(opt, ctx, conv);
-		return "Presented to user. Download not guaranteed. Confirm before deleting.";},
-};
-//endregion
-const vfsTools = [RequestFile, SendFile];
 
 // 隐藏工具集，仅用于注册所有动态加载的工具
 registerToolset(
 	"Files/Dynamic",
 	"",
-	[...shellTools, ...vfsTools, ...shellFallbackTools, ...imageReadTools],
+	[...shellTools, ...shellFallbackTools, ...imageReadTools],
 	{
 	hidden: true
 });
@@ -857,6 +706,7 @@ registerToolset(
 			let auxPrompt = conv[FILESYSTEM_AUX_PROMPT];
 			if (null == auxPrompt) {
 				auxPrompt = '';
+				if (isVirtualFileSystem) auxPrompt += '- UI command \`/upload\` can manually upload file to workspace\n';
 				if (fsType === 'api') auxPrompt += await shellPrompt(conv);
 				conv[FILESYSTEM_AUX_PROMPT] = auxPrompt;
 			}
@@ -886,8 +736,6 @@ registerToolset(
 				shellFallbackTools.forEach(addTools);
 			}
 
-			vfsTools.forEach(isVirtualFileSystem ? addTools : removeTools);
-
 			activatedModules.forEach(item => {
 				toolset[item].tools?.forEach(name => tools.add(name));
 			});
@@ -912,11 +760,11 @@ registerToolset(
 	}
 );
 registerToolset(
-	"FileTransfer",
-	"Interactive user-AI file exchange: upload & download.",
-	[RequestFile, SendFile],
+	"Files/RunJS",
+	"即使有Shell也启用沙箱.",
+	[RunJS],
 	{
-		hidden: 'manual',
+		hidden: "manual",
 		depend: ["Files"]
 	}
 );
@@ -982,9 +830,3 @@ COMMAND_REGISTRY["mount"] = [
 	},
 	"创建新的文件系统挂载点 /mnt <name>"
 ];
-
-
-EVENT_BUS.on('resolveUrl', (path) => {
-	const conv = unconscious(selectedConversation);
-	return binaryRead( { path }, {}, conv).then(blob => blob.toUrl());
-});

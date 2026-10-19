@@ -1,15 +1,16 @@
 import {getToolParameters, registerToolset} from "/src/toolset.js"
-import {config, MessageRoles, messages, onConversationLoaded, selectedConversation} from "/src/states.js"
+import {MessageRoles, messages, onConversationLoaded, selectedConversation, updateMessageUI} from "/src/states.js"
 import {COMMAND_REGISTRY} from "/src/commands.js"
 import {showToast} from "/src/components/Toast.js"
-import {unconscious} from "unconscious"
+import {$update, unconscious} from "unconscious"
 import {enableBranches, expandFolds} from "/src/utils/BranchManager.js";
-import {getImmediateMessages, getMessages,} from "/src/database.js";
+import {getImmediateMessages, getMessages, markMessageDirty,} from "/src/database.js";
 import {serializeJSON} from "/src/utils/serialization.js";
 import {createFileSystemAsync, VirtualDirectory, VirtualFile} from "../agent/index.js";
 import {FSE_NotFound, throwDOMException} from "/common/pure-utils.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
 import {createWebFileSystem} from "../agent/WebFSDriver.js";
+import {getCombinedPreset} from "../../src/presets.js";
 
 const ID = "ContextCompression";
 
@@ -103,12 +104,15 @@ Include multiple independent ranges as separate entries in \`ranges\` array.`,
 		for (const range of params.ranges) {
 			const { startId, endId } = range;
 
-			const startIdx = idMap.get(startId);
+			let startIdx = idMap.get(startId);
 			if (startIdx == null) throw `Invalid or unknown message/block for startId: ${startId}`;
-			const endIdx = idMap.get(endId);
+			let endIdx = idMap.get(endId);
 			if (endIdx == null) throw `Invalid or unknown message/block for endId: ${endId}`;
 
+			if (startIdx === endIdx) throw "range must contain more than 1 message";
 			if (startIdx > endIdx) throw `startId (${startId}) must appear before endId (${endId})`;
+
+			if (path[startIdx].role === 'user' && path[startIdx + 1].role !== 'user') startIdx++;
 
 			let removed = 0;
 			for (let i = startIdx; i <= endIdx; i++) removed += JSON.stringify(path[i]).length;
@@ -116,7 +120,7 @@ Include multiple independent ranges as separate entries in \`ranges\` array.`,
 			resolved.push({
 				startIdx,
 				endIdx,
-				tokensSaved: removed / 4,
+				tokensSaved: removed,
 				summary: range.summary.replace(/\((b[^)]+)\)/g, (match, idStr) => {
 					const block = path.find(m => m.role === 'fold' && m.group === idStr)
 					if (!block) return match
@@ -132,8 +136,9 @@ Include multiple independent ranges as separate entries in \`ranges\` array.`,
 					`#${ordered[i - 1].startIdx}-#${ordered[i - 1].endIdx} and #${ordered[i].startIdx}-#${ordered[i].endIdx}`
 		}
 
+		let saved = 0;
 		for (const r of ordered) {
-			state.tokensSaved += r.tokensSaved;
+			saved += r.tokensSaved;
 		}
 
 		ordered.reverse();
@@ -145,17 +150,22 @@ Include multiple independent ranges as separate entries in \`ranges\` array.`,
 		for (const { startIdx, endIdx, summary } of ordered) {
 			const groupId = "b" + --nextGroup;
 
-			bm.fold(startIdx, startIdx, {
+			bm.fold(startIdx, endIdx, {
 				//foldRole: "user",
 				topic,
 				time: Date.now(),
 				content: summary,
-			}, groupId);
+			}, groupId, true);
 
 			newIds.push(groupId);
 		}
 
+		bm.update();
+		if (unconscious(messages) === bm) $update(updateMessageUI);
 		response.blockIds = newIds;
+		response.usage = conv.contextUsage;
+		response.saved = saved;
+
 		return `OK`;
 	},
 	undo(resp, conv) {
@@ -176,13 +186,13 @@ Include multiple independent ranges as separate entries in \`ranges\` array.`,
 };
 
 // 这只是个占位符，别想着模型会主动调用它
+/** @type {AiChat.FunctionTool} */
 const Marker = {
 	name: "Marker",
 	description: `Place a bookmark in the conversation. Use this at meaningful boundaries so you can later reference exact positions when compressing with the compress tool.`,
 	script() {return '\0'},
 	title() {return `📌`}
 }
-
 
 const convMessageHandler = {
 	async read(data) {
@@ -321,15 +331,17 @@ onConversationLoaded((conv, path, messages) => {
 });
 
 MessageRoles[ID] = {
-	preprocess(self, messages, conv) {
+	async preprocess(self, messages, conv) {
 		const state = getState(conv);
 		if (!state) return;
 
 		const output = messages.map(m => ({...m}));
+		const limit = (await getCombinedPreset(conv)).maxContext;
 
 		let seq = 1;
 
-		for (let i = 0; i < output.length; i++) {
+		let k = 0;
+		for (let i = 0; i < output.length; i++, k++) {
 			const m = output[i];
 			const role = m.role;
 			if (role === 'system') continue;
@@ -354,8 +366,14 @@ MessageRoles[ID] = {
 				let tools = m.tool_calls;
 
 				if (tools) {
-					m.tool_calls = tools = [...tools];
-					const tr = m.tool_responses = [...(m.tool_responses || [])];
+					const realTC = tools;
+					const realTR = m.tool_responses || [];
+
+					tools = [...realTC];
+					const tr = [...realTR];
+
+					m.tool_calls = tools;
+					m.tool_responses = tr;
 
 					for (let j = tools.length - 1; j >= 0; j--) {
 						const tc = tools[j];
@@ -365,7 +383,12 @@ MessageRoles[ID] = {
 								const result = tr[j];
 								if (result?.success !== true) continue;
 								compressionCalls.push([getToolParameters(result, tc), result]);
+							} else {
+								realTC.splice(j, 1);
+								realTR.splice(j, 1);
+								markMessageDirty(messages[k]);
 							}
+
 							tools.splice(j, 1);
 							tr.splice(j, 1);
 						}
@@ -393,7 +416,7 @@ MessageRoles[ID] = {
 				}
 			}
 			if (role === 'fold') {
-				m.content = `<context-summary id="${m.group}" topic="${m.topic}">
+				m.content = `<context-summary ${m.topic != null ? `id="${m.group}" topic="${m.topic}"` : 'manual'}>
 ${m.content}
 </context-summary>`;
 
@@ -412,12 +435,12 @@ ${m.content}
 						rangeStr.push(startId+'-'+endId);
 					}
 
-					const pron = result.blockIds > 1;
+					const pron = result.blockIds.length > 1;
 					output.splice(++i, 0, {
 						role: 'user',
 						content: `<context-compressed topic="${arg.topic}">
 Compression finished. Range${pron ? 's' : ''} [${rangeStr.join(', ')}] ${pron?'are':'is'} replaced by summary block${pron ? 's' : ''} [${result.blockIds.join(', ')}].
-</context-compressed>`
+${result.usage != null ? `Context usage before compression: ${result.usage} / ${limit}. Token saved (approx): ${result.saved / 4}\n`: ''}</context-compressed>`
 					})
 				}
 			}
@@ -425,31 +448,15 @@ Compression finished. Range${pron ? 's' : ''} [${rangeStr.join(', ')}] ${pron?'a
 
 		// reminder
 		const usage = conv.contextUsage;
-		const limit = config.maxContext;
 
 		if (limit && !state.manual && usage > 0) {
 			const pct = usage / limit;
-
-			if (pct > 0.8) {
+			if (pct > 0.8 || limit - usage < 32768) {
 				if (state.nudgeCounter >= 5) {
 					output.push({
 						role: "user",
 						content: `<context-compression-reminder>
-CRITICAL: Context usage is high. Use the \`Compress\` tool NOW.
-Prioritize one large, closed range from older history.
-Do not continue normal exploration until compression is handled.
-</context-compression-reminder>`
-					})
-					state.nudgeCounter = 0
-				} else {
-					state.nudgeCounter++
-				}
-			} else if (pct > 0.4) {
-				if (state.nudgeCounter >= 5) {
-					output.push({
-						role: "user",
-						content: `<context-compression-reminder>
-Context usage is elevated. Look for a closed, self-contained range and compress it.
+Context usage is elevated (${usage} / ${limit}). Look for a closed, self-contained range and compress it.
 Prefer older, resolved history. Batch independent ranges if ready.
 </context-compression-reminder>`
 					})

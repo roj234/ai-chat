@@ -1,9 +1,10 @@
 // API request
 import {createMarkdownStream} from "./markdown/markdown.js";
-import {cloneNamed, getTextContent, prettyError, resolveDBRelativeURL} from "./utils/utils.js";
+import {cloneNamed, getTextContent, prettyError, resolveDBRelativeURL, scrollMessagesToBottom} from "./utils/utils.js";
 import {setWakeLock} from "./utils/wakeLock.js";
 import {
 	abortCompletion,
+	config,
 	EVENT_BUS,
 	getCurrentTheme,
 	inputText,
@@ -75,10 +76,11 @@ import {lockConversation, unlockConversation} from "./conversation-lock.js";
 
 /**
  * @param {boolean} [loop]
+ * @param {AiChat.Conversation} [conv]
  * @return {Promise<void>}
  */
-export const submitUserChatMessage = async (loop) => {
-	const conv = unconscious(selectedConversation);
+export const submitUserChatMessage = async (loop, conv) => {
+	conv ??= unconscious(selectedConversation);
 	if (false === EVENT_BUS.post(["loopEntry"], conv)) return;
 
 	let versionId = await getMessages(conv);
@@ -106,6 +108,31 @@ const RETRY_COUNT = debugSymbol("RetryCount");
  * @return {number}
  */
 const distanceToBottom = () => DI_messageContainer.scrollHeight - DI_messageContainer.clientHeight - DI_messageContainer.scrollTop;
+
+/**
+ * 通用通知模块
+ * @param {AiChat.Conversation} conv
+ * @param {string} message
+ * @param {boolean} success
+ */
+const notifyUser = (conv, message, success) => {
+	const hasFocus = document.hasFocus();
+	if (config.sound === 'always' || (config.sound === 'background' && (!success || !hasFocus))) {
+		success ? complete() : failure();
+	}
+
+	if (hasFocus) {
+		if (selectedConversation.id !== conv.id) {
+			showToast(message, success ? 'ok' : "error");
+		}
+	} else if (document.visibilityState === 'hidden' && Notification.permission === 'granted') {
+		new Notification(`会话 ${conv.title || "无标题"}(#${conv.id}) 需要操作`, {
+			body: message,
+			//requireInteraction: !success,
+			//icon: ""
+		})
+	}
+};
 
 /**
  *
@@ -342,7 +369,6 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 		const hasPendingInput = isDisplaying() && inputText.trim();
 		const tc = assistantMessage.tool_calls;
-		if (tc) assistantMessage.tool_responses = tc.map(() => ({}));
 
 		let toolTurnReached;
 		if (tone === '' && !__skipToolCall && !hasPendingInput && !(toolTurnReached = cfg.maxToolTurns && !(countAgenticTurns(messages_uc) % cfg.maxToolTurns))) {
@@ -359,8 +385,8 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 			if (flags) {
 				if (!cfg.afkState || ((flags&1) && cfg.afkState !== 2)) {
-					isSuccess = false;
 					finishReason = 'interrupt';
+					notifyUser(conversation, "请回答问题", true);
 				} else if (retryCount < cfg.toolRetryLimit && (flags&4)) {
 					conversation[RETRY_COUNT] = retryCount + 1;
 					messages.pop();
@@ -368,16 +394,28 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			}
 
 			if (isDisplaying()) $update(updateMessageUI);
-		} else if (tc) {
-			// 因为走到这个分支我们一定要停，所以是ok时停
-			if (isSuccess) {
-				finishReason = 'interrupt';
-				if (toolTurnReached && conversation.meta?.owner) {
-					assistantMessage.finish_reason = "interrupt";
-					assistantMessage.error = "Max API calls reached.";
-				}
+		} else {
+			if (!isSuccess) {
+				notifyUser(conversation, "模型调用出错"+(assistantMessage.error ? '\n'+prettyError(assistantMessage.error) : ''), false);
 			}
-			if (isDisplaying()) $update(updateMessageUI);
+
+			if (tc) {
+				assistantMessage.tool_responses = tc.map(() => ({}));
+				// 因为走到这个分支我们一定要停，所以是ok时停
+				if (isSuccess) {
+					finishReason = 'interrupt';
+					if (toolTurnReached && conversation.meta?.owner) {
+						assistantMessage.finish_reason = "interrupt";
+						notifyUser(conversation, assistantMessage.error = "Max API calls reached.", false);
+					} else {
+						notifyUser(conversation, "请审查工具调用", false);
+					}
+				}
+
+				if (isDisplaying()) $update(updateMessageUI);
+			} else if (isSuccess) {
+				notifyUser(conversation, messages.at(-2)?.tool_calls ? "已完成工作" : "已生成回复", true);
+			}
 		}
 
 		const commitedDueToToolTimeout = promises.length;
@@ -397,17 +435,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		};
 
 		const hasPendingInput2 = isDisplaying() && inputText.trim();
-		if ('tool_calls' !== finishReason) {
-			mayGenerateTitle();
-
-			if (cfg.sound) {
-				if (cfg.sound === "always" || !document.hasFocus())
-					isSuccess ? complete() : failure();
-			}
-
-			if (!isDisplaying() && !cfg.disableFinishToast)
-				showToast(`对话 ${conversation.title}(#${conversation.id}) 已结束 (${finishReason})`, tone ?? "error");
-		} else if (cfg.generateTitle !== true) {
+		if ('tool_calls' !== finishReason || cfg.generateTitle !== true) {
 			mayGenerateTitle();
 		}
 		if (hasPendingInput2) finishReason = 'userInput';
@@ -636,8 +664,11 @@ async function sendCompletionRequest(
 		})
 	}
 
-	if (onProgress && context.isDisplaying() && distanceToBottom() < 30 && !unconscious(lastScrollDirectionIsUp)) {
-		scrollMessagesToBottom();
+	if (context.isDisplaying()) {
+		$update(updateMessageUI);
+		if (onProgress && distanceToBottom() < 30 && !unconscious(lastScrollDirectionIsUp)) {
+			scrollMessagesToBottom();
+		}
 	}
 
 	if (error) {
@@ -984,13 +1015,6 @@ async function sendCompletionRequest(
 	return log;
 }
 
-export const scrollMessagesToBottom = () => {
-	requestAnimationFrame(() => {
-		if (!unconscious(lastScrollDirectionIsUp))
-			DI_messageContainer.vl.scrollTo(Number.MAX_SAFE_INTEGER);
-	});
-};
-
 // 第一个见 sendCompletionRequest 函数
 const allowPrefillFinishReasons = [null, "length", "interrupt", "error"];
 
@@ -1059,6 +1083,12 @@ async function buildCompletionPayload(
 		} else {
 			isPrefill = true;
 		}
+	}
+
+	const maybeToolMessage = messages.findLast(s => s.role === 'assistant');
+	if (maybeToolMessage?.tool_calls) {
+		const flags = await runTools(maybeToolMessage, conversation, true);
+		if (flags === -1) throw ('取消工具调用');
 	}
 
 	/**
@@ -1173,8 +1203,8 @@ async function buildCompletionPayload(
 	])).slice(0, 10);
 
 	let insideBlock;
-	for (let j = 0; j < messages.length; j++) {
-		const m = messages[j];
+	for (let i = 0; i < messages.length; i++) {
+		const m = messages[i];
 
 		if (useRefs) {
 			const container = getMessageContainer(conversation, m.id);
@@ -1183,7 +1213,7 @@ async function buildCompletionPayload(
 				hash = conversationHash+":"+await objectIdentityHash(m);
 				if (container) {
 					container[MESSAGE_HASH] = hash;
-					container[MESSAGE_CACHED] = messages.length - j > 2;
+					container[MESSAGE_CACHED] = messages.length - i > 2;
 				}
 			}
 
@@ -1201,7 +1231,7 @@ async function buildCompletionPayload(
 
 		const compose = MessageRoles[m.role]?.compose;
 		if (compose) {
-			await compose(m, json_messages, j, messages.length, conversation);
+			await compose(m, json_messages, i, messages.length, conversation);
 			continue;
 		}
 
@@ -1211,14 +1241,13 @@ async function buildCompletionPayload(
 
 		const {tool_calls, tool_responses, think} = m;
 		if (tool_calls) {
-			const flags = await runTools(m, conversation, true);
-			if (flags === -1) throw ('取消操作');
-
-			for (let i = 0; i < tool_calls.length; i++) {
+			for (let j = 0; j < tool_calls.length; j++) {
+				const content = tool_responses[j].content;
+				if (content == null) throw `messages[${i}].tool_calls[${j}] 未执行`;
 				json_messages.push({
 					role: "tool",
-					tool_call_id: tool_calls[i].id,
-					content: tool_responses[i].content,
+					tool_call_id: tool_calls[j].id,
+					content,
 				});
 			}
 		}

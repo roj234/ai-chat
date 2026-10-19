@@ -19,8 +19,8 @@ dialog.modal { padding: 0; }
     box-shadow: 0 4px 12px var(--bg);
 
     &:not(.full) {
-        max-width: 768px;
-        min-width: 20%;
+        max-width: min(768px, 100vw);
+        min-width: max(384px, 20%);
         max-height: 80vh;
     }
     &.full {

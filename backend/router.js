@@ -649,9 +649,10 @@ export class Router {
 		};
 
 		let filter = this.#filter;
-		if (typeof filter === 'function' && filter(ctx)) return;
 
 		try {
+			if (typeof filter === 'function' && filter(ctx)) return;
+
 			await handler(ctx);
 		} catch (err) {
 			console.error(err);

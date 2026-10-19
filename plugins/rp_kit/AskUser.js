@@ -100,7 +100,7 @@ export const AskUser = {
 
 			<div className="input">
 				<textarea
-					placeholder={arg.customAnswerLabel || "召唤邪神"}
+					placeholder={arg.placeholder || "召唤邪神"}
 					ref={ta}
 					rows="8"
 					onInput={() => content.value = ta.value}

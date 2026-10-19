@@ -6,6 +6,7 @@ import {webviewSetUserAgent} from "/vendor/jsBridge.js";
 import {onLoad} from "./hooks.js";
 import {toolScriptRegistry} from "./toolset.js";
 import {inspect} from "unconscious/common/inspect.js";
+import {showToast} from "./components/Toast.js";
 
 const defaultSystemPrompt = `You are {{model}}, a helpful assistant.
 {{think}}
@@ -603,6 +604,14 @@ export const GLOBAL_SETTINGS = [
 	},
 	{
 		_tab: "customize",
+		name: "系统通知",
+		type: "element",
+		element: <div className={"choice-scroll"}>
+			<button className="btn ghost" onClick={() => Notification.requestPermission().then(p => showToast(p))}>申请权限</button>
+		</div>
+	},
+	{
+		_tab: "customize",
 		name: "流式输出时自动展开",
 		title: "在 AI 生成过程中，自动展开对应的内容块，方便查看。",
 		type: "multiple",
@@ -615,12 +624,12 @@ export const GLOBAL_SETTINGS = [
 		name: "更多选项",
 		type: "multiple",
 		choices: {
-			"每天检查更新": "checkUpdate",
-			"合并连续的工具调用": "combineToolCalls",
+			"检查更新": "checkUpdate",
+			"自动折叠工具步骤": "combineToolCalls",
 			"生成时防止睡眠": "wakelock",
 		},
 		title: {
-			"合并连续的工具调用": "将多条连续的工具调用消息合并为一条显示\n只能编辑合并消息的最后一条\n工具调用链过长可能影响渲染性能",
+			"自动折叠工具步骤": "将多条连续的工具调用消息合并为一条显示\n只能编辑合并消息的最后一条\n工具调用链过长可能影响渲染性能",
 			"生成时防止睡眠": "生成回复期间，阻止系统睡眠，避免生成中断",
 		}
 	},

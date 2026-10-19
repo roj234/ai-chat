@@ -7,6 +7,7 @@ import {highlight, highlightJsonLike} from "../markdown/highlight.js";
 import SimpleModal from "./SimpleModal.jsx";
 import {updateConversation} from "../database.js";
 import {BorderSpinner} from "./BorderSpinner.jsx";
+import {CollapseButton} from "./ThinkBlock.jsx";
 
 const RESP_SYMBOL = debugSymbol("ToolResponseUpdate");
 const AUTO_EXPAND = debugSymbol("AutoExpandForApproval");
@@ -42,11 +43,11 @@ export function ToolCallCard(props) {
 
         let _response = ref();
         appendChildren(base, <>
-            <div className="tool-body">
+            <div className="tool-body i">
                 <div className="args-title">参数</div>
                 {input}
             </div>
-            <div className="tool-body" ref={_response}>
+            <div className="tool-body o" ref={_response}>
                 <div className="args-title">结果 {duration}
                     {isReactive(tool) ? null : <button className={"rerun-btn"} onClick={({target}) => {
                         const runOperation = () => {
@@ -74,6 +75,7 @@ export function ToolCallCard(props) {
                 </div>
                 {output}
             </div>
+            <CollapseButton/>
         </>);
 
         // 什么都ondemand，算了，反正【我觉得爽也是一种优秀】
@@ -83,12 +85,25 @@ export function ToolCallCard(props) {
             });
             tool[OPENED] = true;
         } else {
+            const renderInput =  toolScriptRegistry[name]?.renderInput;
             const renderOutput =  toolScriptRegistry[name]?.renderOutput;
 
             $watch(reactiveResponse, () => {
                 toolResponse = message.tool_responses[idx];
                 duration.value = toolResponse && formatDuration(toolResponse.duration);
                 const isRunning = toolResponse?.[TOOL_IS_RUNNING];
+
+                if (renderInput && input.parentElement) {
+                    try {
+                        const result = renderInput(toolResponse || {}, input, tool, message);
+                        if (result !== false) {
+                            if (result != null)
+                                input.replaceWith(result);
+                        }
+                    } catch (e) {
+                        console.error("工具内容渲染失败", e);
+                    }
+                }
 
                 if (toolResponse && renderOutput && !base.classList.contains("pending")) {
                     try {
@@ -125,21 +140,9 @@ export function ToolCallCard(props) {
                 }
             });
 
-            const renderInput =  toolScriptRegistry[name]?.renderInput;
-            if (renderInput) {
-                try {
-                    const result = renderInput(toolResponse || {}, input, tool, message);
-                    if (result !== false) {
-                        if (result != null)
-                            input.replaceWith(result);
-                        return;
-                    }
-                } catch (e) {
-                    console.error("工具内容渲染失败", e);
-                }
-            }
-            // 这个函数自带JSON格式化，但是不应该在流式响应的时候使用它，不是么
-            input.innerHTML = highlightJsonLike(tool.function.arguments);
+            // 这个函数自带JSON格式化，但是不应该在流式响应的时候使用它
+            if (input.parentElement)
+                input.innerHTML = highlightJsonLike(tool.function.arguments);
         }
     };
 
@@ -152,7 +155,7 @@ export function ToolCallCard(props) {
         console.error("工具标题渲染失败", e);
     }
     const base = <details className={"tool-call"} onToggle.once={initializeHtml}>
-        <summary className="tool-header" title={"展开调用详情\n"+name}>{title || name}</summary>
+        <summary className="tool-header" title={"展开调用详情\n" + name}>{title || name}</summary>
     </details>;
 
     updateCard(base, props);
@@ -213,7 +216,7 @@ const updateCard = (element, {tool, message, idx}) => {
             element[AUTO_EXPAND] = element.open = true;
             element.dispatchEvent(new Event('toggle'));
         }
-        element.append(<div className={"tool-body"+(secure?" audit":"")}>
+        element.append(<div className={"tool-body c"+(secure?" audit":"")}>
             <div className="args-title">{secure ? "敏感操作需要批准" : "工具执行已暂停"}</div>
             <div className={"audit-box"}>
                 <button className={"btn primary"} onClick={({target}) => {

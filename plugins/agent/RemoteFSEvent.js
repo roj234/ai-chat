@@ -12,7 +12,7 @@ const EVENTS = debugSymbol("FS__EVENTS");
 /** @type {import("unconscious").Reactive<Record<string, { [EVENTS]: [], runId: string, since: number }>>} */
 const serverStates = $store("eventIds", {}, { persist: true, deep: false });
 
-function registerEvents(conv, mnt, fsEvents) {
+const registerEvents = (conv, mnt, fsEvents) => {
 	for (let event of fsEvents) {
 		event[OWNER] = conv;
 		event[FS] = mnt;
@@ -26,21 +26,13 @@ function registerEvents(conv, mnt, fsEvents) {
 			pollLoop(mnt, key, state);
 		}
 
-		state[EVENTS].push(...fsEvents.filter(cb => {
-			const runId = cb.runId;
-			if (runId == null) {
-				cb.runId = state.runId;
-				return true;
-			} else {
-				dispatch(cb);
-			}
-		}));
+		state[EVENTS].push(...fsEvents.filter(runCallbacks(state.runId)));
 		return;
 	}
 
 	serverStates[key] = state = {[EVENTS]: [...fsEvents],};
 	pollLoop(mnt, key, state);
-}
+};
 
 /**
  * 从 spawn/shell 的响应文本登记待通知进程
@@ -49,7 +41,7 @@ function registerEvents(conv, mnt, fsEvents) {
  * @param {Record<string, string>} par
  */
 export const trackProcess = async (result, conv, par) => {
-	const m = /^Running in background \(pid=(\d+)/.exec(result);
+	const m = /^(?:TIMEOUT, )?Running in background \(pid=(\d+)/.exec(result);
 	if (!m) return;
 
 	let mnt = conv;
@@ -70,6 +62,16 @@ export const trackProcess = async (result, conv, par) => {
 	await updateConversation(conv);
 };
 
+const runCallbacks = serverId => cb => {
+	const runId = cb.runId;
+	if (runId == null || runId === serverId) {
+		cb.runId = serverId;
+		return true;
+	} else {
+		dispatch(cb);
+	}
+};
+
 const pollLoop = async (mnt, key, state) => {
 	const call = await createFileSystem(mnt);
 	let backoff = 1000;
@@ -85,21 +87,15 @@ const pollLoop = async (mnt, key, state) => {
 
 			if (clientId !== serverId) {
 				state.runId = serverId;
+				state.since = -1;
 
-				const copy = callbacks.filter(cb => {
-					const runId = cb.runId;
-					if (runId == null || runId === serverId) {
-						cb.runId = serverId;
-						return true;
-					} else {
-						dispatch(cb);
-					}
-				});
+				const copy = callbacks.filter(runCallbacks(serverId));
 				callbacks.length = 0;
 				callbacks.push(...copy);
+			} else {
+				state.since = resp.next;
 			}
 
-			state.since = resp.next;
 			$update(serverStates);
 
 			for (const event of resp.events) {

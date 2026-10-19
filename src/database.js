@@ -34,7 +34,7 @@ export const setRemoteDBUrl = url => remoteDBUrl = url;
  * 后端类型（本地/远程）在整个会话内是固定的；变化的只是远程地址（见 database/remoteDB.js）。
  * 因此这里保持 const，下游 200+ 个调用点无需改动。
  */
-export const isIDB = DB_MODE === 'local' ? true : DB_MODE === 'remote' ? false : config.db_servers.includes(':idb:');
+export const isIDB = DB_MODE === 'local' ? true : DB_MODE === 'remote' ? false : config.db_servers?.includes(':idb:');
 
 const db = isIDB ? idb : remote;
 
@@ -194,6 +194,12 @@ export const fetchMessages = throttledPromise(async conversation => {
 		for (let message of messages) {
 			delete message.owner;
 			m.set(message.id, structuredClone(message));
+			const tr = message.tool_responses;
+			if (tr) {
+				while (tr.length < message.tool_calls.length) {
+					tr.push({});
+				}
+			}
 			message[M_CLEAN] = true;
 		}
 

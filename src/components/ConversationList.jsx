@@ -269,6 +269,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 	const vl = new VirtualList({
 		element: list,
 		itemHeight: 32,
+		gap: 8,
 		data: groupAndConvArr,
 		keyFunc,
 		reuseHook(node, newKey, item) {

@@ -28,6 +28,8 @@ import "./agent/agents-md.js";
 import "./agent/files.js";
 // 技能
 import "./agent/skills.js";
+// 文件预览
+import "./file-preview.js";
 
 // 预装工具
 // JSON编辑

@@ -1,5 +1,6 @@
 import "./AudioPlayer.css";
 import {webviewDownloadFile} from "/vendor/jsBridge.js";
+import {formatDuration} from "/common/pure-utils.js";
 
 export const AudioPlayer = ({src, autoplay}) => {
 	let audio, playBtn, timeDisplay, progressBar, speedBtn;
@@ -7,13 +8,6 @@ export const AudioPlayer = ({src, autoplay}) => {
 	let currentSpeedIndex = 0;
 
 	// 工具函数：格式化时间为 mm:ss
-	const formatTime = seconds => {
-		if (isNaN(seconds)) return "--:--";
-		const m = Math.floor(seconds / 60);
-		const s = Math.floor(seconds % 60);
-		return `${m}:${s < 10 ? '0' : ''}${s}`;
-	};
-
 	let filename = 'media';
 	if (typeof src !== "string") {
 		filename = src.name || 'media';
@@ -22,7 +16,7 @@ export const AudioPlayer = ({src, autoplay}) => {
 
 	const timeUpdate = () => {
 		// 自动更新时间显示
-		timeDisplay.textContent = `${formatTime(audio.currentTime)} / ${formatTime(audio.duration)}`;
+		timeDisplay.textContent = `${formatDuration(audio.currentTime)} / ${formatDuration(audio.duration)}`;
 		// 计算百分比并更新进度条 (只在没有被用户拖拽时更新)
 		if (audio.duration) {
 			progressBar.value = (audio.currentTime / audio.duration) * 100;

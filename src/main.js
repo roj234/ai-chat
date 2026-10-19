@@ -310,7 +310,7 @@ const createApp = () => {
 						if (conv[LOCKED]) {
 							submitUserChatMessage();
 						} else if (Date.now() - conv.time < RESUME_TIMEOUT) {
-							submitUserChatMessage();
+							submitUserChatMessage(true);
 							showToast("继续意外中断的请求", 'ok');
 						} else {
 							delete conv.resumeId;

@@ -60,13 +60,13 @@ import {UsageBlock} from "./UsageBlock.jsx";
 import {decodeObjects, encodeObjects} from "../utils/serialization.js";
 import {openJsonEditor} from "../json_editor/JsonEditDialog.js";
 import {inspect} from "unconscious/common/inspect.js";
+import {formatDuration} from "/common/pure-utils.js";
 
 const CURRENT_EDITING = debugSymbol("EditingNow");
 const isEditing = message => (selectedConversation[CURRENT_EDITING] === message);
 
-const CTC_EXPAND_COUNT = debugSymbol("ExpandedSize");
-const CTC_BASE_COUNT = 50;
-const CTC_EXPAND_ONCE = 50;
+const CTC_EXPAND_ALL = debugSymbol("ExpandedSize");
+const CTC_BASE_COUNT = 2;
 
 /**
  *
@@ -114,20 +114,25 @@ const chunkRenderer = m => {
 				return typeof element === "string" ? <div dangerouslySetInnerHTML={item.html} /> : element;
 			case "progress":return <StatusPill {...item} />;
 			case "divider": {
-				const el = <div className="timeline-divider">
+				const s1 = $state();
+				const node = <div className="timeline-divider">
 					<button onClick={() => {
 						const message = m.key;
-						message[CTC_EXPAND_COUNT] = (message[CTC_EXPAND_COUNT]||0) + CTC_EXPAND_ONCE;
+						message[CTC_EXPAND_ALL] ^= 1;
 						$update(updateMessageUI);
 					}}>
-						<span className={"ri-stack-line"} />
-						展开余下 <span className="white">{item.steps}</span> 轮
+						<span className={"ri-stack-line"}/>
+						{s1} <span className="white"></span> 步 · 用时 <span className="white"></span>
 					</button>
 				</div>;
-				el[onReuse_Callback] = (node, item) => {
-					node.querySelector('.white').textContent = item.steps;
-				};
-				return el;
+				(node[onReuse_Callback] = (node, item) => {
+					const message = m.key;
+					s1.value = message[CTC_EXPAND_ALL] ? "收起" : "展开";
+					const arr = node.querySelectorAll('.white');
+					arr[1].textContent = formatDuration(item.time/1000);
+					arr[0].textContent = item.rounds;
+				})(node, item);
+				return node;
 			}
 			case "input_audio": {
 				const src = item.input_audio.data;
@@ -762,8 +767,7 @@ class MessageListItem {
 		let i = ref.index;
 		let lastGroup = 0;
 
-		const chunks = [];
-		chunkGather(message, chunks, i, messages);
+		let chunks = [];
 
 		/** @type {boolean} */
 		let generationEnded;
@@ -772,22 +776,60 @@ class MessageListItem {
 			i++;
 
 			if (config.combineToolCalls) {
-				const maxSize = CTC_BASE_COUNT + (message[CTC_EXPAND_COUNT] ?? 0);
+				let j = i;
+				const firstMessage = message;
 
-				for (; i < messages.length; i++) {
-					if (!message.tool_calls || isEditing(messages[i]) || messages[i].role !== "assistant") break;
-					message = messages[i];
+				const obj = {type: "divider",};
+				chunks.push(obj);
+
+				const expanded = firstMessage[CTC_EXPAND_ALL];
+
+				for (;;) {
 					lastGroup = chunks.length;
-					chunkGather(message, chunks, i, messages);
+
+					if (i === messages.length || !message.tool_calls || isEditing(messages[i]) || messages[i].role !== "assistant") {
+						chunkGather(message, chunks, i, messages);
+						break;
+					}
+
+					if (expanded) chunkGather(message, chunks, i, messages);
+					else {
+						let {tool_calls} = message;
+
+						for (let j = 0; j < tool_calls.length; j++) {
+							const tool = tool_calls[j];
+							const response = message.tool_responses[j];
+							const name = getToolName(response, tool);
+							const fn = toolScriptRegistry[name];
+							const artifact = fn?.artifact;
+							if (!artifact) continue;
+
+							if (artifact.includes('i')) chunks.push({
+								type: "tool",
+								tool,
+								message,
+								idx: j
+							});
+
+							if (artifact.includes('o') && fn.renderer && response && (null != fn.interactive || response.time) && getToolParameters(response, tool, true)) {
+								chunks.push({
+									type: "tool_ui",
+									name,
+									idx: i,
+									response,
+									tool
+								});
+							}
+						}
+					}
+
+					message = messages[i++];
 				}
 
-				const removeCount = chunks.length - maxSize;
-				if (removeCount > 0) {
-					chunks.splice(0, removeCount, {
-						type: "divider",
-						steps: removeCount
-					});
-					lastGroup++;
+				if (i === j) chunks.shift();
+				else {
+					obj.rounds = i - j + 1;
+					obj.time = (message.time??Date.now()) - firstMessage.time;
 				}
 			}
 
@@ -804,6 +846,7 @@ class MessageListItem {
 				if (message.finish_reason) chunks.push({type: "usage"});
 			}
 		} else {
+			chunkGather(message, chunks, i, messages);
 			getBranchChunk(messages, message, chunks);
 			// 自定义消息角色
 			if (message.finish_reason) chunks.push({type: "usage"});

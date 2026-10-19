@@ -284,7 +284,7 @@ export const openWindow = ({
 					<button className="ri-close-line" title="关闭" onClick={() => closeWindow(state)}></button>
 				</span>
 			</div>
-			<div className={"win-body "+id}>{element}</div>
+			<div className={"win-body "+id.replaceAll(' ', '-')}>{element}</div>
 			{resizable && <div className="win-resize" onPointerDown.left={startResize}></div>}
 		</div>
 	);

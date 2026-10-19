@@ -17,7 +17,7 @@ const extractReasoningTextFromDetails = details => {
 		if (item.type === "reasoning.text") {
 			str += item.text;
 		} else if (item.type === "reasoning.summary") {
-			str += item.summary+"\n\n";
+			str += item.summary + "\n\n";
 		}
 	}
 
@@ -31,7 +31,7 @@ const reasoningFormatNames = {
 	mthinking: "纯文本<thinking>",
 };
 
-export const DONT_PARSE_HTML_IN_THINKING = { allowedTags: [] };
+export const DONT_PARSE_HTML_IN_THINKING = {allowedTags: []};
 
 /**
  *
@@ -59,8 +59,9 @@ export function ThinkBlock({think, message, edit}) {
 					if (details.length === 1 && details[0].type === "reasoning.text" && details[0].format === "unknown") {
 						arr.push(<EditWidget value={details[0].text} onChange={(value) => details[0].text = value}/>);
 					} else {
-						arr.push(<JsonEditor value={inspect(details)} state={thinkState} />);
-						arr.push(<div className={"args error"} style:display={() => thinkState.error ? "" : "none"}>{() => thinkState.error}</div>);
+						arr.push(<JsonEditor value={inspect(details)} state={thinkState}/>);
+						arr.push(<div className={"args error"}
+									  style:display={() => thinkState.error ? "" : "none"}>{() => thinkState.error}</div>);
 						$watch(thinkState, () => {
 							if (thinkState.obj) {
 								message.reasoning_details = thinkState.obj;
@@ -72,7 +73,8 @@ export function ThinkBlock({think, message, edit}) {
 						arr.push(<div style={"font-size:14px"}>思维链格式&nbsp;&nbsp;<select onChange={({target}) => {
 							think.format = target.selectedOptions[0].value;
 						}}>
-							{Object.entries(reasoningFormatNames).map(([k, v]) => <option value={k} selected={format === k}>{v}</option>)}
+							{Object.entries(reasoningFormatNames).map(([k, v]) => <option value={k}
+																						  selected={format === k}>{v}</option>)}
 						</select></div>);
 					}
 					arr.push(<EditWidget value={content} onChange={(value) => think.content = value}/>);
@@ -92,7 +94,7 @@ export function ThinkBlock({think, message, edit}) {
 				 onToggle.once={renderContentAtFirstOpen}>
 			<summary title={title || '展开思考过程'}>
 				<span className="chevron ri-play-large-fill"></span>
-				{edit ? "编辑思维链"+(message.reasoning_details ? " [结构化，可能加密]" : '') : title || $computed(() => {
+				{edit ? "编辑思维链" + (message.reasoning_details ? " [结构化，可能加密]" : '') : title || $computed(() => {
 					let duration = think.duration;
 					if (null == duration) return "已完成思考";
 
@@ -101,10 +103,11 @@ export function ThinkBlock({think, message, edit}) {
 				})}
 			</summary>
 			<div ref={container} className="md"><p>加载中……</p></div>
-			<button className="ri-collapse-vertical-line ghost" title="收起"
-					onClick={({target}) => {
-						target.closest("details").open = false;
-					}}></button>
+			<CollapseButton/>
 		</details>
 	);
 }
+
+export const CollapseButton = () => <button className="collapse ri-collapse-vertical-line ghost" title="收起"
+			onClick={({target}) => {target.closest("details").open = false;
+}} />;

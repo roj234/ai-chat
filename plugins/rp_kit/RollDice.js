@@ -46,6 +46,7 @@ export const RollDice = {
 		},
 		required: ["rolls"]
 	},
+	artifact: 'o',
 
 	script(parameters, response) {
 		const rolls = response.rolls = [];

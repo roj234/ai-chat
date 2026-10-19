@@ -65,7 +65,7 @@ export const requestBackend = async (path, {body, method} = {}) => {
 		res = await fetch(remoteDBUrl+path, init);
 	} catch (e) {
 		if (e.message === 'Failed to fetch')
-			throwDOMException("一般网络故障", "NetworkError");
+			throwDOMException("网络故障", "AbortError");
 		throw e;
 	}
 

@@ -554,10 +554,16 @@ export const getToolName = (ctx, tool) => ctx?.[TOOL_NAME] ?? tool.function.name
  * @return {"secure" | boolean}
  */
 export const getToolInteractiveLevel = (ctx, tool, conv) => {
-	let secure = toolScriptRegistry[getToolName(ctx, tool)]?.interactive;
+	const name = getToolName(ctx, tool);
+	let secure = toolScriptRegistry[name]?.interactive;
 	let tp;
 	if (typeof secure === "function" && (tp = getToolParameters(ctx, tool, true)))
 		secure = secure(tp, conv);
+
+	if (secure === 'secure') {
+		const allowed = /*(await getCombinedPreset(conv))*/config.permittedTools;
+		if (allowed?.includes(name) || allowed?.includes('*') || conv.grantedTools?.has(name)) return false;
+	}
 
 	return secure;
 }
@@ -639,7 +645,7 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 
 			msg = tool_responses[i] = { [TOOL_NAME]: name };
 
-			const parameters = getToolParameters(msg, tc);
+			let parameters = getToolParameters(msg, tc);
 			const allowRun = fn.default || conv.tools.has(name);
 
 			if (!(fn && allowRun)) {
@@ -668,9 +674,11 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 						flags |= 4; // UNRECOVERABLE_ERROR
 						throw "Schema validation error:\n"+error;
 					}
-					// 改变历史
-					tc.function.arguments = JSON.stringify(parameters);
 				}
+				// 在不支持约束采样的推理商上优化工具调用成功率（不知道是否有效其实）
+				parameters = msg[TOOL_PARAM] = sortBySchema(parameters, schema);
+				// 改变历史
+				tc.function.arguments = JSON.stringify(parameters);
 			}
 
 			const deny = customRejectText || (config.afkState === 2 ? UNSAFE_TOOL_DENY_MESSAGE_AFK : UNSAFE_TOOL_DENY_MESSAGE);
@@ -722,8 +730,10 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 			flags |= 2; // ERROR
 		}
 		delete msg[TOOL_IS_RUNNING];
-		if (forceRerun === true && null == msg.content) throw 'some interactive tool need user input';
+		if (forceRerun === true && null == msg.content) throw `${name} 拒绝被自动执行 (可能需要用户交互)`;
 		if (msg.time) msg.duration = Date.now() - msg.time;
+
+		markMessageDirty(response);
 	};
 
 	if (typeof forceRerun === "number") await callTool(forceRerun);
@@ -753,7 +763,6 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 		if (waitList.length) await Promise.all(waitList);
 	}
 
-	markMessageDirty(response);
 	return flags;
 };
 
@@ -885,3 +894,83 @@ export const updateConversationState = (conv, name, value) => {
  * @return {function(*, *): string}
  */
 export const prefixTitle = (prefix, key = 'path') => (req, ctx) => prefix + ' ' + (getToolParameters(ctx, req)[key]||'');
+
+/**
+ * 按 JSON Schema 递归排序对象键名
+ * 优化工具调用成功率的小技巧
+ * @param {Object} obj
+ * @param {OpenAI.ObjectSchema} schema
+ */
+const sortBySchema = (obj, schema) => {
+	/**
+	 * @param {OpenAI.Schema} schema
+	 * @return {Map<string, number>}
+	 */
+	function getOrder(schema) {
+		const visited = new Set();
+		const map = new Map, defined = new Set;
+
+		const walk = (schema) => {
+			if (visited.has(schema)) return;
+			visited.add(schema);
+
+			if (schema.properties) {
+				const required = new Set(schema.required);
+				for (const key of Object.keys(schema.properties)) {
+					if (required.has(key)) {
+						if (!map.has(key)) map.set(key, map.size);
+					}
+					else {
+						defined.add(key);
+					}
+				}
+			}
+
+			schema.allOf?.forEach(walk);
+			schema.oneOf?.forEach(walk);
+			schema.anyOf?.forEach(walk);
+		};
+
+		walk(schema);
+
+		for (const item of defined) map.set(item, map.size);
+		return map;
+	}
+
+	/**
+	 * @param value
+	 * @param {OpenAI.Schema} schema
+	 */
+	function sort(value, schema) {
+		if (!schema || typeof value !== 'object' || value === null) return value;
+
+		if (Array.isArray(value)) {
+			const items = schema.items;
+			return value.map((v, i) => sort(v, schema.prefixItems?.[i] ?? items));
+		}
+
+		const sorter = getOrder(schema);
+		if (!sorter.size) return value;
+
+		const keys = Object.keys(value);
+		let isSorted = 0;
+
+		keys.sort((a, b) => {
+			const ra = sorter.get(a) ?? sorter.size;
+			const rb = sorter.get(b) ?? sorter.size;
+			const delta = ra - rb;
+			if (delta > 0) isSorted = 1;
+			return delta;
+		});
+
+		const properties = schema.properties;
+
+		const out = isSorted ? Object.create(null) : value;
+		for (const key of keys) {
+			out[key] = sort(value[key], properties[key] ?? schema.additionalProperties);
+		}
+		return out;
+	}
+
+	return sort(obj, schema);
+};

@@ -14,6 +14,7 @@ import "./ContextUsage.css";
 import {getContextStrokeColor} from "./contextColor.js";
 import {DI, DID_SEND_BUTTON} from "../hooks.js";
 import {immutableObjectMap} from "unconscious/common/Utils.js";
+import {cannotInsertAfter} from "../inject-message.js";
 
 const x = ["发送", "中止", "继续", "重试", "执行工具", "取消中"];
 const y = ["ri-send-plane-fill", "ri-square-fill", "ri-play-large-fill", "ri-loop-right-line", "ri-function-ai-line", "ri-square-fill spin"];
@@ -63,11 +64,11 @@ export function ContextRing(sendBtn) {
 
 /**
  * @param {import("unconscious").Reactive<OpenAI.ContentPart[]>} attachments
- * @param {function(Event): void} onSend
+ * @param {function(Event): void} submitInput
  * @return {JSX.Element}
  */
-export const createSendButton = (attachments, onSend) => {
-	const sendBtn = DI[DID_SEND_BUTTON] = <button onClick={onSend} />;
+export const createSendButton = (attachments, submitInput) => {
+	const sendBtn = DI[DID_SEND_BUTTON] = <button onClick={submitInput} />;
 
 	/** @param {number} state */
 	const setIcon = state => {
@@ -76,11 +77,15 @@ export const createSendButton = (attachments, onSend) => {
 	};
 
 	const checkAuxActions = () => {
+		const last = messages.at(-1);
+
+		const text = unconscious(inputText);
+		if (text) return cannotInsertAfter(last) ? null : setIcon(0);
+
 		const value = unconscious(abortCompletion);
 		setIcon(value ? value.signal.aborted ? 5 : 1 : 0);
 		if (value) return !value.signal.aborted;
 
-		const last = messages.at(-1);
 		if (!last || selectedConversation.noAI) return false;
 
 		if (selectedConversation.resumeId) {

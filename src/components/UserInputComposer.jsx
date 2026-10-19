@@ -9,11 +9,11 @@ import {
 	messages,
 	selectedConversation
 } from "../states.js";
-import {scrollMessagesToBottom, submitUserChatMessage} from "../api-request.js";
+import {submitUserChatMessage} from "../api-request.js";
 import {AttachmentGallery, blobToContentPart} from "./AttachmentGallery.jsx";
 import {CUSTOM_CONTROLS} from "../settings.js";
 import {createSendButton} from "./SendButton.jsx";
-import {bind} from "../utils/utils.js";
+import {bind, scrollMessagesToBottom} from "../utils/utils.js";
 import {$derived, $state, $update, $watch, unconscious} from "unconscious";
 import {handleCommand} from "../commands.js";
 import SimpleModal from "./SimpleModal.jsx";
@@ -22,6 +22,92 @@ import {webviewUploadImage} from "/vendor/jsBridge.js";
 import {Recorder} from "/plugins/voiceInput/Recorder.jsx";
 import {getCombinedPreset} from "../presets.js";
 import {closeWindow, openWindow} from "./Windows.jsx";
+import {cannotInsertAfter, injectMessages} from "../inject-message.js";
+import {PendingMessageList} from "./PendingMessageList.jsx";
+
+/**
+ *
+ * @param {string} text
+ * @param {OpenAI.ContentPart[]} attachments
+ * @return {Promise<File|string|OpenAI.ContentPart[]>}
+ */
+async function parseUserInput(text, attachments) {
+	let choice;
+	const longTextToAttachment = async (text) => {
+		if (text.length >= 50000) {
+			const huge = text.length > 200000;
+			if (!huge && null == choice) choice = await new Promise((resolve) => {
+				SimpleModal({
+					title: `文本较长（${text.length} 字符）`,
+					message: "是否转为附件？",
+					onConfirm() {
+						resolve(true)
+					},
+					onCancel() {
+						resolve(false)
+					}
+				})
+			});
+			if (choice || huge) {
+				return new File([text], text.slice(0, 32), {type: "text/plain"});
+			}
+		}
+		return text;
+	}
+
+	// Syntax: 单行 ![image](1)
+	const imageRegex = /^!\[image(\d+)]|!\[blob]\(([\da-zA-Z_-]{43})\)$/gm;
+	{
+		const parts = [];
+		let lastIndex = 0;
+		let match;
+		const usedIndices = new Set();
+
+		const flushText = () => {
+			const before = text.slice(lastIndex, match.index).trim();
+			if (before) parts.push({type: "text", text: before});
+			lastIndex = imageRegex.lastIndex;
+		};
+
+		// 寻找匹配的标签并插入图片
+		while ((match = imageRegex.exec(text)) !== null) {
+			const [str, imageIdxStr, hash] = match;
+
+			if (imageIdxStr) {
+				const imageIdx = parseInt(imageIdxStr, 10) - 1;
+
+				if (attachments[imageIdx]) {
+					flushText();
+					parts.push(attachments[imageIdx]);
+					usedIndices.add(imageIdx);
+					continue;
+				}
+			} else if (hash) {
+				try {
+					const blob = await getBlob({hash});
+					flushText();
+					blobToContentPart(blob, 0 === selectedConversation.id, parts);
+					continue;
+				} catch {
+				}
+			}
+
+			parts.push({type: "text", text: await longTextToAttachment(str)});
+		}
+
+		if (lastIndex === 0 && !attachments.length) {
+			return await longTextToAttachment(text, true);
+		} else {
+			const after = text.slice(lastIndex).trim();
+			if (after) parts.push({type: "text", text: await longTextToAttachment(after)});
+
+			attachments.forEach((attachment, index) => {
+				if (!usedIndices.has(index)) parts.push(attachment);
+			});
+			return parts;
+		}
+	}
+}
 
 export const createUserInputComposer = (scroller) => {
 	/** @type {import("unconscious").Reactive<OpenAI.ContentPart[]>} */
@@ -56,14 +142,29 @@ export const createUserInputComposer = (scroller) => {
 			mime.push("video/mp4,video/avi,video/m4v");
 		}
 		fileInput.accept = mime.join(",");
-	})
+	});
+
+	const pendingMessages = $derived(selectedConversation.pendingMessages);
 
 	/**
 	 * @type {HTMLElement}
 	 */
-	let userInput,
+	let userInput = <textarea placeholder="有事尽管问我" className="userInput" enterkeyhint="send"
+			onInput={() => {
+				// Auto resize when typing
+				userInput.style.height = '';
+				userInput.style.height = (userInput.scrollHeight) + 'px';
+			}}
+			onKeyDown={(e) => {
+				if (auxMainlyTouch) return;
+				if (!e.isComposing && e.key === 'Enter' && !e.shiftKey) {
+					e.preventDefault();
+					submitInput(e);
+				}
+			}}
+		/>,
 		backToBottomBtn,
-		sendButton = createSendButton(attachments, onSend);
+		sendButton = createSendButton(attachments, submitInput);
 
 	const blobCallback = blob => {
 		if (blob) blobToContentPart(blob, 0 === selectedConversation.id, attachments);
@@ -85,22 +186,10 @@ export const createUserInputComposer = (scroller) => {
 				onClick={() => {
 					scroller.scrollTop = scroller.scrollHeight;
 				}} title={"返回底部"}/>
+		<PendingMessageList attachments={attachments} input={userInput} items={pendingMessages} />
 		<div className="query">
 			<h1 className={"drag"}>松开上传</h1>
-			<textarea placeholder="有事尽管问我" className="userInput" enterkeyhint="send" ref={userInput}
-					  onInput={() => {
-						  // Auto resize when typing
-						  userInput.style.height = '';
-						  userInput.style.height = (userInput.scrollHeight) + 'px';
-					  }}
-					  onKeyDown={(e) => {
-						  if (auxMainlyTouch) return;
-						  if (!e.isComposing && e.key === 'Enter' && !e.shiftKey) {
-							  e.preventDefault();
-							  if (!unconscious(abortCompletion)) onSend();
-						  }
-					  }}
-			></textarea>
+			{userInput}
 			{AttachmentGallery(attachments)}
 			<div className="controls">
 				<div className="row hide-human">{CUSTOM_CONTROLS}</div>
@@ -181,28 +270,21 @@ export const createUserInputComposer = (scroller) => {
 		}
 	});
 
-	async function onSend() {
+	async function submitInput(event) {
 		if (await handleCommand(inputText, userInput)) return;
-
-		// Abort previous if any
-		const aborter = unconscious(abortCompletion);
-		if (aborter) {
-			aborter.abort();
-			$update(abortCompletion);
-			return;
-		}
 
 		const conv = unconscious(selectedConversation);
 		if (conv && !conv.ready) return;
 
-		const text = inputText.trim();
+		if (sendButton.firstElementChild.disabled) return;
 
+		const text = inputText.trim();
 		if (text) {
-			const prevprev = messages.at(-1);
-			if (prevprev?.role === 'assistant' && (prevprev.error || prevprev.finish_reason === 'interrupt' || prevprev.finish_reason === 'length')) {
+			const m = messages.at(-1);
+			if (cannotInsertAfter(m)) {
 				const options = [];
 
-				if (!prevprev.error && await getCombinedPreset(conv).canPrefill)
+				if (!m.error && await getCombinedPreset(conv).canPrefill)
 					options.push("清空输入框并点击右下角【继续】");
 				options.push("点击上条消息的【重新生成】按钮");
 				options.push("在上上条消息处【分支】");
@@ -218,104 +300,35 @@ export const createUserInputComposer = (scroller) => {
 		inputText.value = '';
 		userInput.style.height = '';
 
-		let choice;
-		const convertToBlob = async (text, capsule) => {
-			if (text.length >= 50000) {
-				const huge = text.length > 200000;
-				if (!huge && null == choice) choice = await new Promise((resolve) => {
-					SimpleModal({
-						title: `文本较长（${text.length} 字符）`,
-						message: "是否转为附件？",
-						onConfirm(){resolve(true)},
-						onCancel() {resolve(false)}
-					})
-				});
-				if (choice || huge) {
-					return new Blob([text], {type: "text/plain"});
-				}
-			}
-			return text;
-		}
+		const content = await parseUserInput(text, attachments);
+		attachments.length = 0;
 
-		let input;
-		// in order to generate image:
-		// modalities: ['image', 'text'],
-
-		// Syntax: 单行 ![image](1)
-		const imageRegex = /^!\[image(\d+)]|!\[blob]\(([\da-zA-Z_-]{43})\)$/gm;
-		{
-			const parts = [];
-			let lastIndex = 0;
-			let match;
-			const usedIndices = new Set();
-
-			const flushText = () => {
-				const before = text.slice(lastIndex, match.index).trim();
-				if (before) parts.push({ type: "text", text: before });
-				lastIndex = imageRegex.lastIndex;
-			};
-
-			// 寻找匹配的标签并插入图片
-			while ((match = imageRegex.exec(text)) !== null) {
-				const [str, imageIdxStr, hash] = match;
-
-				if (imageIdxStr) {
-					const imageIdx = parseInt(imageIdxStr, 10) - 1;
-
-					if (attachments[imageIdx]) {
-						flushText();
-						parts.push(attachments[imageIdx]);
-						usedIndices.add(imageIdx);
-						continue;
-					}
-				} else if (hash) {
-					try {
-						const blob = await getBlob({hash});
-						flushText();
-						blobToContentPart(blob, 0 === selectedConversation.id, parts);
-						continue;
-					} catch {}
-				}
-
-				parts.push({ type: "text", text: await convertToBlob(str) });
+		// Abort previous if any
+		const aborter = unconscious(abortCompletion);
+		if (aborter) {
+			if (content) {
+				injectMessages(conv, {role: 'user', content, time: Date.now()});
+				$update(pendingMessages);
+				return;
 			}
 
-			if (lastIndex === 0 && !attachments.length) {
-				const blob = await convertToBlob(text, true);
-				input = blob || null;
-			} else {
-				const after = text.slice(lastIndex).trim();
-				if (after) parts.push({ type: "text", text: await convertToBlob(after) });
+			if (event.key) return;
 
-				attachments.forEach((attachment, index) => {
-					if (!usedIndices.has(index)) parts.push(attachment);
-				});
-				attachments.length = 0; // 清空附件
-
-				input = parts;
-			}
+			aborter.abort();
+			$update(abortCompletion);
+			return;
 		}
 
-		const noAI = selectedConversation.noAI;
-		if (input) {
-			if (!input.length) return;
-			const userMessage = {role: 'user', content: input, time: Date.now()};
-
-			const nickname = config.nickname;
-			if (noAI && nickname) userMessage.name = nickname;
-
-			messages.push(userMessage);
-		} else {
-			if (sendButton.firstElementChild.disabled) return;
+		if (content) {
+			messages.push({role: 'user', content, time: Date.now()});
+			scrollMessagesToBottom(true);
 		}
 
-		scrollMessagesToBottom();
-
-		if (noAI) return;
+		if (selectedConversation.noAI) return;
 
 		await ensureConversation();
 
-		if (config.reviewMessage && input) return;
+		if (config.reviewMessage && content) return;
 		submitUserChatMessage(true);
 	}
 

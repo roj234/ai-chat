@@ -207,6 +207,7 @@ export const highlight = (code, language, node, is_finished) => {
 			if (last && last.lastElementChild !== staging)
 				last.append(staging);
 		};
+		syncStagingArea();
 
 		success: {
 			if (stableHtml) {

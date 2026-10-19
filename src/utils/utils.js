@@ -2,10 +2,11 @@ import {showToast} from "../components/Toast.js";
 import {$watch, debugSymbol, unconscious} from "unconscious";
 import {highlightJsonLike} from "../markdown/highlight.js";
 import {webviewDownloadFile} from "/vendor/jsBridge.js";
-import {auxKeyboardOnly} from "../states.js";
+import {auxKeyboardOnly, lastScrollDirectionIsUp} from "../states.js";
 import {isIDB, remoteDBUrl} from "../database.js";
 import SimpleModal from "../components/SimpleModal.jsx";
 import {base64Encode} from "unconscious/common/Base64.js";
+import {DI_messageContainer} from "../hooks.js";
 
 export const getRandomString = (length) => {
 	const view = new Uint8Array(length);
@@ -273,3 +274,10 @@ export const cloneNamed = (obj, names) => {
 };
 
 export const requestIdleCallback = window.requestIdleCallback || window.setTimeout;
+
+export const scrollMessagesToBottom = (force) => {
+	requestAnimationFrame(() => {
+		if (!unconscious(lastScrollDirectionIsUp) || force)
+			DI_messageContainer.vl.scrollTo(Number.MAX_SAFE_INTEGER);
+	});
+};
