@@ -1,5 +1,5 @@
 import {join} from 'node:path';
-import {createReadStream, createWriteStream} from 'node:fs';
+import {createWriteStream} from 'node:fs';
 import {access, mkdir, rename, rm, rmdir, unlink} from 'node:fs/promises';
 import {pipeline} from 'node:stream/promises';
 import {createHash} from 'node:crypto';
@@ -8,6 +8,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {cachePreparedSql} from "../utils/sqliteUtils.js";
 import {MAX_UPLOAD_SIZE} from "../config.js";
 import {exclusiveLock} from "../utils/lock.js";
+import {staticFileServe} from "../utils/staticFile.js";
 
 export const BLOB_HASH_REGEX = "[a-zA-Z0-9_-]{43}";
 
@@ -71,86 +72,7 @@ PRAGMA user_version = `+DB_VERSION);
 		const hashBuf = Buffer.from(hash, 'base64url');
 		const info = blobDB.prepare('SELECT * FROM blobs WHERE hash = ?').get(hashBuf);
 		if (!info) return ctx.send(404, { error: 'not found' });
-
-		const lastModified = new Date(info.lastModified).toUTCString();
-
-		const ifModifiedSince = ctx.req.headers['if-modified-since'];
-		if (ifModifiedSince) {
-			const imsDate = new Date(ifModifiedSince);
-			if (!isNaN(imsDate.getTime()) && info.lastModified <= imsDate) {
-				ctx.res.writeHead(304, {
-					'Content-Length': 0,
-					'Last-Modified': lastModified,
-				});
-				ctx.res.end();
-				return;
-			}
-		}
-
-		const fileSize = info.size;
-		const fileType = info.type || "application/octet-stream";
-		const dataPath = join(getStoragePath(hash), hash);
-
-		// 检查并解析 Range 头
-		let range = ctx.req.headers['range'];
-		let start, end;
-
-		if (range && !range.includes(',')) {
-			const ifRange = ctx.req.headers['if-range'];
-			if (ifRange) {
-				if (ifRange !== lastModified) range = null;
-			}
-		} else {
-			range = null;
-		}
-
-		if (range) {
-			const match = range.match(/^bytes=(\d+)-(\d*)$/);
-			if (match) {
-				start = parseInt(match[1], 10);
-				if (match[2] !== '') {
-					end = parseInt(match[2], 10);
-				} else {
-					end = fileSize - 1;
-				}
-			}
-
-			if (!match || start < 0 || start >= fileSize || end >= fileSize || start > end) {
-				ctx.res.writeHead(416, {
-					'Content-Range': `bytes */${fileSize}`,
-					'Content-Length': '0',
-					'Last-Modified': lastModified
-				});
-				ctx.res.end();
-				return;
-			}
-
-			const contentLength = end - start + 1;
-			ctx.res.writeHead(206, {
-				'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-				'Content-Length': contentLength.toString(),
-				'Content-Type': fileType,
-				'Cache-Control': 'public, max-age=31536000, immutable',
-				'Last-Modified': lastModified,
-				'Accept-Ranges': 'bytes'
-			});
-
-			// 管道部分内容
-			await pipeline(createReadStream(dataPath, { start, end }), ctx.res);
-			return;
-
-		}
-
-		ctx.res.writeHead(200, {
-			'Content-Type': fileType,
-			'Content-Length': fileSize,
-			'Cache-Control': 'public, max-age=31536000, immutable',
-			'Content-Disposition': `attachment; filename="${encodeURIComponent(ctx.searchParams.get("name") || info.name)}"`,
-			'Last-Modified': lastModified,
-			'Accept-Ranges': 'bytes'
-		});
-
-		await pipeline(createReadStream(dataPath), ctx.res);
+		await staticFileServe(ctx, info, join(getStoragePath(hash), hash));
 	});
 
 	// 上传 Blob

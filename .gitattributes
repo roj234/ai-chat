@@ -1,5 +1,6 @@
 media/*.txt -text
 media/*.json -text
 media/*.md -text
+public/*.md -text
 # 需要用 GBK
 misc/*.bat -text

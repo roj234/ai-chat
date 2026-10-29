@@ -11,6 +11,7 @@ import {resolveDBRelativeURL} from "../utils/utils.js";
 import {AsyncButton} from "./AsyncButton.jsx";
 import {config, CONFIG_VERSION, LOCKED} from "../states.js";
 import {PRESET_KVS_ID, presets, PromptDropdown, ProviderDropdown} from "../presets.js";
+import {deepEqual} from "unconscious/common/deepEqual.js";
 
 let currentTab = $state("general");
 /**
@@ -63,8 +64,20 @@ async function saveModel(settings, modelTab) {
 		const keys = catData.keys;
 		for (let i = 0; i < keys.length; i++) {
 			const key = keys[i];
-			if (set[key] !== catData.values[i].default) data[key] = set[key];
+			const v = set[key];
+			if (!deepEqual(v, catData.values[i].default) && (typeof v !== 'number' || isFinite(v))) data[key] = v;
+			else delete data[key];
 		}
+	}
+
+	if (!data.canPrefill) delete data.prefillPath;
+
+	// FIXME 同时支持思考等级和思考预算
+	if (data.reasoningEffortPath?.endsWith(",i")) {
+		delete data.supportedEfforts;
+		delete data.reasoningEffort;
+	} else {
+		delete data.reasoningBudget;
 	}
 
 	const modelName = modelTab && set.name;
@@ -84,7 +97,7 @@ async function saveModel(settings, modelTab) {
  * @param {Array} optionsArray
  * @param {import("unconscious").Reactive<AiChat.Preset>} settings
  * @param {Function} onSettingChanged
- * @return {{showHide: showHide, show(): void, byId: (function(string): HTMLElement), sync(boolean, boolean)}}
+ * @return {{showHide(id: string, show: boolean, exact?: boolean): void, show(): void, byId(string): HTMLElement, sync(boolean, boolean)}}
  */
 export function createSettingDialog(optionsArray, settings, onSettingChanged) {
 	/** @type {import("unconscious/common/components/Filter").FilterInstance} */
@@ -216,9 +229,9 @@ export function createSettingDialog(optionsArray, settings, onSettingChanged) {
 	byId.set("provider", providerTest);
 	byId.set("providerTab", selectedProvider);
 
-	let showHide = (pattern, display) => {
+	let showHide = (pattern, display, exact) => {
 		for (let element of elements) {
-			if (element.dataset.id?.startsWith(pattern)) {
+			if (exact ? element.dataset.id === pattern : element.dataset.id?.startsWith(pattern)) {
 				element.style.display = display ? '' : 'none'
 			}
 		}

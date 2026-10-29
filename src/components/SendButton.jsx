@@ -1,6 +1,5 @@
 import {
 	abortCompletion,
-	config,
 	inputText,
 	messages,
 	selectedConversation,
@@ -15,6 +14,7 @@ import {getContextStrokeColor} from "./contextColor.js";
 import {DI, DID_SEND_BUTTON} from "../hooks.js";
 import {immutableObjectMap} from "unconscious/common/Utils.js";
 import {cannotInsertAfter} from "../inject-message.js";
+import {currentCombinedConfig} from "../presets.js";
 
 const x = ["发送", "中止", "继续", "重试", "执行工具", "取消中"];
 const y = ["ri-send-plane-fill", "ri-square-fill", "ri-play-large-fill", "ri-loop-right-line", "ri-function-ai-line", "ri-square-fill spin"];
@@ -48,7 +48,7 @@ export function ContextRing(sendBtn) {
 	</div>;
 
 	bar.style.strokeDasharray = CIRCUMFERENCE;
-	const max = $derived(config.maxContext);
+	const max = $derived(currentCombinedConfig.maxContext);
 	const used = $computed(() => selectedConversation.contextUsage, [updateConversationUI, selectedConversation]);
 	$watchWithCleanup([used, max], () => {
 		let pct = unconscious(used) / unconscious(max);

@@ -21,6 +21,10 @@ import "./managers/ToolManager.js";
 import "./customBackground.js";
 // 消息缓存管理
 import "./session-cache.js";
+// 模型切换
+import "./PresetFastSwitch.js";
+// 思考强度切换
+import "./thinking_slider/thinking-slider.js";
 
 // AGENTS.md 支持
 import "./agent/agents-md.js";
@@ -46,6 +50,8 @@ import "./tools/memories.js";
 import "./tools/followupSuggestions.js";
 // 图表
 import "./tools/chart.js";
+// 上下文占用
+import "./tools/context_usage.js";
 // 角色扮演工具
 import "./rp_kit/interactive_simulation.js";
 // 预装管线（？）
@@ -53,7 +59,6 @@ import "./rpg/example/Translator.js";
 
 // 内联代码的可选插件
 import {registerConfigSync} from "./configSync.js";
-import {registerPresetFastSwitch} from "./PresetFastSwitch.js";
 import {registerMermaidRenderer} from "./mermaid.js";
 import {registerMultimediaGeneration} from "./tools/multimedia_generation.js";
 import {registerRemoteControl} from "./remoteControl.js";
@@ -105,12 +110,6 @@ window.AiChatAPI = {
  */
 const pluginDefinitions = [
 	{
-		name: "预设快速切换菜单",
-		description: "在输入框左侧添加一个预设切换菜单",
-		defaultEnabled: true,
-		load: registerPresetFastSwitch
-	},
-	{
 		name: "基础角色扮演",
 		description: "实现角色卡、世界书、预设等数据结构的导入和导出支持，以及请求体的构造，提供基础角色扮演能力",
 		defaultEnabled: true,
@@ -154,11 +153,6 @@ const pluginDefinitions = [
 		name: "微信机器人 (WIP)",
 		description: "开发中",
 		load: () => import("./chatbot/chatbot.js")
-	},
-	{
-		name: "思考滑块",
-		description: "GPT 6.1 Sol 写的很Q弹的波形和滑块。",
-		load: () => import("./thinking_slider/thinking-slider.js")
 	},
 ];
 

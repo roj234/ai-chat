@@ -1,8 +1,10 @@
 import './thinking-slider.css';
-import {$cleanup, $computed, $derived, $watchWithCleanup, ref, unconscious} from "unconscious";
+import {$cleanup, $computed, $derived, $watchWithCleanup, AS_IS, ref, unconscious} from "unconscious";
 import {DI_settings, onLoad} from "/src/hooks.js";
-import {config} from "/src/states.js";
-import {CUSTOM_CONTROLS} from "/src/settings.js";
+import {config, selectedConversation} from "/src/states.js";
+import {currentCombinedConfig, markCombinedPresetDirty, maxTokensClamped} from "/src/presets.js";
+import {updateConversation} from "/src/database.js";
+import {CUSTOM_CONTROLS} from "/src/customControls.js";
 
 const BUDGET_DESCRIPTIONS = [
 	'短路径推理，优先获得可用答案。',
@@ -17,7 +19,7 @@ const SAMPLE_SPACING = 3;
 const smoothstep = value => value * value * (3 - 2 * value);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
-const ThinkingSlider = ({ options, onChange, onInput, haptics = true }) => {
+const ThinkingSlider = ({ options, onChange, onInput, haptics = true, noAnimation }) => {
 	let sliderValue = 0;
 	let visible = false;
 	let settings;
@@ -109,7 +111,7 @@ const ThinkingSlider = ({ options, onChange, onInput, haptics = true }) => {
 			let index = levels.findIndex(level => level.value === value);
 			if (index < 0) index = Math.round(levels.length / 2);
 
-			sliderValue = index / (levels.length - 1);
+			sliderValue = levels.length <= 1 ? 0.5 : index / (levels.length - 1);
 			input.value = index;
 
 			description.textContent = levels[index].description;
@@ -259,7 +261,7 @@ const ThinkingSlider = ({ options, onChange, onInput, haptics = true }) => {
 	let _visual = 0, _velocity = 0;
 	let _visual2 = 0, _velocity2 = 0;
 
-	const onFrame = now => {
+	const onFrame = noAnimation ? AS_IS : now => {
 		const delta = lastFrameTime ? Math.min((now - lastFrameTime) / 1000, 1 / 30) : 1 / 60;
 		lastFrameTime = now;
 
@@ -308,7 +310,7 @@ const ThinkingSlider = ({ options, onChange, onInput, haptics = true }) => {
 			input.min = options.min;
 			input.max = options.max;
 			input.step = 128;
-			input.value = options.value;
+			input.value = unconscious(options).value;
 			uiValue = input.valueAsNumber;
 		}
 
@@ -344,36 +346,64 @@ const ThinkingSlider = ({ options, onChange, onInput, haptics = true }) => {
 		updateView(uiValue);
 	});
 
-	ro.observe(canvas);
+	if(noAnimation) canvas.remove();
+	else ro.observe(canvas);
 	io.observe(root);
 	return root;
 }
 
 const levels = [
+	{ value: 'minimal', label: '最低', description: '爷不思考了！' },
 	{ value: 'low', label: '低', description: '快速判断，保持轻盈。' },
 	{ value: 'medium', label: '中', description: '拆解问题，让推理多走一步。' },
 	{ value: 'high', label: '高', description: '深入探索，给复杂问题更多空间。' },
 	{ value: 'xhigh', label: '超高', description: '雷霆超大思考。' },
-	{ value: 'max', label: '极致', description: '钱包的心电图。' },
+	{ value: 'max', label: '超超高', description: '钱包的心电图。' },
+	{ value: 'ultra', label: '超超超高', description: '你的额度没了。' },
 ]
 
-const isBudget = $computed(() => config.reasoningEffortPath.endsWith(",i"));
-const level = $derived(config.reasoning);
+const state = currentCombinedConfig;
+const isBudget = $computed(() => state.reasoningEffortPath?.endsWith(",i"));
+const token = $derived(state.reasoningBudget);
+const level = $derived(state.reasoningEffort);
+const supportedEfforts = $derived(state.supportedEfforts);
+
 const options = $computed(() => {
-	const value =  unconscious(level);
-	return unconscious(isBudget) ? { min: 0, max: 65536, value } : { levels, value }
-}, [
-	isBudget,
-	level
-])
+	if (unconscious(isBudget)) {
+		return {min: 0, max: unconscious(maxTokensClamped), value: unconscious(token)}
+	} else {
+		const out = [];
+		for (const key of unconscious(supportedEfforts) ?? []) {
+			out.push(levels.find(level => level.value === key) ?? { value: key, label: key, description: key });
+		}
+		return {levels: out.length ? out : levels, value: unconscious(level)}
+	}
+});
 
 onLoad(() => {
 	const el = <ThinkingSlider options={options} onChange={value => {
-		config.reasoning = value;
-		DI_settings.sync(false, true);
+		if (selectedConversation.presets) {
+			const conv = unconscious(selectedConversation);
+			const overrides = conv.overrides ??= {};
+			if (unconscious(isBudget)) overrides.reasoningBudget = value;
+			else overrides.reasoningEffort = value;
+			markCombinedPresetDirty(conv);
+			updateConversation(conv);
+		} else {
+			if (unconscious(isBudget)) config.reasoningBudget = value;
+			else config.reasoningEffort = value;
+			DI_settings.sync(false, true);
+		}
 	}} />;
-	CUSTOM_CONTROLS[0].append(el);
+
+	CUSTOM_CONTROLS[0].lastElementChild.append(el);
 	el.addEventListener('click', e => {
 		e.stopPropagation();
 	})
+
+	DI_settings.byId("re").replaceWith(<ThinkingSlider noAnimation={true} options={options} onChange={value => {
+		if (unconscious(isBudget)) config.reasoningBudget = value;
+		else config.reasoningEffort = value;
+		DI_settings.sync(false, true);
+	}} />);
 });

@@ -40,7 +40,7 @@
 		overflow-wrap: anywhere;
 	}
 
-	.trace {
+	.trace:not(:empty) {
 		height: 64px;
 		overflow: hidden;
 		mask-image: linear-gradient(to right, transparent, #000 7%, #000 93%, transparent);

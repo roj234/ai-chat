@@ -5,7 +5,7 @@ import {openWindow} from "/src/components/Windows.jsx";
 import {HighlightBox} from "/src/components/TextDiff.jsx";
 import {AudioPlayer} from "/src/components/AudioPlayer.jsx";
 import {fileAccess} from "./agent/index.js";
-import {unconscious} from "unconscious";
+import {$state, unconscious} from "unconscious";
 import {downloadFile, prettyError} from "/src/utils/utils.js";
 import {ZipWriter} from "unconscious/common/zip-io.js";
 import {showToast} from "/src/components/Toast.js";
@@ -13,9 +13,11 @@ import {COMMAND_REGISTRY} from "/src/commands.js";
 import {formatSize, immutableObjectMap} from "unconscious/common/Utils.js";
 import {renderMarkdownToElement} from "../src/markdown/markdown.js";
 import {ImagePane} from "./agent/ImagePane.jsx";
+import {FSE_NotFound, throwDOMException} from "../common/pure-utils.js";
 
 const binaryRead = fileAccess("readRaw");
 const binaryWrite = fileAccess('writeRaw');
+const glob = fileAccess('list');
 
 const openCreateFileWindow = () => {
 	let resetHandler;
@@ -36,7 +38,7 @@ const openCreateFileWindow = () => {
 
 	openWindow({
 		id: "createFile",
-		title: "创建文件",
+		title: "创建文件 (弃用)",
 		actions: <button className="btn primary" onClick={submit} disabled={() => !unconscious(content) || !unconscious(path)}>写入</button>,
 		width: 500,
 		height: 175,
@@ -83,7 +85,7 @@ const handleDownload = async (path, fileName) => {
 		blob = await binaryRead({ path }, {}, conv);
 		blob = new File([blob], fileName, { type: blob.type });
 	} catch {
-		const files = await Glob.script({ path, pattern: "**", json: true }, response, conv);
+		const files = await glob({ path, pattern: "**", json: true }, response, conv);
 		const zw = ZipWriter();
 
 		for (const [relPath] of files) {
@@ -119,6 +121,65 @@ const sizeByKind = immutableObjectMap({
 	binary: { width: 420, height: 220 },
 });
 
+function htmlRenderer(conv, s, path) {
+	const sw = navigator.serviceWorker.controller;
+	if (sw) {
+		let fs = conv;
+		if (path.startsWith("~/")) {
+			let end = path.indexOf('/', 2);
+			const mountPoint = conv.mnt?.[path.slice(2, end < 0 ? path.length : end)];
+			if (!mountPoint) throwDOMException(`Mount ${JSON.stringify(path)}`, FSE_NotFound);
+			path = end < 0 ? "" :path.slice(end+1);
+			fs = mountPoint;
+		}
+
+		return <iframe sandbox="allow-scripts allow-same-origin" src={"vfs/"+(fs.fs_type+'@'+encodeURIComponent(fs.fs_base)+"@"+encodeURIComponent(fs.fs_server))+"/"+path} style="width:100%;height:100%;border:none"/>;
+	} else {
+		s = `
+<!-- ===== 顶部可关闭横幅 ===== -->
+<div>
+<div style="
+  position: absolute; top: 0; left: 0; right: 0;
+  z-index: 9999;
+  background: linear-gradient(135deg, #FFF9E6, #FFF3CD);
+  border-bottom: 1px solid #F0D890;
+  box-shadow: 0 2px 8px rgba(0,0,0,.08);
+  padding: 12px 16px;
+  display: flex; align-items: center; gap: 12px;
+">
+
+  <!-- 提示图标 -->
+  <svg width="22" height="22" viewBox="0 0 24 24" style="flex-shrink:0;">
+    <circle cx="12" cy="12" r="10" fill="#F5A623"/>
+    <path d="M12 6.5v7" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>
+    <circle cx="12" cy="17" r="1.4" fill="#fff"/>
+  </svg>
+
+  <!-- 文案 -->
+  <div style="flex:1; font-size:14px; line-height:1.7; color:#6B4E00;">
+    <b>看不到图片、点击没反应？</b>
+    请到 <b style="background:#FFE08A; padding:2px 6px; border-radius:4px;">设置 → 数据</b>
+    打开 <b>「远程资源缓存」</b>，就能完整显示啦～
+  </div>
+
+  <!-- 关闭按钮（hover 效果用内联 JS 模拟，因为内联样式写不了 :hover） -->
+  <button onclick="this.parentElement.parentElement.remove()"
+    onmouseover="this.style.background='#F0D890'"
+    onmouseout="this.style.background='transparent'"
+    style="
+      background:transparent; border:none; cursor:pointer;
+      width:28px; height:28px; border-radius:50%;
+      font-size:15px; color:#8A6D1A; line-height:1;
+      display:flex; align-items:center; justify-content:center;
+      flex-shrink:0;
+  ">✕</button>
+</div>
+<div style="height:60px"></div>
+</div>` + s;
+		return <iframe sandbox="allow-scripts" srcDoc={s} style="width:100%;height:100%;border:none"/>;
+	}
+}
+
 EVENT_BUS.on('viewUrl', async (path, _, node) => {
 	const conv = unconscious(selectedConversation);
 	if (!conv) return;
@@ -142,10 +203,12 @@ EVENT_BUS.on('viewUrl', async (path, _, node) => {
 		else if (AUDIO_EXT.test(filename)) kind = 'audio';
 		else if (s.size < 1048576 && (loadLanguage(extname) || TEXT_EXT.test(extname))) {
 			kind = 'text';
-			s = await readAsString(s);
-
 			if (extname === 'md') kind = 'markdown';
 			else if (/xhtml|html|htm/i.test(extname)) kind = 'html';
+
+			const sw = navigator.serviceWorker?.controller;
+			if (sw && kind === 'html') {}
+			else s = await readAsString(s);
 		}
 	}
 
@@ -163,9 +226,7 @@ EVENT_BUS.on('viewUrl', async (path, _, node) => {
 				case 'audio': el = <AudioPlayer src={s.toUrl()} />; break;
 				case 'image': el = <div className="images"><ImagePane variant='' overlay="图像" blob={s}/></div>;break;
 				case 'binary':el = <div>不支持或过大的文件 {formatSize(s.size)}<br/>你可以尝试点击上方下载</div>; break;
-				case 'html':
-					el = <iframe sandbox="" srcDoc={s} style="width:100%;height:100%" />;
-					break;
+				case 'html': el = htmlRenderer(conv, s, path);break;
 				case 'folder': el = <div>尚未实现</div>; break
 			}
 

@@ -14,6 +14,8 @@ import {compileGlobPattern, emptyAsyncGenerator, generateGlobCode} from "../../c
 import {Writable} from 'node:stream';
 // noinspection ES6UnusedImports
 import {mpscScheduler} from "../../common/pure-utils.js";
+import {getContentType} from "../utils/mime.js";
+import {staticFileServe} from "../utils/staticFile.js";
 
 const devNull = () => new Writable({
 	write(chunk, encoding, callback) {
@@ -390,7 +392,7 @@ export async function registerFsRoutes(router, allowExec) {
 	// ── Binary read/write/append (bypass text line cache) ──
 
 	router.post('/readRaw', async (ctx) => {
-		const { path: filePath } = await ctx.readAsObject();
+		const { path: filePath, sniff } = await ctx.readAsObject();
 		const safePath = pathFilter(filePath, ctx);
 		const stats = await fs.stat(safePath);
 		if (stats.size > BINARY_FILE_MAX) {
@@ -402,6 +404,25 @@ export async function registerFsRoutes(router, allowExec) {
 			'Content-Length': stats.size,
 		});
 		return pipeline(createReadStream(safePath), ctx.res);
+	});
+	router.get('/readRaw', async (ctx) => {
+		const filePath = ctx.searchParams.get('path');
+		const safePath = pathFilter(filePath, ctx);
+
+		let stats;
+		try {
+			stats = await fs.stat(safePath);
+		} catch (e) {
+			ctx.send(404, { error: `文件 ${filePath} 不存在` });
+			return;
+		}
+
+		await staticFileServe(ctx, {
+			size: stats.size,
+			lastModified: stats.mtimeMs,
+			type: getContentType(safePath),
+			volatile: true
+		}, safePath);
 	});
 
 	/**
@@ -548,7 +569,7 @@ nlink: ${stats.nlink}`);
 	 * @param {object}   options   - { cwd, timeout(ms), shell(boolean|string), safeCwd(用于落盘) }
 	 * @returns {Promise<{code: number, text: string}>}
 	 */
-	async function executeCommand(command, args, { cwd, timeout, shell = false, dir = '.', inline, async: isAsync, env, kill, stdin = true }) {
+	async function executeCommand(command, args, { cwd, timeout, shell = false, dir = '.', inline, background, env, kill, stdin = true }) {
 		const child = spawn(command, args, {
 			cwd,
 			stdio: [stdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
@@ -635,7 +656,7 @@ nlink: ${stats.nlink}`);
 				}
 
 				resolve({
-					code: (isAsync?'':'TIMEOUT, ')+'Running in background (pid='+child.pid+', logPath='+JSON.stringify(dir + filename)+')',
+					code: (background?'':'TIMEOUT, ')+'Running in background (pid='+child.pid+', logPath='+JSON.stringify(dir + filename)+')',
 					text: getLog(),
 				});
 
@@ -647,7 +668,7 @@ nlink: ${stats.nlink}`);
 
 				child.stdout.pipe(file, { end: false });
 				child.stderr.pipe(file, { end: false });
-			}, Math.min(isAsync ? 100 : timeout, 275000));
+			}, Math.min(background ? 100 : timeout, 275000));
 
 			if (!inline && child.pid != null)
 				processes.set(child.pid, { child, logFile: dir+filename, cwd, timer });
@@ -844,14 +865,14 @@ logPath: ${logFile}`
 		router.post('/spawn', async (ctx) => {
 			const {
 				program, arguments: args, cwd = '',
-				timeout = 10, async = false,
+				timeout = 10, background = false,
 				charset = 'utf8',
 				env
 			} = await ctx.readAsObject();
 			const { code, text, duration } = await executeCommand(program, args, {
 				cwd: await pathFilterWithIgnore(ctx, cwd, true),
 				timeout: timeout * 1000,
-				async,
+				background,
 				charset,
 				env
 			});
@@ -861,7 +882,7 @@ logPath: ${logFile}`
 		router.post('/shell', async (ctx) => {
 			let {
 				command, cwd = '', shell = defaultShell,
-				timeout = 10, async = false,
+				timeout = 10, background = false,
 				charset = 'utf8',
 				env
 			} = await ctx.readAsObject();
@@ -876,7 +897,7 @@ logPath: ${logFile}`
 			let { code, text, duration } = await executeCommand(command, args, {
 				cwd: await pathFilterWithIgnore(ctx, cwd, true),
 				timeout: timeout * 1000,
-				async,
+				background,
 				shell,
 				charset,
 				env

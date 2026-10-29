@@ -1,6 +1,6 @@
 import {OpenAI} from "/src/openai";
 import {DatabaseSync} from "node:sqlite";
-import {TSDB} from "./tsdb";
+import {TSDB} from "unconscious/common/tsdb";
 
 namespace AiChatBackend {
     type Router = {

@@ -97,7 +97,7 @@ const provider_kvs_schema = [
 	"canPrefill",
 	"prefillPath",
 	"stripCoT",
-	"reasoningPath",
+	"reasoningTogglePath",
 	"reasoningEffortPath",
 	"jsonSupport",
 	"additionalBody",

@@ -1,10 +1,10 @@
 import {DI_settings, onLoad} from "./hooks.js";
-import {kvListDel, kvListGet, kvListGetKeys, kvListSet} from "./database.js";
+import {kvListDel, kvListGet, kvListGetKeys, kvListSet, updateConversation} from "./database.js";
 import {$asyncState, $computed, $state, $update, debugSymbol, unconscious} from "unconscious";
 import {cloneNamed, prettyError, resolveDBRelativeURL} from "./utils/utils.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
 import {jsonFetch} from "../common/fetch-utils.js";
-import {config, CONFIG_VERSION, EVENT_BUS, LOCKED} from "./states.js";
+import {config, CONFIG_VERSION, EVENT_BUS, LOCKED, selectedConversation} from "./states.js";
 import {showToast} from "./components/Toast.js";
 import {throttledPromiseLast} from "../common/pure-utils.js";
 import {Dropdown} from "./components/Dropdown.jsx";
@@ -203,6 +203,8 @@ EVENT_BUS.on(['kvs', PRESET_KVS_ID, 'set'], () => {
  */
 export const getCombinedPreset = async (conv) => {
 	const globalPreset = unconscious(config);
+	if (!conv) return globalPreset;
+
 	const presets = conv.presets;
 	const overrides = conv.overrides;
 	if (!overrides && !presets) return globalPreset;
@@ -224,6 +226,31 @@ export const getCombinedPreset = async (conv) => {
 	return combined;
 }
 
+const _updateCombinedPreset = $computed(() => unconscious(selectedConversation), [selectedConversation, config], true);
+export const currentCombinedConfig = $asyncState(getCombinedPreset, _updateCombinedPreset);
+
+export const maxTokensClamped = $computed(() => {
+	const maxCompletionTokens = currentCombinedConfig.max_completion_tokens;
+	const v = currentCombinedConfig.maxContext;
+	if (v) return Math.min(v, maxCompletionTokens);
+	return maxCompletionTokens;
+});
+
+export const manualOverrideKeys = new Set(["think", "reasoningBudget", "reasoningEffort"]);
+
+export const setCombinedConfig = (key, value) => {
+	const isLocked = selectedConversation.presets;
+	if (isLocked) {
+		const conv = unconscious(selectedConversation);
+		(conv.overrides ??= {}) [key] = value;
+		return updateConversation(conv);
+	} else {
+		config[key] = value;
+	}
+}
+
 export const markCombinedPresetDirty = (conv) => {
 	delete conv[MERGED_CONFIG];
+	if (conv === unconscious(selectedConversation))
+		$update(_updateCombinedPreset);
 }

@@ -2,11 +2,8 @@ import {getToolParameters, parseFrontmatter, registerToolset} from "/src/toolset
 import {debugSymbol} from "unconscious";
 import {fileAccess} from "./Mounts.js";
 import {createAsyncQueue} from "/common/pure-utils.js";
-import agentsGuide from "/media/vfs/skills/agents-guide/SKILL.md?raw";
-import skillsGuide from "/media/vfs/skills/skills-guide/SKILL.md?raw";
-import aclGuide from "/media/vfs/skills/agents-guide/ACL.md?raw";
 import {EVENT_BUS} from "/src/states.js";
-import {isIDB} from "../../src/database.js";
+import {isIDB} from "/src/database.js";
 
 const SKILL_INFO = debugSymbol("Skills");
 const glob = fileAccess("list");
@@ -51,6 +48,17 @@ Skills provide specialized capabilities and domain knowledge.`,
 	}
 }
 
+const copyFile = (name, toBase, conv) => {
+	return fetch("files/"+name).then((res) => {
+		return res.blob();
+	}).then(blob => {
+		return writeFile({
+			path: toBase+name,
+			content: blob
+		}, 0, conv);
+	})
+}
+
 export async function getSkillCache(conv) {
 	let skillCache = conv[SKILL_INFO];
 	if (!skillCache) {
@@ -58,7 +66,6 @@ export async function getSkillCache(conv) {
 		let prompt = `<skills>\n`;
 
 		if (conv.activatedModules.has("Files")) {
-			// TODO zip vfs for it
 			const path = "~/.skills/skills-guide/SKILL.md";
 			try {
 				await statFile( {
@@ -68,18 +75,9 @@ export async function getSkillCache(conv) {
 				const fs = conv.mnt['.skills'];
 				fs.fs_readonly = false;
 				const p = Promise.all([
-					writeFile({
-						path,
-						content: skillsGuide
-					}, 0, conv),
-					writeFile({
-						path: "~/.skills/agents-guide/SKILL.md",
-						content: agentsGuide
-					}, 0, conv),
-					writeFile({
-						path: "~/.skills/agents-guide/ACL.md",
-						content: aclGuide
-					}, 0, conv),
+					copyFile("skills-guide/SKILL.md", "~/.skills/", conv),
+					copyFile("agents-guide/SKILL.md", "~/.skills/", conv),
+					copyFile("agents-guide/ACL.md", "~/.skills/", conv),
 					EVENT_BUS.post(['initSkills'], conv, writeFile)
 				]);
 				p.finally(() => fs.fs_readonly = true);

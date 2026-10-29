@@ -64,6 +64,7 @@ import {decodeObjects, encodeObjects} from "../utils/serialization.js";
 import {openJsonEditor} from "../json_editor/JsonEditDialog.js";
 import {inspect} from "unconscious/common/inspect.js";
 import {formatDuration} from "/common/pure-utils.js";
+import {AUDIO_MIMES, IMAGE_MIMES, TEXT_MIMES} from "./UserInputComposer.jsx";
 
 const CURRENT_EDITING = debugSymbol("EditingNow");
 const isEditing = message => (selectedConversation[CURRENT_EDITING] === message);
@@ -86,23 +87,28 @@ const formatElapsed = ms => {
  *
  * @param {File} blob
  * @param {string} className
+ * @param {(File) => void} [changer]
+ * @param {string} [kind]
  * @return {JSX.Element}
  */
-const createBlobDisplay = (blob, className) => {
+const createBlobDisplay = (blob, className, changer, kind) => {
 	const deleted = blob.size <= 0;
 	return <div className={"text-attachment"+(deleted ? " deleted" : "")}>
 		<div className="attach-header">
 			<i className={className}></i>
-			<span className="ellipsis">{blob.name || "文件"}</span>
-			{!deleted && <span className="attach-meta ellipsis">{formatSize(blob.size)}, {prettyTime(blob.lastModified)}上传</span>}
+			<span className="ellipsis">{() => blob.name || "文件"}</span>
+			{!deleted && <span className="attach-meta ellipsis">{() => formatSize(blob.size)}, {() => prettyTime(blob.lastModified)}上传</span>}
 		</div>
-		<button className="btn" disabled={deleted}
-				onClick={() => downloadFile(blob)}>
-			<i className="ri-download-line"></i> 下载
-		</button>
+		{changer
+			? <label className="btn" onClick={e => e.stopPropagation()}><i className="ri-edit-2-line"></i> 替换 <input type="file" hidden={true} accept={kind} onChange={e => {
+				changer(e.target.files[0]);
+			}}/></label>
+			: <button className="btn" disabled={deleted} onClick={() => downloadFile(blob)}>
+				<i className="ri-download-line"></i> 下载
+			</button>
+		}
 	</div>
 };
-
 // region AiChat.ResponseContentPart[] 的生成和渲染函数
 /**
  *
@@ -187,15 +193,24 @@ const chunkRenderer = m => {
 			}
 			case "input_audio": {
 				const src = item.input_audio.data;
+
+				if (isEditing(m.key)) {
+					const state = $state(src);
+					return createBlobDisplay(state, "ri-file-music-line", blob => {
+						state.value = blob;
+						item.input_audio.data = blob;
+
+						let name = blob.name;
+						name = name.slice(name.lastIndexOf('.')+1);
+						item.input_audio.format = name;
+					}, AUDIO_MIMES);
+				}
+
 				if (src.size < 0) return createBlobDisplay(src, "ri-file-music-line");
 				return <AudioPlayer src={src} />
 			}
 			case "text": {
 				let text = item.text;
-				if (typeof text !== "string") {
-					if (!text) return <div className={"md"}><em>没有数据</em></div>;
-					return createBlobDisplay(text, "ri-file-text-line");
-				}
 
 				ineditable:
 				if (isEditing(m.key)) {
@@ -210,18 +225,44 @@ const chunkRenderer = m => {
 						}
 					}
 
-					return <EditWidget value={text} placeholder={"消息正文 content"} onChange={value => {
+					const onChange = value => {
 						if (Array.isArray(assistantKey)) {
 							assistantKey[0].content[assistantKey[1]].text = value;
 						} else {
 							assistantKey.content = value;
 						}
-					}} />;
+					};
+					if (typeof text !== 'string') {
+						const state = $state(text);
+						return createBlobDisplay(state, "ri-file-text-line", blob => {
+							state.value = blob;
+							onChange(blob);
+						}, TEXT_MIMES);
+					}
+					return <EditWidget value={text} placeholder={"消息正文 content"} onChange={onChange} />;
 				}
 
+				if (typeof text !== 'string') return createBlobDisplay(text, "ri-file-text-line");
 				return config.afkState === 2 ? <div className={"md"} style={"white-space:pre-line"}>{text}</div> : renderMarkdownToElement(<div className="md"/>, text);
 			}
 			case "images":
+				if (isEditing(m.key)) {
+					return <div>{item.images.map((part, i) => {
+						const file = part.image_url.url;
+
+						const state = $state(file);
+						const el = createBlobDisplay(state, "ri-file-image-line", blob => {
+							state.value = blob;
+							part.image_url.url = blob;
+						}, IMAGE_MIMES);
+
+						const src = typeof file === "string" ? file : file.toUrl();
+						el.addEventListener("click", () => showImageZoomView(src, file.name));
+
+						return el;
+					})}</div>
+				}
+
 				return <div className="gallery">{item.images.map(part => {
 					const file = part.image_url.url;
 					const src = typeof file === "string" ? file : file.toUrl();
@@ -861,7 +902,7 @@ class MessageListItem {
 					chunkGather(message, chunks, i, messages);
 
 					let {content, think} = message;
-					if (content) {
+					if (content || messages[i+1]?.label != null/* check for injected user message */) {
 						if (think) selfBegin++;
 						const self = chunks.splice(selfBegin);
 

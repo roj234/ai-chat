@@ -59,7 +59,6 @@ export const importConversationData = async (conv, messages_, batch) => {
 	await updateConversation(conv, messages_, true);
 	if (!batch) {
 		conv.ready = true;
-		conversations.unshift(conv);
 		selectedConversation.value = conv;
 		messages.value = messages_;
 	}

@@ -60,6 +60,68 @@ const MODIFIABLE_ROLE = immutableObjectMap({
 });
 
 
+/**
+ * @param {AiChat.Mount} mount
+ */
+const connectRemoteFileSystem = async mount => {
+	let obj = await kvListGet(BACKEND_SERVER_KVLIST_ID, mount.fs_server);
+	const {servers, pat, instanceId} = obj;
+	const [uri, currentInstanceId] = await connectBestServer(servers, instanceId, 'fs');
+	if (currentInstanceId !== instanceId) {
+		obj.instanceId = currentInstanceId;
+		await kvListSet(obj, BACKEND_SERVER_KVLIST_ID);
+	}
+	return {pat, uri};
+};
+
+/**
+ * @param {string} base
+ * @return {Promise<FileSystemDirectoryHandle>}
+ */
+const connectLocalFileSystem = async base => {
+	let handle = localFileSystemCache.get(base);
+	if (!handle) {
+		const folder = await folderDB((tx) => tx.objectStore(FOLDER_STORE_NAME).get(base), false, FOLDER_STORE_NAME);
+		if (folder) {
+			handle = folder.handle;
+			while (true) {
+				let result;
+				try {
+					result = await handle.requestPermission({mode: 'readwrite'});
+				} catch (e) {
+					if (e.message.includes('User activation')) {
+						await new Promise((resolve) => {
+							const div = <div
+								style={"position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none"}>
+								<div
+									style={"background:var(--bg);color:var(--text);padding:1%"}>点击页面任意位置，连接本地文件系统喵~
+								</div>
+							</div>;
+							const body = document.body;
+							body.append(div);
+							body.addEventListener("click", e => {
+								div.remove();
+								resolve();
+							}, ONCE_EVENT);
+						});
+						continue;
+					}
+
+					throw e;
+				}
+
+				if (result !== "granted") throwDOMException("用户拒绝授予权限", FSE_NotAllowed);
+				break;
+			}
+
+			await (await handle.entries()).next();
+			localFileSystemCache.set(folder.name, handle);
+		} else {
+			throwDOMException("文件路径 "+base+" 不存在", FSE_NotFound);
+		}
+	}
+	return handle;
+};
 
 /**
  * 实例化文件系统
@@ -73,59 +135,15 @@ const materializeFileSystem = async (mount) => {
 			if (DB_MODE !== 'local')
 				return createRemoteFileSystem(remoteDBUrl+'fs/', config.db_pat, fs_base);
 		}
+		break;
 		case "api": {
-			let obj = await kvListGet(BACKEND_SERVER_KVLIST_ID, mount.fs_server);
-			const {servers, pat, instanceId} = obj;
-			const [uri, currentInstanceId] = await connectBestServer(servers, instanceId, 'fs');
-			if (currentInstanceId !== instanceId) {
-				obj.instanceId = currentInstanceId;
-				await kvListSet(obj, BACKEND_SERVER_KVLIST_ID);
-			}
+			const {pat, uri} = await connectRemoteFileSystem(mount);
 			return createRemoteFileSystem(uri + 'fs/', pat, fs_base);
 		}
 		case "local": {
 			const paths = fs_base?.split("/") || [];
 			const base = paths.shift();
-
-			let handle = localFileSystemCache.get(base);
-			if (!handle) {
-				const folder = await folderDB((tx) => tx.objectStore(FOLDER_STORE_NAME).get(base), false, FOLDER_STORE_NAME);
-				if (folder) {
-					handle = folder.handle;
-					while (true) {
-						let result;
-						try {
-							result = await handle.requestPermission({mode: 'readwrite'});
-						} catch (e) {
-							if (e.message.includes('User activation')) {
-								await new Promise((resolve) => {
-									const div = <div style={"position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none"}>
-										<div style={"background:var(--bg);color:var(--text);padding:1%"}>点击页面任意位置，连接本地文件系统喵~</div>
-									</div>;
-									const body = document.body;
-									body.append(div);
-									body.addEventListener("click", e => {
-										div.remove();
-										resolve();
-									}, ONCE_EVENT);
-								});
-								continue;
-							}
-
-							throw e;
-						}
-
-						if (result !== "granted") throwDOMException("用户拒绝授予权限", FSE_NotAllowed);
-						break;
-					}
-
-					await (await handle.entries()).next();
-					localFileSystemCache.set(folder.name, handle);
-				} else {
-					throwDOMException("文件路径 "+base+" 不存在", FSE_NotFound);
-				}
-			}
-
+			const handle = await connectLocalFileSystem(base);
 			return createWebFileSystem(await resolveDirectory(handle, paths), mount);
 		}
 		case "opfs": {
@@ -141,6 +159,36 @@ const materializeFileSystem = async (mount) => {
 			return createWebFileSystem(vd, mount);
 	}
 };
+
+// GetVFSMeta事件监听器
+navigator.serviceWorker?.addEventListener('message', async ({data}) => {
+	const [rpcId, type, payload] = data;
+	if (type !== 'GetVFSMeta') return;
+
+	let packet = { error: `暂不支持 ${JSON.stringify(payload)} 文件系统` };
+
+	const fsType = payload.fs_type;
+	if (fsType === 'api') {
+		packet = await connectRemoteFileSystem(payload);
+		packet.uri += 'fs/';
+	} else if (fsType === 'db') {
+		packet = {
+			uri: remoteDBUrl+'fs/',
+			pat: config.db_pat
+		}
+	} else {
+		const fs_base = payload.fs_base;
+		if (fsType === 'local') {
+			packet = { handle: await connectLocalFileSystem(fs_base) };
+		} else if (fsType === 'opfs') {
+			let baseDir = await navigator.storage.getDirectory();
+			if (fs_base) baseDir = await resolveDirectory(baseDir, fs_base, CREATE_OPT);
+			packet = { handle: baseDir };
+		}
+	}
+
+	navigator.serviceWorker.controller.postMessage([rpcId, 'rpc', packet]);
+});
 
 /**
  * 调用 File Browser Interface (FBI) 选择文件系统实现
@@ -748,7 +796,7 @@ export const crossVFSCopyMove = async({src, dest, move}, _, conv) => {
 
 const state = $state();
 const updateEstimate = () => navigator.storage.estimate().then(t => state.value = formatSize(t.usage) + "/" + formatSize(t.quota));
-const opfsDialog = <div className={"choice-scroll"}>
+const opfsDialog = <div className="choice-scroll row">
 	<button className={"btn ghost"} onClick={() => callFBI({fs_label: "管理文件系统"}).catch(PROMISE_CATCH)}>管理文件系统</button>
 	<button className={"btn danger"} onClick={() => {
 		SimpleModal({

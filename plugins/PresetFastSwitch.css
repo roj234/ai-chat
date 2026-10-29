@@ -8,8 +8,11 @@
 	& > .dropdown {
 		bottom: calc(100% + 6px);
 		min-width: 180px;
-		padding: 4px;
 		border-radius: 8px;
+
+		& ul {
+			padding: 4px;
+		}
 
 		& li {
 			border-radius: 6px;
@@ -25,13 +28,13 @@
 
 	& .ts {
 		background: var(--panel-2);
+		border: 1px solid var(--border);
 		border-radius: var(--border-radius-md);
 		box-shadow: var(--shadow);
 		padding: 4px;
 
 		position: absolute;
-		left: 200px;
-		bottom: calc(100% + 10px);
+		left: calc(100% + 10px);
 		width: 300px;
 	}
 
@@ -41,5 +44,13 @@
 		&.locked {
 			color: var(--text);
 		}
+	}
+}
+
+@media screen and (max-width: 768px) {
+
+	.pretty-select.preset-switch .ts {
+		left: 0;
+		bottom: calc(100% + 10px);
 	}
 }

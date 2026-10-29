@@ -1,7 +1,7 @@
 import {parseJson5} from "unconscious/common/Json.js";
-import {auxSmallScreen, config, selectedConversation} from "./states.js";
+import {auxSmallScreen, config} from "./states.js";
 import defaultCoTPrompt from "/media/cotPrompt.txt?raw";
-import {$derived, $watch, isPureObject} from "unconscious";
+import {$derived, $watch, isPureObject, unconscious} from "unconscious";
 import {webviewSetUserAgent} from "/vendor/jsBridge.js";
 import {onLoad} from "./hooks.js";
 import {toolScriptRegistry} from "./toolset.js";
@@ -9,7 +9,7 @@ import {inspect} from "unconscious/common/inspect.js";
 import {showToast} from "./components/Toast.js";
 
 const defaultSystemPrompt = `You are {{model}}, a helpful assistant.
-{{think}}
+{{modelPrompt}}
 {{tools}}
 <markdown-format>
 {{mdfmt}}{{htmlTag}}
@@ -33,27 +33,6 @@ const defaultTitlePrompt = `### Title Requirements
 - "Windows 上的目录连接点和符号链接的区别以及如何创建": Too long`;
 
 export {defaultSystemPrompt, defaultCoTPrompt, defaultTitlePrompt};
-
-/**
- *
- * @type {JSX.Element[]}
- */
-export const CUSTOM_CONTROLS = <>
-	<button className="ri-lightbulb-flash-line chip ghost"
-			style:display={() => config.forceThink == null ? "" : "none"}
-			class:active={() => config.think}
-			onClick={() => {
-				config.think ^= true;
-			}}>
-		<div className="tooltip">深度思考：先思考后回答，解决复杂问题</div>
-	</button>
-	<button className="ri-robot-2-line chip"
-			style:display={() => config.modalities?.includes("tool") ? "" : "none"}
-			class:active={() => selectedConversation.activatedModules?.size}
-	>
-		<div className="tooltip">智能体：让AI使用工具</div>
-	</button>
-</>;
 
 export const GLOBAL_SETTINGS = [
 	{
@@ -272,32 +251,67 @@ export const GLOBAL_SETTINGS = [
 		inline: true,
 	},
 	{
+		_tab: "model2",
+		_group: 'model',
+		id: "supportedEfforts",
+		name: "支持的推理等级",
+		type: "multiple",
+		choices: {
+			"minimal": "minimal",
+			"low": "low",
+			"medium": "medium",
+			"high": "high",
+			"xhigh": "xhigh",
+			"max": "max",
+			"ultra": "ultra",
+		},
+		default: ['low', 'high', 'max'],
+		required: true
+	},
+	{
 		_tab: "model",
 		_group: 'model',
-		id: "reasoning",
-		name: "推理预算",
+		id: "reasoningEffort",
+		name: "推理等级",
 		type: "radio",
 		choices: {
-			"手动": false,
 			"最低": "minimal",
 			"低": "low",
 			"中": "medium",
 			"高": "high",
 			"超高": "xhigh",
-			"最高": "max",
-		},
-		title: {
-			"手动": "关闭模型内置推理，由手动编写的 CoT 提示词驱动\n" +
-				"识别并折叠<think>、<thought>、<reasoning>等XML思考标签",
-			"最低": "1024 tokens",
-			"低": "~20% of max_tokens",
-			"中": "~50% of max_tokens",
-			"高": "~80% of max_tokens",
-			"超高": "~95% of max_tokens",
-			"最高": "~99% of max_tokens",
+			"最大": "max",
+			"超级": "ultra",
 		},
 		default: "high",
 		required: true
+	},
+	{
+		_tab: "model",
+		_group: 'model',
+		id: "reasoningBudget",
+		name: "推理预算",
+		type: "number",
+		min: 0,
+		max: 131072,
+		default: 0,
+		step: 1024
+	},
+	{
+		_tab: "model",
+		_id: "re",
+		name: "推理预算 (新对话初始值)",
+		type: "element",
+		element: <div />
+	},
+	{
+		_tab: "model2",
+		_group: 'model',
+		id: "modelPrompt",
+		name: "提示词变量",
+		title: "使用 {{modelPrompt}} 引用，这个配置跟随模型",
+		type: "textbox",
+		default: ""
 	},
 	{
 		id: "maxContext",
@@ -354,7 +368,7 @@ export const GLOBAL_SETTINGS = [
 	{
 		_tab: 'model2',
 		_group: 'model',
-		id: "reasoningPath",
+		id: "reasoningTogglePath",
 		name: "推理开关参数映射",
 		title: "格式：<JSON Pointer>,<启用值>,<禁用值>",
 		pattern: /^([a-z_/])+(,[^,]+,[^,]+)?$/,
@@ -422,13 +436,15 @@ export const GLOBAL_SETTINGS = [
 		placeholder: defaultTitlePrompt
 	},
 	{
-		id: "CoTPrompt",
-		_tab: 'prompt',
-		_group: 'prompt',
-		name: "手动 CoT 提示词",
-		title: "在系统提示词中通过 {{think}} 占位符引用此处输入的文本。\n在手动推理模式下且推理开关打开时注入，否则被替换为空字符串。",
-		type: "textbox",
-		placeholder: defaultCoTPrompt
+		id: "parseThinkTag",
+		name: "解析响应中的思维链XML标签 (<think> 等)",
+		_tab: "prompt",
+		type: "radio",
+		required: true,
+		choices: {
+			"否": false,
+			"是": true,
+		},
 	},
 	// prompt
 	// sampling
@@ -657,6 +673,14 @@ export const GLOBAL_SETTINGS = [
 	},
 	// customize
 	// 因为模块加载顺序的原因 data 整个模块被拆分到 data-exchange.js 和 PresetDropdown.jsx 了
+	{
+		id: "apiRetry",
+		name: "API 错误重试",
+		type: "number",
+		min: 0,
+		max: 10,
+		default: 3
+	},
 	{
 		name: "开发",
 		type: "multiple",
@@ -901,7 +925,7 @@ for (const [k, v] of [
 
 // 删除过时的配置项
 onLoad(() => {
-	const keys = new Set(Object.keys(config));
+	const keys = new Set(Object.keys(unconscious(config)));
 	["name", "think", "_new", "_dirty", "_instanceId"].forEach(name => keys.delete(name));
 
 	GLOBAL_SETTINGS.forEach((item) => {

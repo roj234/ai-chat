@@ -343,7 +343,7 @@ function createBranchManager(conv, messages) {
 			const last = path.at(-1);
 			if (last) {
 				if (remove(last)) {
-					updatePath();
+					if (path[0] === SENTRY) updatePath();
 				} else {
 					Array.prototype.pop.apply(path);
 				}

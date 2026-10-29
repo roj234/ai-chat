@@ -158,7 +158,7 @@ const createApp = () => {
 	appendChild(messagesPanel, <div ref={sentinel} className={"scroll-spy"} aria-hidden />);
 	appendChild(messagesPanel, userInputComposer);
 
-	const toggleSettingUI = (id, display) => settings.showHide(id, display);
+	const toggleSettingUI = settings.showHide;
 
 	toggleSettingUI('prefillPath', false);
 	/**
@@ -197,9 +197,9 @@ const createApp = () => {
 			toggleSettingUI('modalities', !isTextCompletion);
 			toggleSettingUI('jsonSupport', !isTextCompletion);
 			toggleSettingUI('prefillPath', !isTextCompletion && config.canPrefill);
-			toggleSettingUI('CoTPrompt', !isTextCompletion && config.reasoning === false);
+			toggleSettingUI('reasoningEffort', false, true);
+			toggleSettingUI('reasoningBudget', false, true);
 		}
-		if (id === 'reasoning') toggleSettingUI('CoTPrompt', !newValue);
 		if (id === 'generateTitle') toggleSettingUI('title', !!newValue);
 		if (id === 'canPrefill') toggleSettingUI('prefillPath', !!newValue);
 	}
@@ -314,6 +314,7 @@ const createApp = () => {
 							showToast("继续意外中断的请求", 'ok');
 						} else {
 							delete conv.resumeId;
+							delete conv.resumeParent;
 							updateConversation(conv);
 						}
 					}
@@ -387,7 +388,10 @@ const executeLogin = (server) => new Promise((resolve, reject) => {
 				onCancel: null,
 				confirmMessage: "取消",
 				accent: "danger",
-				onConfirm() {abort.abort();}
+				onConfirm() {
+					abort.abort();
+					showToast("注：如你已有PAT，可以刷新之后手动在设置内填写");
+				}
 			})
 		}
 		if (token || skip) {
@@ -418,6 +422,7 @@ const connectDatabase = async () => {
 		type: "input",
 		title: "连接数据库",
 		message: `请输入${apiEndpoint ? "用户名" : "数据库服务地址"}。` + (DB_MODE === "mixed" && "\n点击取消使用本地数据库。"),
+		//value: GLOBAL_SETTINGS.filter(s => s.id.startsWith("db_")),
 		placeholder: (apiEndpoint ? "输入用户名（新用户将自动注册）" : ""),
 		confirmMessage: "连接",
 		onConfirm(value) {
@@ -456,13 +461,24 @@ addEventListener("load", () => {
 		const serverCount = config.db_servers.length;
 		if (!isIDB && !serverCount) return connectDatabase();
 
-		if (serverCount > 1) await initialize(true);
+		if (serverCount > 1 || isIDB) await initialize(true);
 
 		injectCommonDI(settings, messageContainer);
 		EVENT_BUS.fire(['load'], wrapper);
 		onLoad_(wrapper);
 	}).catch(e => {
 		$("loading")?.remove();
+		if (typeof e === 'string') {
+			SimpleModal({
+				title: "提示",
+				message: e,
+				onCancel() {
+					location.reload();
+					return false;
+				}
+			});
+			return;
+		}
 		if (e.name === 'AbortError') {
 			showToast("服务器不可用", 'error');
 			return

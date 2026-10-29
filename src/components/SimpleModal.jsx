@@ -29,6 +29,7 @@ const SimpleModal = ({
 		list,
 		accent = 'primary',
 		confirmMessage = '确认',
+		cancelMessage = '取消',
 		onConfirm,
 		onFilterChanged,
 		onCancel,
@@ -104,7 +105,7 @@ const SimpleModal = ({
 		<div className="footer">
 			<button className={"btn " + accent}
 					onClick={onConfirm ? handleConfirm : handleClose}>{confirmMessage}</button>
-			{onConfirm && !ignoreCancel && <button className="btn ghost" onClick={handleClose}>取消</button>}
+			{onConfirm && !ignoreCancel && <button className="btn ghost" onClick={handleClose}>{cancelMessage}</button>}
 		</div>
 	</dialog>;
 

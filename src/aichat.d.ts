@@ -58,6 +58,8 @@ declare namespace AiChat {
 
         /** SSE Proxy 的断点续传ID */
         resumeId?: string,
+        /** 断点续传 & 分支结合时的临时 parent id */
+        resumeParent?: number;
         /** Schema 模式使用的自定义渲染器ID和后处理函数 */
         roleId?: string;
 
@@ -172,7 +174,7 @@ declare namespace AiChat {
         start?: number;
     };
 
-    type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+    type ReasoningEffort = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 
     type ModelConfig = {
         provider: string
@@ -189,7 +191,7 @@ declare namespace AiChat {
         prefillPath: string
 
         forceThink: boolean | null
-        reasoningPath: string
+        reasoningTogglePath: string
         reasoningEffortPath: string
 
         modalities: ('image' | 'audio' | 'tool')[]
@@ -204,6 +206,11 @@ declare namespace AiChat {
         userId: string,
         userIdField: string,
         sessionIdField: string
+
+        supportedEfforts: ReasoningEffort[]
+        modelPrompt: string
+
+        maxContext: number
 
         jsonSupport: 0 | 1 | 2 | 3
     }
@@ -222,8 +229,8 @@ declare namespace AiChat {
 
     type PromptConfig = {
         systemPrompt: string
-        reasoning: false | ReasoningEffort
-        CoTPrompt: string
+        reasoningEffort: ReasoningEffort
+        reasoningBudget: number
         stripCoT: boolean | 'm'
     }
 
@@ -252,6 +259,7 @@ declare namespace AiChat {
         think: 0 | 1,
         tools: 0 | 1,
         wakelock: 0 | 1,
+        parseThinkTag: boolean
     }
 
     type AgentFSPreset = {
@@ -283,6 +291,8 @@ declare namespace AiChat {
         combineToolCalls: 0 | 1,
         expandThinkBlock: 0 | 1,
         checkUpdate: 0 | 1,
+
+        apiRetry: number
     }
 
     type LocalPreset = ModelConfig & SamplingConfig & PromptConfig & TitleModelConfig & MiscPreset & ManualOverridePreset & AgentFSPreset;

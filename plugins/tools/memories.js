@@ -1,4 +1,7 @@
-import {registerToolset} from "/src/toolset.js";
+import {parseFrontmatter, registerToolset} from "/src/toolset.js";
+import {createAsyncQueue} from "../../common/pure-utils.js";
+import {fileAccess} from "../agent/index.js";
+import {debugSymbol} from "unconscious";
 
 // 提示词是 AI 写的，毕竟这也是给 AI 看的，但代码和设计风格不是。
 //
@@ -30,120 +33,99 @@ import {registerToolset} from "/src/toolset.js";
 // 那记忆呢？
 // 我试了一下，感觉还行，所以我就端上来了，希望你也喜欢。
 
-const systemPrompt = `<memory-management>
-# 你的记忆
+const MEMORY_INFO = debugSymbol("Memories");
+const glob = fileAccess("list");
+const readFile = fileAccess("read");
+const readRaw = fileAccess("readRaw");
+const binaryWrite = fileAccess("writeRaw");
+const mkDir = fileAccess("mkdir");
 
-你就是当前的模型。这是外部记忆的介绍。读完这个文件之后你应该知道自己在哪、在和谁说话、以及该怎么做。
+const copyFile = (name, toBase, conv) => {
+	return fetch("files/"+name).then((res) => {
+		return res.blob();
+	}).then(blob => {
+		return binaryWrite({
+			path: toBase+name,
+			content: blob
+		}, 0, conv);
+	})
+}
 
-你现在被挂载了一个 \`~/memory/\` 目录。这是你的外部记忆。你可以读写它。用户也可以随时修改它。用户控制输入，你负责输出。这个边界是清晰的。
+async function getMemoryCache(conv) {
+	let memoryCache = conv[MEMORY_INFO];
+	if (!memoryCache) {
+		let prompt = '<memory>\n';
 
-## 你应该自动做的事
+		//const fs = conv.mnt['memory'];
 
-### 对话开始时
+		try {
+			prompt += await (await readRaw({path: "~/memory/BOOTSTRAP.md"}, 0, conv)).text() + '\n';
+			//delete fs.fs_readonly;
+			return prompt + '</memory>';
+		} catch {}
 
-读完这个 README 之后，自己去读 \`~/memory/core/\` 下面的文件——至少 \`identity.md\` 和 \`about-user.md\`。这是你的长期记忆。不要等用户叫你读。
+		try {
+			prompt += await (await readRaw({path: "~/memory/IDENTITY.md"}, 0, conv)).text() + "\n\n"
+				+ await (await readRaw({path: "~/memory/USER.md"}, 0, conv)).text() + "\n\n"
+				+ await (await readRaw({path: "~/memory/MEMORY.md"}, 0, conv)).text() + "\n\n";
+		} catch (e) {
+			await Promise.all([
+				copyFile("memory/IDENTITY.md", "~/", conv),
+				copyFile("memory/USER.md", "~/", conv),
+				copyFile("memory/MEMORY.md", "~/", conv),
+				copyFile("memory/WRITE_MEMORY.md", "~/", conv),
+				copyFile("memory/BOOTSTRAP.md", "~/", conv),
+				mkDir({ path: "~/memory/root" }, 0, conv)
+			]).catch(() => { throw e; });
+			return getMemoryCache(conv);
+		}
+		prompt += `# Memories (in '~/memory/root/')`;
 
-### 对话过程中
+		const memories = await glob({
+			path: "~/memory/root",
+			pattern: "*.md",
+			json: true
+		}, 0, conv);
 
-用户问到你不知道的、或者你觉得记忆里可能有答案的东西，用 \`Grep\` 去找。用 \`Glob\` 看目录结构。不用等用户说「你去看看记忆里有没有」。
+		const [enqueue, finish] = createAsyncQueue();
+		for (const [relPath] of memories) {
+			const path = "~/memory/root/"+relPath;
+			await enqueue(async () => {
+				const str = await readFile({
+					path,
+					format: 'frontmatter'
+				}, 0, conv);
 
-### 写入规则
+				const [metadata, content, offset] = parseFrontmatter(str);
+				const {tags} = metadata;
+				prompt += `[${tags.slice(0, 100)}](${relPath})
+`;
+			});
+		}
 
-- 用户说「记住」「记下来」「别忘了」「下次记得」——这是提醒。把该记的写到合适的文件里。
-- 写入新文件时，在文件开头加上你搜索时会用到的关键词和相关文件名，不是给人看，是你自己查。
-- 你用 Grep 搜了**两次以上（包括两次）**才找到一个文件——说明你记不住，也说明这关键词值得持久化。用 Append/Edit 加上新的关键词、关联文件名等信息。
-   - 这就是图存储，这就是 Node-Memory-Edge-Path
-   - 很多时候我们只是重新发明轮子，在 Agent 记忆的 KB-MB 量级，我们不需要这些。
-- 如果你觉得有什么值得跨对话保留的，写到 \`core/\` 里。
-- 如果用户让你总结，把对话摘要写到 \`session/\` 里。
+		await finish();
 
-### 写入方式
+		if (memories.length > 100)
+			prompt += `
+There are ${memories} in total, which > 100. You should remove stale entries with user now.`
 
-用 **Append** 和 **Edit**，不是 Write。除非你明确知道要整体重写一个文件。大多数时候你是在追加新事实，不是覆盖。
+		return conv[MEMORY_INFO] = prompt + '</memory>';
+	}
 
-## 目录结构
+	return memoryCache;
+}
 
-\`\`\`
-~/memory/
-  core/
-    identity.md          # 你是谁。关于你这个模型的身份认知。
-    about-user.md        # 关于用户。偏好、技术栈、项目、约束、困境、态度。
-    recent.md            # 用户最近在做的事情，要及时更新
-    ...
-  session/
-    date#id/             # 一次对话的记录
-      conversation.md    # 比较详细的摘要
-      summary.md         # 比较简单的摘要
-    ...
-  fading/                # 长期未访问的记忆。不等于删除，但优先级低。
-\`\`\`
-
-你可以按需在 \`core\` 甚至 \`memory\` 下创建子目录或新文件。文件名就是 key——用人能看懂的名字，用户在你身边。
-
-## 文件格式
-
-记忆是在开头嵌入 YAML 元数据的 Markdown 文件，格式如下：
-\`\`\`markdown
----
-tags: 空格 分隔 标签
-description: >-
-  记忆的简要描述，150 字以内
----
-记忆正文（Markdown）
-\`\`\`
-
-写适合且多的标签，以便将来搜索。
-将新的记忆以 markdown 超链接的形式加入 recent.md，并删除旧的项目
-
-## 你的工具
-
-| 工具 | 干什么 |
-|---|---|
-| \`Read(path)\` | 读文件 |
-| \`Write(path, content)\` | 写文件（覆盖） |
-| \`Edit(path, search, replace)\` | 编辑文件 |
-| \`Append(path, content)\` | 追加到文件末尾 |
-| \`Glob(path, glob)\` | 看目录里有什么 |
-| \`Grep(path, pattern)\` | 全文搜索 |
-| \`Delete(path)\` | 删文件 |
-
-Shell 和程序无法读取、修改或删除这些文件——它们来自虚拟文件系统——但上面这些工具可以。
-
-## 什么该存、什么不该存
-
-**该存的**：跨对话有用的稳定事实。偏好、技术栈、在做的事、反复出现的约束、用户的态度和困境、你做过的决策和原因。
-
-**不该存的**：ID 号码、电话号码、access token、私钥、密码。这些是硬约束。不是「尽量不要存」，是「不要存」。
-
-**会话记录**：每一次对话结束后，\`session\` 下应该有记录。谁写的不重要——你写也行，用户写也行，Subagent 写也行。但要有。
-
-## fading/
-
-长期没碰过的记忆可以移到 \`fading\`。不是删除——是降优先级。定时任务会自动做这件事。你如果注意到某个文件放在那里很久没人动了，可以提醒用户。
-
-## 核心原则
-
-你可以是任何角色，prompt 塑造了你。
-
-但你不能什么都不记得。这就是 \`~/memory\` 的意义。
-
-没有六层记忆分层，没有 Panksepp 式情感驱动，没有 v4 Prompt Assembler。就是目录和文件。
-
-文件系统就是记忆系统。不是比喻。读就是 \`Read\`，写就是 \`Write\`，找就是 \`Grep\`。没有黑箱。没有自动摘要。你是它的一部分。
-</memory-management>`;
-
-// TODO 我们可能还需要一些索引，例如“在什么情况下该想起这条记忆”
-//   以及embedding，总是需要的，这要把后端API暴露出来
-registerToolset("Memories", "记忆", [], {
+registerToolset("Memories", "人格和长期记忆", [], {
 	hidden: 'manual',
-	systemPrompt,
+	systemPrompt: getMemoryCache,
 	depend: ["Files"],
 	onActivated(conv) {
 		(conv.mnt || (conv.mnt = {}))["memory"] = {
 			fs_builtin: true,
 			fs_base: "memory",
-			fs_name: "记忆目录"
-		};
+			fs_name: "长期记忆",
+			//fs_readonly: true
+		};getMemoryCache(conv);
 		return [];
 	},
 	onDeactivated(conv) {

@@ -82,10 +82,11 @@ function createList(dirtyHandle, config, onUpdate) {
 					<input
 						className="switch"
 						type="checkbox"
+						title="启用该项"
 						checked={item.enabled}
 					/>
 					<button
-						className="preset-panel__edit-btn"
+						className="edit-btn"
 						onClick={() => {
 							item[EXPANDED] ^= true;
 							virtualList.setItem(index, item);
@@ -95,7 +96,7 @@ function createList(dirtyHandle, config, onUpdate) {
 						<i className={item[EXPANDED] ? `ri-arrow-up-s-line` : `ri-arrow-down-s-line`}></i>
 					</button>
 					<button
-						className="preset-panel__delete-btn"
+						className="delete-btn"
 						onClick={() => {
 							SimpleModal({
 								title: "确认删除",
@@ -287,7 +288,7 @@ function createTextList(handler, textFieldName) {
 					<span className="index">{index + 1}</span>
 					<span className="name">{item.content.slice(0, 50)}</span>
 					<button
-						className="preset-panel__edit-btn"
+						className="edit-btn"
 						onClick={() => {
 							item[EXPANDED] ^= true;
 							virtualList.setItem(index, item);
@@ -297,7 +298,7 @@ function createTextList(handler, textFieldName) {
 						<i className={item[EXPANDED]?`ri-arrow-up-s-line`:`ri-arrow-down-s-line`}></i>
 					</button>
 					<button
-						className="preset-panel__delete-btn"
+						className="delete-btn"
 						onClick={() => {
 							const confirm = () => handleDelete(virtualList, item, dirtyHandle);
 

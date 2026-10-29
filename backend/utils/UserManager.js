@@ -4,7 +4,7 @@ import {DatabaseSync} from "node:sqlite";
 import fs from "node:fs";
 import {cachePreparedSql} from "./sqliteUtils.js";
 import {compressLog, compressMessage, decompressLog} from "./compression.js";
-import {NULL_OWNER, TSDB} from "../tsdb/index.js";
+import {NULL_OWNER, TSDB} from "unconscious/common/tsdb/index.js";
 import {LRUCache} from "../../common/LRUCache.js";
 
 /** @type {LRUCache<string, { close: Function }>} */

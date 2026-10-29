@@ -269,18 +269,20 @@ export const RunJS = {
 	name: "RunJS",
 	description: `Execute a JavaScript module (ESM) in sandbox.
 - ES2023+, top-level await, import, import attributes and dynamic import(), no live bindings.
-- Supports CommonJS-style \`module.exports\`. extension must be \`.cjs\`.
-- Node.js shim (no require()): Buffer, process, fs, fetch, and modules \`fs/promises\`, \`path\`, \`url\`.
-- Globals without import: crypto.subtle, CompressionStream, OffscreenCanvas, FontFace.
+- Supports CommonJS-style \`module.exports\`, extension must be \`.cjs\`.
+- Globals without import: Buffer, process, fs, crypto.subtle, CompressionStream, OffscreenCanvas, FontFace.
+- Node.js shim modules: \`fs/promises\`, \`path\`, \`url\`, no require() or sync fs methods.
+- Its fs can access all VFSs, and cwd = workspace root.
 - After the module evaluated, the sandbox detaches — MUST await top-level Promises.
-- Permissions: "network" for fetch/Websocket, "eval" for Function, wasm and remote import().
+- Permissions: "network" for fetch/Websocket, "eval" for Function, wasm and remote import(), "" = fetch is undefined.
 - For Uint8Array, use \`fs.writeFile(path, data, { transfer: true })\` (or appendFile) to transfer the buffer ownership for better performance. The returned promise resolves to a new Uint8Array with the same content; the original buffer becomes invalid.`,
 	parameters: {
 		type: "object",
 		properties: {
-			/*explanation: {
-				type: "string"
-			},*/
+			explanation: {
+				type: "string",
+				description: "One sentence human-readable summary of why run it."
+			},
 			path: {
 				type: "string",
 				description: "Run an existing JavaScript file."
@@ -409,6 +411,8 @@ export const RunJS = {
 				worker.handlers.log('[WARN] Builtin module '+path+' is alias, DO NOT IMPORT, THEY ARE ALREADY USABLE.');
 				return '';
 			}
+
+			if (path.startsWith("node:")) throwDOMException("No shim for module "+path, FSE_NotSupported);
 
 			const mod = JS_SANDBOX_MODULES[path];
 			if (mod) {

@@ -43,8 +43,8 @@ const test = async (body, flag, err1) => {
 	if (!body.max_completion_tokens) body.max_completion_tokens = 16;
 
 	if (flag !== 2) {
-		const [reasoningPath, reasoningEnabledValue = 'true', reasoningDisabledValue = 'false'] = (config.reasoningPath||"reasoning/enabled").split(",");
-		jsonEval(body, reasoningPath, "set", JSON.parse(flag === 3 ? reasoningEnabledValue : reasoningDisabledValue));
+		const [reasoningTogglePath, reasoningEnabledValue = 'true', reasoningDisabledValue = 'false'] = (config.reasoningTogglePath||"reasoning/enabled").split(",");
+		jsonEval(body, reasoningTogglePath, "set", JSON.parse(flag === 3 ? reasoningEnabledValue : reasoningDisabledValue));
 	}
 
 	const additionalBody = config.additionalBody;
@@ -74,10 +74,10 @@ const test = async (body, flag, err1) => {
 	});
 
 	if (!flag) p = p.catch((err) => {
-		if (err1 && String(err).match(err1)) return true;
+		if (err1 && JSON.stringify(err).match(err1)) return true;
 	});
 
-	return p;
+	return p.catch(e => null);
 }
 
 const reason_switch_keys = [
@@ -139,7 +139,7 @@ async function checkModelCapability() {
 				continue;
 			}
 			if (!isThinking(json)) {
-				config.reasoningPath = k;
+				config.reasoningTogglePath = k;
 				break foundAny;
 			}
 		}

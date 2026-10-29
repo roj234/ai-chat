@@ -41,6 +41,20 @@ const [transaction, deleteDatabase] = IndexedDBAccess('AiChat', 9, (event) => {
 
 export {deleteDatabase};
 
+export const initialize = () => {
+	return new Promise((resolve, reject) => {
+		navigator.locks.request(APP_NAME+':singleton', { ifAvailable: true }, lock => {
+			if (!lock) {
+				reject("因为作者很菜写不好分布式锁。\n所以 indexedDB 数据库必须单例，\n请关闭其它Aint标签页");
+				return;
+			}
+
+			resolve();
+			return new Promise(() => {}); // 永久持有，页面卸载时自动释放
+		});
+	})
+}
+
 /**
  * 获取一个会话的消息
  * @param {AiChat.Conversation} conversation 对话
@@ -220,7 +234,8 @@ export const kvListGet = (type, name) => transaction(tx => tx.objectStore('kvs')
 export const kvListSet = (value, type, name) => {
 	if (type) value.type = type;
 	if (name) value.name = name;
-	return transaction(tx => tx.objectStore('kvs').put(value), true, 'kvs').then(() => EVENT_BUS.post(['kvs', type, 'set'], name));
+	return transaction(tx => tx.objectStore('kvs').put(value), true, 'kvs')
+		.then(() => EVENT_BUS.post(['kvs', type, 'set'], name, value.meta));
 };
 
 /**
@@ -228,7 +243,8 @@ export const kvListSet = (value, type, name) => {
  * @param {string} name
  * @returns {Promise<void>}
  */
-export const kvListDel = (type, name) => transaction(tx => tx.objectStore('kvs').delete([type, name]), true, 'kvs');
+export const kvListDel = (type, name) => transaction(tx => tx.objectStore('kvs').delete([type, name]), true, 'kvs')
+	.then(() => EVENT_BUS.post(['kvs', type, 'del'], name));
 
 /**
  * @param {AiChat.BillingLog} log

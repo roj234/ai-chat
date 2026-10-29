@@ -11,12 +11,12 @@ let element;
 
 const swc = navigator.serviceWorker;
 
-if (DB_MODE !== 'local' && swc) {
+if (swc) {
 	GLOBAL_SETTINGS.push({
 		_tab: "data",
 		type: "element",
-		name: "远程文件缓存",
-		element: <div className={"choice-scroll"} ref={element} />
+		name: "远程资源缓存",
+		element: <div className={"choice-scroll row"} ref={element} />
 	});
 	GLOBAL_SETTINGS.push({
 		_tab: "data",
@@ -45,10 +45,11 @@ if (DB_MODE !== 'local' && swc) {
 			});
 
 			element.replaceChildren(
-				<span>已用空间：{() => formatSize(unconscious(size))}</span>,
+				<span style="font-size:14px">已用：{() => formatSize(unconscious(size))}</span>,
+				<button className="btn ghost" onClick={() => sendMessage('vfs')}>刷新VFS</button>,
 				<button className={"btn danger"} onClick={() => unregisterCache().then((removed) => {
 					if (removed) location.reload();
-				})}>卸载</button>
+				})}>卸载</button>,
 			);
 		}
 	};
@@ -97,7 +98,7 @@ const enableBlobCache = () => (
  */
 const sendMessage = (type, value) => enableBlobCache().then((reg) => {
 	return new Promise((resolve, reject) => {
-		const key = id++;
+		const key = id += 2;
 		transactions.set(key, resolve);
 		swc.controller.postMessage([key, type, value]);
 		setTimeout(() => {

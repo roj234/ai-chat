@@ -1,7 +1,7 @@
 import {config} from "../states.js";
 import "./StatusPill.css";
 import {$computed, unconscious} from "unconscious";
-import {SP_CONNECT, SP_GENERATE, SP_PREFILL, SP_WAIT} from "./StatusPill_state.js";
+import {SP_CONNECT, SP_GENERATE, SP_PREFILL, SP_RETRY, SP_WAIT} from "./StatusPill_state.js";
 import {Icon_lightning} from "./Icons.jsx";
 
 const phrases = [
@@ -64,6 +64,13 @@ export const StatusPill = ({kind, data}) => {
 					<div className="icon"></div>
 					<span>正在准备响应...</span>
 				</div>;
+			case SP_RETRY: {
+				const [count, maxCount, delay] = unconscious(data);
+				return <div className="ai-status wait">
+					<div className="icon"></div>
+					<span>发生错误，{delay}ms后重试... ({count} / {maxCount})</span>
+				</div>;
+			}
 			case SP_PREFILL:
 				return <div className="ai-status prefill">
 					<svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">

@@ -30,6 +30,7 @@
         padding: 0;
         gap: 0;
         flex: 1;
+        min-height: 0;
     }
 
     & .sd-provider .pretty-select {
@@ -134,3 +135,14 @@
     }
 }
 
+@media screen and (min-width: 768px) {
+    .ntp {
+        & .chat-item {
+            background: var(--chip-bg);
+
+            &:hover {
+                background: var(--chip-hover);
+            }
+        }
+    }
+}

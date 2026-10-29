@@ -586,10 +586,9 @@ body._fileUI .hide-human {
         gap: 0.75rem;
     }
     & > .controls {
-        display: flex; gap: var(--spacing-md); flex-wrap: wrap; align-items: center;
+        display: flex; flex-wrap: wrap; align-items: center;
         user-select: none;
         justify-content: space-between;
-        width: 100%;
         padding: 0 var(--spacing-md) var(--spacing-md);
     }
     &:has(.userInput:focus) { border-color: var(--accent); }

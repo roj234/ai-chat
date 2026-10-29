@@ -23,10 +23,6 @@ export const databaseError = err => {
 		showToast("数据库错误!\n"+prettyError(err)+"\n建议导出(备份)当前对话", 'error');
 };
 
-if (DB_MODE !== 'local') {
-	if (!config.db_servers && config.db_server) config.db_servers = [config.db_server];
-}
-
 export let remoteDBUrl = '';
 export const setRemoteDBUrl = url => remoteDBUrl = url;
 
@@ -201,6 +197,16 @@ export const fetchMessages = throttledPromise(async conversation => {
 				}
 			}
 			message[M_CLEAN] = true;
+		}
+
+		// 最后一条消息恰巧是位于分支点的正在生成的消息
+		if (conversation.resumeParent) {
+			messages.push({
+				role: "assistant",
+				finish_reason: "error",
+				parent: conversation.resumeParent,
+				id: -1
+			});
 		}
 
 		delete messages[BRANCH_MANAGER];

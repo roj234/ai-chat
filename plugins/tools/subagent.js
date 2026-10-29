@@ -331,7 +331,7 @@ async function createSubagent(par, response, conv, tools) {
 		agent.tools.add(t);
 	}
 
-	agent.overrides.systemPrompt = (systemPrompt + toolsetPrompt) || '---\n---';
+	agent.overrides.systemPrompt = (systemPrompt+'\n\n'+toolsetPrompt) || '---\n---';
 
 	markCombinedPresetDirty(agent);
 
@@ -556,7 +556,7 @@ const CreateAgent = {
 			background: {
 				type: "boolean",
 				default: false,
-				description: "Background mode: the call returns immediately with an id; You will be notified asynchronously by a <agent-message from=\"agentId\">XML tag</agent-message> when it finishes."
+				description: "The call returns immediately with agentId; You will receive an XML message <agent-message from=\"agentId\">...</agent-message> when it finishes."
 			},
 			argv: {
 				type: "array",

@@ -11,7 +11,6 @@ import {
 } from "../states.js";
 import {submitUserChatMessage} from "../api-request.js";
 import {AttachmentGallery, blobToContentPart} from "./AttachmentGallery.jsx";
-import {CUSTOM_CONTROLS} from "../settings.js";
 import {createSendButton} from "./SendButton.jsx";
 import {bind, scrollMessagesToBottom} from "../utils/utils.js";
 import {$derived, $state, $update, $watch, unconscious} from "unconscious";
@@ -25,7 +24,12 @@ import {closeWindow, openWindow} from "./Windows.jsx";
 import {cannotInsertAfter, injectMessages} from "../inject-message.js";
 import {PendingMessageList} from "./PendingMessageList.jsx";
 import {DI, DID_INPUT_BOX_POSITION} from "../hooks.js";
+import {CUSTOM_CONTROLS} from "../customControls.js";
 
+export const TEXT_MIMES = "text/plain";
+export const AUDIO_MIMES = "audio/wav,audio/mp3,audio/flac,audio/ogg";
+export const IMAGE_MIMES = "image/png,image/jpeg,image/bmp,image/gif,image/apng,image/webp";
+export const VIDEO_MIMES = "video/mp4,video/avi,video/m4v";
 /**
  *
  * @param {string} text
@@ -134,17 +138,10 @@ export const createUserInputComposer = (scroller) => {
 		const opt = !conv ? config : await getCombinedPreset(conv);
 
 		// 文本文件
-		const mime = ["text/plain"];
-
-		if (opt.modalities.includes("audio")) {
-			mime.push("audio/wav,audio/mp3,audio/flac,audio/ogg");
-		}
-		if (opt.modalities.includes("image")) {
-			mime.push("image/png,image/jpeg,image/bmp,image/gif,image/apng,image/webp");
-		}
-		if (opt.modalities.includes("video")) {
-			mime.push("video/mp4,video/avi,video/m4v");
-		}
+		const mime = [TEXT_MIMES];
+		if (opt.modalities.includes("audio")) mime.push(AUDIO_MIMES);
+		if (opt.modalities.includes("image")) mime.push(IMAGE_MIMES);
+		if (opt.modalities.includes("video")) mime.push(VIDEO_MIMES);
 		fileInput.accept = mime.join(",");
 	});
 
@@ -197,37 +194,38 @@ export const createUserInputComposer = (scroller) => {
 			{AttachmentGallery(attachments)}
 			<div className="controls">
 				<div className="row hide-human">{CUSTOM_CONTROLS}</div>
-				<div className="spacer"></div>
-				<div className="dropdown">
-					<button className="ri-attachment-2 btn ghost" title="添加附件" onClick={() => {
-						if (auxMainlyTouch) return;
-						fileInput.click()
-					}}></button>
-					<div className="list mid up">
-						{IS_ANDROID_BUILD && <label className="ri-camera-4-fill" onClick={() => {
-							webviewUploadImage().then(blobCallback)
-						}}>
-							拍摄照片
-						</label>}
-						<label className="ri-mic-fill" role="button" tabIndex={0} onClick={() => {
-							const handle = openWindow({
-								id: 'recorder',
-								icon: <i className={"ri-mic-fill"}></i>,
-								title: "录音机",
-								element: () => <div style={"padding:8px"}><Recorder onSubmit={(blob) => {
-									blobCallback(blob);
-									closeWindow(handle);
-								}}/></div>,
-								width: 500,
-								height: 230,
-								resizable: false
-							});
-						}}>录制语音</label>
-						<label className="ri-attachment-2" role="button" tabIndex={0} onClick={() => fileInput.click()}>选择文件</label>
+				<div className="spacer" />
+				<div className="row">
+					<div className="dropdown">
+						<button className="ri-attachment-2 btn ghost" title="添加附件" onClick={() => {
+							if (auxMainlyTouch) return;
+							fileInput.click()
+						}}></button>
+						<div className="list mid up">
+							{IS_ANDROID_BUILD && <label className="ri-camera-4-fill" onClick={() => {
+								webviewUploadImage().then(blobCallback)
+							}}>
+								拍摄照片
+							</label>}
+							<label className="ri-mic-fill" role="button" tabIndex={0} onClick={() => {
+								const handle = openWindow({
+									id: 'recorder',
+									icon: <i className={"ri-mic-fill"}></i>,
+									title: "录音机",
+									element: () => <div style={"padding:8px"}><Recorder onSubmit={(blob) => {
+										blobCallback(blob);
+										closeWindow(handle);
+									}}/></div>,
+									width: 500,
+									height: 230,
+									resizable: false
+								});
+							}}>录制语音</label>
+							<label className="ri-attachment-2" role="button" tabIndex={0} onClick={() => fileInput.click()}>选择文件</label>
+						</div>
 					</div>
+					{sendButton}
 				</div>
-
-				{sendButton}
 			</div>
 		</div>
 	</div>);

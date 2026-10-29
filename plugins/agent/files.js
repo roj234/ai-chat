@@ -84,7 +84,7 @@ const Read = {
 	description: "Read a file by 1-based line `offset`." +
 		" Negative `offset` count from the end." +
 		" Return at most `limit` lines." +
-		"\nErrors are separated from content by delimiter '\x03'; everything after '\x03' is error details, not file content." +
+		"\nSidenotes are separated from content by delimiter '\x03'; everything AFTER '\x03' (like 'totalLines' or 'EOF') is not file content." +
 		"\nExamples:\n" +
 		"\n - Read(offset=-5) for a 10-line file return line 6-10" +
 		"\n - Read(offset=-5, limit=3) for that file return line 6-8",

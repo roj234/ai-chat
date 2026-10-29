@@ -45,19 +45,17 @@
     justify-content: space-between;
     padding: 0 var(--spacing-md);
     height: 2rem;
-    background: var(--chip-bg);
     border-radius: var(--border-radius-sm);
     border: 1px solid transparent;
     transition: var(--transition);
     gap: var(--spacing-sm);
 
     &:hover {
-        background: var(--chip-hover);
+        background: var(--chip-bg);
         border-color: var(--border);
     }
 
     &.active {
-        background: var(--chip-active);
         border-color: var(--chip-active-border);
     }
 

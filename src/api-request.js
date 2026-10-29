@@ -56,7 +56,7 @@ import {
 	markMessageDirty,
 	updateConversation
 } from "./database.js";
-import {BODY_PARAMETERS, defaultCoTPrompt, defaultSystemPrompt, defaultTitlePrompt} from "./settings.js";
+import {BODY_PARAMETERS, defaultSystemPrompt, defaultTitlePrompt} from "./settings.js";
 import {createJsonStream} from "/common/StreamJsonSerializer.js";
 import {createAntiSlopSampler} from "./anti-slop-sampler.js";
 import SimpleModal from "./components/SimpleModal.jsx";
@@ -70,10 +70,11 @@ import {encodeObjects, objectIdentityHash} from "./utils/serialization.js";
 import {SHA256} from "unconscious/common/SHA256.js";
 import {DONT_PARSE_HTML_IN_THINKING} from "./components/ThinkBlock.jsx";
 import {LLM_COST_SCALE} from "/backend/sync.js";
-import {SP_CONNECT, SP_GENERATE, SP_PREFILL, SP_WAIT} from "./components/StatusPill_state.js";
+import {SP_CONNECT, SP_GENERATE, SP_PREFILL, SP_RETRY, SP_WAIT} from "./components/StatusPill_state.js";
 import {getCombinedPreset, isLlamaCppBackend, PRESET_KVS_ID} from "./presets.js";
 import {expandFolds} from "./utils/BranchManager.js";
 import {lockConversation, unlockConversation} from "./conversation-lock.js";
+import {abortable, sleep} from "../common/pure-utils.js";
 
 /**
  * @param {boolean} [loop]
@@ -338,6 +339,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 						showToast("Abort接口调用失败\n"+e, 'error');
 					}));
 					delete conversation.resumeId;
+					delete conversation.resumeParent;
 					needUpdate = true;
 				}
 			} else {
@@ -522,8 +524,8 @@ Directly output title in JSON \` { "title": <conversation title> } \`, no explai
 		response_format: { type: "json_object" }
 	};
 
-	const [reasoningPath, reasoningEnabledValue, reasoningDisabledValue = 'false'] = (config.reasoningPath||"reasoning/enabled").split(",");
-	if (config.forceThink == null) jsonEval(body, reasoningPath, "set", JSON.parse(reasoningDisabledValue));
+	const [reasoningTogglePath, reasoningEnabledValue, reasoningDisabledValue = 'false'] = (config.reasoningTogglePath||"reasoning/enabled").split(",");
+	if (config.forceThink == null) jsonEval(body, reasoningTogglePath, "set", JSON.parse(reasoningDisabledValue));
 
 	setConversationTitle(conversation, '正在生成标题……', true);
 
@@ -596,6 +598,7 @@ const setMessageCacheState = (conversation, messages, hashes, state) => {
 };
 
 const ALLOW_RESUME = "network error";
+const NO_RETRY_STATUS = new Set([400, 401, 402, 403, 404, 422, 413]);
 
 /**
  *
@@ -635,20 +638,29 @@ async function sendCompletionRequest(
 
 	if (abortCompletion.signal.aborted && !error) return false;
 
+	block:
 	if (assistantMessage) {
 		delete assistantMessage.error;
 		assistantMessage.finish_reason = '';
 		markMessageDirty(assistantMessage);
 		onProgress?.();
 	} else {
-		if (resumableMessage) messages.pop();
-		messages.push(assistantMessage = {
+		assistantMessage = {
 			role: 'assistant',
 			content: '',
 			model: config.model,
 			id: -1,
 			finish_reason: ''
-		});
+		};
+		if (resumableMessage) {
+			if (resumableMessage.parent != null) {
+				assistantMessage = Object.assign(resumableMessage, assistantMessage);
+				break block;
+			}
+
+			messages.pop();
+		}
+		messages.push(assistantMessage);
 	}
 
 	if (config.reviewRequest && !error && data.body) {
@@ -741,13 +753,16 @@ async function sendCompletionRequest(
 				if (resumable) {
 					if (!resumable.end && null != conversation.id) {
 						conversation.resumeId = id;
+						const resumeParent = assistantMessage.parent;
+						if (resumeParent != null) conversation.resumeParent = resumeParent;
 						updateConversation(conversation, assistantMessage.id > 0 ? null : unconscious(messages));
 					} else {
 						delete conversation.resumeId;
+						delete conversation.resumeParent;
 					}
 
 					localTimeDelta = resumable.now - firstPacketTime;
-					//console.log("time diff to server", localTimeDelta);
+					//console.log("server resume state", resumable);
 					firstPacketTime = resumable.start;
 				}
 
@@ -878,7 +893,7 @@ async function sendCompletionRequest(
 				content += text;
 			}
 
-			if (config.reasoning === false && !manualCoTCloseTag && (manualCoTCloseTag = /^\s*<(thinking|think|thought|reasoning)>/i.exec(content))) {
+			if (config.parseThinkTag && !manualCoTCloseTag && (manualCoTCloseTag = /^\s*<(thinking|think|thought|reasoning)>/i.exec(content))) {
 				reasoning_text = content.slice(manualCoTCloseTag[0].length);
 				manualCoTCloseTag = manualCoTCloseTag[1];
 				reasoning_format = "m"+manualCoTCloseTag;
@@ -897,7 +912,7 @@ async function sendCompletionRequest(
 			if (reasoning_text != null) {
 				if (!thinkState) {
 					thinkState = {
-						duration: resumable ? ((resumable.re||resumable.now) - resumable.ft) : 0,
+						duration: (resumable ? ((resumable.re||resumable.now) - resumable.ft) : 0),
 						content: reasoning_text,
 						format: reasoning_format
 					};
@@ -983,7 +998,6 @@ async function sendCompletionRequest(
 			messages.pop();
 			context.retry?.();
 		} else {
-			abortCompletion.abort();
 			if (err !== "retry") {
 				finishReason = 'error';
 
@@ -993,13 +1007,28 @@ async function sendCompletionRequest(
 				}
 
 				if (config.sound) failure();
+
+				let noRetry;
 				if (err.status) {
+					noRetry = NO_RETRY_STATUS.has(err.status);
 					err = `API错误 (${err.status})\n${err.message}`;
 				} else {
+					noRetry = isContentfulMessage(assistantMessage);
 					err = prettyError(err);
 				}
 				assistantMessage.error = err;
+
+				const count = context.retryCount = (context.retryCount ?? 0) + 1;
+				if (!noRetry && count <= config.apiRetry) {
+					const delay = Math.round(Math.min(30000, 800 * (1 << (count - 1))) * Math.random());
+					progressKind.value = SP_RETRY;
+					progressValue.value = [count, config.apiRetry, delay];
+					onProgress?.(MARKDOWN_END, assistantMessage);
+					return await abortable(sleep(delay), abortCompletion.signal).then(() => context.retry?.());
+				}
 			}
+
+			abortCompletion.abort();
 		}
 	} finally {
 		if (isReactive(thinkState)) endThinking();
@@ -1125,34 +1154,15 @@ async function buildCompletionPayload(
 			}
 		}
 
-		const reasoningEffort = config.reasoning;
-		const useModelCoT = isThinkingEnabled(config) && reasoningEffort;
-		const [reasoningPath, reasoningEnabledValue = 'true', reasoningDisabledValue = 'false'] = (config.reasoningPath||"reasoning/enabled").split(",");
+		const useModelCoT = isThinkingEnabled(config);
+		const [reasoningTogglePath, reasoningEnabledValue = 'true', reasoningDisabledValue = 'false'] = (config.reasoningTogglePath||"reasoning/enabled").split(",");
 
 		if (config.forceThink == null) {
-			jsonEval(body, reasoningPath, "set", JSON.parse(useModelCoT?reasoningEnabledValue:reasoningDisabledValue));
+			jsonEval(body, reasoningTogglePath, "set", JSON.parse(useModelCoT?reasoningEnabledValue:reasoningDisabledValue));
 		}
 		if (useModelCoT) {
-			const [reasoningEffortPath, reasoningEffortType = 's'] = (config.reasoningEffortPath || "reasoning/effort").split(",");
-			let fieldValue = reasoningEffort;
-			if (reasoningEffortType === 'i') {
-				if (typeof reasoningEffort === 'string') {
-					if (reasoningEffort === "minimal") {
-						fieldValue = 1024;
-					} else {
-						fieldValue = ({
-							"low": 0.2,
-							"medium": 0.5,
-							"high": 0.8,
-							"xhigh": 0.95,
-							"max": 0.99
-						}[reasoningEffort]) * body.max_completion_tokens;
-					}
-				}
-			} else if (typeof reasoningEffort === 'number') {
-				fieldValue = 'high';
-			}
-			jsonEval(body, reasoningEffortPath, "set", config.reasoning = fieldValue);
+			const [reasoningEffortPath, reasoningEffortType] = (config.reasoningEffortPath || "reasoning/effort").split(",");
+			jsonEval(body, reasoningEffortPath, "set", reasoningEffortType === 'i' ? config.reasoningBudget : config.reasoningEffort);
 		}
 	}
 
@@ -1438,8 +1448,8 @@ export const buildSystemPrompt = async (config, conversation, prompt, toolPrompt
 					result += config.allowHTMLTags.includes("basic") ? "\n- HTML tags in Markdown are supported, use HTML table for complex tables, details/summary for spoilers, and optional inline styles." : "";
 				}
 				break;
-				case "think":
-					result += isThinkingEnabled(config) && config.reasoning === false ? (config.CoTPrompt || defaultCoTPrompt) : "";
+				case "modelPrompt":
+					result += config.modelPrompt;
 				break;
 				case "tools":
 					if (toolPrompt) result += toolPrompt.includes('{{') ? await transform(toolPrompt) : toolPrompt;
@@ -1455,7 +1465,7 @@ export const buildSystemPrompt = async (config, conversation, prompt, toolPrompt
 								val = await val(conversation);
 							result += val;
 						} else if (id[0] !== '#') {
-							throw new Error("未识别的占位符 {{"+id+"}}");
+							throw new Error("未知提示词变量: {{"+id+"}}");
 						}
 					}
 			}

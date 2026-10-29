@@ -8,13 +8,13 @@ import {renderMarkdownToElement} from "/src/markdown/markdown.js";
 import "./ToolManager.css";
 import "../rp_basic/PresetPanel.css";
 import {ensureConversation, selectedConversation} from "/src/states.js";
-import {CUSTOM_CONTROLS} from "/src/settings.js";
 import {onLoad} from "/src/hooks.js";
 import {showToast} from "/src/components/Toast.js";
 import {prettyError} from "/src/utils/utils.js";
 import {getKV, setKV} from "/src/database.js";
 import {MCPClient} from "/common/MCPClient.js";
 import {getWindow, openWindow} from "/src/components/Windows.jsx";
+import {CUSTOM_CONTROLS} from "/src/customControls.js";
 
 const mcps = $state([]);
 let registeredMcps;
@@ -128,30 +128,42 @@ function createList() {
 					<span className="name" title={mod.name}>{name}</span>
 					{mod.hidden && <small title={"需要人工操作"}>手动</small>}
 					{mod.tools?.length && <small title={mod.tools.join("\n")}>{mod.tools.length} 个工具</small>}
-					{mod.data === "MCP" && <button
-						className="preset-panel__delete-btn"
-						onClick={() => {
-							const idx = mcps.findIndex(mcp => mcp.name === mod.name);
-
-							SimpleModal({
-								title: "确认删除",
-								message: <div dangerouslySetInnerHTML={highlightJsonLike(mcps[idx])}/>,
-								accent: 'danger',
-								onConfirm() {
-									mcps.splice(idx, 1);
-									const vlIdx = virtualList.findIndex(mod);
-									virtualList.items.splice(vlIdx, 1);
-									virtualList.setItems(virtualList.items);
-								}
-							})
-						}}
-						title="删除"
-					>
-						<i className="ri-delete-bin-line"></i>
-					</button>}
+					{mod.data === "MCP" && <div style="display:flex">
+						<button
+							className="edit-btn"
+							onClick={() => {
+								const idx = mcps.findIndex(mcp => mcp.name === mod.name);
+								addOrEditMCPServer(mcps[idx], idx);
+							}}
+							title="编辑"
+						>
+							<i className="ri-edit-2-line"></i>
+						</button>
+						<button
+							className="delete-btn"
+							onClick={() => {
+								const idx = mcps.findIndex(mcp => mcp.name === mod.name);
+								SimpleModal({
+									title: "确认删除",
+									message: <div dangerouslySetInnerHTML={highlightJsonLike(mcps[idx])}/>,
+									accent: 'danger',
+									onConfirm() {
+										mcps.splice(idx, 1);
+										const vlIdx = virtualList.findIndex(mod);
+										virtualList.items.splice(vlIdx, 1);
+										virtualList.setItems(virtualList.items);
+									}
+								})
+							}}
+							title="删除"
+						>
+							<i className="ri-delete-bin-line"></i>
+						</button>
+					</div>}
 					<input
 						className="switch"
 						type="checkbox"
+						title="启用该项"
 						checked={isActivated(selectedConversation, mod.name)}
 					/>
 				</div>
@@ -159,7 +171,7 @@ function createList() {
 			</li>;
 		},
 		keyFunc(item) {
-			return item.name+'/'+(isActivated(selectedConversation, item.name)?1:0);
+			return item.name + '/' + (isActivated(selectedConversation, item.name) ? 1 : 0);
 		}
 	});
 
@@ -176,10 +188,11 @@ function openSkillManager() {
 	return <div className={`preset-panel skill-manager`}>{el}</div>
 }
 
-async function addMCPServerDialog() {
+async function addOrEditMCPServer(existed, existedIdx) {
 	SimpleModal({
 		type: "filter",
-		title: "添加MCP服务器",
+		title: `${existed ? "编辑" : "添加"}MCP服务器`,
+		placeholder: existed,
 		value: [
 			{
 				type: "input",
@@ -188,7 +201,8 @@ async function addMCPServerDialog() {
 				id: "name",
 				pattern(name) {
 					if (!/^[a-zA-Z0-9_-]+$/.test(name)) return "名称只能包含大小写字母数字斜杠下划线";
-					if (mcps.find(mcp => mcp.name === name)) return "名称与现有MCP/工具集重复";
+					const idx = mcps.findIndex(mcp => mcp.name === name);
+					if (idx >= 0 && idx !== existedIdx) return "名称与现有MCP/工具集重复";
 				},
 				required: true
 			},
@@ -237,6 +251,9 @@ async function addMCPServerDialog() {
 				},
 			}
 		],
+
+		confirmMessage: existed ? "保存" : "添加",
+
 		async onConfirm(state) {
 			const client = new MCPClient(state.url, {key: state.key});
 			try {
@@ -250,7 +267,9 @@ async function addMCPServerDialog() {
 			for (const key in obj) {
 				if (!obj[key]) delete obj[key];
 			}
-			mcps.push(obj);
+
+			if (existed) mcps[existedIdx] = obj;
+			else mcps.push(obj);
 		}
 	});
 }
@@ -277,7 +296,7 @@ CUSTOM_CONTROLS.find(el => el.matches(".ri-robot-2-line")).addEventListener("cli
 		id: "skillManager",
 		icon: <i className='ri-tools-line'/>,
 		title: "工具和技能配置",
-		actions: <button className="ri-add-line btn ghost" title={"添加MCP服务器"} onClick={addMCPServerDialog}/>,
+		actions: <button className="ri-add-line btn ghost" title={"添加MCP服务器"} onClick={addOrEditMCPServer}/>,
 		element: openSkillManager,
 		dock: "right",
 		width: 400

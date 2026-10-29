@@ -115,21 +115,21 @@ export class ProxyResumeManager {
 			this.hasError = true;
 
 			// 确保源连接被释放，避免 hang 住
-			ctx.req.destroy();
+			ctx?.req.destroy();
 		}
 	}
 
 	/**
 	 *
-	 * @param {boolean} [abort]
+	 * @param {boolean} [finished]
 	 */
-	end(abort) {
+	end(finished) {
 		const {req, completion, ctx, hasError} = this;
 
-		if (req == null || abort) {
-			this.abort.abort();
-			if (req == null) return;
-		}
+		if (req != null && !finished) return;
+
+		this.abort.abort();
+		if (req == null) return;
 
 		const id = req.id;
 

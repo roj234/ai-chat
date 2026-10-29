@@ -17,7 +17,6 @@ import {showToast} from "/src/components/Toast.js";
 import {throttled} from "/common/pure-utils.js";
 import {getMessages} from "/src/database.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
-import {fileAccess} from "../agent/index.js";
 import {onLoad} from "/src/hooks.js";
 
 /** @type {AiChat.FunctionTool} */
@@ -72,13 +71,10 @@ const ListTools = {
 	}
 };
 
-const binaryRead = fileAccess("readRaw");
-
 registerToolset("Chatbot", "将该对话接入聊天机器人", [SendMessage, ListTools], {
 	hidden: "manual",
 	onActivated(conv) {
 		config.chatbot_cid = conv.id;
-		return [SendMessage.name, ListTools.name, "Read", "Glob", "Grep", "Write", "Stat", "Append", "Edit", "Patch", "Delete", "CopyMove", "Mkdir", "RunJS"]
 	},
 	async systemPrompt(conv) {
 		if (conv.id !== config.chatbot_cid)

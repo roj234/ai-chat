@@ -1,6 +1,7 @@
 /**
  * Service Worker: Blob LRU 缓存
  */
+import {getContentType} from "./backend/utils/mime.js";
 
 const CACHE_NAME = 'blob-cache-v1';
 const CACHE_NAME_ASSETS = 'assets-cache-v1';
@@ -19,6 +20,9 @@ self.addEventListener('activate', (event) => {
 		caches.delete(CACHE_NAME_ASSETS)
 	]));
 });
+
+const vfsScope = self.registration.scope+"vfs/";
+const vfsData = new Map;
 
 // ===== 请求拦截 =====
 self.addEventListener('fetch', (event) => {
@@ -44,7 +48,69 @@ self.addEventListener('fetch', (event) => {
 			event.respondWith(handleSetBlobRequest(request, event));
 		}
 	}
+
+	if (request.url.startsWith(vfsScope)) {
+		event.respondWith(handleVfsRequest(request, event));
+	}
 });
+
+let rpcId = 1;
+const rpcTasks = new Map;
+
+const RPC = (type, payload) => new Promise((resolve) => {
+	const id = rpcId;
+	rpcTasks.set(id, resolve);
+	self.clients.matchAll({ type: 'window' }).then(clients => {
+		for (const c of clients) c.postMessage([id, type, payload]);
+	});
+	rpcId += 2;
+});
+
+/**
+ * VFS 虚拟服务器实现
+ * @param {Request} request
+ * @param {FetchEvent} event
+ */
+const handleVfsRequest = async (request, event) => {
+	// TODO 支持修改文件的请求 PUT PATCH 等等
+	if (request.method !== 'GET') {
+		return new Response("", { status: 403 });
+	}
+
+	const parts = request.url.slice(vfsScope.length).split('/');
+	const vfsId = parts.shift();
+	const params = vfsId.split('@').map(decodeURIComponent);
+	let vfs = vfsData.get(vfsId);
+	if (!vfs) {
+		let timer;
+		vfsData.set(vfsId, vfs = await Promise.race([
+			RPC("GetVFSMeta",{fs_type: params[0], fs_base: params[1], fs_server: params[2]}),
+			new Promise((resolve, reject) => timer = setTimeout(() => resolve({ error: '读取VFS元数据超时' }), 3000))
+		]));
+		clearTimeout(timer);
+	}
+
+	if (vfs.error) return new Response(vfs.error, { status: 503 });
+
+	if (vfs.handle) {
+		// OPFS-like
+		let cur = vfs.handle;
+		for (const p of parts.slice(0, -1)) cur = await cur.getDirectoryHandle(p);
+		return new Response(await (await cur.getFileHandle(parts.at(-1))).getFile(), {
+			headers: {
+				"Cache-Control": "no-store",
+				"Content-Type": getContentType(parts.at(-1))
+			}
+		});
+	} else {
+		// real server
+		const upstream = await fetch(vfs.uri+"readRaw?root="+encodeURIComponent(params[1])+"&path="+encodeURIComponent(parts.join('/')), {
+			headers: vfs.pat ? {Authorization: 'Bearer '+vfs.pat} : undefined,
+		});
+		return new Response(upstream.body, upstream);
+	}
+};
+
 
 /** 默认容量 = 最大容量, 500 MB */
 let CACHE_CAPACITY = 500<<20;
@@ -396,6 +462,16 @@ self.addEventListener('message', (event) => {
 		case 'del':
 			fn = unregisterAndCleanup();
 			break;
+		case 'vfs':
+			vfsData.clear();
+			break;
+		case 'rpc':
+			const callback = rpcTasks.get(id);
+			if (callback) {
+				rpcTasks.delete(id);
+				callback(value);
+			}
+			return;
 	}
 	if (fn) event.waitUntil(fn.then((value) => client.postMessage([ id, value ])));
 });
