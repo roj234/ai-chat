@@ -5,7 +5,7 @@ import {$unwatch, $update, $watch, unconscious} from "unconscious";
 import {decodeObjects, encodeObjects} from "/src/utils/serialization.js";
 import {updateConversation} from "/src/database.js";
 import {DI_settings, onLoad} from "/src/hooks.js";
-import {inspect} from "unconscious/common/inspect.js";
+import {inspect} from "@roj234/util-inspect";
 
 onLoad(() => {
 	const dataDebug = DI_settings.byId("dd");

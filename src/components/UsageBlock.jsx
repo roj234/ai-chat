@@ -28,7 +28,7 @@ export const UsageBlock = (m) => {
 		const p = [];
 
 		msgs.forEach(m => {
-			if (!m[LOG_CACHE]) p.push(getBillingLog(m.id).then(log => m[LOG_CACHE] = log, () => {}));
+			if (undefined === m[LOG_CACHE]) p.push(getBillingLog(m.id).then(log => m[LOG_CACHE] = log, () => {}));
 		});
 
 		Promise.all(p).then(() => {

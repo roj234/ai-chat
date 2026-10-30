@@ -46,7 +46,7 @@ export const createSyncValidateMiddleware = (DATA_PATH) => /**
 	const myUrl = new URL(req.url, baseUrl);
 
 	const userId = myUrl.searchParams.get('u');
-	if (RESTRICT_USER_CREATION && !ALLOW_USER_NAMES.has(userId)) {
+	if (RESTRICT_USER_CREATION && !ALLOW_USER_NAMES.test(userId)) {
 		cb(false, 403, "no such user");
 		return;
 	}

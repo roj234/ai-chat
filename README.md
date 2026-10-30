@@ -143,23 +143,21 @@ llama-server --path ./dist
 | [高级功能](public/documents/advanced-features.md) | AntiSlop、对话分支、角色扮演基础、思考模式 |
 | [RPG 管线](public/documents/rpg-pipeline.md) | 约束采样、流式 JSON 解析 |
 | [插件开发](public/documents/plugin-development.md) | 工具注册、命令、后端插件 |
-| [API 参考](public/documents/api-reference.md) | SSE 代理、批量请求、WebSocket 同步 |
-| [后端配置](public/documents/backend-config.md) | 代理路由、内容审核 |
+| [API 参考](public/documents/api-reference.md) | LLM 中转站、批量请求、WebSocket 同步 | 
 | [设计哲学](public/documents/philosophy.md) | 设计理念 |
 | [路线图](public/documents/roadmap.md) | 已知问题和计划中的功能 |
 | [TTS & 生图](public/documents/tts.md) | 端点配置与 API 规范 |
 
 ## 依赖
 
-> unconscious/common 的设计目标: smaller, faster, or both
-- [Unconscious](https://github.com/Roj234/unconscious) — 8KB 的无 VDOM 响应式框架，以及大量公共代码。
-  - qr.js：大概最快的JavaScript二维码生成库 - 6KB
-  - msgpack.js：性能很好的Msgpack编解码库 - 8KB
-  - Zip-IO：比JSZip快三十倍的Zip读写库。在Node上支持Brotli，另有JSZip-兼容API shim - 8KB
-  - safe-worker：基于语法解析/转换和原型锁定的安全WebWorker沙箱。支持权限控制、ESM/CJS模块、异步RPC和文件系统shim - 24KB
-  - Json.js：流式JSON5解析器。支持JSONL以及增量回调 - 4KB
-  - ws2：比 ws 快 10% 的 WebSocket 服务器/客户端 - 41KB
-- [streaming-markdown](https://github.com/Roj234/streaming-markdown) — 流式 Markdown 解析器
+> @roj234/* 的设计目标: smaller, faster, or both
+- [@roj234/unconscious](https://github.com/Roj234/unconscious) — 8KB 的无 VDOM 响应式框架。
+- @roj234/logdb — 增量日志数据库
+- @roj234/sadbox — OS 级 OverlayFS 沙箱
+- @roj234/web-audio-engine — 流式 Markdown 解析器
+- @roj234/workerbox — 安全 JS 沙箱
+- @roj234/mdstream — 增量 Markdown 解析器
+- @roj234/ie — 类 vite 构建工具
 - KaTeX
 - [Remix Icon](https://github.com/Remix-Design/remixicon)
 - [Modern Normalize](https://github.com/sindresorhus/modern-normalize)
@@ -175,7 +173,7 @@ llama-server --path ./dist
 ## 按需加载
 - [Driver.js](https://driverjs.com/) 新手引导 (30KB)
 - [lamejs](https://github.com/zhuker/lamejs) 录音输入 (148KB)
-- KaTex (371KB)
+- KaTex (550KB)
 - 包含在项目中并 patched： 
    - [highlight.js](https://highlightjs.org/) 语法高亮 (360KB)
    - [Chart.js](https://chartjs.org/) 图表 (197KB)

@@ -2,11 +2,12 @@ import {config} from "/src/states.js";
 import {$asyncState, $cleanup, $computed, $derived, $foreach, $state, $unwatch, $update, $watch} from "unconscious";
 import {isLanAddress} from "/common/isLanAddress.js";
 import "./llamaCpp.css";
-import {prettyError, resolveDBRelativeURL} from "/src/utils/utils.js";
+import {prettyError} from "/src/utils/utils.js";
 import {jsonFetch} from "/common/fetch-utils.js";
 import {GLOBAL_SETTINGS} from "/src/settings.js";
 import {showToast} from "/src/components/Toast.js";
 import {isLlamaCppBackend, models, setIsLlamaCppBackend, updateModels} from "/src/presets.js";
+import {resolveDBRelativeURL} from "../src/database.js";
 
 const _endpoint = $state({});
 const _stateChanging = $state("");

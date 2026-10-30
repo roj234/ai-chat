@@ -1,26 +1,23 @@
 # API 参考
 
-AiChat 后端提供三类服务，可通过命令行参数控制：
+> 如你所见，我不喜欢维护文档，否则API又会烂掉，你可以（让你的AI）去看目前版本的代码。
 
-| 启动方式                         | 可用服务 |
-|------------------------------|----------|
-| 默认（`node server.js`）         | SSE Proxy + 数据库服务 + 文件服务（无命令执行） |
-| 专用文件服务（`--workspace <path>`） | 仅文件服务（含命令执行） |
+AiChat 后端提供三种互相独立的功能：
 
----
+## 1. API Proxy（LLM 代理）
 
-## 1. SSE Proxy（LLM 代理）
+API Proxy 负责将前端的 LLM 请求代理转发到上游 API，同时支持流量节省、格式转换、会话恢复、中止和调试追踪。
 
-SSE Proxy 负责将前端的 LLM 请求代理转发到上游 API，同时支持会话恢复、中止和调试追踪。
+文件：`backend/api-request/*.js`
 
-### 1.1 路由前缀 (仅适用于本项目参考实现，自行实现无需考虑)
+前端只支持 OpenAI chat completions API。Responses和其它API的格式转换通过后端的format字段完成
+
+### 1.1 路由前缀
 
 | 前缀 | 适用场景 |
 |------|----------|
 | `/api/sse/v1` | 无需用户隔离（单用户部署） |
 | `/api/v2/:userId/sse/v1` | 多用户部署，userId 关联数据库 |
-
-所有 SSE Proxy 端点均需要通过 `Authorization: Bearer <key>` 认证，key 匹配 `config.js` 中 `SSE_PROXY_BACKEND` 的键名。
 
 ### 1.2 端点列表
 
@@ -38,12 +35,6 @@ POST /v1/completions
 ```
 
 请求体和响应格式遵循 [OpenAI Chat Completions API](https://platform.openai.com/docs/api-reference/chat/create)。
-
-**查询参数**：
-
-| 参数 | 说明           |
-|------|--------------|
-| `blobProxy` | 代理发送Blob节省流量（未实现） |
 
 **响应**：`text/event-stream`（SSE 流），首个 chunk 的 `resumable` 字段包含会话恢复信息：
 
@@ -102,6 +93,65 @@ cache_new 创建一个范围，从下一条消息开始，直到下一条 cached
 
 若传递的 cached 消息不存在（过期），接口将返回 409 Conflict + JSON ` { error: 'cache_expired', hashes: string[] } `
 
+### 教程：实现简单的API Key中转站
+
+```
+provider ds {
+	url: "https://api.deepseek.com/v1",
+	# 模拟请求头
+	headers: {
+		"User-Agent": "deepseek-harness/0.1.5-alpha.1 (+https://github.com/deepseek-ai/deepseek-harness)"
+	}
+}
+
+provider openai {
+	url: "https://api.openai.com/v1",
+	# 接口类型 目前仅支持 openai 或 responses
+	format: 'responses',
+	# responses 接口是否支持有状态会话
+	store: true
+}
+
+# 以下划线开头的API无法被请求使用，只能被内部使用
+openai _gpt sk-xxx
+ds _deepseek sk-xxx
+```
+
+```js
+/**
+ * @type {Record<string, AiChatBackend.SSEProxyTarget>}
+ */
+export const SSE_PROXY_BACKEND = AiChatAPI.parseProviderFile("keys.conf");
+
+import fs from 'node:fs';
+
+const externalKeys = {
+	'sk-114514': {
+		name: "测试",
+		models: ['deepseek-pro'],
+		rpm: 15,
+		tpm: 1000000
+	},
+}
+
+Object.assign(SSE_PROXY_BACKEND, externalKeys);
+
+const k = (k, m) => ({...SSE_PROXY_BACKEND[k], model: m});
+
+const DS1 = '_deepseek'; // 填写 keys.conf 中的密钥ID
+
+// 填写多个 provider 会自动轮换
+const externalModels = {
+	'deepseek-flash': [ k(DS1), ],
+	'deepseek-v4-pro': [ k(DS1), ],
+};
+
+/**
+ * @type {AiChatBackend.ModerationHandler}
+ */
+export const SSE_PROXY_MODERATION = AiChatAPI.advancedLLMProxy(externalKeys, externalModels);
+```
+
 ---
 
 ## 2. 文件服务
@@ -117,195 +167,11 @@ cache_new 创建一个范围，从下一条消息开始，直到下一条 cached
 
 ### 2.2 文件操作
 
-#### 检测可用性
+代码见 `backend/routes/agent.js`
 
-```http
-POST /api/fs/ping
-```
-
-**请求体**：
-```json
-{
-  "nonce": "string"
-}
-```
-
-**响应**：
-```js
-{
-	// 小写 hex
-	pong: sha256(nonce + "AiChat[FS]").toHex()
-}
-```
-
-#### 读取文件
-
-```http
-POST /api/fs/read
-```
-
-**请求体**：
-```json
-{
-  "path": "string",
-  "offset": 10,
-  "limit": 100,
-  "format": "lineNumber"
-}
-```
-
-**响应**：
-- 文本文件：`text/plain`，自动检测编码（UTF-8 / GB18030），含 BOM 检测
-- 图片文件（png/jpg/jpeg/bmp/webp）：`image/<type>`，二进制流
-- 文件超过 10MB 返回 `400`
-
-#### 写入文件
-
-```http
-POST /api/fs/write
-```
-
-**请求体**：
-```json
-{
-  "path": "relative/path/to/file.txt",
-  "content": "文件内容"
-}
-```
-
-自动创建父目录。使用哈希行（HashLine）协议确保幂等性。
-
-#### 追加内容
-
-```http
-POST /api/fs/append
-```
-
-**请求体**：
-```json
-{
-  "path": "relative/path/to/file.txt",
-  "content": "追加内容",
-  "newline": true
-}
-```
-
-`newline`（默认 `true`）：如果文件末尾没有换行，自动插入一个。
-
-#### 差异更新（Patch）
-
-```http
-POST /api/fs/patch
-```
-
-**请求体**：
-```json
-{
-  "path": "relative/path/to/file.txt",
-  "patches": [
-    { "old": "原文本", "new": "新文本" }
-  ]
-}
-```
-
-基于哈希行的增量更新，支持字符串级 diff/patch，具有幂等保证。
-
-#### 编辑（Edit）
-
-```http
-POST /api/fs/edit
-```
-
-**请求体**：
-```json
-{
-  "path": "relative/path/to/file.txt",
-  "old": "待替换文本",
-  "new": "替换文本"
-}
-```
-
-先验证文件内容与 `old` 匹配（通过哈希行），然后替换为 `new`。失败时不修改文件。
-
-#### 文件信息
-
-```http
-POST /api/fs/stat
-```
-
-**请求体**：`{ "path": "..." }`
-
-**响应**：`text/plain`
-```
-type: file
-mode: -rw-r--r--
-size: 1234
-atime: 2026-07-18T08:00:00.000Z
-mtime: 2026-07-18T08:00:00.000Z
-ctime: 2026-07-18T08:00:00.000Z
-nlink: 1
-```
-
-#### 列出目录
-
-```http
-POST /api/fs/list
-```
-
-**请求体**：
-```json
-{
-  "path": "subdir",
-  "glob": "*.js",
-  "json": false
-}
-```
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `path` | — | 目录路径（相对沙盒根目录） |
-| `glob` | `"*"` | glob 匹配模式 |
-| `json` | `false` | `true` 时返回 JSON 数组，否则返回 TSV 文本 |
-
-**响应（json=false）**：`text/plain`，每行 `name\ttype\tsize`，最多 500 条。
-**响应（json=true）**：`[["name", "file", 1234], ["dirName", "dir"]]`，不限制数量，用于前端实现 glob
-
-#### 创建目录
-
-```http
-POST /api/fs/mkdir
-```
-
-**请求体**：`{ "path": "a/b/c" }`
-
-递归创建，已存在不报错。
-
-#### 复制/移动
-
-```http
-POST /api/fs/copy
-```
-
-**请求体**：
-```json
-{
-  "src": "source.txt",
-  "dest": "target.txt",
-  "move": false
-}
-```
-
-`move: true` 时执行移动（重命名）。
-
-#### 删除
-
-```http
-POST /api/fs/delete
-```
-
-**请求体**：`{ "path": "file.txt" }`
-
-递归删除文件或目录。不允许删除根目录。
+支持 read write patch edit mkdir delete copymove 等  
+还支持二进制流式接口(接收/返回 Blob) readRaw writeRaw appendRaw  
+其中 readRaw 接口支持分片下载， writeRaw 接口支持分片上传（暂时没有通过它在 API 文件系统上实现 fs.open）
 
 ### 2.3 命令执行
 
@@ -326,104 +192,7 @@ GET /api/fs/env
 
 返回系统环境摘要（OS、Shell、已安装工具等），填充系统提示词。
 
-#### 执行程序
-
-```http
-POST /api/fs/spawn
-```
-
-**请求体**：
-```json
-{
-  "program": "git",
-  "arguments": ["status", "--short"],
-  "cwd": "project",
-  "timeout": 10,
-  "noTruncate": false
-}
-```
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `program` | — | 可执行程序名称 |
-| `arguments` | — | 参数数组 |
-| `cwd` | `""` | 工作目录（相对沙盒根目录） |
-| `timeout` | `10` | 超时秒数（最大 275 秒） |
-| `noTruncate` | `false` | 禁止截断输出 |
-
-**行为**：
-- 输出 ≤ 20KB：直接返回 stdout+stderr 交错内容
-- 输出 > 20KB：头部和尾部各保留 10KB，中间部分写入 `command-log-<timestamp>.log` 文件
-
-**响应**：`text/plain`
-```
-Exit code 0
-<stdout/stderr 交织内容>
-```
-
-#### 执行 Shell 命令
-
-```http
-POST /api/fs/shell
-```
-
-**请求体**：
-```json
-{
-  "command": "ls -la && cat file.txt",
-  "cwd": "project",
-  "timeout": 10
-}
-```
-
-**响应**：同 `/spawn`。
-
-#### 启动后台进程
-
-```http
-POST /api/fs/run_bg
-```
-
-**请求体**：
-```json
-{
-  "program": "npm",
-  "arguments": ["run", "dev"],
-  "cwd": "project",
-  "timeout": -1
-}
-```
-
-`timeout` 为 `-1` 表示无超时（需手动停止）。
-
-**响应**：
-```json
-{
-  "status": "Running in background",
-  "programId": "a1b2c3d4",
-  "logFile": "bg-program-a1b2c3d4.log"
-}
-```
-
-进程的 stdout/stderr 全部写入 `logFile`，LLM 可通过 `/read` 查看。
-
-#### 终止后台进程
-
-```http
-POST /api/fs/stop_bg
-```
-
-**请求体**：`{ "programId": "a1b2c3d4" }`
-
-先发送 SIGTERM，3 秒后发送 SIGKILL。
-
-**响应**：
-```json
-{
-  "status": "killed",
-  "logFile": "bg-program-a1b2c3d4.log"
-}
-```
+同时还有其他接口，详见 `RemoteFSShell.js`
 
 ---
 
@@ -618,30 +387,11 @@ ws://host:port/api/sync?u=<userId>&t=<pat-token>
 
 实时多客户端数据同步。连接成功后收到 `SYNC_INIT` 消息。
 
-**消息类型**（`[type, data]` 格式）：
-
-| 类型码 | 名称 | 方向 | 说明 |
-|--------|------|------|------|
-| `0` | `SYNC_INIT` | S→C | 连接初始化：`[客户端数, 已锁定对话ID列表, 我的客户端ID, 计数器]` |
-| `1` | `SYNC_LOCKED` | C→S / S→C | 锁定对话（写锁）/ 通知他人 |
-| `2` | `SYNC_UNLOCKED` | C→S / S→C | 解锁对话 |
-| `3` | `SYNC_RESOLVE` | C→S | 强制解锁（升级读锁为写锁） |
-| `4` | `SYNC_CONFLICT` | S→C | 通知对话已被他人锁定（降级为读锁） |
-| `5` | `SYNC_RELEASED` | S→C | 通知写锁持有者：所有读者已释放 |
-| `6` | `SYNC_READERS` | S→C | 读锁持有者数量变更 |
-| `7` | `SYNC_PING` | 双向 | 心跳 |
-| `8` | `SYNC_ERROR` | S→C | 错误（随后关闭连接） |
-| `9` | `SYNC_CONVERSATION` | S→C | 对话创建/更新 |
-| `10` | `SYNC_CONVERSATION_DEL` | S→C | 对话删除 |
-| `11` | `SYNC_MESSAGE` | S→C | 消息创建/更新 |
-| `12` | `SYNC_MESSAGE_DEL` | S→C | 消息删除 |
-| `13` | `SYNC_KV` | S→C | KV 变更 |
-| `14` | `SYNC_KVS` | S→C | KVS 条目变更 |
-| `15` | `SYNC_KVS_DEL` | S→C | KVS 条目删除 |
+具体协议详见 `syncClient.js` 和 `syncServer.js`
 
 **编码**：JSON 或 Msgpack（由 `RESPONSE_USE_MSGPACK_SCHEMA` 配置控制）。
 
-**消息大小限制**：4KB。
+**单包大小限制**：4KB。
 
 ---
 
@@ -651,7 +401,7 @@ ws://host:port/api/sync?u=<userId>&t=<pat-token>
 1. `Accept` 头包含 `application/vnd.msgpack`
 2. `X-SV` 头等于服务端的 `msgpack_schema_version`（在 `common/MsgpackSchema.js` 中定义）
 
-参考实现还支持 Gzip 和 Brotli 压缩
+参考服务端支持 Gzip 和 Brotli 压缩
 
 ---
 

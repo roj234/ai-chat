@@ -1,7 +1,7 @@
 import {DI_settings, onLoad} from "./hooks.js";
-import {kvListDel, kvListGet, kvListGetKeys, kvListSet, updateConversation} from "./database.js";
+import {kvListDel, kvListGet, kvListGetKeys, kvListSet, resolveDBRelativeURL, updateConversation} from "./database.js";
 import {$asyncState, $computed, $state, $update, debugSymbol, unconscious} from "unconscious";
-import {cloneNamed, prettyError, resolveDBRelativeURL} from "./utils/utils.js";
+import {cloneNamed, prettyError} from "./utils/utils.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
 import {jsonFetch} from "../common/fetch-utils.js";
 import {config, CONFIG_VERSION, EVENT_BUS, LOCKED, selectedConversation} from "./states.js";
@@ -201,7 +201,7 @@ EVENT_BUS.on(['kvs', PRESET_KVS_ID, 'set'], () => {
  * @param {AiChat.Conversation} conv
  * @return {Promise<AiChat.LocalPreset>}
  */
-export const getCombinedPreset = async (conv) => {
+export const resolvePreset = async (conv) => {
 	const globalPreset = unconscious(config);
 	if (!conv) return globalPreset;
 
@@ -227,7 +227,7 @@ export const getCombinedPreset = async (conv) => {
 }
 
 const _updateCombinedPreset = $computed(() => unconscious(selectedConversation), [selectedConversation, config], true);
-export const currentCombinedConfig = $asyncState(getCombinedPreset, _updateCombinedPreset);
+export const currentCombinedConfig = $asyncState(resolvePreset, _updateCombinedPreset);
 
 export const maxTokensClamped = $computed(() => {
 	const maxCompletionTokens = currentCombinedConfig.max_completion_tokens;

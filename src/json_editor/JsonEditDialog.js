@@ -2,7 +2,7 @@ import {$state} from "unconscious";
 import {getWindow, openWindow} from "../components/Windows.jsx";
 import {JsonEditor} from "../components/JsonEditor.jsx";
 import './JsonEditDialog.css';
-import {inspect} from "unconscious/common/inspect.js";
+import {inspect} from "@roj234/util-inspect";
 import {EVENT_BUS} from "../states.js";
 import {Icon_warning} from "../components/Icons.jsx";
 

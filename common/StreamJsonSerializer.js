@@ -1,5 +1,5 @@
 import {createBase64Encoder} from "unconscious/common/Base64.js";
-import {UTF8_TEXT_ENCODER} from "unconscious/shared.js";
+import {UTF8_TEXT_ENCODER} from "@roj234/shared";
 
 const buffer = new Uint8Array([34,58,44,91,93,123,125]);
 const symbols = Array.from({ length: 7 }).map((item, i) => buffer.subarray(i, i+1));

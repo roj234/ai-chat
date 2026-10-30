@@ -1,4 +1,4 @@
-import {config} from "../states.js";
+import {config, PP_UNATTENDED} from "../states.js";
 import "./StatusPill.css";
 import {$computed, unconscious} from "unconscious";
 import {SP_CONNECT, SP_GENERATE, SP_PREFILL, SP_RETRY, SP_WAIT} from "./StatusPill_state.js";
@@ -23,7 +23,7 @@ class LoadingMOTD extends HTMLElement {
 
 	connectedCallback() {
 		this.#render(phrases[this.#index++ % phrases.length]);
-		if (phrases.length > 1 && config.afkState < 2) {
+		if (phrases.length > 1 && config.pausePolicy !== PP_UNATTENDED) {
 			this.#timer = setInterval(() => {
 				this.#render(phrases[this.#index++ % phrases.length]);
 			}, 6000);

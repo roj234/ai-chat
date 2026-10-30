@@ -1,27 +1,35 @@
 {
-	"name": "ai-chat",
+	"name": "aint",
 	"private": true,
-	"version": "4.1.0",
+	"version": "4.2.0",
 	"type": "module",
 	"scripts": {
-		"dev": "vite",
-		"build:client": "vite build",
+		"dev": "ie dev",
+		"build:client": "ie build",
 		"build:server": "node build_server.js",
-		"build:app": "vite build --config vite.app.config.js",
-		"build": "vite build && node build_server.js",
-		"preview": "vite preview"
+		"build:app": "ie build --config vite.app.config.js",
+		"build": "ie build && node build_server.js",
+		"preview": "ie preview",
+		"postinstall": "node ./misc/prune-hljs.mjs"
 	},
 	"devDependencies": {
+		"unconscious": "^2.0.0",
+		"@roj234/shared": "^1.0.0",
+		"@roj234/mdstream": "^1.0.0",
+		"@roj234/logdb": "^1.0.0",
+		"@roj234/lru-cache": "^1.0.0",
+		"@roj234/web-audio-engine": "^1.0.0",
+		"@roj234/workerbox": "^1.0.0",
+		"@roj234/ws": "^1.0.0",
+
+		"katex": "^0.19.0",
+		"frappe-charts": "^1.6.2",
 		"chart.js": "^4.5.1",
 		"driver.js": "^1.4.0",
-		"fastmd": "^1.0.0",
 		"fonteditor-core": "^2.6.3",
 		"highlight.js": "^11.11.1",
 		"postcss": "^8.5.8",
-		"postcss-value-parser": "^4.2.0",
-		"purgecss": "^8.0.0",
-		"rollup": "^4.59.0",
-		"unconscious": "^1.19.0"
+		"postcss-value-parser": "^4.2.0"
 	},
 	"dependencies": {
 		"iconv-lite": "^1.0.0-alpha",

@@ -1,10 +1,10 @@
 // vite.config.js
-import unconscious from 'unconscious/VitePlugin.mjs';
-import purgecss from 'unconscious/VitePurgeCSS.mjs';
-import FontFilter from "unconscious/postcss/font-filter.js";
-import OklchToRgb from "unconscious/postcss/oklch-to-rgb.js";
-import InlineVars from "unconscious/postcss/inline-vars.js";
-import {viteFontMinify} from 'unconscious/vite/font-minify.js';
+import unconscious from 'unconscious/vite';
+import purgecss from '@roj234/ie/plugins/purgecss.js';
+import {purgeIconFont} from "@roj234/ie/plugins/purgeIconFont.js";
+import {postcssOkLCHFallback} from "@roj234/ie/plugins/postcss-oklch-fallback.js";
+import {postcssInlineLengthVars} from "@roj234/ie/plugins/postcss-inline-length-vars.js";
+import {postcssWoff2Only} from "@roj234/ie/plugins/postcss-woff2-only.js";
 import {sandboxModules} from "./common/build-sandbox-modules.js";
 
 import packageInfo from "./package.json";
@@ -17,10 +17,10 @@ import {promisify} from 'node:util';
 
 import {rollup} from 'rollup';
 import {defineConfig} from 'vite';
-import {nodeResolve} from 'unconscious/vite/build-backend.js';
+import {nodeResolve} from '@roj234/ie/plugins/build-backend-helper.js';
 
 const VITE_TRICK_CONFIG = path.resolve(__dirname, 'backend/config.js');
-const SERVER_BUNDLE = path.resolve(__dirname, 'node_modules/.vite/.aichat-dev-server.mjs');
+const SERVER_BUNDLE = path.resolve(__dirname, 'node_modules/.ie/.aint-server.mjs');
 
 if (!fs.existsSync(VITE_TRICK_CONFIG)) {
     fs.copyFileSync(path.resolve(__dirname, 'backend/config.default.js'), VITE_TRICK_CONFIG);
@@ -100,16 +100,19 @@ export default defineConfig(async ({mode}) => {
         }),
         purgecss({
             safelist: [
+                // katex
+                'katex-sizing',
+                'delimsizing',
+                'mtable',
+                /-arrow-pad$/,
+                /^cd-label-/,
+                /_fallback$/,
+                // hljs
                 /^hljs-/,
-                /^role-/,
-                /^btn-/,
-                'closed',
-                'lang',
-                'locked', // presetFastSwitch
-                'my/storyTurn'
-            ]
+            ],
+            //debug: true
         }),
-        viteFontMinify(),
+        purgeIconFont(),
         sandboxModules(),
         ...(mode === 'production' ? [(await import("file://"+__dirname+"/common/fs-glob.js")).globMacroPlugin()] : [(await import("file://"+SERVER_BUNDLE)).serverDevPlugin()]),
         {
@@ -144,9 +147,9 @@ export default defineConfig(async ({mode}) => {
     css: {
         postcss: {
             plugins: [
-                FontFilter,
-                OklchToRgb,
-                InlineVars({
+                postcssWoff2Only,
+                postcssOkLCHFallback,
+                postcssInlineLengthVars({
                     safelist: [
                         "--panel-width"
                     ]
@@ -161,6 +164,8 @@ export default defineConfig(async ({mode}) => {
         reportCompressedSize: !isGitHubActions,
         //sourcemap: true,
         copyPublicDir: false,
+
+        mergeUniqueCss: true,
 
         assetsInlineLimit: 512,
         rollupOptions: {

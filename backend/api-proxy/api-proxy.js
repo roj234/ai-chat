@@ -1,5 +1,20 @@
 import {getRPMLimit} from "./rate-limiter.js";
 import {TOKENS} from "./api-proxy-openai.js";
+import {apiProxyLog} from "./api-proxy-utils.js";
+
+const HOSTNAME_CACHE = Symbol();
+
+/**
+ * @param {string} url
+ * @returns {string}
+ */
+const safeHostname = (url) => {
+	try {
+		return new URL(url).hostname;
+	} catch {
+		return String(url);
+	}
+};
 
 const defaultBodyHandler = (body, provider) => {
 	if (body.stream) {
@@ -12,7 +27,7 @@ const defaultBodyHandler = (body, provider) => {
 	}
 };
 
-const defaultFatalPattern = /insufficient|not (?:exist|found|activated)|access[ _]?denied| is invalid|invalid[ _](?:api[ _])?key/i;
+const defaultFatalPattern = /insufficient|not (?:exist|found|activated)|access[ _]?denied|invalid[ _](?:api[ _])?key|quota exhausted/i;
 
 /**
  * @param {Record<string, {
@@ -23,7 +38,7 @@ const defaultFatalPattern = /insufficient|not (?:exist|found|activated)|access[ 
  * @param {Record<string, Partial<AiChatBackend.SSEProxyTarget>[]>} PROVIDER_MAPPING
  * @param {RegExp} [FATAL_PATTERNS]
  * @param {function(OpenAI.ChatCompletionRequest, AiChatBackend.SSEProxyTarget, AiChatBackend.RouteContext): true | void} [bodyHandler]
- * @return {function(AiChatBackend.SSEProxyTarget, AiChatBackend.RouteContext): function(OpenAI.ChatCompletionRequest?, AiChatBackend.SSEProxyTarget, Error?): Partial<AiChatBackend.SSEProxyTarget>}
+ * @return {AiChatBackend.ModerationHandler}
  */
 export const advancedLLMProxy = (API_KEYS, PROVIDER_MAPPING, FATAL_PATTERNS = defaultFatalPattern, bodyHandler = defaultBodyHandler) => {
 	//const tsdb = TSDB.create("llm-api");
@@ -49,36 +64,20 @@ export const advancedLLMProxy = (API_KEYS, PROVIDER_MAPPING, FATAL_PATTERNS = de
 
 		let obj;
 
-		return (req, target, err) => {
-			if (err) {
-				const message = err.message;
-				if (message && obj && FATAL_PATTERNS?.test(message)) {
-					obj.enabled = false;
-					obj.authorization = obj.authorization.slice(0, 6) + "...";
-					console.error(
-						`[WARN] 三元组已禁用`,
-						obj,
-						message
-					);
-				}
-				return;
-			}
-
+		return [(req, target) => {
 			const requestedModel = req.model;
 			if (!requestedModel) return ctx.send(400, { error: { message: 'Missing "model" field', type: 'invalid_request_error' } });
 
 			const modelLimit = zzzKeyInfo.models;
-			if (modelLimit && !modelLimit.includes(requestedModel)) {
-				return ctx.send(403, { error: { message: `Model "${requestedModel}" not allowed for this API key`, type: 'permission_error' } });
-			}
-
 			const providers = PROVIDER_MAPPING[requestedModel];
-			if (!providers) return ctx.send(404, { error: { message: `Model "${requestedModel}" not found`, type: 'invalid_request_error' } });
+			if (!providers || (modelLimit && !modelLimit.includes(requestedModel))) return ctx.send(404, { error: { message: `Model "${requestedModel}" not found`, type: 'invalid_request_error' } });
 
 			let provider = providers.find(s => s.enabled !== false);
 			if (!provider) return ctx.send(503, { error: { message: `Model "${requestedModel}" has no available providers`, type: 'proxy_error' } });
 
-			if (limiter && !limiter.tpm(tpm, state, req[TOKENS])) {
+			const predictTokens = req[TOKENS] / 4;
+
+			if (limiter && !limiter.tpm(tpm, state, predictTokens)) {
 				return ctx.send(429, { error: { message: 'TPM limit exceeded. Retry later.', type: 'rate_limit_error' } });
 			}
 
@@ -87,8 +86,26 @@ export const advancedLLMProxy = (API_KEYS, PROVIDER_MAPPING, FATAL_PATTERNS = de
 
 			if (bodyHandler(req, provider, ctx)) return;
 
+			apiProxyLog(`${zzzKeyInfo.name ?? target.authorization.slice(0, 6) + "..."}:${requestedModel} => ${provider[HOSTNAME_CACHE] ??= safeHostname(provider.url)}:${modelOverride ?? requestedModel} (${provider.name ?? provider.authorization.slice(0, 6) + "..."})`)
 			obj = provider;
 			return provider;
-		}
+		}, err => {
+			const message = err.message;
+			if (message && obj && FATAL_PATTERNS?.test(message)) {
+				obj.enabled = false;
+				obj.authorization = obj.authorization.slice(0, 6) + "...";
+				apiProxyLog(
+					`Key 已禁用`,
+					obj,
+					message
+				);
+			}
+		}, completion => {
+			const usage = completion.usage;
+			if (limiter && usage) {
+				const tokens = usage.total_tokens - (usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0);
+				if (isFinite(tokens)) limiter.tpm(Infinity, state, tokens);
+			}
+		}]
 	}
 }

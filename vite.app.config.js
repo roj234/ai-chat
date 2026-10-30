@@ -1,11 +1,11 @@
 // vite.config.js
 
-import unconscious from 'unconscious/VitePlugin.mjs';
-import purgecss from 'unconscious/VitePurgeCSS.mjs';
-import FontFilter from "unconscious/postcss/font-filter.js";
-import OklchToRgb from "unconscious/postcss/oklch-to-rgb.js";
-import InlineVars from "unconscious/postcss/inline-vars.js";
-import {viteFontMinify} from 'unconscious/vite/font-minify.js';
+import unconscious from 'unconscious/vite';
+import purgecss from '@roj234/ie/plugins/purgecss.js';
+import {purgeIconFont} from "@roj234/ie/plugins/purgeIconFont.js";
+import {postcssOkLCHFallback} from "@roj234/ie/plugins/postcss-oklch-fallback.js";
+import {postcssInlineLengthVars} from "@roj234/ie/plugins/postcss-inline-length-vars.js";
+import {postcssWoff2Only} from "@roj234/ie/plugins/postcss-woff2-only.js";
 import {sandboxModules} from "./common/build-sandbox-modules.js";
 
 import packageInfo from "./package.json";
@@ -35,16 +35,18 @@ export default {
         }),
         purgecss({
             safelist: [
+                // katex
+                'katex-sizing',
+                'delimsizing',
+                'mtable',
+                /-arrow-pad$/,
+                /^cd-label-/,
+                /_fallback$/,
+                // hljs
                 /^hljs-/,
-                /^role-/,
-                /^btn-/,
-                'closed',
-                'lang',
-                'locked', // presetFastSwitch
-                'my/storyTurn'
             ]
         }),
-        viteFontMinify(),
+        purgeIconFont(),
         sandboxModules(),
         globMacroPlugin(),
         {
@@ -58,9 +60,9 @@ export default {
     css: {
         postcss: {
             plugins: [
-                FontFilter,
-                OklchToRgb,
-                InlineVars({
+                postcssWoff2Only,
+                postcssOkLCHFallback,
+                postcssInlineLengthVars({
                     safelist: [
                         "--panel-width"
                     ]
@@ -73,6 +75,8 @@ export default {
     build: {
         modulePreload: { polyfill: false },
         reportCompressedSize: false,
+
+        mergeUniqueCss: true,
 
         outDir: 'dist-app',
 

@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {SSE_REF_CACHE_SIZE} from '../config.js';
-import {LRUCache} from '../../common/LRUCache.js';
+import {LRUCache} from '@roj234/lru-cache';
 import {applyDelta, ORIGINAL_ERROR, sseFetch} from '../../common/fetch-utils.js';
 import {getProxyAgent} from '../utils/socks5-agent.js';
 import {createJsonStream} from "../../common/StreamJsonSerializer.js";
@@ -208,7 +208,7 @@ function convertUsage(usage) {
  * @param {AiChatBackend.RouteContext} ctx
  * @returns {Promise<void>}
  */
-export async function responsesProxyHandler(body, target, logPath, ctx) {
+export async function responsesProxyHandler(body, target, logPath, ctx, moderationHandlers) {
 	/** @type {string[]} */
 	let newCached;
 
@@ -436,7 +436,9 @@ export async function responsesProxyHandler(body, target, logPath, ctx) {
 		}
 
 		pm.onError(err);
+		await moderationHandlers?.[1]?.(err);
 	} finally {
 		pm.end(true);
+		await moderationHandlers?.[2]?.(completion);
 	}
 }

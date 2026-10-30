@@ -1,11 +1,11 @@
 import {SSE_PROXY_BACKEND, SSE_REF_CACHE_SIZE, SSE_REF_TTL} from "../config.js";
-import {LRUCache} from "../../common/LRUCache.js";
+import {LRUCache} from "@roj234/lru-cache";
 import {blobDB} from "../routes/blob-storage.js";
 import path from "node:path";
 import {openAsBlob} from "node:fs";
 import {deepEntries} from "unconscious/common/json-schema-utils.js";
 
-export const apiProxyLog = (str, ...args) => console.log(`[SSE Proxy] `+str, ...args);
+export const apiProxyLog = (str, ...args) => console.log(`[ApiProxy] `+str, ...args);
 
 /**
  * 消息引用缓存：hash -> 完整消息对象

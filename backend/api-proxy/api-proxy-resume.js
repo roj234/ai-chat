@@ -1,5 +1,5 @@
 import {SSE_RESUME_CACHE_SIZE, SSE_RESUME_TTL} from "../config.js";
-import {LRUCache} from "../../common/LRUCache.js";
+import {LRUCache} from "@roj234/lru-cache";
 import fs from "node:fs/promises";
 import {EventEmitter} from "node:events";
 import {apiProxyLog as log} from "./api-proxy-utils.js";
@@ -153,7 +153,11 @@ export class ProxyResumeManager {
 		}
 
 		if (!hasError) {
-			if (id) log('响应结束', this.keyId, id);
+			if (id) log('响应结束', this.keyId, id, {
+				latency: (completion.resumable.ft - completion.resumable.start),
+				duration: (completion.resumable.now - completion.resumable.start),
+				... completion.usage
+			});
 			if (ctx && !ctx.res.closed) ctx.res.end(`data: [DONE]\n\n`);
 		}
 	}

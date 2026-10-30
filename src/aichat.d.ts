@@ -1,4 +1,5 @@
 import {OpenAI} from "./openai";
+import {PP_AUTO, PP_INTERACTIVE, PP_SUPERVISED, PP_UNATTENDED} from "./states";
 
 declare namespace AiChat {
     type FSType = 'db' | 'api' | 'local' | 'config' | 'opfs' | 'vfs';
@@ -249,11 +250,8 @@ declare namespace AiChat {
 
         permittedTools: string[],
         maxToolTurns: number
-        afkState: 0 | 1 | 2,
+        pausePolicy: PP_UNATTENDED | PP_AUTO | PP_SUPERVISED | PP_INTERACTIVE,
         toolRetryLimit: number
-
-        // really misc
-        disableFinishToast?: boolean;
 
         // UI
         think: 0 | 1,

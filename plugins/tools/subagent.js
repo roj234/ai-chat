@@ -33,6 +33,7 @@ import {TemplateFormatter} from "/common/template-formatter.js";
 import {parseJson5} from "unconscious/common/Json.js";
 import {lockConversation, unlockConversation} from "/src/conversation-lock.js";
 import {SetTimeout} from "../rp_kit/SetTimeout.js";
+import {PP_UNATTENDED} from "../../src/states.js";
 
 compileSchema(schema);
 
@@ -133,9 +134,8 @@ async function createSubagent(par, response, conv, tools) {
 		overrides: {
 			maxToolTurns: 200,
 			permittedTools: ['*'],
-			afkState: 1,
-			sound: false,
-			disableFinishToast: true
+			pausePolicy: PP_UNATTENDED,
+			sound: false
 		},
 		tools: new Set(),
 		activatedModules: new Set()
@@ -628,7 +628,7 @@ const CreateAgent = {
 		// 尚未启动：没有 agentId 或 conversation 丢失
 		// 前者应该不可能触发但保留
 		const subagentConv = findAgent(ctx);
-		if (!ctx.agentId || (!has_successor && !subagentConv)) {
+		if (!ctx.agentId || ((!ctx.success || !ctx.content) && !has_successor && !subagentConv)) {
 			return <div className={`subagent-card`}>
 				<button className="sa-btn paused" onClick={() => {
 					delete ctx.agentId;
@@ -713,6 +713,7 @@ const NotifyAgent = {
 		const isResume = toolName === ResumeAgent.name;
 
 		const agent = await findOwnAgent(par, conv);
+		if (agent[LOCKED]) return 'Error: Agent is opened on another device, close must done by user. Message did not sent.';
 
 		const state = runningConversations.get(par.agentId);
 		if (!state) {
@@ -731,7 +732,7 @@ const NotifyAgent = {
 			subagentLoopWrapper(par);
 
 			if (isTerminate) return doTerminate(agent, false);
-			if (isResume) return "Agent resumed, but more error is possible.";
+			if (isResume) return "Agent resumed. (No needed to notify)";
 		} else {
 			if (isTerminate) {
 				state.abort.abort(par.message);
@@ -754,7 +755,7 @@ const NotifyAgent = {
 			label,
 			content
 		});
-		return (state
+		return (!state
 			?"Delivered."
 			:"Queued: agent is busy, message was appended to its inbox and will be dispatched later.");
 	},

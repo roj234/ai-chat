@@ -4,9 +4,9 @@ import './highlight-theme.css';
 import {ITEM_KEY, VirtualList} from "unconscious/common/VirtualList.js";
 import {$cleanup} from "unconscious";
 import {selectableVirtualListMixin} from "unconscious/common/selectableVirtualListMixin.js";
-import {VOID_TAGS} from "fastmd";
+import {VOID_TAGS} from "@roj234/mdstream";
 import json5 from "/common/json5-highlight.js";
-import {inspect} from "unconscious/common/inspect.js";
+import {inspect} from "@roj234/util-inspect";
 import {patchChildren} from "/common/morphpostfix.js";
 import {queueMacrotask} from "unconscious/common/queueMacrotask.js";
 
@@ -158,7 +158,7 @@ export const highlight = (code, language, node, is_finished) => {
 				}
 			}
 
-			if (language) {
+			if (language && loadLanguage(language)) {
 				lightAsync(code, language, (value) => {
 					if (!needVirtualList) { node.innerHTML = value; return; }
 					node.style.height = '50lh';

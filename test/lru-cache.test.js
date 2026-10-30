@@ -1,4 +1,4 @@
-import {LRUCache} from "/common/LRUCache.js";
+import {LRUCache} from "@roj234/lru-cache";
 import {testRunner} from "./index.js";
 
 function fail(msg) { console.log("FAIL:", msg); throw new Error(msg); }

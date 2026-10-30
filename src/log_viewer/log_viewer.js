@@ -13,7 +13,6 @@ let filteredLogs = [];
 let currentPage = 1;
 const pageSize = 20;
 let currentSort = { field: 'time', direction: 'desc' };
-let autoRefreshInterval = null;
 let tokenChartInstance = null;
 let costChartInstance = null;
 

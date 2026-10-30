@@ -17,8 +17,9 @@ class RPMLimiter {
 		const cutoff = now - this.#windowMs;
 
 		const pos = this.#hits.findIndex(s => s.time > cutoff);
-		this.#hits.slice(0, pos).forEach(c => {
-			this.#tokens -= c.tokens ?? 0;
+		this.#hits.slice(0, pos).forEach(state => {
+			state.stale = true;
+			this.#tokens -= state.tokens ?? 0;
 		});
 
 		this.#hits = pos < 0 ? [] : this.#hits.slice(pos);
@@ -30,8 +31,12 @@ class RPMLimiter {
 	}
 
 	tpm(tpm, state, tokens) {
-		if (this.#tokens + tokens > tpm) return false;
+		if (state.stale || this.#tokens + tokens > tpm) return false;
+
+		const prev = state.tokens;
+		if (prev != null) this.#tokens -= prev;
 		this.#tokens += tokens;
+
 		state.tokens = tokens;
 		return true;
 	}

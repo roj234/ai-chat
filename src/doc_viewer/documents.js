@@ -13,9 +13,7 @@ export const chapterData = [
     icon: '⚡',
     children: [
       { title: '高级功能概述', href: 'documents/advanced-features.md' },
-      { title: '服务端配置', href: 'documents/backend-config.md' },
       { title: 'Agent 与文件系统', href: 'documents/agent-filesystem.md' },
-      { title: '自定义背景', href: 'documents/background.md' },
       { title: '生图和语音', href: 'documents/tts.md' }
     ],
   },

@@ -19,28 +19,6 @@
         padding-right: 4px;
     }
 
-    & .add-btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.4em;
-        background: var(--accent);
-        color: #1a1a2e;
-        border: none;
-        border-radius: 6px;
-        padding: 0.45em 0.9em;
-        font-size: 0.875rem;
-        font-weight: 500;
-        cursor: pointer;
-        transition: background 0.2s, transform 0.1s;
-
-        &:hover {
-            background: #a5c7ff;
-        }
-
-        &:active {
-            transform: scale(0.97);
-        }
-    }
 
     /* 列表 */
     & > ul {

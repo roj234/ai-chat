@@ -24,7 +24,7 @@ import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
 import tls from 'node:tls';
-import {LRUCache} from "../../common/LRUCache.js";
+import {LRUCache} from "@roj234/lru-cache";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 

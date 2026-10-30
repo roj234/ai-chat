@@ -1,11 +1,11 @@
 import {parseJson5} from "unconscious/common/Json.js";
-import {auxSmallScreen, config} from "./states.js";
+import {auxSmallScreen, config, PP_AUTO, PP_INTERACTIVE, PP_SUPERVISED, PP_UNATTENDED} from "./states.js";
 import defaultCoTPrompt from "/media/cotPrompt.txt?raw";
 import {$derived, $watch, isPureObject, unconscious} from "unconscious";
 import {webviewSetUserAgent} from "/vendor/jsBridge.js";
 import {onLoad} from "./hooks.js";
 import {toolScriptRegistry} from "./toolset.js";
-import {inspect} from "unconscious/common/inspect.js";
+import {inspect} from "@roj234/util-inspect";
 import {showToast} from "./components/Toast.js";
 
 const defaultSystemPrompt = `You are {{model}}, a helpful assistant.
@@ -697,14 +697,22 @@ export const GLOBAL_SETTINGS = [
 		}
 	},
 	{
-		id: "maxToolTurns",
+		id: "pausePolicy",
 		_tab: "tools",
-		name: "自动工具调用轮数",
-		title: "无需人工确认连续调用工具的轮数上限。0 表示不限制。",
-		type: "number",
-		min: 0,
-		max: 50,
-		step: 1,
+		name: "执行模式",
+		type: "radio",
+		required: true,
+		choices: {
+			"后台": PP_UNATTENDED,
+			"自动": PP_AUTO,
+			"监督": PP_SUPERVISED,
+			"介入": PP_INTERACTIVE
+		},
+		title: {
+			"后台": "关闭动画，尽力防止中断",
+			"监督": "输入框存在文本时暂停",
+			"介入": "工具出错后，你选编辑或继续",
+		},
 		default: 1
 	},
 	{
@@ -717,22 +725,7 @@ export const GLOBAL_SETTINGS = [
 		step: 1,
 		default: 1,
 		inline: true,
-		title: "工具参数不合法时，自动重新生成几次。0 表示不用。"
-	},
-	{
-		id: "afkState",
-		_tab: "tools",
-		name: "工具调用错误策略",
-		type: "radio",
-		required: true,
-		choices: {
-			"人工处理": 0,
-			"模型处理": 1,
-			"无人值守": 2
-		},
-		title: {
-			"无人值守": '省电 (1 + 禁用 markdown 解析)'
-		}
+		title: "工具参数校验失败时，重新生成几次。"
 	},
 	{
 		id: "permittedTools",

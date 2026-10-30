@@ -1,4 +1,4 @@
-import {ONCE_EVENT} from "unconscious/shared.js";
+import {ONCE_EVENT} from "@roj234/shared";
 
 /**
  * MPSC（多生产者-单消费者）调度器：为异步遍历（如 glob）提供背压与任务移交。

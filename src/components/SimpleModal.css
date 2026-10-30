@@ -61,11 +61,6 @@ dialog.modal { padding: 0; }
             padding: 0;
         }
 
-        /* For input mode, ensure the body has space for the input */
-        &:has(.modal-input) {
-            min-height: 60px;
-        }
-
         & p {
             margin: 0;
         }

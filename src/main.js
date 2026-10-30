@@ -22,6 +22,7 @@ import {
 	lastScrollDirectionIsUp,
 	LOCKED,
 	messages,
+	PP_UNATTENDED,
 	resetConversation,
 	runningConversations,
 	selectedConversation,
@@ -269,8 +270,12 @@ const createApp = () => {
 				}
 			}).finally(() => {
 				const loading = $("loading");
+				if (config.pausePolicy === PP_UNATTENDED) {
+					return loading.remove();
+				}
 				loading.classList.add("exiting");
 				loading.addEventListener("animationend", () => loading.remove());
+				setTimeout(() => loading.remove(), 600);
 			});
 
 			let hookGetMessages = AS_IS;
@@ -466,6 +471,10 @@ addEventListener("load", () => {
 		injectCommonDI(settings, messageContainer);
 		EVENT_BUS.fire(['load'], wrapper);
 		onLoad_(wrapper);
+
+		$watch($derived(config.pausePolicy), () => {
+			wrapper.classList.toggle('no-motion', config.pausePolicy === PP_UNATTENDED);
+		})
 	}).catch(e => {
 		$("loading")?.remove();
 		if (typeof e === 'string') {

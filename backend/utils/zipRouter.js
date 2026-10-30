@@ -2,7 +2,7 @@ import {ZipReader} from "unconscious/common/zip-io.js";
 import {pipeline} from 'node:stream/promises';
 import {Readable} from 'node:stream';
 import {createBrotliDecompress, createInflateRaw} from "node:zlib";
-import {getContentType} from "./mime.js";
+import {getContentType} from "@roj234/ie/utils/mimeTypes.js";
 
 
 // ==================== 路由器工厂函数 ====================

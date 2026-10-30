@@ -4,7 +4,7 @@ import {JsonEditor} from "./JsonEditor.jsx";
 import {runTools, toolInfo, toolScriptRegistry} from "../toolset.js";
 import {validateAndShowError} from "unconscious/common/json-schema-utils.js";
 import {EVENT_BUS, selectedConversation, updateMessageUI} from "../states.js";
-import {inspect} from "unconscious/common/inspect.js";
+import {inspect} from "@roj234/util-inspect";
 import {getRandomString} from "../utils/utils.js";
 
 /**

@@ -1,6 +1,6 @@
 // API request
 import {createMarkdownStream} from "./markdown/markdown.js";
-import {cloneNamed, getTextContent, prettyError, resolveDBRelativeURL, scrollMessagesToBottom} from "./utils/utils.js";
+import {cloneNamed, getTextContent, prettyError, scrollMessagesToBottom} from "./utils/utils.js";
 import {setWakeLock} from "./utils/wakeLock.js";
 import {
 	abortCompletion,
@@ -14,6 +14,9 @@ import {
 	MessageRoles,
 	messages,
 	PAGE_TITLE,
+	PP_INTERACTIVE,
+	PP_SUPERVISED,
+	PP_UNATTENDED,
 	PROGRESS_KIND,
 	PROGRESS_VALUE,
 	runningConversations,
@@ -28,6 +31,9 @@ import {
 	parseFrontmatter,
 	PLACEHOLDERS,
 	runTools,
+	TC_ERROR,
+	TC_NEED_INTERACTION,
+	TC_SCHEMA_ERROR,
 	TEMPORARY_PLACEHOLDER,
 	toolScriptRegistry
 } from "./toolset.js";
@@ -54,6 +60,8 @@ import {
 	isIDB,
 	kvListGet,
 	markMessageDirty,
+	resolveDBRelativeURL,
+	setConversationTitle,
 	updateConversation
 } from "./database.js";
 import {BODY_PARAMETERS, defaultSystemPrompt, defaultTitlePrompt} from "./settings.js";
@@ -61,7 +69,6 @@ import {createJsonStream} from "/common/StreamJsonSerializer.js";
 import {createAntiSlopSampler} from "./anti-slop-sampler.js";
 import SimpleModal from "./components/SimpleModal.jsx";
 import {highlightJsonLike} from "./markdown/highlight.js";
-import {setConversationTitle} from "./components/ConversationList.jsx";
 import {deepEntries, jsonEval} from "unconscious/common/json-schema-utils.js";
 import {applyDelta, jsonFetch, ORIGINAL_ERROR, sseFetch} from "/common/fetch-utils.js";
 import {base64DecodeToUint8Array} from "unconscious/common/Base64.js";
@@ -71,7 +78,7 @@ import {SHA256} from "unconscious/common/SHA256.js";
 import {DONT_PARSE_HTML_IN_THINKING} from "./components/ThinkBlock.jsx";
 import {LLM_COST_SCALE} from "/backend/sync.js";
 import {SP_CONNECT, SP_GENERATE, SP_PREFILL, SP_RETRY, SP_WAIT} from "./components/StatusPill_state.js";
-import {getCombinedPreset, isLlamaCppBackend, PRESET_KVS_ID} from "./presets.js";
+import {isLlamaCppBackend, PRESET_KVS_ID, resolvePreset} from "./presets.js";
 import {expandFolds} from "./utils/BranchManager.js";
 import {lockConversation, unlockConversation} from "./conversation-lock.js";
 import {abortable, sleep} from "../common/pure-utils.js";
@@ -99,6 +106,10 @@ export const submitUserChatMessage = async (loop, conv) => {
 			}
 		} while (result === 'tool_calls' && loop);
 		//return result;
+	} catch (e) {
+		// 忽略 agentLoop already running 异常
+		if (runningConversations.has(conv.id)) return;
+		throw e;
 	} finally {
 		unlockConversation(conv.id);
 	}
@@ -156,11 +167,11 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		messages
 	});
 
-	const convCombined = await getCombinedPreset(conversation);
+	const convCombined = await resolvePreset(conversation);
 	if (cfg) cfg = { ...convCombined, ...cfg };
 	else cfg = convCombined;
 
-	let markdownRenderer = cfg.afkState === 2 ? (content, container) => container && (container.textContent = content) : createMarkdownStream();
+	let markdownRenderer = createMarkdownStream();
 	let updateCount = 0;
 	let lastMessage;
 	let lastDetails;
@@ -183,12 +194,12 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		}
 		_waitingFor = 0;
 
-		if (!force) {
+		if (!force || config.pausePolicy === PP_UNATTENDED) {
 			const details = container.closest("details:not([open])");
 			if (details) {
 				if (lastDetails == null) {
 					lastDetails = details;
-					details.addEventListener("click", forceRender, ONCE_EVENT);
+					details.addEventListener("toggle", forceRender, ONCE_EVENT);
 					// 只在展开时解析思考块的markdown
 				}
 				return;
@@ -205,7 +216,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		}
 
 		if (lastDetails) {
-			lastDetails.removeEventListener("click", forceRender);
+			lastDetails.removeEventListener("toggle", forceRender);
 			lastDetails = null;
 		}
 
@@ -300,6 +311,12 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 			attempt();
 		});
+
+		if (lastDetails) {
+			lastDetails.removeEventListener("toggle", forceRender);
+			lastDetails = null;
+		}
+
 		if (!result) return result; // false
 
 		if (roleId) {
@@ -370,11 +387,13 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		const retryCount = conversation[RETRY_COUNT] || 0;
 		delete conversation[RETRY_COUNT];
 
-		const hasPendingInput = isDisplaying() && inputText.trim();
+		// 注意：这里有些地方用的是 config.pausePolicy 有些地方用的是 cfg。它们是故意的
+		const hasPendingInput = () => config.pausePolicy >= PP_SUPERVISED && isDisplaying() && inputText.trim();
 		const tc = assistantMessage.tool_calls;
 
 		let toolTurnReached;
-		if (tone === '' && !__skipToolCall && !hasPendingInput && !(toolTurnReached = cfg.maxToolTurns && !(countAgenticTurns(messages_uc) % cfg.maxToolTurns))) {
+		const turnLimit = cfg.maxToolTurns ?? 500;
+		if (tone === '' && !__skipToolCall && !hasPendingInput() && !(toolTurnReached = turnLimit && !(countAgenticTurns(messages_uc) % turnLimit))) {
 			const timer = setTimeout(commitMessage, 2000);
 			addEventListener("beforeunload", commitMessage);
 
@@ -387,10 +406,10 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			}
 
 			if (flags) {
-				if (!cfg.afkState || ((flags&1) && cfg.afkState !== 2)) {
+				if ((flags&TC_NEED_INTERACTION) || (cfg.pausePolicy === PP_INTERACTIVE && (flags&TC_ERROR))) {
 					finishReason = 'interrupt';
 					notifyUser(conversation, "请回答问题", true);
-				} else if (retryCount < cfg.toolRetryLimit && (flags&4)) {
+				} else if (retryCount < cfg.toolRetryLimit && (flags&TC_SCHEMA_ERROR)) {
 					conversation[RETRY_COUNT] = retryCount + 1;
 					messages.pop();
 				}
@@ -407,9 +426,12 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 				// 因为走到这个分支我们一定要停，所以是ok时停
 				if (isSuccess) {
 					finishReason = 'interrupt';
-					if (toolTurnReached && conversation.meta?.owner) {
-						assistantMessage.finish_reason = "interrupt";
-						notifyUser(conversation, assistantMessage.error = "Max API calls reached.", false);
+					if (toolTurnReached) {
+						messages.push({
+							role: "assistant",
+							finish_reason: 'error',
+							error: `Paused due to continuous turn limit reached (${turnLimit})`
+						});
 					} else {
 						notifyUser(conversation, "请审查工具调用", false);
 					}
@@ -437,11 +459,10 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			}
 		};
 
-		const hasPendingInput2 = isDisplaying() && inputText.trim();
 		if ('tool_calls' !== finishReason || cfg.generateTitle !== true) {
 			mayGenerateTitle();
 		}
-		if (hasPendingInput2) finishReason = 'userInput';
+		if (hasPendingInput()) finishReason = 'userInput';
 
 		// context usage
 		if (isDisplaying()) $update(updateConversationUI);
@@ -449,7 +470,6 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		if (abort.signal.aborted) return false;
 		return finishReason;
 	} finally {
-		await EVENT_BUS.post(['loopEnd'], conversation);
 		runningConversations.delete(conversation.id);
 		const runningNow = runningConversations.size;
 		if (!runningNow) setWakeLock(false);
@@ -457,6 +477,8 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		if (!IS_ANDROID_BUILD) document.title = runningNow ? `工作中(${runningNow}) - ${PAGE_TITLE}` : PAGE_TITLE;
 		$update(updateConversationListUI);
 		abort.value = null;
+
+		await EVENT_BUS.post(['loopEnd'], conversation);
 	}
 }
 
@@ -1094,7 +1116,7 @@ async function buildCompletionPayload(
 	let isPrefill;
 	if (assistantMessage) {
 		const lastModel = assistantMessage.model;
-		if (lastModel && lastModel !== config.model && config.afkState < 2) {
+		if (lastModel && lastModel !== config.model && config.pausePolicy > PP_UNATTENDED) {
 			await new Promise((resolve, reject) => {
 				SimpleModal({
 					title: "你是否主动切换了模型？",

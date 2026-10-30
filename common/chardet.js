@@ -95,6 +95,6 @@ export const readAsString = async blob => {
 	try {
 		return await Promise.any([tryDecode(blob, 'UTF-8'), tryDecode(blob, 'GB18030')]);
 	} catch {
-		throw ('[Failed to decode binary file]');
+		throw 'Cannot detect charset: binary file';
 	}
 };

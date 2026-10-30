@@ -29,6 +29,7 @@ import {
 	MessageCopyHandler,
 	MessageRoles,
 	messages,
+	PP_UNATTENDED,
 	PROGRESS_KIND,
 	PROGRESS_VALUE,
 	selectedConversation,
@@ -62,7 +63,7 @@ import {StatusPill} from "./StatusPill.jsx";
 import {UsageBlock} from "./UsageBlock.jsx";
 import {decodeObjects, encodeObjects} from "../utils/serialization.js";
 import {openJsonEditor} from "../json_editor/JsonEditDialog.js";
-import {inspect} from "unconscious/common/inspect.js";
+import {inspect} from "@roj234/util-inspect";
 import {formatDuration} from "/common/pure-utils.js";
 import {AUDIO_MIMES, IMAGE_MIMES, TEXT_MIMES} from "./UserInputComposer.jsx";
 
@@ -243,7 +244,14 @@ const chunkRenderer = m => {
 				}
 
 				if (typeof text !== 'string') return createBlobDisplay(text, "ri-file-text-line");
-				return config.afkState === 2 ? <div className={"md"} style={"white-space:pre-line"}>{text}</div> : renderMarkdownToElement(<div className="md"/>, text);
+				return config.pausePolicy === PP_UNATTENDED ? <details className="md" onToggle.once={e => {
+					const self = e.currentTarget;
+					if (self.childNodes.length === 1) {
+						renderMarkdownToElement(self, item.text);
+					}
+				}}>
+					<summary>已折叠 Markdown</summary>
+				</details> : renderMarkdownToElement(<div className="md"/>, text);
 			}
 			case "images":
 				if (isEditing(m.key)) {
@@ -1000,6 +1008,7 @@ class MessageListItem {
 						if (type === prev.type) {
 							if (type !== 'tool') {
 								curr.swap = prev[type];
+								prev[type] = curr[type];
 							}
 							break;
 						}

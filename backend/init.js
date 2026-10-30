@@ -79,7 +79,7 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 		const method = ctx.req.method;
 		const {userId} = ctx.params;
 		if (userId != null) {
-			if (RESTRICT_USER_CREATION ? !ALLOW_USER_NAMES.has(userId) : /[\s\\/:*?<>|]/.test(userId)) {
+			if (RESTRICT_USER_CREATION ? !ALLOW_USER_NAMES.test(userId) : /[\s\\/:*?<>|]/.test(userId)) {
 				ctx.send(403, { error: "userId is not allowed" });
 				return true;
 			}

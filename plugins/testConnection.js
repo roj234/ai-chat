@@ -1,4 +1,4 @@
-import {prettyError, resolveDBRelativeURL} from "/src/utils/utils.js";
+import {prettyError} from "/src/utils/utils.js";
 import {config} from "/src/states.js";
 import {provider_presets} from "/media/provider_presets.js";
 import {DI_settings, onLoad} from "/src/hooks.js";
@@ -11,6 +11,7 @@ import {renderMarkdownToElement} from "/src/markdown/markdown.js";
 import {$unwatch, $watch, unconscious} from "unconscious";
 import {models, updateModels} from "/src/presets.js";
 import {showToast} from "/src/components/Toast.js";
+import {resolveDBRelativeURL} from "../src/database.js";
 
 const EMPTY_WAV = `UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=`;
 const EMPTY_BMP = `Qk06AAAAAAAAADYAAAAoAAAAAQAAAAEAAAABABgAAAAAAAQAAAATCwAAEwsAAAAAAAAAAAAA/wAAAA==`;
@@ -42,7 +43,7 @@ const test = async (body, flag, err1) => {
 	if (streamFlag) body.stream = true;
 	if (!body.max_completion_tokens) body.max_completion_tokens = 16;
 
-	if (flag !== 2) {
+	if (flag !== 2 && flag !== 4) {
 		const [reasoningTogglePath, reasoningEnabledValue = 'true', reasoningDisabledValue = 'false'] = (config.reasoningTogglePath||"reasoning/enabled").split(",");
 		jsonEval(body, reasoningTogglePath, "set", JSON.parse(flag === 3 ? reasoningEnabledValue : reasoningDisabledValue));
 	}
@@ -70,14 +71,14 @@ const test = async (body, flag, err1) => {
 		if (typeof flag === 'string') return err1(jsonGet(msg, flag))
 		msg = msg.delta || msg.message;
 		if (!msg) throw completion;
-		return flag === 3 ? msg.content : flag === 2 ? msg : msg.tool_calls || msg.content || msg.reasoning || msg.reasoning_content;
+		return flag === 3 ? msg.content : flag === 2 || flag === 4 ? msg : msg.tool_calls || msg.content || msg.reasoning || msg.reasoning_content;
 	});
 
 	if (!flag) p = p.catch((err) => {
 		if (err1 && JSON.stringify(err).match(err1)) return true;
 	});
 
-	return p.catch(e => null);
+	return flag === 4 ? p : p.catch(e => null);
 }
 
 const reason_switch_keys = [
@@ -345,7 +346,7 @@ const testModel = () => new Promise((resolve, reject) => {
 			prompt: "Hi",
 		} : {
 			messages: [{role: "user", content: "Hi"}],
-		}, 2).then((msg) => {
+		}, 4).then((msg) => {
 			if (isLegacyCompletionMode) return resolve();
 
 			const {content, ...rest} = msg;

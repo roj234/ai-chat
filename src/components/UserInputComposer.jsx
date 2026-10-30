@@ -19,7 +19,7 @@ import SimpleModal from "./SimpleModal.jsx";
 import {getBlob} from "../database.js";
 import {webviewUploadImage} from "/vendor/jsBridge.js";
 import {Recorder} from "/plugins/voiceInput/Recorder.jsx";
-import {getCombinedPreset} from "../presets.js";
+import {resolvePreset} from "../presets.js";
 import {closeWindow, openWindow} from "./Windows.jsx";
 import {cannotInsertAfter, injectMessages} from "../inject-message.js";
 import {PendingMessageList} from "./PendingMessageList.jsx";
@@ -135,7 +135,7 @@ export const createUserInputComposer = (scroller) => {
 			return;
 		}
 
-		const opt = !conv ? config : await getCombinedPreset(conv);
+		const opt = !conv ? config : await resolvePreset(conv);
 
 		// 文本文件
 		const mime = [TEXT_MIMES];
@@ -150,7 +150,7 @@ export const createUserInputComposer = (scroller) => {
 	/**
 	 * @type {HTMLElement}
 	 */
-	let userInput = <textarea placeholder="有事尽管问我" className="userInput" enterkeyhint="send"
+	let userInput = <textarea placeholder={() => !auxSmallScreen && unconscious(abortCompletion) ? "在任务结束后发送，Ctrl+Enter 立即发送" : "有事尽管问我"} className="userInput" enterkeyhint="send"
 			onInput={() => {
 				// Auto resize when typing
 				userInput.style.height = '';
@@ -160,7 +160,7 @@ export const createUserInputComposer = (scroller) => {
 				if (auxMainlyTouch) return;
 				if (!e.isComposing && e.key === 'Enter' && !e.shiftKey) {
 					e.preventDefault();
-					submitInput(e);
+					submitInput(e, e.ctrlKey);
 				}
 			}}
 		/>,
@@ -274,7 +274,7 @@ export const createUserInputComposer = (scroller) => {
 		}
 	});
 
-	async function submitInput(event) {
+	async function submitInput(event, forceInject) {
 		if (await handleCommand(inputText, userInput)) return;
 
 		const conv = unconscious(selectedConversation);
@@ -288,7 +288,7 @@ export const createUserInputComposer = (scroller) => {
 			if (cannotInsertAfter(m)) {
 				const options = [];
 
-				if (!m.error && await getCombinedPreset(conv).canPrefill)
+				if (!m.error && await resolvePreset(conv).canPrefill)
 					options.push("清空输入框并点击右下角【继续】");
 				options.push("点击上条消息的【重新生成】按钮");
 				options.push("在上上条消息处【分支】");
@@ -311,7 +311,7 @@ export const createUserInputComposer = (scroller) => {
 		const aborter = unconscious(abortCompletion);
 		if (aborter) {
 			if (content) {
-				injectMessages(conv, {role: 'user', content, time: Date.now()});
+				injectMessages(conv, {role: 'user', content, time: Date.now(), defer: !forceInject});
 				$update(pendingMessages);
 				return;
 			}

@@ -1,6 +1,6 @@
 import {OpenAI} from "/src/openai";
 import {DatabaseSync} from "node:sqlite";
-import {TSDB} from "unconscious/common/tsdb";
+import {TSDB} from "@roj234/logdb";
 
 namespace AiChatBackend {
     type Router = {
@@ -33,6 +33,12 @@ namespace AiChatBackend {
         setVariable(name: string): ((value: any) => void);
         variables: Function[];
     } & User;
+
+    type ModerationHandler = function(SSEProxyTarget, RouteContext): [
+        onStart: function(OpenAI.ChatCompletionRequest, SSEProxyTarget): Partial<SSEProxyTarget>,
+        onError: function(Error): void,
+        onFinally: function(OpenAI.ChatCompletionResponse): void,
+    ]
 
     type VectorDB = {
         readonly size: number;

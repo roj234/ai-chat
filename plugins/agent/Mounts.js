@@ -772,15 +772,17 @@ export const crossVFSCopyMove = async({src, dest, move}, _, conv) => {
 			path: src,
 			pattern: '**',
 			json: true,
-			showDir: false
+			showDir: false,
+			showHidden: true,
+			//showModified: true,
 		}, conv);
 
 		const [enqueue, waitAll] = createAsyncQueue();
 
 		for (const [path] of srcFiles) {
 			await enqueue(async() => {
-				const content = await callFileSystemFunc(srcFileSystem, 'readRaw', {path});
-				await callFileSystemFunc(destFileSystem, 'writeRaw', { path, content });
+				const content = await callFileSystemFunc(srcFileSystem, 'readRaw', {path: src+'/'+path});
+				await callFileSystemFunc(destFileSystem, 'writeRaw', { path: dest+'/'+path, content });
 			});
 		}
 

@@ -3,7 +3,7 @@
 AiChat 的插件系统基于模块导入，通过 `plugins/PluginRegistry.js` 注册。大部分功能（工具、角色扮演、UI 增强）都以插件形式实现。
 
 首先，针对不想从源代码编译的用户，我提供了这个 API。  
-这个 API 还可以用于调试 bug
+不过，这个 API 主要用于调试 bug
 
 ```js
 // 都有 JSDoc / TypeScript 类型定义
@@ -23,7 +23,8 @@ window.AiChatAPI = {
     markMessageDirty,
 	conversation: selectedConversation,
 	messages,
-	conversations
+	conversations,
+    EVENT_BUS
 };
 ```
 
@@ -75,4 +76,4 @@ registerSchemaMessageRole 示例
 后端插件相对宽松，只需要遵循特定的目录格式 （./plugins/folder/index.js） 并在 index 中导出默认函数就会自动加载。  
 这个函数会接受一个 Router 实例作为参数，可以自行注册路由。  
 有关类型定义在 backend/types.d.ts 中
-后端插件在项目 backend/plugins 里有两个实例可以参考。
+后端插件在项目 backend/plugins 里有几个实例可以参考。

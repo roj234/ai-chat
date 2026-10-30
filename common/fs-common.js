@@ -1,9 +1,10 @@
 import {createAsyncQueue} from "./pure-utils.js";
-import {LRUCache} from "./LRUCache.js";
+import {LRUCache} from "@roj234/lru-cache";
 
 // ────────────────────────────────── Grep and TextFileEditHelper ──────────────────────────
 
 export const GREP_MAX_COLUMNS = 180;
+const BINARY_EXT = /\.(?:dll|exe|so|jpe?g|png|bmp|gif|mp4|mov|m4v|fla|flv|mp3|ogg|flac|wav|zip|7z|rar|gz|zstd?|img|iso|wim|esd|xlsx?|docx?|pptx?|epub)$/i;
 
 /**
  * @param {string} pattern
@@ -457,7 +458,7 @@ totalLines: ${lines.length + delta} (${delta >= 0 ? '+': ''}${delta})`;
 		}
 
 		for (const [relPath, type] of files) {
-			if (type !== 'file') continue;
+			if (type !== 'file' || BINARY_EXT.test(relPath)) continue;
 			if (matchedFiles >= maxFiles) break;
 
 			await enqueue(async () => {

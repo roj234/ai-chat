@@ -1,4 +1,4 @@
-import {debugSymbol} from "unconscious/shared.js";
+import {debugSymbol} from "@roj234/shared";
 import {webviewFetch} from "/vendor/jsBridge.js";
 
 /**

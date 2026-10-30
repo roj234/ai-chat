@@ -4,7 +4,7 @@ import {renderMarkdownToElement} from "../markdown/markdown.js";
 import {EditWidget} from "./EditWidget.jsx";
 import {config} from "../states.js";
 import {JsonEditor} from "./JsonEditor.jsx";
-import {inspect} from "unconscious/common/inspect.js";
+import {inspect} from "@roj234/util-inspect";
 
 /**
  * @param {OpenAI.ReasoningDetail[]} details

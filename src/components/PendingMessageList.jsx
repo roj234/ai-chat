@@ -105,9 +105,18 @@ export function PendingMessageList({attachments, items, input} = {}) {
 						{fileCount ? <i className="ri-file-line pm-file"/> : null}
 						{message.label && <span className="pm-role">{message.label}</span>}
 						<span className="text ellipsis">{preview}</span>
-						<button className="pm-recall" title="撤回并放回输入框" tabIndex={0}
+						{message.defer &&
+							<button className="pm-recall" title="下一条发送" tabIndex={0}
+									onClick={({currentTarget}) => {
+										delete message.defer;
+										updateConversation(unconscious(selectedConversation));
+										currentTarget.remove();
+									}}>
+								<i className="ri-flashlight-fill" />
+							</button>}
+						<button className="pm-recall" title="放回输入框" tabIndex={0}
 								onClick={() => recall(message)}>
-							<i className="ri-corner-up-left-line"/>
+							<i className="ri-corner-right-down-line"/>
 						</button>
 					</div>
 				);

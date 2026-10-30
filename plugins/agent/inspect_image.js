@@ -1,7 +1,7 @@
 import {ContentPart, prefixTitle} from "/src/toolset.js";
 import {fileAccess} from "./Mounts.js";
 import {compressImage} from "/common/imate.js";
-import {getCombinedPreset} from "/src/presets.js";
+import {resolvePreset} from "/src/presets.js";
 
 const readImage = fileAccess("readRaw");
 
@@ -40,7 +40,7 @@ export const InspectImage = {
 		if (!isImage) throw 'Unsupported format. Convert to PNG, JPG, BMP, or WebP using tools.';
 
 		let blob = await readImage({path}, resp, conv);
-		const cfg = await getCombinedPreset(conv);
+		const cfg = await resolvePreset(conv);
 
 		if (bbox) {
 			const imgBitmap = await createImageBitmap(blob);

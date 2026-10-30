@@ -208,10 +208,10 @@ svg.icon {
 }
 
 /* 省电模式 */
-body.no-motion {
-    *,
-    *::before,
-    *::after {
+.no-motion {
+    & *:not(.timer),
+    & *::before,
+    & *::after {
         animation: none !important;
     }
 }
@@ -926,10 +926,6 @@ body._fileUI .hide-human {
 
     .hljs {max-height: 15lh;}
 
-    .chat-actions {
-        display: flex !important;
-    }
-
     .query .userInput {
         height: 2.75rem;
     }
@@ -976,7 +972,7 @@ body._fileUI .hide-human {
     body {
         background: none !important;
     }
-    .bar button, .btn, .sidebar, .composer, .stats, .toasts, .btn-line, .branch-selector, ::-webkit-scrollbar {
+    .bar button, .btn, .sidebar, .composer, .ai-stats, .toasts, .btn-line, .branch-selector, ::-webkit-scrollbar {
         display: none !important;
     }
     .msg {

@@ -2,6 +2,7 @@ import {EVENT_BUS, LOCKED, runningConversations} from "/src/states.js";
 import {getMessages, updateConversation} from "/src/database.js";
 import {submitUserChatMessage} from "./api-request.js";
 import {lockConversation, unlockConversation} from "./conversation-lock.js";
+import {getImmediateMessages} from "./database.js";
 
 function doInsert(msgs, items) {
 	const last = msgs.at(-1);
@@ -15,9 +16,8 @@ function doInsert(msgs, items) {
 				deferred.push(item);
 				continue;
 			}
-
-			delete item.defer;
 		}
+		delete item.defer;
 
 		msgs.push(item);
 	}
@@ -54,7 +54,7 @@ export const injectMessages = async (conv, ...items) => {
 		unlockConversation(conv.id);
 	}
 
-	submitUserChatMessage(true, conv).catch(() => {});
+	submitUserChatMessage(true, conv);
 	return true;
 };
 
@@ -80,11 +80,11 @@ export const flushNotifications = (conv, messages) => {
 
 		EVENT_BUS.post(['messageInject', 'flushed'], conv);
 		queueMicrotask(() => {
-			submitUserChatMessage(true, conv).catch(() => {});
-		});
+			submitUserChatMessage(true, conv);
+		})
 		return updateConversation(conv, messages);
 	}
 }
 
-EVENT_BUS.on(['loopBegin'], conv => flushNotifications(conv, runningConversations.get(conv.id).messages));
-EVENT_BUS.on(['loopEnd'], conv => flushNotifications(conv, runningConversations.get(conv.id).messages));
+EVENT_BUS.on(['loopBegin'], conv => flushNotifications(conv, getImmediateMessages(conv)));
+EVENT_BUS.on(['loopEnd'], conv => flushNotifications(conv, getImmediateMessages(conv)));

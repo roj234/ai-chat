@@ -1,6 +1,6 @@
 import {$derived, $state, $store, $watch, debugSymbol, unconscious} from 'unconscious';
 import {EventBus} from "./utils/EventBus.js";
-import {LRUCache} from "../common/LRUCache.js";
+import {LRUCache} from "@roj234/lru-cache";
 
 export const PAGE_TITLE = document.title;
 
@@ -221,3 +221,5 @@ export const updateConversationUI = $state();
 export const updateMessageUI = $state();
 
 export const CONFIG_VERSION = debugSymbol("ConfigVersion");
+
+export const PP_UNATTENDED = 0, PP_AUTO = 1, PP_SUPERVISED = 2, PP_INTERACTIVE = 3;

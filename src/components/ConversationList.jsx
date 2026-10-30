@@ -3,7 +3,7 @@ import {$state, $update, $watchWithCleanup, debugSymbol, ONCE_EVENT, unconscious
 import {ITEM_KEY, VirtualList} from 'unconscious/common/VirtualList.js';
 import {formatDate} from 'unconscious/common/Utils.js';
 import {deepEqual} from "unconscious/common/deepEqual.js";
-import {deleteConversation, updateConversation} from "../database.js";
+import {deleteConversation, setConversationTitle, updateConversation} from "../database.js";
 import {
 	auxMainlyTouch,
 	conversations,
@@ -103,21 +103,6 @@ const groupConversations = () => {
 	});
 
 	return [baseGroups, timeGroups];
-};
-
-/**
- *
- * @param {AiChat.Conversation} conv
- * @param {string} title
- * @param {boolean=} skipSync
- */
-export const setConversationTitle = (conv, title, skipSync) => {
-	conv.title = title;
-	$update(updateConversationListUI);
-	if (unconscious(selectedConversation) === conv) {
-		$update(selectedConversation);
-	}
-	if (!skipSync) updateConversation(conv);
 };
 
 const SELECTED = debugSymbol("SelectedInConversationList");

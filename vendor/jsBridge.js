@@ -39,7 +39,7 @@ if (IS_ANDROID_BUILD) {
 		}
 	};
 
-	window.__audioPermissionResult = /* #__PURE__ */ (id, granted) => {
+	window.__audioPermissionResult = (id, granted) => {
 		const resolve = rpc.get(id);
 		if (!resolve) return;
 		rpc.delete(id);

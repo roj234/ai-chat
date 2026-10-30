@@ -36,7 +36,13 @@ import {
 	SYNC_RPC,
 	SYNC_UNLOCKED
 } from "/backend/sync.js";
-import {clearMessageDirty, DIFF_SNAPSHOT, getImmediateMessages, listConversations} from "../database.js";
+import {
+	clearMessageDirty,
+	DIFF_SNAPSHOT,
+	getImmediateMessages,
+	listConversations,
+	setConversationTitle
+} from "../database.js";
 import {deepEqual, patch} from "unconscious/common/deepEqual.js";
 import {decodeMsg} from "unconscious/common/msgpack.js";
 import {msgpack_schema} from "/common/wire-compression-schema.js";
@@ -44,7 +50,6 @@ import {highlightJsonLike} from "../markdown/highlight.js";
 import {prettyError} from "../utils/utils.js";
 import {initialize, serializeMsgpack, serverAcceptMsgpack} from "./remoteDB.js";
 import {enableBranches} from "../utils/BranchManager.js";
-import {setConversationTitle} from "../components/ConversationList.jsx";
 import {conversationLock, lockConversation, unlockConversation} from "../conversation-lock.js";
 
 let bodyClass;
@@ -336,12 +341,15 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 							// 刷新了也会自己关闭的，不管
 						}
 					}
-				}
-				else if (isCurrent) {
-					showToast("当前对话已被其它客户端删除", 'error', 0);
-					setLockStatus(convId, "DELETED");
-					showReadonlyUI(convId);
-					EVENT_BUS.post(['convDel', conv.id]);
+				} else {
+					$update(updateConversationListUI);
+
+					if (isCurrent) {
+						showToast("当前对话已被其它客户端删除", 'error', 0);
+						setLockStatus(convId, "DELETED");
+						showReadonlyUI(convId);
+						EVENT_BUS.post(['convDel', conv.id]);
+					}
 				}
 			}
 			break;

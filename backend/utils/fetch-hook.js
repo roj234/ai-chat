@@ -2,7 +2,8 @@ import http from 'node:http';
 import https from 'node:https';
 import {Readable} from "node:stream";
 
-const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const NULL_BODY_STATUS = new Set([101, 103, 204, 205, 304]);
+const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
 
 /**
  * Encode the request body into a Buffer.
@@ -69,7 +70,7 @@ function makeRequest(url, { method, headers: headersInit, body, signal, agent, .
 
 	return new Promise((resolve, reject) => {
 		const req = transport.request(options, (res) => {
-			const stream = new ReadableStream({
+			const stream = NULL_BODY_STATUS.has(res.statusCode) ? null : new ReadableStream({
 				start(controller) {
 					res.on('data', (chunk) => controller.enqueue(new Uint8Array(chunk)));
 					res.on('end', () => controller.close());
@@ -181,7 +182,7 @@ async function _fetch(input, {
 		const _maxRedirects = parseInt(maxRedirects);
 
 		while (
-			REDIRECT_STATUSES.has(response.status) &&
+			REDIRECT_STATUS.has(response.status) &&
 			redirectCount < _maxRedirects
 		) {
 			const location = response.headers.get('location');
@@ -206,7 +207,7 @@ async function _fetch(input, {
 			});
 		}
 	} else if (redirect === 'error') {
-		if (REDIRECT_STATUSES.has(response.status)) {
+		if (REDIRECT_STATUS.has(response.status)) {
 			throw new TypeError('Redirect not allowed');
 		}
 	}

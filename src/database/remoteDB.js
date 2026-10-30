@@ -5,7 +5,7 @@ import {decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
 import {msgpack_schema, msgpack_schema_version} from "/common/wire-compression-schema.js";
 import {SHA256} from "unconscious/common/SHA256.js";
 import {base64Encode} from "unconscious/common/Base64.js";
-import {connectBestServer, prettyError, resolveDBRelativeURL} from "../utils/utils.js";
+import {connectBestServer, prettyError} from "../utils/utils.js";
 import {$store, $update, AS_IS, debugSymbol, unconscious} from "unconscious";
 import SimpleModal from "../components/SimpleModal.jsx";
 import {delta, patch, rep} from "unconscious/common/deepEqual.js";
@@ -15,9 +15,10 @@ import {
 	getImmediateMessages,
 	IdempotencyKeyForReplay,
 	remoteDBUrl,
+	resolveDBRelativeURL,
 	setRemoteDBUrl
 } from "../database.js";
-import {LRUCache} from "/common/LRUCache.js";
+import {LRUCache} from "@roj234/lru-cache";
 import {sleep, throwDOMException} from "/common/pure-utils.js";
 import {showToast} from "../components/Toast.js";
 

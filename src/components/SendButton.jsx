@@ -7,10 +7,10 @@ import {
 	updateMessageUI
 } from "../states.js";
 import {$computed, $derived, $state, $watch, $watchWithCleanup, unconscious} from "unconscious";
-import {getToolInteractiveLevel} from "../toolset.js";
+import {getToolInteractiveLevel, TOOL_IS_RUNNING} from "../toolset.js";
 
 import "./ContextUsage.css";
-import {getContextStrokeColor} from "./contextColor.js";
+import {getContextStrokeColor} from "./contextColor.ts";
 import {DI, DID_SEND_BUTTON} from "../hooks.js";
 import {immutableObjectMap} from "unconscious/common/Utils.js";
 import {cannotInsertAfter} from "../inject-message.js";
@@ -109,7 +109,7 @@ export const createSendButton = (attachments, submitInput) => {
 				for (let i = 0; i < tr.length; i++) {
 					const response = tr[i];
 					if (!response) return 0;
-					if (getToolInteractiveLevel(response, tc[i], conv) && !response.content)
+					if (getToolInteractiveLevel(response, tc[i], conv) && !response.content && !response[TOOL_IS_RUNNING])
 						return response.content == null ? null : false;
 				}
 			}

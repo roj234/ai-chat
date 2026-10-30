@@ -3,6 +3,19 @@ import {constants, createBrotliCompress, createGzip} from "node:zlib";
 import {RESPONSE_COMPRESS_LEVEL, RESPONSE_USE_MSGPACK_SCHEMA} from "./config.js";
 import {decodeMsg, encodeRawMsg} from "unconscious/common/msgpack.js";
 
+export class HttpError extends Error {
+	/**
+	 * @param {number} statusCode
+	 * @param {string} [message]
+	 * @param {Record<string, string>} [headers]
+	 */
+	constructor(statusCode, message = '', headers) {
+		super(message);
+		this.status = statusCode;
+		this.headers = headers;
+	}
+}
+
 const FLAG = {
 	PREFIX:    1,  // prefix delegation (/**)
 	DIRECTORY: 2,  // expects trailing slash
@@ -476,16 +489,16 @@ export class Router {
 	 * @return {Promise<void>}
 	 */
 	async handle(req, res) {
-		let parsedUrl;
+		let parsedUrl, urlPath;
 		try {
 			parsedUrl = new URL(req.url, `http://${req.headers.host}`);
+			// Strip leading slash for matching
+			urlPath = decodeURIComponent(parsedUrl.pathname.slice(1));
 		} catch {
 			res.end();
 			return;
 		}
 
-		// Strip leading slash for matching
-		const urlPath = parsedUrl.pathname.slice(1);
 		let method = req.method.toUpperCase();
 
 		const inputHeaders = req.headers["access-control-request-headers"] || "Content-Type, Authorization, X-Ci, X-Pv, X-Sv";
@@ -617,20 +630,15 @@ export class Router {
 				outputStream.end();
 			},
 			readAsBuffer: (maxLength = 1048576) => new Promise((resolve, reject) => {
-				if (parseInt(req.headers['content-length']) > maxLength) {
-					const error = new Error('Request body too large');
-					error.status = 413;
-					reject(error);
-				}
+				if (parseInt(req.headers['content-length']) > maxLength)
+					throw new HttpError(413, 'Request body too large');
 
 				let chunks = [];
 				let totalLength = 0;
 				req.on('data', chunk => {
 					const length = chunk.length;
 					if (totalLength + length > maxLength) {
-						const error = new Error('Request body too large');
-						error.status = 413;
-						reject(error);
+						reject(new HttpError(413, 'Request body too large'));
 						return;
 					}
 					totalLength += length;
@@ -661,11 +669,21 @@ export class Router {
 			await handler(ctx);
 		} catch (err) {
 			console.error(err);
+			if (res.headersSent) {
+				console.warn("[Router] Headers already sent");
+				res.end();
+				return;
+			}
 
 			let msg = err.message ?? err;
 			if (ctx.errorFilter) msg = ctx.errorFilter(msg, err);
 			try {
-				ctx.send(err.status || 500, { error: msg });
+				if ((req.headers.accept || '') .includes('application/json')) {
+					ctx.send(err.status || 500, { error: err.code != null ? { ...err, message: msg, __type: 'Error' } : msg });
+				} else {
+					res.writeHead(err.status || 500, { 'Content-Type': 'text/plain', ...err.headers });
+					res.end(msg);
+				}
 			} catch {}
 		}
 	}

@@ -10,7 +10,7 @@ export const SANDBOX_MODULES = [
 	'unconscious/common/text-diff.js',
 	'unconscious/common/xml-parser.js',
 	'unconscious/common/JSZip.js',
-	'unconscious/common/web-audio-engine/offline-audio-context.js',
+	'@roj234/web-audio-engine',
 ];
 
 const SANDBOX_BUILTINS = [

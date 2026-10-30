@@ -4,6 +4,7 @@ import {
 	messages,
 	onConversationLoaded,
 	onConversationSwitchOut,
+	PP_UNATTENDED,
 	runningConversations,
 	selectedConversation,
 	updateMessageUI
@@ -18,7 +19,7 @@ import {MCPClient} from "/common/MCPClient.js";
 import {parseJson5} from "unconscious/common/Json.js";
 import {highlightJsonLike} from "./markdown/highlight.js";
 import {markMessageDirty} from "./database.js";
-import {getCombinedPreset} from "./presets.js";
+import {resolvePreset} from "./presets.js";
 
 export const TOOL_NAME = debugSymbol("ToolName");
 export const TOOL_IS_RUNNING = debugSymbol("Running");
@@ -576,7 +577,7 @@ export const getToolInteractiveLevel = (ctx, tool, conv) => {
  */
 const getToolUserInteractionLevel = async (conv, name, parameters) => {
 	let fn = toolScriptRegistry[name];
-	const allowed = (await getCombinedPreset(conv)).permittedTools;
+	const allowed = (await resolvePreset(conv)).permittedTools;
 	let interactive = allowed?.includes("!"+name) ? 'secure' : fn?.interactive;
 	if (interactive) {
 		if (typeof interactive === "function") interactive = interactive(parameters, conv);
@@ -591,7 +592,9 @@ const getToolUserInteractionLevel = async (conv, name, parameters) => {
 }
 
 const UNSAFE_TOOL_DENY_MESSAGE = "User doesn't permit this tool use. Nothing changed. STOP and wait for user.";
-const UNSAFE_TOOL_DENY_MESSAGE_AFK = "该操作需要用户审批. 用户当前不在.";
+const UNSAFE_TOOL_DENY_MESSAGE_AFK = "AutoDenied: user is not present and cannot permit this tool.";
+
+export const TC_SCHEMA_ERROR = 4, TC_NEED_INTERACTION = 1, TC_ERROR = 2;
 
 /**
  *
@@ -614,6 +617,7 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 		let msg = tool_responses[i];
 		let {name} = tc.function;
 
+		let resolve;
 		try {
 			let fn = toolScriptRegistry[name];
 			if (!fn) {
@@ -631,7 +635,7 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 
 				name = nsLookup.get(name);
 				if (null == name) {
-					flags |= 4; // UNRECOVERABLE_ERROR
+					flags |= TC_SCHEMA_ERROR;
 					throw 'The tool name is invalid';
 				}
 
@@ -642,6 +646,7 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 				if (forceRerun !== i) return;
 				if (msg.success) await fn?.undo?.(msg, conv, tc);
 			}
+			if (msg?.[TOOL_IS_RUNNING]) return msg?.[TOOL_IS_RUNNING];
 
 			if (!msg?.pending) msg = tool_responses[i] = { [TOOL_NAME]: name };
 
@@ -656,7 +661,7 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 						name: name = msg[TOOL_NAME] = 'Use',
 					}
 				} else {
-					flags |= 4; // UNRECOVERABLE_ERROR
+					flags |= TC_SCHEMA_ERROR;
 					throw 'The tool exists, but is not allowed.';
 				}
 			}
@@ -686,7 +691,7 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 					}
 
 					if (error) {
-						flags |= 4; // UNRECOVERABLE_ERROR
+						flags |= TC_SCHEMA_ERROR;
 						throw "Schema validation error:\n"+error;
 					}
 				}
@@ -696,10 +701,10 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 				tc.function.arguments = JSON.stringify(parameters);
 			}
 
-			const deny = customRejectText || (config.afkState === 2 ? UNSAFE_TOOL_DENY_MESSAGE_AFK : UNSAFE_TOOL_DENY_MESSAGE);
+			const deny = customRejectText || (config.pausePolicy === PP_UNATTENDED ? UNSAFE_TOOL_DENY_MESSAGE_AFK : UNSAFE_TOOL_DENY_MESSAGE);
 			const uiLevel = await getToolUserInteractionLevel(conv, name, parameters);
 			if (uiLevel) {
-				flags |= 1; // INTERACTIVE
+				flags |= TC_NEED_INTERACTION;
 				if (uiLevel === 2) {
 					if (null == forceRerun) return;
 
@@ -710,7 +715,7 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 			}
 
 			msg.time ??= Date.now();
-			msg[TOOL_IS_RUNNING] = true;
+			msg[TOOL_IS_RUNNING] = new Promise(r => resolve = r);
 
 			await EVENT_BUS.post(['beforeToolCall', name], parameters, msg, conv);
 
@@ -730,8 +735,10 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 				msg.pending = true;
 			}
 		} catch (e) {
-			if (typeof e === 'string' && !e.startsWith('Error: '))
-				e = 'Error: '+e;
+			if (typeof e === 'string' && !e.startsWith('Error: ')) e = 'Error: '+e;
+			// FIXME 后端序列化回来的错误
+			if (e.__type === 'Error') e = e.message;
+
 			console.error(e);
 			/*msg = tool_responses[i] = {
 				[TOOL_NAME]: name,
@@ -741,8 +748,10 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 			if (!msg) msg = tool_responses[i] = { [TOOL_NAME]: name };
 			msg.success = false;
 			msg.content = prettyError(e);
-			flags |= 2; // ERROR
+			flags |= TC_ERROR;
 		}
+
+		resolve?.();
 		delete msg[TOOL_IS_RUNNING];
 		if (forceRerun === true && null == msg.content) throw `${name} 拒绝被自动执行 (可能需要用户交互)`;
 		if (msg.time) msg.duration = Date.now() - msg.time;

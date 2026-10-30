@@ -82,19 +82,20 @@ export const createRemoteFileSystem = (baseUrl, pat, fileBase) =>
 	async (func, parameters) => {
 		let endpoint = baseUrl + func;
 
-		if (fileBase) endpoint += '?root=' + encodeURIComponent(fileBase);
+		if (fileBase) endpoint += '?root='+encodeURIComponent(fileBase);
 
 		// ── Binary write / append: send raw Uint8Array body ──
-		const isBinaryWrite = func === 'writeRaw' || func === 'appendRaw';
 		let body, headers = {
-			Authorization: 'Bearer ' + pat
+			Authorization: 'Bearer ' + pat,
+			Accept: "application/json,*/*"
 		};
-		if (isBinaryWrite && parameters) {
+		if (func.endsWith("Raw") && parameters) {
 			// Append extra params as query string
 			const sep = endpoint.includes('?') ? '&' : '?';
-			endpoint += sep + 'path=' + encodeURIComponent(parameters.path);
+			endpoint += sep + 'path='+encodeURIComponent(parameters.path);
 			body = parameters.content;
-			headers['Content-Type'] = 'application/octet-stream';
+			if (body) headers['Content-Type'] = 'application/octet-stream';
+			else parameters = null;
 		} else if (parameters) {
 			body = JSON.stringify(parameters);
 			if (body === '{}') body = parameters = null;
@@ -112,19 +113,24 @@ export const createRemoteFileSystem = (baseUrl, pat, fileBase) =>
 			throw "FileService dead";
 		}
 
-		const content = response.headers.get("content-type") || "";
+		const mime = response.headers.get("content-type") || "";
+		const status = response.status;
 
 		if (!response.ok) {
-			if (response.status === 404) {
-				throw `${func} is not implemented in this VFS`;
-			}
+			if (status === 502)
+				throw "FileService dead";
 
-			if (content.includes("application/json")) throw (await response.json()).error;
+			if (mime.includes("application/json")) {
+				if (status === 404 && response.headers.get("content-length") === "0") {
+					throw `${func} is not implemented in this VFS`;
+				}
+				throw (await response.json()).error;
+			}
 			throw (await response.text());
 		}
 
-		if (content.startsWith("image/")) return new ContentPart().image(await response.blob());
-		if (content === "application/octet-stream") return await response.blob();
-		if (content.includes("application/json")) return await response.json();
-		return await response.text();
+		if (mime === "application/octet-stream" || func === 'readRaw') return await response.blob();
+		if (mime.startsWith("image/")) return new ContentPart().image(await response.blob());
+		if (mime.includes("application/json")) return await response.json();
+		return await response.text() || "Success";
 	};

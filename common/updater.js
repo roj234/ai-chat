@@ -15,6 +15,7 @@ import {$store} from "unconscious";
  * @type {import("unconscious").Reactive<{
  *     time: number,
  *     retryAfter: number,
+ *     version: string,
  *     info: UpdateInfo
  * }>}
  */
@@ -26,12 +27,12 @@ const updateInfo = $store("update", {}, {persist: true, deep: false});
  * @return {Promise<UpdateInfo>}
  */
 export async function checkUpdate(force) {
-	const lastCheckTime = updateInfo.time;
+	const lastCheckTime = updateInfo.time ?? 0;
 	const time = Date.now();
-	const canCheck = time > (updateInfo.retryAfter || 0) && time - lastCheckTime > 4000000;
+	const canCheck = time > (updateInfo.retryAfter ?? 0) && time - lastCheckTime > 4000000;
 
 	let info = updateInfo.info;
-	if (!canCheck && updateInfo.version !== BUILD_NUMBER) return info;
+	if (!canCheck && updateInfo.version !== BUILD_NUMBER && info) return info;
 
 	const url = `https://api.github.com/repos/roj234/ai-chat/releases/latest`;
 	const response = await fetch(url, { headers: {

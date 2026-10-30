@@ -1,21 +1,23 @@
-import fs from 'node:fs/promises';
+import fsp from 'node:fs/promises';
+import fs, {createWriteStream} from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {readBOM} from "../../common/chardet.js";
 import iconv from "iconv-lite";
-import {getEnvironmentPrompt} from "../utils/checkEnv.js";
+import {getEnvironmentPrompt, updateBash} from "../utils/checkEnv.js";
 import {createTextFileEditHelper, GREP_MAX_COLUMNS} from "../../common/fs-common.js";
 import {ACL} from "../../common/ACL.js";
-import {createReadStream, createWriteStream} from 'node:fs';
 import {pipeline} from "node:stream/promises";
 import {formatSize} from "unconscious/common/Utils.js";
-import {LRUCache} from "../../common/LRUCache.js";
+import {LRUCache} from "@roj234/lru-cache";
 import {compileGlobPattern, emptyAsyncGenerator, generateGlobCode} from "../../common/fs-glob.js";
-import {Writable} from 'node:stream';
+import {Transform, Writable} from 'node:stream';
 // noinspection ES6UnusedImports
 import {mpscScheduler} from "../../common/pure-utils.js";
-import {getContentType} from "../utils/mime.js";
-import {staticFileServe} from "../utils/staticFile.js";
+import {getContentType} from "@roj234/ie/utils/mimeTypes.js";
+import {safeStat, serveFile} from "@roj234/ie/utils/serveFile.js";
+import {HttpError} from "../router.js";
+import {FS_UPDATE_BASH} from "../config.js";
 
 const devNull = () => new Writable({
 	write(chunk, encoding, callback) {
@@ -24,7 +26,6 @@ const devNull = () => new Writable({
 });
 
 const TEXT_FILE_MAX = 10485760;
-const BINARY_FILE_MAX = 52428800;
 
 /**
  * 路径校验
@@ -33,13 +34,13 @@ const BINARY_FILE_MAX = 52428800;
  * @return {string}
  */
 export const pathFilter = (relPath, ctx) => {
+	if (null == relPath) throw new HttpError(400, "param error");
+
 	const root = ctx.fsRoot;
 	const targetPath = path.resolve(root, relPath);
 	// allow path like /tmp/... or C:/tmp/
 	if (!globalThis.AIChatArgs.noSandbox && !(targetPath+"\\").startsWith(root) && !/^(?:[a-zA-Z]:)?[\\/]tmp(?:\/|$)/.test(targetPath)) {
-		const err = new Error('Path Traversal');
-		err.statusCode = 403;
-		throw err;
+		throw new HttpError(403, 'Path traversal');
 	}
 	return targetPath;
 };
@@ -50,11 +51,7 @@ async function pathFilterWithIgnore(ctx, relPath, isDir) {
 	const root = ctx.fsRoot;
 	const processedRelPath = targetPath.slice(root.length+1).replaceAll(path.sep, '/');
 	const acl = await getACL(root, targetPath);
-	if (acl.denyList(processedRelPath, isDir)) {
-		const err = new Error(`This path is readonly`);
-		err.statusCode = 403;
-		throw err;
-	}
+	if (acl.denyList(processedRelPath, isDir)) throw new HttpError(403, 'This path is readonly');
 
 	return targetPath;
 }
@@ -89,7 +86,7 @@ function guessCharset(buffer, candidates = ["UTF-8", "GBK"]) {
 		}
 	}
 
-	if (!bestResult) throw '[Failed to decode binary file]';
+	if (!bestResult) throw 'Cannot detect charset: binary file';
 	return bestResult.text;
 }
 
@@ -235,7 +232,7 @@ const getACL = async (root, targetDir) => {
 
 		for (const name of ['.ignore', '.gitignore']) {
 			try {
-				matcher.parseIgnore(await fs.readFile(path.join(root, name), 'utf-8'));
+				matcher.parseIgnore(await fsp.readFile(path.join(root, name), 'utf-8'));
 				break;
 			} catch {}
 		}
@@ -251,7 +248,7 @@ async function glob(pattern, path_, showHidden, acl, exclude) {
 	const handle = result.path;
 
 	try {
-		await fs.access(handle);
+		await fsp.access(handle);
 	} catch {
 		return emptyAsyncGenerator();
 	}
@@ -289,7 +286,7 @@ export async function registerFsRoutes(router, allowExec) {
 		const safePath = pathFilter(filePath, ctx);
 		const acl = await getACL(ctx.fsRoot, safePath);
 
-		if (!(await fs.stat(safePath)).isDirectory()) throw new Error("Path is a file, cannot use glob");
+		if (!(await fsp.stat(safePath)).isDirectory()) throw new Error("Path is a file, cannot use glob");
 
 		let prefix = '';
 		let modSince = modifiedSince ? +new Date(modifiedSince) : 0;
@@ -309,7 +306,7 @@ export async function registerFsRoutes(router, allowExec) {
 			}
 
 			const fullPath = path.join(entry.parentPath, entry.name);
-			const stats = await fs.stat(fullPath);
+			const stats = await fsp.stat(fullPath);
 
 			if (!isDir) {
 				if (stats.mtimeMs >= modSince) {
@@ -335,22 +332,22 @@ export async function registerFsRoutes(router, allowExec) {
 		list: listFileHandler,
 		absPath: pathFilter,
 		async read(path, ctx) {
-			const stats = await fs.stat(path);
+			const stats = await fsp.stat(path);
 			if (stats.size > TEXT_FILE_MAX) {
 				const msg = `File too large (${stats.size} > ${TEXT_FILE_MAX})`;
 				if (!ctx) throw msg; // for grep
 				return ctx.send(400, { error: msg });
 			}
-			return readAsString(await fs.readFile(path));
+			return readAsString(await fsp.readFile(path));
 		},
 		async write(path1, data, ctx) {
 			const safePath = await pathFilterWithIgnore(ctx, path1);
-			await fs.mkdir(path.dirname(safePath), { recursive: true });
-			await fs.writeFile(safePath, data, 'utf-8');
+			await fsp.mkdir(path.dirname(safePath), { recursive: true });
+			await fsp.writeFile(safePath, data, 'utf-8');
 			if (/\.(gitignore|ignore)$/.test(safePath)) matcherCache.delete(ctx.fsRoot);
 		},
 		async mtime(path) {
-			return (await fs.stat(path)).mtimeMs;
+			return (await fsp.stat(path)).mtimeMs;
 		}
 	});
 
@@ -373,9 +370,9 @@ export async function registerFsRoutes(router, allowExec) {
 		let needNewline;
 		if (newline) {
 			try {
-				const size = (await fs.stat(safePath)).size;
+				const size = (await safeStat(safePath)).size;
 				if (size) {
-					const fd = await fs.open(safePath, 'r');
+					const fd = await fsp.open(safePath, 'r');
 					const buf = Buffer.allocUnsafe(1);
 					await fd.read(buf, 0, 1, size - 1);
 					await fd.close();
@@ -384,40 +381,31 @@ export async function registerFsRoutes(router, allowExec) {
 			} catch {}
 		}
 
-		await fs.appendFile(safePath, needNewline ? '\n'+content : content, 'utf8');
+		await fsp.appendFile(safePath, needNewline ? '\n'+content : content, 'utf8');
 		if (/\.(gitignore|ignore)$/.test(path)) matcherCache.delete(ctx.fsRoot);
 		sendText(ctx.res, "success");
 	});
 
 	// ── Binary read/write/append (bypass text line cache) ──
 
-	router.post('/readRaw', async (ctx) => {
-		const { path: filePath, sniff } = await ctx.readAsObject();
-		const safePath = pathFilter(filePath, ctx);
-		const stats = await fs.stat(safePath);
-		if (stats.size > BINARY_FILE_MAX) {
-			return ctx.send(400, { error: `File too large (${stats.size} > ${BINARY_FILE_MAX})` });
-		}
-
-		ctx.res.writeHead(200, {
-			'Content-Type': 'application/octet-stream',
-			'Content-Length': stats.size,
-		});
-		return pipeline(createReadStream(safePath), ctx.res);
-	});
 	router.get('/readRaw', async (ctx) => {
 		const filePath = ctx.searchParams.get('path');
 		const safePath = pathFilter(filePath, ctx);
 
-		let stats;
-		try {
-			stats = await fs.stat(safePath);
-		} catch (e) {
-			ctx.send(404, { error: `文件 ${filePath} 不存在` });
-			return;
+		const stats = await safeStat(safePath);
+		const isJson = ctx.req.headers.accept?.includes("application/json");
+
+		if (!stats.isFile()) {
+			// readRaw 可能被浏览器直接访问
+			if (isJson) {
+				const code = stats.isDirectory() ? "EISDIR" : "ENOENT";
+				throw Object.assign(new HttpError(404, code+": "+filePath), { code, syscall: 'stat' });
+			}
+			throw new HttpError(404,  `无法读取 ${filePath} (不存在或被占用)`);
 		}
 
-		await staticFileServe(ctx, {
+		// 刻意不限制大小。
+		await serveFile(ctx, {
 			size: stats.size,
 			lastModified: stats.mtimeMs,
 			type: getContentType(safePath),
@@ -430,15 +418,82 @@ export async function registerFsRoutes(router, allowExec) {
 	 */
 	const binaryWriteHandler = async (ctx) => {
 		const filePath = ctx.searchParams.get('path');
-		if (!filePath) return ctx.send(400, { error: 'missing path' });
 		const safePath = await pathFilterWithIgnore(ctx, filePath);
-		await fs.mkdir(path.dirname(safePath), { recursive: true });
+		await fsp.mkdir(path.dirname(safePath), { recursive: true });
 
-		const buffer = await ctx.readAsBuffer(BINARY_FILE_MAX);
-		await fs[ctx.url.pathname.endsWith("/appendRaw") ? 'appendFile' : 'writeFile'](safePath, buffer);
+		let isAppend = ctx.url.pathname.endsWith("/appendRaw");
+		let needPart; // not implemented
+		let start, length, totalSize;
+
+		const range = ctx.req.headers['content-range'];
+		if (range) {
+			const match = range.match(/^bytes (\d+)-(\d+)\/(?:\*|(\d+))$/);
+			if (!match) throw new HttpError(400, 'unsupported content-range');
+
+			start = parseInt(match[1], 10);
+			const end = match[2] ? parseInt(match[2], 10) : Infinity;
+			totalSize = match[3] ? parseInt(match[3], 10) : null;
+			if (end < start || (totalSize != null && end >= totalSize)) throw new HttpError(416, 'invalid range');
+			isAppend = needPart = true;
+			if (end !== Infinity) {
+				length = end - start + 1;
+
+				const contentLength = ctx.req.headers['content-length'];
+				if (contentLength && length !== parseInt(contentLength, 10))
+					throw new HttpError(416, 'invalid content-length != '+length);
+			}
+		}
+
+		// 带offset不加锁并发上传。
+		//const unlock = start != null ? () => {} : await fileLock(ctx, safePath);
+		try {
+			const fd = await fsp.open(safePath, fs.constants.O_CREAT | fs.constants.O_WRONLY | (isAppend ? 0 : fs.constants.O_TRUNC));
+
+			try {
+				const stat = await fd.stat();
+
+				const ifUnmodifiedSince = ctx.req.headers['if-unmodified-since'];
+				const imsDate = new Date(ifUnmodifiedSince);
+				if (!isNaN(imsDate.getTime()) && stat.mtimeMs > imsDate.getTime()) throw new HttpError(412, '', { 'Last-Modified': imsDate.toUTCString() });
+
+				if (totalSize != null && stat.size !== totalSize) {
+					if (stat.size > 0) throw new HttpError(416, '', { Range: `bytes=0-${stat.size-1}` });
+					await fd.truncate(totalSize).catch(() => {});
+				}
+
+				const out = fd.createWriteStream(isAppend ? {
+					start: start ?? stat.size,
+				} : undefined);
+
+				// 不回滚，没有临时文件：能上传说明客户端知道文件内容。
+				try {
+					await (length > 0 ? pipeline(ctx.req, new Transform({
+						transform(chunk, _e, cb) {
+							length -= chunk.length;
+							if (length < 0) return cb(new HttpError(400, 'body exceeds content-range'));
+							cb(null, chunk);
+						},
+					}), out) : pipeline(ctx.req, out));
+				} catch (e) {
+					if (isAppend && start == null) {
+						// 除了单纯追加（不指定offset的）场景。
+						await fsp.truncate(safePath, stat.size).catch(() => {});
+					}
+					throw e;
+				}
+
+				if (length) throw new HttpError(400, `short body: want ${length} more bytes`);
+			} finally {
+				await fd.close();
+			}
+		} finally {
+			//unlock();
+		}
+
 		if (/\.(gitignore|ignore)$/.test(filePath)) matcherCache.delete(ctx.fsRoot);
 		teh.del(safePath);
-		sendText(ctx.res, "success");
+
+		ctx.send(201);
 	};
 
 	router.post('/writeRaw', binaryWriteHandler);
@@ -447,7 +502,7 @@ export async function registerFsRoutes(router, allowExec) {
 	// 文件/目录信息
 	router.post('/stat', async (ctx) => {
 		const { path: filePath } = await ctx.readAsObject();
-		const stats = await fs.stat(pathFilter(filePath, ctx));
+		const stats = await fsp.stat(pathFilter(filePath, ctx));
 		ctx.send(200, `type: ${stats.isDirectory() ? "dir" : "file"}
 mode: ${modeToString(stats.mode)}
 size: ${stats.size}
@@ -465,29 +520,33 @@ nlink: ${stats.nlink}`);
 	// 基础操作
 	router.post('/mkdir', async (ctx) => {
 		const { path: filePath, recursive = true } = await ctx.readAsObject();
-		await fs.mkdir(await pathFilterWithIgnore(ctx, filePath, true), { recursive });
-		ctx.send(200, 'Success');
+		await fsp.mkdir(await pathFilterWithIgnore(ctx, filePath, true), { recursive });
+		ctx.send(204);
 	});
 	router.post('/copy', async (ctx) => {
 		const { src, dest, move } = await ctx.readAsObject();
 		const safeSrc = await (move ? pathFilterWithIgnore(ctx, src, true) : pathFilter(src, ctx));
 		const safeDest = await pathFilterWithIgnore(ctx, dest, true);
 		if (move) {
-			await fs.mkdir(path.dirname(safeDest), { recursive: true });
-			await fs.rename(safeSrc, safeDest);
+			await fsp.mkdir(path.dirname(safeDest), { recursive: true });
+			await fsp.rename(safeSrc, safeDest);
 		} else {
-			await fs.cp(safeSrc, safeDest, { recursive: true, preserveTimestamps: true });
+			await fsp.cp(safeSrc, safeDest, { recursive: true, preserveTimestamps: true });
 		}
-		ctx.send(200, 'Success');
+		ctx.send(201);
 	});
 	router.post('/delete', async (ctx) => {
 		const { path: filePath, recursive = true, force = false } = await ctx.readAsObject();
 		const safePath = await pathFilterWithIgnore(ctx, filePath, true);
 		if (safePath === ctx.fsRoot) return ctx.send(403, { error: 'Cannot delete root' });
 
-		await fs.rm(safePath, { recursive, force });
+		await fsp.rm(safePath, { recursive, force }).catch(e => {
+			if (e.code === 'ERR_FS_EISDIR' && !recursive)
+				return fsp.rmdir(safePath);
+			throw e;
+		});
 		teh.del(safePath);
-		ctx.send(200, 'Success');
+		ctx.send(204);
 	});
 
 	const OUTPUT_LIMIT = 20000;
@@ -692,10 +751,10 @@ nlink: ${stats.nlink}`);
 				console.log("[进程] 已停止", child.pid, codeStr);
 
 				if (notify) {
-					fs.stat(dir+filename).catch(() => ({})).then(async state => {
+					fsp.stat(dir+filename).catch(() => ({})).then(async state => {
 						let logFile = dir+filename;
 						if (state.size === 0) {
-							await fs.rm(logFile).then(() => logFile = '0B, deleted', () => {});
+							await fsp.rm(logFile).then(() => logFile = '0B, deleted', () => {});
 						}
 						postEvent('process-exit', {
 							pid: child.pid,
@@ -757,7 +816,7 @@ logPath: ${logFile}`
 	let bashPath = 'bash';
 	let rgPath = path.join(import.meta.dirname, 'bin', 'rg.exe');
 	try {
-		await fs.access(rgPath);
+		await fsp.access(rgPath);
 	} catch {
 		rgPath = 'rg';
 	}
@@ -779,11 +838,7 @@ logPath: ${logFile}`
 			} = body;
 
 			const cwd = pathFilter(path, ctx);
-			try {
-				if (!(await fs.stat(cwd)).isDirectory()) break rgNotUsable;
-			} catch {
-				break rgNotUsable;
-			}
+			if (!(await safeStat(cwd)).isDirectory()) break rgNotUsable;
 
 			const args = [
 				//"-i", // --ignore-case
@@ -835,19 +890,22 @@ logPath: ${logFile}`
 	});
 
 	if (allowExec) {
-		console.log("正在检测环境，这可能需要几秒钟（特别是容器内）...");
-		const envPrompt = await getEnvironmentPrompt();
-
 		let defaultShell = 'bash';
-		if (envPrompt.startsWith("os: Windows")) {
-			defaultShell = envPrompt.includes("bash: No") ? 'powershell' : "bashemu";
-		}
+		const getEnv = async () => {
+			const prompt = await getEnvironmentPrompt();
+			defaultShell = prompt.startsWith("os: Windows") ? prompt.includes("bash: No") ? 'powershell' : "bashemu" : 'bash';
+			return prompt;
+		};
 
-		console.log(envPrompt);
-		console.log("\n默认 shell: "+defaultShell);
+		getEnv().then((prompt) => {
+			console.log(prompt);
+			console.log("\n命令宿主: "+defaultShell);
+		})
+
+		if (FS_UPDATE_BASH) updateBash();
 
 		router.get('/env', async (ctx) => {
-			return ctx.send(200, { prompt: envPrompt, location: ctx.fsRoot })
+			return ctx.send(200, { prompt: await getEnv(), location: ctx.fsRoot })
 		});
 
 		router.post('/feed', async (ctx) => {
@@ -887,6 +945,9 @@ logPath: ${logFile}`
 				env
 			} = await ctx.readAsObject();
 			let args = [];
+
+			if (process.env.AINT_EXPERIMENTAL_BASH_GUARD)
+				command = `set -Eeuo pipefail\nIFS=$'\\n\\t'\n`+command;
 
 			if (shell === 'bashemu') {
 				shell = false;

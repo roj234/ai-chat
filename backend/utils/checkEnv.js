@@ -1,6 +1,11 @@
 import os from "node:os";
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
 import {promisify} from "node:util";
 import {exec} from "node:child_process";
+import {safeStat} from "@roj234/ie/utils/serveFile.js";
+import {sleep} from "../../common/pure-utils.js";
 
 const execPromise = promisify(exec);
 
@@ -96,6 +101,8 @@ async function detectEnv() {
 let prompt;
 export async function getEnvironmentPrompt(forceRecheck) {
 	if (!prompt || forceRecheck) {
+		console.log("正在检测环境，稍等");
+
 		prompt = '';
 		for (const [tool, version] of Object.entries(await detectEnv())) {
 			prompt += `${tool}: ${version}\n`;
@@ -104,4 +111,97 @@ export async function getEnvironmentPrompt(forceRecheck) {
 	}
 
 	return prompt;
+}
+
+const DOWNLOAD_URL = 'https://frippery.org/files/busybox/busybox64u.exe';
+
+const log = (...a) => { console.log(...a); };
+
+const BIN_DIR = path.resolve(path.join(import.meta.dirname, 'bin'));
+const TARGET = path.join(BIN_DIR, 'bash.exe');
+
+/** 改名（Windows 上被占用的 exe 会 EPERM/EBUSY，重试） */
+async function renameWithRetry(from, to, timeoutMs = 1500) {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		try {
+			await fsp.rename(from, to);
+			return true;
+		} catch (e) {
+			if (!['EPERM', 'EBUSY', 'EACCES', 'EEXIST'].includes(e.code) || Date.now() > deadline) throw e;
+			await sleep(120);
+		}
+	}
+}
+
+export async function updateBash() {
+	if (process.platform !== 'win32') return;
+
+	await fsp.mkdir(BIN_DIR, {recursive: true});
+
+	const TEMP_FILE = TARGET+".tmp";
+	const tmpStat = await safeStat(TEMP_FILE);
+
+	if (tmpStat.size > 0) {
+		await renameWithRetry(TEMP_FILE, TARGET);
+		prompt = null;
+		console.log("[update-bash] busybox-w32 已更新");
+	}
+
+	const stat = await safeStat(TARGET);
+	const ac = new AbortController;
+
+	const timeout = setTimeout(() => ac.abort(), 10000);
+
+	const res = await fetch(DOWNLOAD_URL, {
+		method: 'GET',
+		redirect: 'follow',
+		headers: stat.mtime ? { 'If-Modified-Since': `${stat.mtime.toUTCString()}`, } : undefined,
+		signal: ac.signal,
+	}).catch(() => {});
+
+	if (!res?.ok) {
+		if (res?.status === 304) console.log("[update-bash] 无更新");
+		else console.log("[update-bash] 网络错误", res);
+		return;
+	}
+
+	clearTimeout(timeout);
+
+	const date = Date.parse(res.headers.get('last-modified')) || null;
+	const length = parseInt(res.headers.get('content-length')) || null;
+	let downloaded = 0;
+
+	if (length > 1048576) throw new Error("[update-bash] 新版本太大");
+
+	const reader = res.body.getReader();
+	const handle = await fsp.open(TEMP_FILE, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL);
+
+	while (true) {
+		const {done, value} = await reader.read();
+		if (done) break;
+
+		await handle.write(value);
+
+		downloaded += value.length;
+		if (!QUIET && length) {
+			const pct = Math.floor(downloaded / length * 100);
+			if (pct % 10 === 0) process.stdout.write(`\r  busybox-w32 下载中… ${pct}% (${(downloaded / 1048576).toFixed(2)} MB)`);
+		}
+
+		if (downloaded > 1048576) {
+			await handle.close();
+			await fsp.rm(TEMP_FILE);
+
+			throw new Error("[update-bash] 新版本太大");
+		}
+	}
+
+	await handle.utimes(date, date);
+	await handle.close();
+
+	await renameWithRetry(TEMP_FILE, TARGET).catch(e => log(`[update-bash] bash.exe 正在使用，将在重启后更新`));
+
+	prompt = null;
+	console.log("[update-bash] busybox-w32 已更新");
 }

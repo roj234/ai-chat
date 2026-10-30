@@ -1,7 +1,7 @@
 import {copyButtonAnimation, downloadFile} from "../utils/utils.js";
 
 import {createMarkdownRenderer} from "./renderer.js";
-import {createMarkdownParser} from "fastmd";
+import {createMarkdownParser} from "@roj234/mdstream";
 import {queueMacrotask} from "unconscious/common/queueMacrotask.js";
 
 import "./markdown.css";
@@ -44,7 +44,7 @@ const SLICE_PER_FRAME = 10000;
  *
  * @param {HTMLElement} container
  * @param {string} md
- * @param {import("fastmd").ParserOptions & AiChat.MarkdownRendererOptions} options
+ * @param {import("@roj234/mdstream").ParserOptions & AiChat.MarkdownRendererOptions} options
  */
 export const renderMarkdownToElement = (container, md, options = {}) => {
 	const renderer = createMarkdownRenderer(container, options);
@@ -149,7 +149,7 @@ const rendererOptions = { stream: true };
  *
  * @param {HTMLElement} output
  * @param [options]
- * @return {import("fastmd").Parser}
+ * @return {import("@roj234/mdstream").Parser}
  */
 export const createStreamingMarkdownParser = (output, options) => {
 	return createMarkdownParser(

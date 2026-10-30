@@ -1,7 +1,7 @@
 /**
  * Service Worker: Blob LRU 缓存
  */
-import {getContentType} from "./backend/utils/mime.js";
+import {getContentType} from "@roj234/ie/utils/mimeTypes.js";
 
 const CACHE_NAME = 'blob-cache-v1';
 const CACHE_NAME_ASSETS = 'assets-cache-v1';

@@ -1,5 +1,13 @@
-import {debugSymbol, unconscious} from 'unconscious';
-import {BRANCH_MANAGER, config, conversations, EVENT_BUS, LOCKED} from "./states.js";
+import {$update, debugSymbol, unconscious} from 'unconscious';
+import {
+	BRANCH_MANAGER,
+	config,
+	conversations,
+	EVENT_BUS,
+	LOCKED,
+	selectedConversation,
+	updateConversationListUI
+} from "./states.js";
 import {deepEqual, delta} from "unconscious/common/deepEqual.js";
 import {cloneNamed, prettyError} from "./utils/utils.js";
 import * as idb from "./database/indexedDB.js";
@@ -424,3 +432,36 @@ export const setKV = (key, value) => db.setKV(key, value).then(() => EVENT_BUS.p
  * @returns {Promise<void>}
  */
 export const kvListDel = (type, name) => db.kvListDel(type, name).then(() => EVENT_BUS.post(['kvs', type, 'del'], name));
+
+/**
+ *
+ * @param {AiChat.Conversation} conv
+ * @param {string} title
+ * @param {boolean=} skipSync
+ */
+export const setConversationTitle = (conv, title, skipSync) => {
+	conv.title = title;
+	$update(updateConversationListUI);
+	if (unconscious(selectedConversation) === conv) {
+		$update(selectedConversation);
+	}
+	if (!skipSync) updateConversation(conv);
+};
+
+export const resolveDBRelativeURL = (url) => {
+	if (url[0] === '@') {
+		if (isIDB) {
+			showToast("Could not resolve [" + url + "] in IndexedDB backend");
+			return url;
+		}
+
+		try {
+			const backendBase = new URL(remoteDBUrl, document.baseURI).toString();
+			const baseDir = backendBase.split('/').slice(0, -3).join('/') + '/';
+			url = new URL(url.slice(1), baseDir).toString();
+		} catch {
+		}
+	}
+	if (url.endsWith("/")) url = url.slice(0, -1);
+	return url;
+}

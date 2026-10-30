@@ -1,4 +1,5 @@
 import {createHash} from "node:crypto";
+import {HttpError} from "../router.js";
 
 const locks = new Map;
 
@@ -40,4 +41,35 @@ export const exclusiveLock = (func, wait) => {
 		p.finally(() => locks.delete(lockKey));
 		return p;
 	}
+}
+
+/**
+ *
+ * @param {AiChatBackend.RouteContext} ctx
+ * @param {string} absPath
+ * @return {Promise<Function>}
+ */
+export const fileLock = async (ctx, absPath) => {
+	await locks.get(absPath);
+
+	let onClosed;
+	const closeCallback = new Promise(resolve => onClosed = resolve);
+	ctx.res.once('close', onClosed);
+
+	let closed;
+	do {
+		await Promise.race([locks.get(absPath), closeCallback]).catch(() => {});
+		closed = ctx.res.closed;
+		if (closed) break;
+	} while (locks.has(absPath));
+
+	ctx.res.off('close', onClosed);
+	if (closed) throw new HttpError(444, 'closed');
+
+	let resolved;
+	locks.set(absPath, new Promise(resolve => {
+		resolved = resolve;
+		locks.delete(absPath);
+	}));
+	return resolved;
 }

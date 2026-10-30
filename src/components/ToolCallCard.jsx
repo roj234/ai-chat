@@ -91,7 +91,7 @@ export function ToolCallCard(props) {
             $watch(reactiveResponse, () => {
                 toolResponse = message.tool_responses[idx];
                 duration.value = toolResponse && formatDuration(toolResponse.duration);
-                const isRunning = toolResponse?.[TOOL_IS_RUNNING];
+                const isRunning = !!toolResponse?.[TOOL_IS_RUNNING];
 
                 if (renderInput && input.parentElement) {
                     try {

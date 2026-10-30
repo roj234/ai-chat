@@ -1,10 +1,8 @@
-import * as fastmd from 'fastmd';
+import * as fastmd from '@roj234/mdstream';
 
-import 'katex/dist/katex.min.css';
 import {SafeImage} from "../components/SafeImage.jsx";
 import {unconscious} from "unconscious";
 import {highlight} from "./highlight.js";
-import {once} from "/common/pure-utils.js";
 import {EVENT_BUS} from "../states.js";
 
 const customCodeRenderer = {};
@@ -14,8 +12,6 @@ const customCodeRenderer = {};
  * @param {function(code: string, language: string, node: HTMLElement, is_finished: boolean): void} htmlGenerator
  */
 export const registerCodeBlockRenderer = (type, htmlGenerator) => customCodeRenderer[type] = htmlGenerator;
-
-const loadKatex = once(() => import('katex'));
 
 const getInnerHTML = node => {
 	if (node._value) return node._value;
@@ -34,7 +30,7 @@ const allowedAttributes = new Set(["class", "style", "href", "width", "height", 
 /**
  * @param {HTMLElement} root
  * @param {AiChat.MarkdownRendererOptions} options
- * @return {import("fastmd").Renderer}
+ * @return {import("@roj234/mdstream").Renderer}
  */
 export function createMarkdownRenderer(root, options = {}) {
 	/**
@@ -176,9 +172,10 @@ export function createMarkdownRenderer(root, options = {}) {
 					node.__value = markdownOriginalText(dollar, displayMode);
 
 					if (!node.dataset.processed) {
-						node.dataset.processed = true;
+						node.dataset.processed = 1;
+						node.dataset.katex = 1;
 
-						loadKatex().then((katex) => {
+						import('./katex.js').then((katex) => {
 							const cleanFormula = node._value.replace(/\p{Script=Han}+/gu, '\\text{$&}');
 							node.innerHTML = katex.renderToString(cleanFormula, {throwOnError: false, displayMode});
 						}).catch(e => {

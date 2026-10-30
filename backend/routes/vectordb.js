@@ -1,7 +1,7 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import {VectorDB} from "../rag/VectorDB.js";
-import {LRUCache} from "../../common/LRUCache.js";
+import {LRUCache} from "@roj234/lru-cache";
 import {SEMANTIC_SEARCH_EMBEDDING_SIZE} from "../config.js";
 import {pathFilter} from "./agent.js";
 

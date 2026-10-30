@@ -2,13 +2,13 @@ import {crossVFSCopyMove, fileAccess} from "./Mounts.js";
 import {showToast} from "/src/components/Toast.js";
 import {getRandomString, prettyError} from "/src/utils/utils.js";
 import {AS_IS} from "unconscious";
-import {createSandbox} from "unconscious/common/safe-worker/safe-worker.js";
+import {createSandbox} from "@roj234/workerbox";
 import {normalizePath} from "unconscious/common/path-utils.js";
 import {getToolParameters, runTools} from "/src/toolset.js";
 import {formatSize} from "unconscious/common/Utils.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
 import {HighlightBox} from "/src/components/TextDiff.jsx";
-import {inspect} from "unconscious/common/inspect.js";
+import {inspect} from "@roj234/util-inspect";
 import {config} from "/src/states.js";
 import {FSE_NotAllowed, FSE_NotFound, FSE_NotSupported, throwDOMException} from "../../common/pure-utils.js";
 
@@ -324,10 +324,7 @@ export const RunJS = {
 	},
 	title(tc, ctx) {
 		const args = getToolParameters(ctx, tc);
-		let label = '运行';
-		if (args.path) label += ' '+args.path;
-		else label += args.explanation ?? `JS代码 (${formatSize(args.code?.length)})`;
-		return label;
+		return args.explanation ? "运行脚本: "+args.explanation : (args.path ? '运行 ' + args.path : `运行脚本 (${formatSize(args.code?.length)})`);
 	},
 	renderInput(ctx, box, tc) {
 		let {code, ...rest} = getToolParameters(ctx, tc);

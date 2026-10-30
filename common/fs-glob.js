@@ -316,7 +316,7 @@ export function compileGlobPattern(pattern, path, exclude) {
 export async function* emptyAsyncGenerator() {}
 
 export const generateGlobCode = (remote, callByBuildPlugin) => {
-	let iter = remote ? `for (const h of await fs.readdir(dirHandle, { withFileTypes: true })) {
+	let iter = remote ? `for (const h of await fsp.readdir(dirHandle, { withFileTypes: true })) {
 	const name = h.name;
 ` : `for await (const [name, h] of dirHandle) {
 `;

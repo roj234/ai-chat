@@ -1,6 +1,6 @@
 import {auxSmallScreen, selectedConversation} from "../states.js";
 import {$state, unconscious} from "unconscious";
-import {setConversationTitle} from "./ConversationList.jsx";
+import {setConversationTitle} from "../database.js";
 
 export function TitleEditor() {
 	//row = <div className='input-warp'>{input}</div>;

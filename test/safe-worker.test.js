@@ -1,4 +1,4 @@
-import {createSandbox} from "unconscious/common/safe-worker/safe-worker.js";
+import {createSandbox} from "@roj234/workerbox";
 import {testRunner} from "./index.js";
 
 function assert(cond, msg) {

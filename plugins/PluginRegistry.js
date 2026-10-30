@@ -65,7 +65,7 @@ import {registerRemoteControl} from "./remoteControl.js";
 
 // 插件注册表
 import {GLOBAL_SETTINGS} from "/src/settings.js";
-import {config, conversations, messages, selectedConversation} from "/src/states.js";
+import {config, conversations, EVENT_BUS, messages, selectedConversation} from "/src/states.js";
 import "./PluginRegistry.css";
 import {registerCodeBlockRenderer, renderMarkdownToElement} from "/src/markdown/markdown.js";
 import {createDragSort} from "/common/DragSort.js";
@@ -74,6 +74,7 @@ import {COMMAND_REGISTRY} from "/src/commands.js";
 import {GetTime} from "./rp_kit/interactive_simulation.js";
 import {markMessageDirty} from "/src/database.js";
 import {openWindow} from "/src/components/Windows.jsx";
+import {resolvePreset} from "../src/presets.js";
 
 // 时间工具
 registerToolset("GetTime", "获取时间", [GetTime], {
@@ -94,7 +95,9 @@ window.AiChatAPI = {
 	config,
 	conversation: selectedConversation,
 	messages,
-	conversations
+	conversations,
+	EVENT_BUS,
+	resolvePreset
 };
 
 /**

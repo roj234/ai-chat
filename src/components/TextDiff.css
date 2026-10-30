@@ -20,9 +20,6 @@
         padding-left: 8px;
     }
 
-    /* space + 99999 + space + sign */
-    &.has-lines .no { width: 8ch; }
-
     & .no {
         width: var(--lw, 3ch);
         text-align: right;

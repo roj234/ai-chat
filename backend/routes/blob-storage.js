@@ -8,7 +8,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {cachePreparedSql} from "../utils/sqliteUtils.js";
 import {MAX_UPLOAD_SIZE} from "../config.js";
 import {exclusiveLock} from "../utils/lock.js";
-import {staticFileServe} from "../utils/staticFile.js";
+import {serveFile} from "@roj234/ie/utils/serveFile.js";
 
 export const BLOB_HASH_REGEX = "[a-zA-Z0-9_-]{43}";
 
@@ -72,14 +72,15 @@ PRAGMA user_version = `+DB_VERSION);
 		const hashBuf = Buffer.from(hash, 'base64url');
 		const info = blobDB.prepare('SELECT * FROM blobs WHERE hash = ?').get(hashBuf);
 		if (!info) return ctx.send(404, { error: 'not found' });
-		await staticFileServe(ctx, info, join(getStoragePath(hash), hash));
+		await serveFile(ctx, info, join(getStoragePath(hash), hash));
 	});
 
 	// 上传 Blob
 	router.post(`/blob/:hash(${BLOB_HASH_REGEX})`, async (ctx) => {
 		const { hash } = ctx.params;
+		const hashBuf = Buffer.from(hash,'base64url');
 
-		const info = blobDB.prepare('SELECT hash FROM blobs WHERE hash = ?').get(hash);
+		const info = blobDB.prepare('SELECT hash FROM blobs WHERE hash = ?').get(hashBuf);
 		if (info) return ctx.send(409, { error: "already exist" });
 
 		let contentType = ctx.req.headers['content-type'];
@@ -117,18 +118,16 @@ PRAGMA user_version = `+DB_VERSION);
 			});
 			await pipeline(ctx.req, fileStream);
 
-			const hashBuf = hasher.digest();
-			const hashStr = hashBuf.toString('base64url');
-
-			if (hash !== hashStr) {
+			const hashBuf2 = hasher.digest();
+			if (Buffer.compare(hashBuf, hashBuf2) !== 0) {
 				ctx.send(409, { error: 'hash mismatch' });
 				break hasError;
 			}
 
-			const bucket = getStoragePath(hashStr);
+			const bucket = getStoragePath(hash);
 			await mkdir(bucket, { recursive: true });
 
-			const targetPath = join(bucket, hashStr);
+			const targetPath = join(bucket, hash);
 			await access(targetPath).catch(() => {
 				return rename(tempFile, targetPath).then(() => {
 					tempFile = null;
@@ -169,7 +168,7 @@ PRAGMA user_version = `+DB_VERSION);
 		const term = params.get("term");
 
 		let isHash;
-		const where = term ? (isHash = new RegExp(BLOB_HASH_REGEX).test(term)) ? " WHERE hash = ?" : " WHERE name LIKE ?" : '';
+		const where = term ? (isHash = new RegExp(`^${BLOB_HASH_REGEX}$`).test(term)) ? " WHERE hash = ?" : " WHERE name LIKE ?" : '';
 		const whereArg = term ? [isHash ? Buffer.from(term, 'base64url') : `%${term}%`] : [];
 
 		try {

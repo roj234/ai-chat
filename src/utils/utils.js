@@ -3,7 +3,6 @@ import {$watch, debugSymbol, unconscious} from "unconscious";
 import {highlightJsonLike} from "../markdown/highlight.js";
 import {webviewDownloadFile} from "/vendor/jsBridge.js";
 import {auxKeyboardOnly, lastScrollDirectionIsUp} from "../states.js";
-import {isIDB, remoteDBUrl} from "../database.js";
 import SimpleModal from "../components/SimpleModal.jsx";
 import {base64Encode} from "unconscious/common/Base64.js";
 import {DI_messageContainer} from "../hooks.js";
@@ -15,23 +14,6 @@ export const getRandomString = (length) => {
 	const view = new Uint8Array(length);
 	crypto.getRandomValues(view);
 	return base64Encode(view, true, length * 4 / 3);
-}
-
-export const resolveDBRelativeURL = (url) => {
-	if (url[0] === '@') {
-		if (isIDB) {
-			showToast("Could not resolve ["+url+"] in IndexedDB backend");
-			return url;
-		}
-
-		try {
-			const backendBase = new URL(remoteDBUrl, document.baseURI).toString();
-			const baseDir = backendBase.split('/').slice(0, -3).join('/') + '/';
-			url = new URL(url.slice(1), baseDir).toString();
-		} catch {}
-	}
-	if (url.endsWith("/")) url = url.slice(0, -1);
-	return url;
 }
 
 export const loadingBlock = (message) => <div className={"my-box loading"}>

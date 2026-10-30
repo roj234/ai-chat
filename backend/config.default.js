@@ -17,6 +17,12 @@
  */
 export const FS_SERVICE_PAT = '';
 
+/**
+ * 在 windows 上，且没有 bash 时，自动下载并安装 busybox-w32-unicode
+ * @type {boolean}
+ */
+export const FS_UPDATE_BASH = true;
+
 // ==========================================
 // 1. 语义搜索与向量化 (Semantic Search)
 // ==========================================
@@ -79,11 +85,14 @@ export const WEBSOCKET_SYNC_BASE = (ctx) => {
 /** 实例 ID（用来确定同一台服务器），如果是空字符串，下次服务器启动时会随机生成 */
 export const INSTANCE_ID = '';
 
-/** 是否开启用户注册限制 */
+/** 是否开启用户名称限制 */
 export const RESTRICT_USER_CREATION = false;
 
-/** 白名单用户列表：仅当 RESTRICT_USER_CREATION 为 true 时生效 */
-export const ALLOW_USER_NAMES = new Set(['admin', 'user']);
+/** 用户名称限制正则 通常来说，你可以直接在用竖线分隔没有特殊符号的用户名 */
+export const ALLOW_USER_NAMES = /^(?:admin|user)$/;
+
+/** 管理员用户正则 */
+export const ADMIN_USER_NAMES = /^(?:admin)$/;
 
 /** 要求交互式登录（在控制台接受）并下发PAT */
 export const INTERACTIVE_LOGIN = false;
@@ -159,9 +168,7 @@ export const SSE_PROXY_BACKEND = {
 
 /**
  * 可以async
- * @param {AiChatBackend.SSEProxyTarget} target
- * @param {AiChatBackend.RouteContext} ctx
- * @return {void | function(OpenAI.ChatCompletionRequest, AiChatBackend.SSEProxyTarget): Promise<Partial<AiChatBackend.SSEProxyTarget>>}
+ * @type {AiChatBackend.ModerationHandler}
  */
 export const SSE_PROXY_MODERATION = (target, ctx) => {
 

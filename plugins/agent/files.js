@@ -17,7 +17,7 @@ import {getChangeableFiles} from "./overwrite-monitor.js";
 import {showToast} from "/src/components/Toast.js";
 import {shellPrompt, shellTools} from "./RemoteFSShell.js";
 import {vcsAvailableKey, vcsEnabledKey} from "./VCS.js";
-import {getCombinedPreset} from "/src/presets.js";
+import {resolvePreset} from "/src/presets.js";
 
 const DIFF_CACHE = debugSymbol("Diff");
 /**
@@ -91,7 +91,7 @@ const Read = {
 	parallel: true,
 	async script(par, resp, conv) {
 		if (par.path.match(/\.(png|jpg|jpeg|bmp|webp)$/i)) {
-			const hasImageCapability = (await getCombinedPreset(conv)).modalities.includes("image");
+			const hasImageCapability = (await resolvePreset(conv)).modalities.includes("image");
 			if (hasImageCapability) return InspectImage.script(par, resp, conv);
 		}
 
@@ -710,7 +710,7 @@ registerToolset(
 				conv[FILESYSTEM_AUX_PROMPT] = auxPrompt;
 			}
 
-			imageReadTools.forEach((await getCombinedPreset(conv)).modalities.includes('image') ? addTools : removeTools);
+			imageReadTools.forEach((await resolvePreset(conv)).modalities.includes('image') ? addTools : removeTools);
 
 			let vcsSupported = conv[vcsAvailableKey];
 			const vcsEnabled = activatedModules.has(vcsEnabledKey);

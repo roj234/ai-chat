@@ -15,6 +15,28 @@ import {debugSecret} from "../utils/debugSecret.js";
 export const TOKENS = Symbol("TokenCount");
 
 /**
+ * @param {AiChatBackend.RouteContext} ctx
+ * @returns {boolean}
+ */
+const isResponsed = (ctx) => ctx.res.headersSent || ctx.res.writableEnded;
+
+/**
+ * @param {AiChatBackend.SSEProxyTarget} target
+ * @param {AiChatBackend.RouteContext} ctx
+ * @returns {boolean}
+ */
+function missingUrl(target, ctx) {
+	if (target?.url) return false;
+	ctx.send(502, {
+		error: {
+			message: 'No upstream URL resolved for this request.',
+			type: 'proxy_error'
+		}
+	});
+	return true;
+}
+
+/**
  * 创建一个限制大小的可读流
  * @param {import('stream').Readable} source 源请求可读流（ctx.req）
  * @param {number} maxLength 最大字节数
@@ -71,14 +93,13 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 
 	const initFormat = target.format ?? 'openai';
 
-	// 允许moderation中止请求
-	const moderation = await SSE_PROXY_MODERATION(target, ctx);
-	if (!ctx.res.writable) return;
+	const moderationHandlers = await SSE_PROXY_MODERATION(target, ctx);
+	if (isResponsed(ctx)) return;
 
 	let {trace} = target;
 
 	const MAX_BODY_LENGTH = 20971520;
-	const parseRequired = blobDir || moderation || initFormat === 'responses';
+	const parseRequired = blobDir || moderationHandlers || initFormat === 'responses';
 
 	let body;
 	let duplex;
@@ -109,13 +130,17 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 			return;
 		}
 
-		if (moderation) {
+		if (moderationHandlers?.[0]) {
 			overrideModel = obj.model;
 			obj[TOKENS] = body.length;
 			// 或在函数返回之后检查请求体
-			const changes = await moderation(obj, target);
-			if (!ctx.res.writable) return;
+			const changes = await moderationHandlers[0](obj, target);
+			if (isResponsed(ctx)) return;
 			if (changes) target = Object.assign({}, target, changes);
+			if (missingUrl(target, ctx)) {
+				log("No upstream URL for key "+(target.name ?? target.authorization.slice(0, 6)+"...")+" : "+obj.model);
+				return;
+			}
 		}
 
 		if (blobDir) {
@@ -137,7 +162,7 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 			}
 		}
 
-		if (initFormat === 'responses') return responsesProxyHandler(convertRequest(obj, obj.messages), target, logPath, ctx);
+		if (initFormat === 'responses') return responsesProxyHandler(convertRequest(obj, obj.messages), target, logPath, ctx, moderationHandlers);
 
 		body = createJsonStream(obj);
 		//duplex = 'half';
@@ -193,7 +218,10 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 						.catch(err => log('写入 trace 失败', err));
 				}
 
-				log("非流响应", pm.keyId, id, (now - start)+"ms");
+				log("非流响应", pm.keyId, id, {
+					latency: (now - start),
+					... chunk.usage
+				});
 				ctx.res.writeHead(200, { 'Content-Type': 'application/json' });
 				ctx.res.end(response);
 				return;
@@ -252,9 +280,10 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 		});
 	} catch (err) {
 		pm.onError(err);
-		if (moderation) await moderation(null, target, err);
+		await moderationHandlers?.[1]?.(err);
 	} finally {
 		pm.end(true);
+		await moderationHandlers?.[2]?.(completion);
 	}
 }
 
@@ -268,11 +297,10 @@ export async function proxyHandler(itf, ctx) {
 	if (!result) return;
 
 	let {url: baseUrl, authorization, proxy: proxyUrl, headers} = result;
-	if (!baseUrl.endsWith("/")) baseUrl += '/';
 
 	const res = ctx.res;
 
-	if (!isLanAddress(baseUrl)) {
+	if (!baseUrl || !isLanAddress(baseUrl)) {
 		res.writeHead(204, {
 			vary: "Authorization",
 			"cache-control": "public"
@@ -288,6 +316,7 @@ export async function proxyHandler(itf, ctx) {
 		duplex = 'half';
 	}
 
+	if (!baseUrl.endsWith("/")) baseUrl += '/';
 	const proxyRes = await fetch(baseUrl+'../'+itf, {
 		headers: {
 			accept: "application/json",

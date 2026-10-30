@@ -27,21 +27,15 @@ jobs:
         with:
           path: packages/ai-chat
 
-      - name: Checkout unconscious
+      - name: Checkout @roj234
         uses: actions/checkout@v6
         with:
-          path: packages/unconscious
+          path: packages/@roj234
           repository: roj234/unconscious
-
-      - name: Checkout streaming-markdown
-        uses: actions/checkout@v6
-        with:
-          path: packages/streaming-markdown
-          repository: roj234/streaming-markdown
 
       - name: Setup environment
         run: |
-          echo '{ "private": true, "workspaces": ["packages/*"] }' > package.json
+          echo '{ "private": true, "workspaces": ["packages/*", "packages/@roj234/*"] }' > package.json
           echo "BUILD_NUMBER=${{ github.run_number }}" >> $GITHUB_ENV
 
           cd packages/ai-chat
@@ -53,17 +47,19 @@ jobs:
             -e "s/{{VERSION}}/${VERSION}/g" \
             misc/android-config/config.json
 
-          echo "✅ 替换完成：VERSION=${VERSION}  VERSION_NAME=${VERSION_NAME}"
-
       - name: Install dependencies
         run: npm install
 
-      - name: Build frontend
-        run: npm run build
-        working-directory: packages/ai-chat
-
-      - name: Build frontend (app)
-        run: npm run build:app
+      - name: 并行构建两个前端版本
+        shell: bash
+        run: |
+          set -uo pipefail
+          npm run build & p1=$!
+          npm run build:app  & p2=$!
+          status=0
+          wait $p1 || status=$?
+          wait $p2 || status=$?
+          exit $status
         working-directory: packages/ai-chat
 
       - name: Upload Android assets

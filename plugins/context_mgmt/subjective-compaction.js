@@ -10,7 +10,7 @@ import {createFileSystemAsync, VirtualDirectory, VirtualFile} from "../agent/ind
 import {FSE_NotFound, throwDOMException} from "/common/pure-utils.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
 import {createWebFileSystem} from "../agent/WebFSDriver.js";
-import {getCombinedPreset} from "../../src/presets.js";
+import {resolvePreset} from "../../src/presets.js";
 
 const ID = "ContextCompression";
 
@@ -336,7 +336,7 @@ MessageRoles[ID] = {
 		if (!state) return;
 
 		const output = messages.map(m => ({...m}));
-		const limit = (await getCombinedPreset(conv)).maxContext;
+		const limit = (await resolvePreset(conv)).maxContext;
 
 		let seq = 1;
 
