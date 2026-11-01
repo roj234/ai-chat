@@ -9,6 +9,31 @@ export const applyMacro = (prompt, ctx) => prompt.replaceAll(/\{\{(.+?)}}/g, (te
 	return match in ctx ? ctx[match] || '' : text;
 });
 
+/** 本地时间 HH:mm:ss */
+export const formatLocalTime = (d = new Date()) => {
+	const pad = n => String(n).padStart(2, "0");
+	return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+
+/** 本地日期 YYYY-MM-DD */
+export const formatLocalDate = (d = new Date()) => {
+	const pad = n => String(n).padStart(2, "0");
+	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+/** 从消息 content 提取纯文本（兼容字符串与多模态数组） */
+const extractMessageText = (content) => {
+	if (typeof content === "string") return content;
+	if (Array.isArray(content)) {
+		return content.map(part => {
+			if (typeof part === "string") return part;
+			if (part && part.type === "text" && typeof part.text === "string") return part.text;
+			return "";
+		}).join("");
+	}
+	return "";
+};
+
 const IS_SYSTEM = debugSymbol("InternalMessage");
 
 /**
@@ -36,26 +61,29 @@ export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages) => 
 		first = applyMacro(jsonMessages.shift().content, ctx);
 	}
 
-	let message ;
-	for (;;) {
+	/** @type {OpenAI.Message|undefined} */
+	let message;
+	// 去掉尾部空消息，避免 lastUserMessage / chatHistory 取到空 content
+	while (jsonMessages.length) {
 		message = jsonMessages.at(-1);
-		if (!message.content) jsonMessages.length --;
-		else break
+		if (!message || !extractMessageText(message.content)) {
+			jsonMessages.length--;
+			continue;
+		}
+		break;
 	}
+	message = jsonMessages.at(-1);
 
 	/** @type {string} */
 	let lastUserMessage = '';
 	/** @type {OpenAI.Message[]} */
-	let chatHistory;
+	let chatHistory = jsonMessages;
 
-	if (message.role === "user") {
-		lastUserMessage = message.content;
+	if (message?.role === "user") {
+		lastUserMessage = extractMessageText(message.content);
 		// 酒馆并没有把最后一条消息去掉
-		chatHistory = jsonMessages;
 		if (config.st_removeLastUserMessage)
-			chatHistory = jsonMessages.slice(0, jsonMessages.length-1);
-	} else {
-		chatHistory = jsonMessages;
+			chatHistory = jsonMessages.slice(0, jsonMessages.length - 1);
 	}
 
 	for (const prompt of prompts) {
@@ -100,6 +128,8 @@ export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages) => 
 					}
 
 					if (match === "lastUserMessage") return lastUserMessage;
+					if (match === "time") return formatLocalTime();
+					if (match === "date") return formatLocalDate();
 					if (match === "dialogueExamples") return ctx.dialogueExamples?.length ? EXAMPLE_CHAT_LABEL + ctx.dialogueExamples.join(EXAMPLE_CHAT_LABEL) : '';
 					if (match in ctx) return ctx[match] || '';
 
@@ -209,9 +239,13 @@ export const createSimpleMacroContext = char => ({
 	personality: char.personality,
 	scenario: char.scenario,
 	systemPrompt: char.systemPrompt,
+	// 简单本地时间宏，便于预设模板引用当前时刻
+	time: formatLocalTime(),
+	date: formatLocalDate(),
 });
 
-export const DEFAULT_SYSTEM_PROMPT = `Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.`;
+export const DEFAULT_SYSTEM_PROMPT = `你是一个专业的角色扮演 AI。接下来请严格按照角色设定进行回复。
+Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.`;
 const EXAMPLE_CHAT_LABEL = "\n\n[Example Chat]\n\n";
 const START_CHAT_LABEL = `\n\n[Start a new Chat]`;
 
