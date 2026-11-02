@@ -282,34 +282,33 @@ function createSchemaEditColumn(typeId, editorConstructor, defaultValue = {}) {
 //endregion
 
 const [presetBar, presetList, currentPreset] = createSchemaEditColumn("st|preset", _PresetEditor, {
+	// 默认预设：系统提示 + 角色/场景模板 + 对话历史标记
 	prompts: [
 		{
 			name: "系统提示",
 			enabled: true,
 			role: "system",
-			content: `Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.`,
+			content: `你是一个专业的角色扮演 AI。接下来请严格按照角色设定进行回复。
+Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.`,
 		},
 		{
 			name: "默认模板",
 			enabled: true,
 			role: "system",
-			content: `
-
-{{worldInfoBefore}}
+			content: `{{worldInfoBefore}}
 
 ---
 
-用户 {{user}} 信息：
-
-{{personaDescription}}
-
-角色 {{char}} 信息：
-
+【角色设定】
 {{description}}
 
 {{personality}}
 
+【场景】
 {{scenario}}
+
+【用户信息】
+{{personaDescription}}
 
 ---
 
@@ -317,7 +316,17 @@ const [presetBar, presetList, currentPreset] = createSchemaEditColumn("st|preset
 
 ---
 
-{{dialogueExamples}}`,
+{{dialogueExamples}}
+
+---
+
+【回复要求】
+- 你正在扮演 {{char}}，与 {{user}} 进行沉浸式角色扮演。
+- 始终保持角色一致性，不要跳出角色（禁止 OOC、禁止提及自己是 AI）。
+- 使用简体中文回复，除非角色设定明确要求其他语言。
+- 回复要自然、有细节、推动剧情，避免重复句式和空洞描写。
+- 如果用户输入不完整或意图不明，可以合理补充细节继续推进。
+- 不要在回复开头或结尾加任何元信息（如“（扮演开始）”等）。`,
 		},
 		{
 			name: "对话历史",
@@ -534,7 +543,7 @@ const FetchLorebookCache = debugSymbol("FetchLorebookCache");
 /** @type {AiChat.FunctionTool} */
 const FetchLorebook = {
 	name: "FetchLorebook",
-	description: "获取Lorebook条目的详细内容。\n当讲述者在角色扮演过程中遇到世界书有介绍的项目时调用",
+	description: "获取世界书条目的详细内容。当对话中提到世界书中有定义的地点、人物、物品、规则、历史等概念时调用。只在需要补充背景知识时使用，不要频繁调用。",
 	parameters: {
 		type: "object",
 		properties: {
@@ -578,6 +587,14 @@ registerToolset(RP_TOOLSET_ID, "", [FetchLorebook], {
 
 		conv.tools?.delete(FetchLorebook.name);
 		tools.push(tool);
+
+		// 向模型补充当前可用世界书条目，避免盲目频繁调用
+		const entries = lbCache.toolKeys?.length
+			? lbCache.toolKeys.join("\n")
+			: [...(lbCache.toolVals?.keys?.() || [])].map(n => " - " + n).join("\n");
+		return entries
+			? `可用世界书条目（名称: 关键词）：\n${entries}\n涉及上述概念时再用 FetchLorebook 查阅详情；无需背景知识时不要调用。`
+			: "";
 	}
 });
 //endregion
@@ -860,8 +877,8 @@ MessageRoles["st|char"] = {
 		if (lorebookImplType) {
 			if ('fs' === lorebookImplType) {
 				worldInfoBefore += "\n\n<lorebook>\nLorebook 在文件夹 `~/lorebook/` 中\n使用Read、Grep、Glob工具读取你的知识</lorebook>";
-			} else { // tool
-				worldInfoBefore += "\n\n<lorebook>\nLorebook 名称与关键词：\n"+lorebookCaches.toolKeys.join("\n")+"\n</lorebook>";
+			} else { // tool：列出可 FetchLorebook 的条目，提示按需调用
+				worldInfoBefore += "\n\n<lorebook>\n当前可通过 FetchLorebook 查阅的世界书条目（名称: 关键词）：\n"+lorebookCaches.toolKeys.join("\n")+"\n对话涉及上述地点、人物、物品、规则等时再调用工具获取详情；不要频繁调用。\n</lorebook>";
 			}
 		} else {
 			/** @type {LorebookMatcher} */
