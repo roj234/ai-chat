@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - master
+    paths-ignore:
+      - '**.md'
+      - 'public/documents/**'
+      - 'media/**'
+      - 'LICENSE'
+      - '.gitignore'
+
   workflow_dispatch:
     inputs:
       tag_name:
@@ -12,14 +19,10 @@ on:
         default: ''
 
 permissions:
-  contents: write
-  pages: write
-  id-token: write
+  contents: read
 
 jobs:
   build:
-    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[pre]')
-
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -102,6 +105,7 @@ jobs:
           path: packages/ai-chat/dist/dist.zip
 
   build-apk:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     needs: build
     uses: roj234/webview-app/.github/workflows/build.yml@master
     with:
@@ -110,6 +114,11 @@ jobs:
     secrets: inherit
 
   deploy:
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     needs:
       - build
     runs-on: ubuntu-latest
@@ -138,13 +147,14 @@ jobs:
         uses: actions/deploy-pages@v5
 
   release:
+    environment: production
+    permissions:
+      contents: write
     needs:
       - build
       - build-apk
     runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'workflow_dispatch' || 
-      contains(github.event.head_commit.message, '[release]')
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[release]'))
 
     steps:
       - name: Download release package
@@ -177,5 +187,3 @@ jobs:
             release-files/*.apk
           draft: false
           prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

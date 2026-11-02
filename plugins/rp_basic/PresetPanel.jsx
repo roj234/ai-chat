@@ -353,8 +353,7 @@ function createTextList(handler, textFieldName) {
 //endregion
 
 /**
- * 预设编辑面板（提示词条目顺序即实际注入顺序；默认含系统提示/模板/chatHistory）
- * 常用宏：{{char}} {{user}} {{description}} {{worldInfoBefore}} {{lastUserMessage}} {{time}} {{date}}
+ * 预设编辑面板
  * @param {import("unconscious").Reactive<AiChat.DnD.MyPreset>} preset
  * @return {import("unconscious").Renderable}
  */
@@ -369,8 +368,7 @@ export function _PresetEditor(preset) {
 		{
 			name: "内容(给AI看)",
 			id: "content",
-			// marker 模式填宏名（无花括号）；普通模式可用 {{time}}/{{date}}/{{lastUserMessage}} 等
-			placeholder: "类型为【宏】时，在此填写宏的名称，如 chatHistory，不包含花括号。花括号在非宏模式中需要",
+			placeholder: "【宏】模式填宏名（无花括号）；其余模式可直接用 {{chatHistory}}/{{time}}/{{personality}} 等",
 			required: true,
 			type: "textbox"
 		},

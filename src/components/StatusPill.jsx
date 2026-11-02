@@ -89,7 +89,7 @@ export const StatusPill = ({kind, data}) => {
 						<span className="num">{() => data.tps?.toFixed(2)}</span>TPS ·
 						<span className="num">{() => data.tokens}</span>tokens ·
 					</> : <>
-						<span className="num">{() => (data.len / ((Date.now() - (data.start||start)) / 1000)).toFixed(2)}</span>CPS ·
+						<span className="num">{() => (data.len / ((Date.now() - (data.start||start)) / 1000) / 2.5).toFixed(2)}</span><span title="估计值">TPS<sup>*</sup></span> ·
 						<span className="num">{() => data.len}</span>chars ·
 					</>}
 					<span className="num">{$computed(() => ((Date.now() - (data.start||start)) / 1000).toFixed(2), [data])}</span>s

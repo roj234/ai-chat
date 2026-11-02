@@ -1,6 +1,6 @@
 import {registerCodeBlockRenderer} from "/src/markdown/markdown.js";
 import {getCurrentTheme} from "/src/states.js";
-import {PLACEHOLDERS} from "/src/toolset.js";
+import {PLACEHOLDERS} from "/src/utils/placeholder.js";
 
 PLACEHOLDERS['mdfmt'] += `
 - Render mermaid:

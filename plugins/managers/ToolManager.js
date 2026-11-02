@@ -2,7 +2,7 @@ import SimpleModal from "/src/components/SimpleModal.jsx";
 import {highlightJsonLike} from "/src/markdown/highlight.js";
 import {$computed, $state, $update, $watch, $watchWithCleanup, unconscious} from "unconscious";
 import {VirtualList} from "unconscious/common/VirtualList.js";
-import {addMCPServer, defaultGroups, PLACEHOLDERS, toolScriptRegistry, toolset} from "/src/toolset.js";
+import {addMCPServer, defaultGroups, toolScriptRegistry, toolset} from "/src/toolset.js";
 import {renderMarkdownToElement} from "/src/markdown/markdown.js";
 
 import "./ToolManager.css";
@@ -15,6 +15,7 @@ import {getKV, setKV} from "/src/database.js";
 import {MCPClient} from "/common/MCPClient.js";
 import {getWindow, openWindow} from "/src/components/Windows.jsx";
 import {CUSTOM_CONTROLS} from "/src/customControls.js";
+import {PLACEHOLDERS} from "/src/utils/placeholder.js";
 
 const mcps = $state([]);
 let registeredMcps;

@@ -14,7 +14,7 @@ const defaultSystemPrompt = `You are {{model}}, a helpful assistant.
 <markdown-format>
 {{mdfmt}}{{htmlTag}}
 </markdown-format>
-<date>{{date}}</date>
+<date>{{month}}</date>
 {{#AGENTS.md}}`;
 
 const defaultTitlePrompt = `### Title Requirements

@@ -70,11 +70,11 @@ async function applyPreset(name, target) {
 	const isPrompt = name[0] === ':';
 	const isModel = name.indexOf('/');
 	let p = [
-		{},
 		kvListGet(PRESET_KVS_ID, isModel > 0 ? name.slice(0, isModel) : name)
 	];
 	if (isModel > 0) p.push(kvListGet(PRESET_KVS_ID, name));
-	let data = (await Promise.all(p)).reduce(Object.assign);
+	let data = {};
+	(await Promise.all(p)).forEach(s => Object.assign(data, s));
 	data.name = data.meta;
 
 	for (const category of isPrompt ? ["prompt"] : isModel > 0 ? ["model", "sampling", "provider"] : ["provider"]) {
@@ -199,7 +199,7 @@ EVENT_BUS.on(['kvs', PRESET_KVS_ID, 'set'], () => {
 /**
  *
  * @param {AiChat.Conversation} conv
- * @return {Promise<AiChat.LocalPreset>}
+ * @return {Promise<AiChat.Preset>}
  */
 export const resolvePreset = async (conv) => {
 	const globalPreset = unconscious(config);
@@ -209,19 +209,22 @@ export const resolvePreset = async (conv) => {
 	const overrides = conv.overrides;
 	if (!overrides && !presets) return globalPreset;
 
-	let combined = conv[MERGED_CONFIG];
+	let combined = await conv[MERGED_CONFIG];
 	if (!combined || combined[CONFIG_VERSION] !== globalPreset[CONFIG_VERSION]) {
-		combined = conv[MERGED_CONFIG] = {...globalPreset};
-		if (presets) {
-			if (Array.isArray(presets)) {
-				for (const preset of presets) {
-					await applyPreset(preset, combined);
+		combined = {...globalPreset};
+		conv[MERGED_CONFIG] = (async() => {
+			if (presets) {
+				if (Array.isArray(presets)) {
+					for (const preset of presets) {
+						await applyPreset(preset, combined);
+					}
+				} else {
+					await applyPreset(presets, combined);
 				}
-			} else {
-				await applyPreset(presets, combined);
 			}
-		}
-		if (overrides) Object.assign(combined, overrides);
+			if (overrides) Object.assign(combined, overrides);
+			conv[MERGED_CONFIG] = combined;
+		})();
 	}
 	return combined;
 }

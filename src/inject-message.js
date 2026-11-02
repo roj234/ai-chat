@@ -75,7 +75,10 @@ export const flushNotifications = (conv, messages) => {
 	const pm = conv.pendingMessages;
 	if (pm && !conv[LOCKED]) {
 		const remain = doInsert(messages, pm);
-		if (remain.length) conv.pendingMessages = remain;
+		if (remain.length) {
+			if (remain.length === pm.length) return;
+			conv.pendingMessages = remain;
+		}
 		else delete conv.pendingMessages;
 
 		EVENT_BUS.post(['messageInject', 'flushed'], conv);

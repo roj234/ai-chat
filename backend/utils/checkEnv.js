@@ -115,7 +115,7 @@ export async function getEnvironmentPrompt(forceRecheck) {
 
 const DOWNLOAD_URL = 'https://frippery.org/files/busybox/busybox64u.exe';
 
-const log = (...a) => { console.log(...a); };
+const log = (...a) => console.log(...a);
 
 const BIN_DIR = path.resolve(path.join(import.meta.dirname, 'bin'));
 const TARGET = path.join(BIN_DIR, 'bash.exe');
@@ -145,7 +145,7 @@ export async function updateBash() {
 	if (tmpStat.size > 0) {
 		await renameWithRetry(TEMP_FILE, TARGET);
 		prompt = null;
-		console.log("[update-bash] busybox-w32 已更新");
+		log("[update-bash] busybox-w32 已更新");
 	}
 
 	const stat = await safeStat(TARGET);
@@ -161,14 +161,14 @@ export async function updateBash() {
 	}).catch(() => {});
 
 	if (!res?.ok) {
-		if (res?.status === 304) console.log("[update-bash] 无更新");
-		else console.log("[update-bash] 网络错误", res);
+		if (res?.status === 304) log("[update-bash] 无更新");
+		else log("[update-bash] 网络错误", res);
 		return;
 	}
 
 	clearTimeout(timeout);
 
-	const date = Date.parse(res.headers.get('last-modified')) || null;
+	const date = Date.parse(res.headers.get('last-modified')) / 1000 || null;
 	const length = parseInt(res.headers.get('content-length')) || null;
 	let downloaded = 0;
 
@@ -184,7 +184,7 @@ export async function updateBash() {
 		await handle.write(value);
 
 		downloaded += value.length;
-		if (!QUIET && length) {
+		if (length) {
 			const pct = Math.floor(downloaded / length * 100);
 			if (pct % 10 === 0) process.stdout.write(`\r  busybox-w32 下载中… ${pct}% (${(downloaded / 1048576).toFixed(2)} MB)`);
 		}
@@ -197,11 +197,12 @@ export async function updateBash() {
 		}
 	}
 
-	await handle.utimes(date, date);
+	if (date != null) await handle.utimes(date, date);
 	await handle.close();
 
+	log('');
 	await renameWithRetry(TEMP_FILE, TARGET).catch(e => log(`[update-bash] bash.exe 正在使用，将在重启后更新`));
 
 	prompt = null;
-	console.log("[update-bash] busybox-w32 已更新");
+	log("[update-bash] busybox-w32 已更新");
 }

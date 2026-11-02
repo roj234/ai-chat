@@ -1,7 +1,8 @@
-import {parseFrontmatter, PLACEHOLDERS, setPlaceholder} from "/src/toolset.js";
+import {parseFrontmatter} from "/src/toolset.js";
 import {fileAccess} from "./Mounts.js";
 import {getSkillCache} from "./skills.js";
 import {getRandomString} from "/src/utils/utils.js";
+import {PLACEHOLDERS, setPlaceholder} from "/src/utils/placeholder.js";
 
 const readFile = fileAccess("read");
 

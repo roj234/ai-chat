@@ -6,7 +6,6 @@ import {
 	abortCompletion,
 	config,
 	EVENT_BUS,
-	getCurrentTheme,
 	inputText,
 	lastScrollDirectionIsUp,
 	LOCKED,
@@ -29,12 +28,10 @@ import {
 import {
 	getAvailableTools,
 	parseFrontmatter,
-	PLACEHOLDERS,
 	runTools,
 	TC_ERROR,
 	TC_NEED_INTERACTION,
 	TC_SCHEMA_ERROR,
-	TEMPORARY_PLACEHOLDER,
 	toolScriptRegistry
 } from "./toolset.js";
 import {
@@ -82,6 +79,7 @@ import {isLlamaCppBackend, PRESET_KVS_ID, resolvePreset} from "./presets.js";
 import {expandFolds} from "./utils/BranchManager.js";
 import {lockConversation, unlockConversation} from "./conversation-lock.js";
 import {abortable, sleep} from "../common/pure-utils.js";
+import {resolvePlaceholder} from "./utils/placeholder.js";
 
 /**
  * @param {boolean} [loop]
@@ -243,7 +241,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			case MARKDOWN_END: {
 				if (lastMessage) {
 					updateCount = 0;
-					render(lastMessage, true);
+					render(lastMessage);
 					markdownRenderer();
 				}
 				if (null === message?.finish_reason) return;
@@ -1417,7 +1415,7 @@ const isThinkingEnabled = (config) => (typeof config.forceThink === "boolean" ? 
 
 /**
  *
- * @param config
+ * @param {AiChat.Preset} config
  * @param {AiChat.Conversation} conversation
  * @param {string} prompt
  * @param {string} toolPrompt
@@ -1441,9 +1439,10 @@ export const buildSystemPrompt = async (config, conversation, prompt, toolPrompt
 
 	/**
 	 * @param {string} prompt
+	 * @param {boolean} recur
 	 * @returns {Promise<string>}
 	 */
-	const transform = async (prompt) => {
+	const transform = async (prompt, recur) => {
 		let result = '';
 		let prev = 0, i;
 
@@ -1451,45 +1450,16 @@ export const buildSystemPrompt = async (config, conversation, prompt, toolPrompt
 			result += prompt.slice(prev, i);
 
 			const end = prompt.indexOf('}}', i + 2);
-			if (end === -1) throw new Error('未闭合的占位符('+i+')');
+			if (end === -1) throw new DOMException('SystemPrompt中未闭合的占位符('+i+')');
 
 			const id = prompt.slice(i + 2, end).trim();
 			prev = end + 2;
 			if (prompt[prev] === '\n') prev++;
 
-			switch (id) {
-				case "model": result += config.model; break;
-				case "language": result += navigator.language; break;
-				case "theme": result += getCurrentTheme(); break;
-				case "date": {
-					const date = new Date();
-					result += date.getFullYear()+"-"+(""+(date.getMonth()+1)).padStart(2, "0");
-				}
-				break;
-				case "htmlTag": {
-					result += config.allowHTMLTags.includes("basic") ? "\n- HTML tags in Markdown are supported, use HTML table for complex tables, details/summary for spoilers, and optional inline styles." : "";
-				}
-				break;
-				case "modelPrompt":
-					result += config.modelPrompt;
-				break;
-				case "tools":
-					if (toolPrompt) result += toolPrompt.includes('{{') ? await transform(toolPrompt) : toolPrompt;
-				break;
-				default:
-					if (id[0] === ':') {
-						const preset = await kvListGet(PRESET_KVS_ID, id);
-						result += preset.systemPrompt;
-					} else {
-						let val = conversation[TEMPORARY_PLACEHOLDER]?.[id] ?? PLACEHOLDERS[id];
-						if (val != null) {
-							if (typeof val === "function")
-								val = await val(conversation);
-							result += val;
-						} else if (id[0] !== '#') {
-							throw new Error("未知提示词变量: {{"+id+"}}");
-						}
-					}
+			if (!recur && id === 'tools') {
+				if (toolPrompt) result += toolPrompt.includes('{{') ? await transform(toolPrompt, true) : toolPrompt;
+			} else {
+				result += await resolvePlaceholder(id, config, conversation, 'sys');
 			}
 		}
 		result += prompt.slice(prev);

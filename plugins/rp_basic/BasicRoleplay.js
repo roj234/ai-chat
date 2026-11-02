@@ -59,6 +59,7 @@ import {Icon_save} from "/src/components/Icons.jsx";
 
 import "./BasicRoleplay.css";
 import {HighlightBox} from "/src/components/TextDiff.jsx";
+import {switchToConversation} from "../../src/states.js";
 
 compileSchema(schema);
 
@@ -282,33 +283,34 @@ function createSchemaEditColumn(typeId, editorConstructor, defaultValue = {}) {
 //endregion
 
 const [presetBar, presetList, currentPreset] = createSchemaEditColumn("st|preset", _PresetEditor, {
-	// 默认预设：系统提示 + 角色/场景模板 + 对话历史标记
 	prompts: [
 		{
 			name: "系统提示",
 			enabled: true,
 			role: "system",
-			content: `你是一个专业的角色扮演 AI。接下来请严格按照角色设定进行回复。
-Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.`,
+			content: `Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.`,
 		},
 		{
 			name: "默认模板",
 			enabled: true,
 			role: "system",
-			content: `{{worldInfoBefore}}
+			content: `
+
+{{worldInfoBefore}}
 
 ---
 
-【角色设定】
+用户 {{user}} 信息：
+
+{{personaDescription}}
+
+角色 {{char}} 信息：
+
 {{description}}
 
 {{personality}}
 
-【场景】
 {{scenario}}
-
-【用户信息】
-{{personaDescription}}
 
 ---
 
@@ -316,17 +318,7 @@ Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.`,
 
 ---
 
-{{dialogueExamples}}
-
----
-
-【回复要求】
-- 你正在扮演 {{char}}，与 {{user}} 进行沉浸式角色扮演。
-- 始终保持角色一致性，不要跳出角色（禁止 OOC、禁止提及自己是 AI）。
-- 使用简体中文回复，除非角色设定明确要求其他语言。
-- 回复要自然、有细节、推动剧情，避免重复句式和空洞描写。
-- 如果用户输入不完整或意图不明，可以合理补充细节继续推进。
-- 不要在回复开头或结尾加任何元信息（如“（扮演开始）”等）。`,
+{{dialogueExamples}}`,
 		},
 		{
 			name: "对话历史",
@@ -394,8 +386,9 @@ export async function exportForCV_createConversation(char) {
 		conv.title += ' (临时)';
 	}
 
+	await importConversationData(conv, messages, true);
 	await loadRPConversation(conv, messages, true);
-	await importConversationData(conv, messages);
+	await switchToConversation(conv);
 
 	if (config.temporaryChat) {
 		conv.id = "temporary-"+conv.time;
@@ -587,14 +580,6 @@ registerToolset(RP_TOOLSET_ID, "", [FetchLorebook], {
 
 		conv.tools?.delete(FetchLorebook.name);
 		tools.push(tool);
-
-		// 向模型补充当前可用世界书条目，避免盲目频繁调用
-		const entries = lbCache.toolKeys?.length
-			? lbCache.toolKeys.join("\n")
-			: [...(lbCache.toolVals?.keys?.() || [])].map(n => " - " + n).join("\n");
-		return entries
-			? `可用世界书条目（名称: 关键词）：\n${entries}\n涉及上述概念时再用 FetchLorebook 查阅详情；无需背景知识时不要调用。`
-			: "";
 	}
 });
 //endregion
@@ -876,9 +861,9 @@ MessageRoles["st|char"] = {
 
 		if (lorebookImplType) {
 			if ('fs' === lorebookImplType) {
-				worldInfoBefore += "\n\n<lorebook>\nLorebook 在文件夹 `~/lorebook/` 中\n使用Read、Grep、Glob工具读取你的知识</lorebook>";
-			} else { // tool：列出可 FetchLorebook 的条目，提示按需调用
-				worldInfoBefore += "\n\n<lorebook>\n当前可通过 FetchLorebook 查阅的世界书条目（名称: 关键词）：\n"+lorebookCaches.toolKeys.join("\n")+"\n对话涉及上述地点、人物、物品、规则等时再调用工具获取详情；不要频繁调用。\n</lorebook>";
+				worldInfoBefore += "\n\n<lorebook>\n世界书条目在 `~/lorebook/` 中\n先 Glob 拿到文件名（=简介），后续需要时，再用 Read、Grep 读</lorebook>";
+			} else { // tool
+				worldInfoBefore += "\n\n<lorebook>\n当前可通过 FetchLorebook 查阅的世界书条目（名称: 关键词）：\n"+lorebookCaches.toolKeys.join("\n")+"\n对话涉及上述地点、人物、物品、规则时调用工具通过名称获取详情\n</lorebook>";
 			}
 		} else {
 			/** @type {LorebookMatcher} */
@@ -892,7 +877,7 @@ MessageRoles["st|char"] = {
 			macro.worldInfoBefore = worldInfoBefore;
 			macro.worldInfoAfter = worldInfoAfter;
 
-			return applyPreset(preset, macro, output);
+			return applyPreset(preset, macro, output, conv);
 		} else {
 			let prefix = '';
 			const hasSystemMessage = output[0].role === "system";
@@ -1069,6 +1054,10 @@ MessageRoles["st|greeting"] = {
 	 */
 	renderContent(self, chunks) {
 		const card = self.content;
+		if (!card[INST]) {
+			console.trace("no inst???");
+			return
+		}
 		const char = card[INST].character;
 		const greetings = char.greetings;
 

@@ -1,6 +1,9 @@
 import {showToast} from "/src/components/Toast.js";
 import {config} from "/src/states.js";
 import {debugSymbol} from "unconscious";
+import {getTextContent} from "/src/utils/utils.js";
+import {resolvePlaceholder} from "/src/utils/placeholder.js";
+import {resolvePreset} from "/src/presets.js";
 
 export const DEFAULT_USER_NAME = 'Tav'; // see Baldur's Gate 3
 
@@ -9,31 +12,6 @@ export const applyMacro = (prompt, ctx) => prompt.replaceAll(/\{\{(.+?)}}/g, (te
 	return match in ctx ? ctx[match] || '' : text;
 });
 
-/** 本地时间 HH:mm:ss */
-export const formatLocalTime = (d = new Date()) => {
-	const pad = n => String(n).padStart(2, "0");
-	return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-};
-
-/** 本地日期 YYYY-MM-DD */
-export const formatLocalDate = (d = new Date()) => {
-	const pad = n => String(n).padStart(2, "0");
-	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-};
-
-/** 从消息 content 提取纯文本（兼容字符串与多模态数组） */
-const extractMessageText = (content) => {
-	if (typeof content === "string") return content;
-	if (Array.isArray(content)) {
-		return content.map(part => {
-			if (typeof part === "string") return part;
-			if (part && part.type === "text" && typeof part.text === "string") return part.text;
-			return "";
-		}).join("");
-	}
-	return "";
-};
-
 const IS_SYSTEM = debugSymbol("InternalMessage");
 
 /**
@@ -41,10 +19,11 @@ const IS_SYSTEM = debugSymbol("InternalMessage");
  * @param {AiChat.DnD.MyPrompt[]} prompts
  * @param {AiChat.DnD.MyRegexp[]} regexps
  * @param {Record<string, string>} ctx
- * @param {OpenAI.Message[]} jsonMessages
+ * @param {OpenAI.Message[]} input
+ * @param {AiChat.Conversation} conv
  * @return {OpenAI.Message[]}
  */
-export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages) => {
+export const applyPreset = async ({prompts = [], regexps = []}, ctx, input, conv) => {
 	let first = '';
 	/** @type {OpenAI.Message[]} */
 	const messages = [{
@@ -57,36 +36,32 @@ export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages) => 
 	/** @type {OpenAI.Message} */
 	let currentMessage;
 
-	if (jsonMessages[0].role === "system") {
-		first = applyMacro(jsonMessages.shift().content, ctx);
+	if (input[0].role === "system") {
+		first = applyMacro(input.shift().content, ctx);
 	}
 
 	/** @type {OpenAI.Message|undefined} */
 	let message;
-	// 去掉尾部空消息，避免 lastUserMessage / chatHistory 取到空 content
-	while (jsonMessages.length) {
-		message = jsonMessages.at(-1);
-		if (!message || !extractMessageText(message.content)) {
-			jsonMessages.length--;
-			continue;
-		}
-		break;
+	for (;;) {
+		message = input.at(-1);
+		if (message && !message.content) input.length --;
+		else break
 	}
-	message = jsonMessages.at(-1);
 
 	/** @type {string} */
 	let lastUserMessage = '';
 	/** @type {OpenAI.Message[]} */
-	let chatHistory = jsonMessages;
+	let chatHistory = input;
 
 	if (message?.role === "user") {
-		lastUserMessage = extractMessageText(message.content);
+		lastUserMessage = getTextContent(message);
 		// 酒馆并没有把最后一条消息去掉
 		if (config.st_removeLastUserMessage)
-			chatHistory = jsonMessages.slice(0, jsonMessages.length - 1);
+			chatHistory = input.slice(0, input.length - 1);
 	}
 
-	for (const prompt of prompts) {
+	for (let pid = 0; pid < prompts.length; pid++){
+		const prompt = prompts[pid];
 		let {content, enabled, attr, role} = prompt;
 		if (!enabled) continue;
 
@@ -120,47 +95,70 @@ export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages) => 
 			}
 		} else {
 			let needTrim = false;
-			content = content.replaceAll(/\{\{(.+?)}}/gs, (_, match) => {
-				if (!match.startsWith("//")) {
-					if (match === "trim") {
-						needTrim = true;
-						return "";
-					}
+			let result = '';
 
-					if (match === "lastUserMessage") return lastUserMessage;
-					if (match === "time") return formatLocalTime();
-					if (match === "date") return formatLocalDate();
-					if (match === "dialogueExamples") return ctx.dialogueExamples?.length ? EXAMPLE_CHAT_LABEL + ctx.dialogueExamples.join(EXAMPLE_CHAT_LABEL) : '';
-					if (match in ctx) return ctx[match] || '';
+			{
+				let prev = 0, i;
 
-					const idx = match.indexOf("::");
-					const cmd = match.slice(0, idx);
-					if (cmd === "getvar") {
-						const vname = match.slice(idx + 2);
-						return variables[vname]?.trim() ?? ("未定义的变量 "+vname+"\n");
-					}
-					if (cmd === "random") {
-						const choices = match.slice(idx + 2).split(",").map(s => s.trim()).filter(String);
-						return choices[0] || '';
-					}
+				while ((i = content.indexOf('{{', prev)) >= 0) {
+					result += content.slice(prev, i);
 
-					const idx2 = match.indexOf("::", idx + 2);
-					const name = match.slice(idx + 2, idx2);
-					let value = match.slice(idx2 + 2);
-					//if (value.startsWith("\n")) value = value.trim();
+					const end = content.indexOf('}}', i + 2);
+					if (end === -1) throw new DOMException(`preset[${pid}]中有未闭合的宏(`+i+')');
 
-					if (cmd === "setvar") {
-						variables[name] = value;
-					} else if (cmd === "addvar") {
-						variables[name] = (variables[name] || "") + value;
-					} else {
-						showToast("暂不支持指令: "+match, "error");
+					const match = content.slice(i + 2, end).trim();
+					if (match.includes('{{')) throw new DOMException(`preset[${pid}]中有未闭合的宏(`+i+')');
+
+					prev = end + 2;
+					if (content[prev] === '\n') prev++;
+
+					if (match.startsWith("//")) continue;
+
+					ok:
+					if (match === "trim") needTrim = true;
+					else if (match === "lastUserMessage") result += lastUserMessage;
+					else if (match === "dialogueExamples") result += ctx.dialogueExamples?.length ? EXAMPLE_CHAT_LABEL + ctx.dialogueExamples.join(EXAMPLE_CHAT_LABEL) : '';
+					else if (match in ctx) result += ctx[match] || '';
+					else {
+						const idx = match.indexOf("::");
+						if (idx < 0) {
+							const p = await resolvePlaceholder(match, await resolvePreset(conv), conv, 'rp');
+							if (p !== undefined) {
+								result += p;
+								break ok;
+							}
+						}
+
+						const cmd = match.slice(0, idx);
+						if (cmd === "getvar") {
+							const vname = match.slice(idx + 2);
+							result += variables[vname]?.trim() ?? ("未定义的变量 "+vname+"\n");
+							break ok;
+						} else if (cmd === "random") {
+							const choices = match.slice(idx + 2).split(",").map(s => s.trim()).filter(String);
+							result += choices[0] || '';
+							break ok;
+						}
+
+						const idx2 = match.indexOf("::", idx + 2);
+						const name = match.slice(idx + 2, idx2);
+						let value = match.slice(idx2 + 2);
+						//if (value.startsWith("\n")) value = value.trim();
+
+						if (cmd === "setvar") {
+							variables[name] = value;
+						} else if (cmd === "addvar") {
+							variables[name] = (variables[name] || "") + value;
+						} else {
+							showToast("暂不支持指令: "+match, "error");
+						}
 					}
 				}
-				return "";
-			});
+				result += content.slice(prev);
+			}
+
 			// 真的这么简单吗
-			if (needTrim) content = content.trim();
+			content = needTrim ? result.trim() : result;
 			if (!content) continue;
 			length += content.length;
 
@@ -193,7 +191,7 @@ export const applyPreset = ({prompts = [], regexps = []}, ctx, jsonMessages) => 
 
 	const pp = config.st_postProcess;
 	if (pp) {
-		const offset = message[0]?.role === "system" ? 0 : 1;
+		const offset = messages[0]?.role === "system" ? 0 : 1;
 		if (pp === 2) {
 			for (let i = messages.length - 1; i >= 0; i--) {
 				const item = messages[i];
@@ -239,13 +237,9 @@ export const createSimpleMacroContext = char => ({
 	personality: char.personality,
 	scenario: char.scenario,
 	systemPrompt: char.systemPrompt,
-	// 简单本地时间宏，便于预设模板引用当前时刻
-	time: formatLocalTime(),
-	date: formatLocalDate(),
 });
 
-export const DEFAULT_SYSTEM_PROMPT = `你是一个专业的角色扮演 AI。接下来请严格按照角色设定进行回复。
-Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.`;
+export const DEFAULT_SYSTEM_PROMPT = `Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.`;
 const EXAMPLE_CHAT_LABEL = "\n\n[Example Chat]\n\n";
 const START_CHAT_LABEL = `\n\n[Start a new Chat]`;
 

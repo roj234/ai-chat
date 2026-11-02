@@ -26,19 +26,6 @@ export const TOOL_IS_RUNNING = debugSymbol("Running");
 //export const TOOL_LIST = debugSymbol("ToolList");
 const TOOL_PARAM = debugSymbol("ToolArgumentCache");
 
-/**
- * @type {Record<string, string | function(AiChat.Conversation): Promise<string>>}
- */
-export const PLACEHOLDERS = {};
-export const TEMPORARY_PLACEHOLDER = debugSymbol("PlaceholderOnConversation");
-/**
- *
- * @param {AiChat.Conversation} conv
- * @param {string} key
- * @param {string} val
- * @return {string}
- */
-export const setPlaceholder = (conv, key, val) => (conv[TEMPORARY_PLACEHOLDER] || (conv[TEMPORARY_PLACEHOLDER] = {}))[key] = val;
 
 /**
  * 常开模块
