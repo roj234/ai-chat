@@ -74,7 +74,7 @@ export const createSyncValidateMiddleware = (DATA_PATH) => /**
 
 /**
  *
- * @param {WebSocketServer} wss
+ * @param {import("@roj234/ws").WebSocketServer} wss
  * @return {AiChatBackend.SyncManager}
  */
 export function createSyncManager(wss) {

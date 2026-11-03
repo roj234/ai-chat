@@ -23,12 +23,11 @@ const finish = async (response, message, conv) => {
  *     deadline: number,
  * }>}
  */
-export const SetTimeout = {
-	name: "SetTimeout",
+export const Wait = {
+	name: "Wait",
 	description:
 		"Wait for user message or asynchronous notifications. "
-		+ "If a message was received before the deadline, the tool call resolves with 'interrupt: xms elapsed'. "
-		+ "Otherwise it resolves with 'timeout'. "
+		+ "Returns early with `interrupt` if a message is injected; otherwise returns `timeout`."
 		+ "\n"
 		+ "Use for timed interactions (QTE), reminders, or waiting real-time events. "
 		+ "\n"
@@ -40,29 +39,29 @@ export const SetTimeout = {
 		properties: {
 			label: {
 				type: "string",
-				description: "Short timer name shown to the user.",
+				description: "Short human-readable timer name.",
 				maxLength: 60
 			},
-			timeout: {
+			duration: {
 				type: "integer",
-				description: "Real-world duration in seconds.",
+				description: "Relative wait in seconds.",
 				minimum: 5,
 				maximum: 300
 			},
-			deadline: {
+			until: {
 				type: "string",
-				description: "ISO 8601 timestamp. Mutually exclusive with `timeout`.",
+				description: "Absolute ISO-8601 timestamp with timezone. Mutually exclusive with `duration`.",
 				example: "2026-06-01T08:00:00+08:00"
 			}
 		}
 	},
 	title(req, ctx) {
 		const par = getToolParameters(ctx, req);
-		let str = par.timeout != null ? '等待 '+par.timeout+"s" : "等到 "+new Date(par.deadline).toLocaleString();
+		let str = par.duration != null ? '等待 '+par.duration+"s" : "等到 "+new Date(par.until).toLocaleString();
 		return par.label ? str+`: `+par.label : str;
 	},
 
-	script({ timeout, deadline, label }, response, conv, toolName, message)  {
+	script({ duration, until, label }, response, conv, toolName, message)  {
 		// 异步消息
 		if (response.deadline != null) {
 			let reason = '';
@@ -76,14 +75,15 @@ export const SetTimeout = {
 		}
 
 		let ddl;
-		if (timeout != null) {
-			if (deadline) throw 'Both timeout and deadline are specified';
-			ddl = Date.now() + timeout * 1000;
+		if (duration != null) {
+			if (until) throw 'Both duration and until are specified';
+			ddl = Date.now() + duration * 1000;
 		} else {
-			if (!deadline) throw 'Neither timeout or deadline is specified';
-			ddl = + new Date(deadline);
+			if (!until) throw 'Neither duration or until is specified';
+			ddl = Date.parse(until);
 			if (isNaN(ddl)) throw 'Invalid Date';
-			if (ddl - Date.now() < 10000) throw 'Deadline too close';
+			const t = ddl - Date.now();
+			if (t < 0) return `Timeout already (${t}ms passed)`;
 		}
 
 		response.time = Date.now();

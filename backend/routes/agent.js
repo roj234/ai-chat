@@ -18,6 +18,9 @@ import {getContentType} from "@roj234/ie/utils/mimeTypes.js";
 import {safeStat, serveFile} from "@roj234/ie/utils/serveFile.js";
 import {HttpError} from "../router.js";
 import {FS_UPDATE_BASH} from "../config.js";
+import {registerTerminalRoutes} from "./terminal.js";
+import {killProcess} from "../utils/process.js";
+import {ANSI_SEQ} from "@roj234/ansi2html/seq";
 
 const devNull = () => new Writable({
 	write(chunk, encoding, callback) {
@@ -167,52 +170,6 @@ function modeToString(mode) {
 
 // ---------- 路由注册 ----------
 
-const IS_WIN = process.platform === 'win32';
-
-/**
- * 结束进程树。
- * @param {import('node:child_process').ChildProcess} child
- * @param {number} [gracePeriod] SIGTERM 升级到 SIGKILL 的宽限期(ms)，0 表示立即升级
- * @returns {Promise<void>} Windows 下在 taskkill 返回后 resolve
- */
-function killProcess(child, gracePeriod = 3000) {
-	const pid = child.pid;
-	// 用 exitCode/signalCode 判断，child.killed 只代表"发过信号"
-	if (pid == null || child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
-
-	if (IS_WIN) {
-		return new Promise((resolve) => {
-			let settled = false;
-			const done = (ok) => {
-				if (settled) return;
-				settled = true;
-				if (!ok) try { child.kill('SIGKILL'); } catch {}
-				resolve();
-			};
-			const killer = spawn('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true });
-			killer.on('error', () => done(false));
-			killer.on('exit', (code) => done(code === 0));
-		});
-	}
-
-	const sig = gracePeriod > 0 ? 'SIGTERM' : 'SIGKILL';
-	try {
-		process.kill(-pid, sig);
-	} catch {
-		try { child.kill(sig); } catch {}
-	}
-	if (gracePeriod <= 0) return Promise.resolve();
-
-	const timer = setTimeout(() => {
-		try { process.kill(-pid, 'SIGKILL'); } catch {
-			try { child.kill('SIGKILL'); } catch {}
-		}
-	}, gracePeriod);
-	timer.unref?.();
-
-	return Promise.resolve();
-}
-
 const matcherCache = new LRUCache(255);
 /**
  *
@@ -300,7 +257,7 @@ export async function registerFsRoutes(router, allowExec) {
 			const displayPath = pattern !== '*' && parentPath ? parentPath+'/'+entry.name : entry.name;
 			const isDir = entry.isDirectory();
 
-			if (!json && result.length >= limit) {
+			if (result.length >= limit) {
 				prefix = `[TRUNCATED to ${limit} entries, use a more specific path or pattern]\n`;
 				break;
 			}
@@ -501,9 +458,9 @@ export async function registerFsRoutes(router, allowExec) {
 
 	// 文件/目录信息
 	router.post('/stat', async (ctx) => {
-		const { path: filePath } = await ctx.readAsObject();
+		const { path: filePath, json } = await ctx.readAsObject();
 		const stats = await fsp.stat(pathFilter(filePath, ctx));
-		ctx.send(200, `type: ${stats.isDirectory() ? "dir" : "file"}
+		ctx.send(200, json ? stats : `type: ${stats.isDirectory() ? "dir" : "file"}
 mode: ${modeToString(stats.mode)}
 size: ${stats.size}
 atime: ${new Date(stats.atimeMs).toISOString()}
@@ -552,16 +509,6 @@ nlink: ${stats.nlink}`);
 	const OUTPUT_LIMIT = 20000;
 	const HALF = Math.floor(OUTPUT_LIMIT / 2);
 
-	// Valid string terminator sequences are BEL, ESC\, and 0x9c
-	const ST = "(?:\\u0007|\\u001B\\u005C|\\u009C)";
-	// OSC sequences only: ESC ] ... ST (non-greedy until the first ST)
-	const osc = "(?:\\u001B\\][\\s\\S]*?"+ST+")";
-	// CSI and related: ESC/C1, optional intermediates, optional params (supports ; and :) then final byte
-	const csi = "[\\u001B\\u009B][\\[\\]()#;?]*(?:\\d{1,4}(?:[;:]\\d{0,4})*)?[\\dA-PR-TZcf-nq-uy=><~]";
-
-	const ANSI_SEQ = new RegExp(osc+"|"+csi, 'g');
-
-	// 后台进程管理：输出全部落盘为日志文件，LLM 可自行 read_file 查看
 	/** @type {Map<number, {child: import('node:child_process').ChildProcess, logFile: string, cwd: string, timer: ReturnType<typeof setTimeout>, message?: string, killing?: boolean}>} */
 	const processes = new Map();
 
@@ -626,9 +573,9 @@ nlink: ${stats.nlink}`);
 	 * @param {string} command     - 要执行的程序或 shell 命令
 	 * @param {string[]} args      - 程序参数（shell 模式时传空数组）
 	 * @param {object}   options   - { cwd, timeout(ms), shell(boolean|string), safeCwd(用于落盘) }
-	 * @returns {Promise<{code: number, text: string}>}
+	 * @returns {AiChat.Cancellable<{code: number, text: string}>}
 	 */
-	async function executeCommand(command, args, { cwd, timeout, shell = false, dir = '.', inline, background, env, kill, stdin = true }) {
+	function executeCommand(command, args, { cwd, timeout, shell = false, dir = '.', inline, background, env, kill, stdin = true }) {
 		const child = spawn(command, args, {
 			cwd,
 			stdio: [stdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
@@ -700,39 +647,42 @@ nlink: ${stats.nlink}`);
 		const startTime = Date.now();
 		let notify = false;
 
-		const result = await new Promise((resolve) => {
-			let timer = setTimeout(() => {
-				child.stdout.removeAllListeners('data');
-				child.stderr.removeAllListeners('data');
+		let reject;
+		let timer = setTimeout(() => {
+			child.stdout.removeAllListeners('data');
+			child.stderr.removeAllListeners('data');
 
-				if (kill) {
-					killProcess(child);
-					resolve({
-						code: 'TIMEOUT, killed (pid='+child.pid+', logPath='+JSON.stringify(dir + filename)+')',
-						text: getLog(),
-					});
-					return;
-				}
-
+			if (kill) {
+				killProcess(child);
 				resolve({
-					code: (background?'':'TIMEOUT, ')+'Running in background (pid='+child.pid+', logPath='+JSON.stringify(dir + filename)+')',
+					code: 'TIMEOUT, killed (pid='+child.pid+', logPath='+JSON.stringify(dir + filename)+')',
 					text: getLog(),
 				});
+				return;
+			}
 
-				if (!file) createLogStream();
+			resolve({
+				code: (background?'':'TIMEOUT, ')+'Running in background (pid='+child.pid+', logPath='+JSON.stringify(dir + filename)+')',
+				text: getLog(),
+			});
 
-				file.write(tail);
-				head = tail = null;
-				notify = true;
+			if (!file) createLogStream();
 
-				child.stdout.pipe(file, { end: false });
-				child.stderr.pipe(file, { end: false });
-			}, Math.min(background ? 100 : timeout, 275000));
+			file.write(tail);
+			head = tail = null;
+			notify = true;
 
-			if (!inline && child.pid != null)
-				processes.set(child.pid, { child, logFile: dir+filename, cwd, timer });
+			child.stdout.pipe(file, { end: false });
+			child.stderr.pipe(file, { end: false });
+		}, Math.min(background ? 100 : timeout, 275000));
 
-			console.log("[进程] 已启动", child.pid, command, args);
+		if (!inline && child.pid != null)
+			processes.set(child.pid, { child, logFile: dir+filename, cwd, timer });
+
+		console.log("[进程] 已启动", child.pid, command, args);
+
+		const result = new Promise((resolve, rej) => {
+			reject = rej;
 
 			child.on('error', (err) => {
 				clearTimeout(timer);
@@ -775,7 +725,14 @@ nlink: ${stats.nlink}`);
 			});
 		});
 
-		return { code: result.code ?? 0, text: result.text.replaceAll(ANSI_SEQ, ""), duration: Date.now() - startTime };
+		return {
+			cancel() {
+				clearTimeout(timer);
+				reject("取消");
+				killProcess(child);
+			},
+			done: result.then(r => ({ code: r.code ?? 0, text: r.text.replaceAll(ANSI_SEQ, ""), duration: Date.now() - startTime }))
+		}
 	}
 
 	/**
@@ -874,7 +831,7 @@ logPath: ${logFile}`
 				timeout: 15000,
 				kill: true,
 				charset: 'utf8'
-			});
+			}).done;
 
 			// ENOENT
 			if (code === -1) {
@@ -905,7 +862,7 @@ logPath: ${logFile}`
 		if (FS_UPDATE_BASH) updateBash();
 
 		router.get('/env', async (ctx) => {
-			return ctx.send(200, { prompt: await getEnv(), location: ctx.fsRoot })
+			return ctx.send(200, { programs: await getEnv(), location: ctx.fsRoot })
 		});
 
 		router.post('/feed', async (ctx) => {
@@ -927,13 +884,26 @@ logPath: ${logFile}`
 				charset = 'utf8',
 				env
 			} = await ctx.readAsObject();
-			const { code, text, duration } = await executeCommand(program, args, {
-				cwd: await pathFilterWithIgnore(ctx, cwd, true),
+
+			const cwd1 = await pathFilterWithIgnore(ctx, cwd, true);
+			if (ctx.res.closed) return;
+
+			let reallyDone = false;
+			const {cancel, done} = executeCommand(program, args, {
+				cwd: cwd1,
 				timeout: timeout * 1000,
 				background,
 				charset,
 				env
 			});
+
+			ctx.res.once('close', () => {
+				if (!reallyDone) cancel();
+			});
+
+			const { code, text, duration } = await done;
+			reallyDone = true;
+
 			sendText(ctx.res, `${typeof code === 'number'?'Exit code '+code:code} (wall time ${(duration/1000).toFixed(1)}s)\n${text}`);
 		});
 
@@ -955,16 +925,30 @@ logPath: ${logFile}`
 				command = bashPath;
 			}
 
-			let { code, text, duration } = await executeCommand(command, args, {
-				cwd: await pathFilterWithIgnore(ctx, cwd, true),
+			const cwd1 = await pathFilterWithIgnore(ctx, cwd, true);
+			if (ctx.res.closed) return;
+
+			let reallyDone = false;
+			const {cancel, done} = executeCommand(command, args, {
+				cwd: cwd1,
 				timeout: timeout * 1000,
 				background,
 				shell,
 				charset,
 				env
 			});
+
+			ctx.res.once('close', () => {
+				if (!reallyDone) cancel();
+			});
+
+			let { code, text, duration } = await done;
+			reallyDone = true;
+
 			if (globalThis.AIChatArgs.hideUser) text = text.replaceAll(new RegExp("\\b"+process.env.USERNAME+"\\b", "g"), "user");
 			sendText(ctx.res, `${typeof code === 'number'?'Exit code '+code:code} (wall time ${(duration/1000).toFixed(1)}s)\n${text}`);
 		});
+
+		registerTerminalRoutes(router);
 	}
 }

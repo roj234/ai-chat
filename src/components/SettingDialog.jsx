@@ -6,10 +6,10 @@ import {ITEM_KEY} from "unconscious/common/VirtualList.js";
 import {openWindow} from "./Windows.jsx";
 import Filter from "unconscious/common/components/Filter.jsx";
 import {immutableObjectMap} from "unconscious/common/Utils.js";
-import {isIDB, kvListGet, kvListSet, resolveDBRelativeURL} from "../database.js";
+import {isIDB, kvListGet, kvListSet} from "../database.js";
 import {AsyncButton} from "./AsyncButton.jsx";
 import {config, CONFIG_VERSION, LOCKED} from "../states.js";
-import {PRESET_KVS_ID, presets, PromptDropdown, ProviderDropdown} from "../presets.js";
+import {getProviderId, PRESET_KVS_ID, presets, PromptDropdown, ProviderDropdown} from "../presets.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
 
 let currentTab = $state("general");
@@ -53,8 +53,8 @@ createTab("data", "数据", "ri-database-2-line");
 createTab("tools", "工具", "ri-wrench-line");
 
 async function saveModel(settings, modelTab) {
-	const providerName = settings.provider || new URL(resolveDBRelativeURL(config.endpoint)).host;
-	const slug = modelTab ? providerName + '/' + settings.model : providerName;
+	const providerId = getProviderId(settings);
+	const slug = modelTab ? providerId + '/' + settings.model : providerId;
 
 	const data = isIDB ? Object.create(null) : await kvListGet(PRESET_KVS_ID, slug).catch(() => (Object.create(null)));
 	const set = unconscious(settings);

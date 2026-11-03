@@ -1,7 +1,6 @@
 import {getToolParameters, prefixTitle, registerToolset, toolset} from "/src/toolset.js";
 import {messages, selectedConversation, updateMessageUI} from "/src/states.js";
 import {$state, $update, debugSymbol, unconscious} from "unconscious";
-import {AskUser} from "../rp_kit/AskUser.js";
 import {callFileSystemFunc, createFileSystem, crossVFSCopyMove, fileAccess, FS_INSTANCE,} from "./Mounts.js";
 import {RunJS, SearchModules} from "./run_js.js";
 import {errorBlock} from "/src/utils/utils.js";
@@ -550,6 +549,7 @@ b.txt
  */
 const Mount = {
 	name: "Mount",
+	requireUI: true,
 	description: "Mount a new VFS, new workspace, new project, and even a new computer.\nUI command: `/mount`",
 	parameters: {
 		type: "object",
@@ -632,21 +632,32 @@ const Mounts = {
 		"Non-root mount points are accessed via `~/<mount-point>/`.\nClear all VFSs: UI command \`/fsreset\`.",
 	title: () => "列出文件系统",
 
-	script(_, resp, conv) {
+	async script(_, resp, conv) {
 		const arr = Object.entries(conv.mnt||{});
 		arr.unshift([".", conv]);
-		return "Total "+(arr.length)+"\n"+arr.map(([k, {fs_type, fs_base, fs_name, fs_readonly, fs_ACL, fs_builtin}], i) => {
-			let str = `${JSON.stringify(i ? "~/" + k : k)} (type=${fs_type||'vfs'}, remote_path=${JSON.stringify(fs_base || "/")}`;
+		let s = "Total "+(arr.length);
+		for (let i = 0; i < arr.length; i++){
+			const [k, mount] = arr[i];
+			let {fs_type, fs_base, fs_name, fs_readonly, fs_ACL, fs_builtin} = mount;
+
+			if (fs_type === 'api') {
+				const shell = await callFileSystemFunc(await createFileSystem(mount), 'env', {}).catch(() => ({}));
+				const loc = shell.location;
+				if (loc) fs_base = loc === '/' ? '/' + (fs_base || '') : normalizePath(loc+'/'+(fs_base || '')).join('/');
+			}
+
+			let str = `\n${JSON.stringify(i ? "~/" + k : k)} (type=${fs_type||'vfs'}, remote_path=${JSON.stringify(fs_base || "/")}`;
 			if (fs_name) str += `, label=${JSON.stringify(fs_name || "")}`;
 			if (fs_builtin) str += `, builtin`;
 			if (fs_readonly) str += `, readonly`;
 			if (fs_ACL) str += `, hasAccessController`;
-			return str+')';
-		}).join("\n");
+			s += str+')';
+		}
+		return s;
 	},
 };
 //endregion
-const fileSystemTools = [Glob, Read, Grep, Stat, AskUser, Edit, Patch, Write, Append, Delete, Mkdir, CopyMove, Mount, Mounts];
+const fileSystemTools = [Glob, Read, Grep, Stat, Edit, Patch, Write, Append, Delete, Mkdir, CopyMove, Mount, Mounts];
 const imageReadTools = [InspectImage];
 const filesystemPrompt = `<file-editing>
 - NEVER use absolute paths like \`/tmp\`, **ALWAYS** use relative path.
@@ -668,7 +679,7 @@ registerToolset(
 	hidden: true
 });
 
-const FILESYSTEM_AUX_PROMPT = debugSymbol("ShellAvailabilityKnown");
+const FILESYSTEM_AUX_PROMPT = debugSymbol("PromptCache");
 
 /**
  * @param {AiChat.Conversation} conv
@@ -705,7 +716,7 @@ registerToolset(
 			let auxPrompt = conv[FILESYSTEM_AUX_PROMPT];
 			if (null == auxPrompt) {
 				auxPrompt = '';
-				if (isVirtualFileSystem) auxPrompt += '- UI command \`/upload\` can manually upload file to workspace\n';
+				if (isVirtualFileSystem) auxPrompt += '- User command \`/upload\` can manually upload file to workspace\n';
 				if (fsType === 'api') auxPrompt += await shellPrompt(conv);
 				conv[FILESYSTEM_AUX_PROMPT] = auxPrompt;
 			}
@@ -758,7 +769,7 @@ registerToolset(
 );
 registerToolset(
 	"Files/RunJS",
-	"即使有Shell也启用沙箱.",
+	"有Shell也启用沙箱.",
 	[RunJS],
 	{
 		hidden: "manual",

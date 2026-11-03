@@ -149,7 +149,7 @@ async function showDetail(c) {
 	const {name, creator} = c;
 
 	openWindow({
-		id: "charCard-"+name,
+		id: "charCard-"+encodeURI(name),
 		icon: "卡",
 		width: 600,
 		height: 800,

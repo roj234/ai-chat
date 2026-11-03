@@ -62,7 +62,7 @@ const ListTools = {
 		prompt += '独立工具\n\n';
 		for (const key of myTools) {
 			const val = toolInfo[key];
-			if (toolScriptRegistry[key]?.interactive === true && key !== 'SetTimeout')
+			if (toolScriptRegistry[key]?.interactive === true && key !== 'Wait')
 				continue;
 			prompt += key+" - "+val.function.description+"\n\n";
 		}

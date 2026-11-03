@@ -32,7 +32,7 @@ import {markCombinedPresetDirty} from "/src/presets.js";
 import {TemplateFormatter} from "/common/template-formatter.js";
 import {parseJson5} from "unconscious/common/Json.js";
 import {lockConversation, unlockConversation} from "/src/conversation-lock.js";
-import {SetTimeout} from "../rp_kit/SetTimeout.js";
+import {Wait} from "../rp_kit/Wait.js";
 import {PP_UNATTENDED} from "../../src/states.js";
 
 compileSchema(schema);
@@ -111,6 +111,12 @@ const hasLoop = async (start) => {
 	}
 }
 
+const noInherit = new Set([
+	'CreateAgent',
+	'ResumeAgent',
+	'TerminateAgent'
+])
+
 /**
  *
  * @param {Object} par
@@ -126,9 +132,9 @@ async function createSubagent(par, response, conv, tools) {
 	 * @type {AiChat.Conversation}
 	 */
 	const agent = {
-		title: par.label || '无标题子代理',
+		title: par.label || '无标题子智能体',
 		time: Date.now(),
-		// 有些工具比如SetTimeout判断它是否存在从而进入假设无UI的无头模式
+		// 有些工具比如Wait判断它是否存在从而进入假设无UI的无头模式
 		meta: { owner: conv.id },
 		// 覆盖系统配置
 		overrides: {
@@ -324,10 +330,18 @@ async function createSubagent(par, response, conv, tools) {
 	const [tools_, toolsetPrompt] = await getAvailableTools(agent);
 	if (!exist) modules1.delete("Files");
 
+	const isInheritedTools = tools === conv.tools;
 	agent.tools.clear();
 	for (let t of tools) {
-		if (!toolScriptRegistry[t = t.trim()])
-			throw "Tool "+JSON.stringify(t)+" not found";
+		const reg = toolScriptRegistry[t = t.trim()];
+		if (!reg) throw "Tool "+JSON.stringify(t)+" not found";
+
+		if (isInheritedTools && noInherit.has(t)) continue;
+		if (reg.requireUI) {
+			if (isInheritedTools) continue;
+			throw "Tool "+JSON.stringify(t)+" requires UI access";
+		}
+
 		agent.tools.add(t);
 	}
 
@@ -466,7 +480,7 @@ export const subagentLoopWrapper = ctx => {
 			if (redir) {
 				const ping = (result) => injectMessages(findConversation(redir.id), {
 					role: 'user',
-					label: "子代理",
+					label: "子智能体",
 					time: Date.now(),
 					content: `<agent-message from="${agent.id}" role="ping">\n${result}</agent-message>`,
 				});
@@ -518,7 +532,7 @@ export const subagentLoopWrapper = ctx => {
 
 			promises.push(injectMessages(target, {
 				role: 'user',
-				label: "子代理",
+				label: "子智能体",
 				time: Date.now(),
 				content: `<agent-message from="${agent.id}"${resp.error?" errored":""}>\n${resp.content}\n</agent-message>`,
 			}));
@@ -577,7 +591,7 @@ const CreateAgent = {
 	},
 	title(req, ctx) {
 		const par = getToolParameters(ctx, req);
-		return "子代理 ["+par.label+"]";
+		return "子智能体 ["+par.label+"]";
 	},
 	keyFunc(keys, context) {
 		const id = context.agentId;
@@ -669,7 +683,7 @@ const CreateAgent = {
 			{par.responseSchemaPath && <span title={"结构化输出"}>📐</span>}
 			{subagentConv && <button className={"btn ghost"} onClick={() => {
 				switchToConversation(subagentConv);
-			}}>转到子代理会话 #{ctx.agentId}</button>}
+			}}>转到子智能体会话 #{ctx.agentId}</button>}
 		</div>;
 
 		// 代理 $cleanup
@@ -706,7 +720,7 @@ const NotifyAgent = {
 	},
 	title(req, ctx) {
 		const par = getToolParameters(ctx, req);
-		return "向子代理 #"+par.agentId+" 发送 "+par.message.slice(0, 50);
+		return "向子智能体 #"+par.agentId+" 发送 "+par.message.slice(0, 50);
 	},
 	async script(par, resp, conv, toolName) {
 		const isTerminate = toolName === TerminateAgent.name;
@@ -774,7 +788,7 @@ const TerminateAgent = {
 		},
 		required: ['agentId'],
 	},
-	title: prefixTitle("终止子代理 #", "agentId"),
+	title: prefixTitle("终止子智能体 #", "agentId"),
 	script: NotifyAgent.script
 };
 
@@ -791,13 +805,13 @@ const ResumeAgent = {
 		},
 		required: ['agentId'],
 	},
-	title: prefixTitle("重试子代理 #", "agentId"),
+	title: prefixTitle("重试子智能体 #", "agentId"),
 	script: NotifyAgent.script
 };
 
 GLOBAL_SETTINGS.push({
 	id: "subagentDepth",
-	name: "子代理最大递归深度",
+	name: "子智能体最大递归深度",
 	_tab: "tools",
 	type: "number",
 	default: 3,
@@ -872,7 +886,7 @@ Available agent definitions:
 registerToolset(
 	"Subagent",
 	"Create agents to autonomously execute a task and return the result.",
-	[CreateAgent, NotifyAgent, TerminateAgent, ResumeAgent, SetTimeout],
+	[CreateAgent, NotifyAgent, TerminateAgent, ResumeAgent, Wait],
 	{
 		default: true,
 		async systemPrompt(conv) {

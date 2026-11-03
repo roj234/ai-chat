@@ -6,7 +6,9 @@ import {auxSmallScreen, EVENT_BUS} from "../states.js";
 /**
  * @typedef {Object} WindowState
  * @property {string} id
+ * @property {HTMLElement} root
  * @property {HTMLElement} element
+ * @property {(boolean) => void} [onFocus]
  * @property {boolean} resizable
  * @property {boolean} minimized
  * @property {boolean} active
@@ -22,6 +24,8 @@ const windows = new Map();
 
 /** 响应式窗口列表，供任务栏监听 */
 const windowList = $state([]);
+
+/** @type {?WindowState} */
 let focusedWindow;
 
 /** 自增的 z-index 基准 */
@@ -47,20 +51,27 @@ export const focusWindow = (w) => {
 	if (typeof w === 'string') w = windows.get(w);
 	if (!w || focusedWindow === w) return;
 
-	w.element.style.zIndex = ++topZ;
+	focusedWindow?.onFocus?.(false);
+	w.root.style.zIndex = ++topZ;
+	w.onFocus?.(true);
 	focusedWindow = w;
 	$update(windowList);
 };
 
+/**
+ * @param {WindowState | string} w
+ */
 function syncFocused(w) {
 	if (focusedWindow === w) {
+		w.onFocus?.(false);
 		focusedWindow = null;
 		let topZ = -1;
 		for (const win of windows.values()) {
-			if (win.element.classList.contains(MINIMIZED)) continue;
-			const z = +win.element.style.zIndex;
+			if (win.root.classList.contains(MINIMIZED)) continue;
+			const z = +win.root.style.zIndex;
 			if (z > topZ) {
 				topZ = z;
+				win.onFocus?.(true);
 				focusedWindow = win;
 				$update(windowList);
 			}
@@ -77,7 +88,7 @@ export const closeWindow = (w) => {
 	if (typeof w === 'string') w = windows.get(w);
 	if (!w) return;
 
-	const el = w.element;
+	const el = w.root;
 	el.classList.add(TRANSITION);
 	const end = () => el.remove(w.reuse);
 	el.addEventListener('animationend', end);
@@ -94,7 +105,7 @@ export const closeWindow = (w) => {
  * @param {WindowState} w
  */
 const minimizeWindow = (w) => {
-	const el = w.element;
+	const el = w.root;
 	const classList = el.classList;
 	if (!classList.contains(MINIMIZED)) {
 		classList.add(MINIMIZED, TRANSITION);
@@ -117,7 +128,7 @@ const minimizeWindow = (w) => {
  * @param {WindowState} w
  */
 const restoreWindow = (w) => {
-	const classList = w.element.classList;
+	const classList = w.root.classList;
 	if (classList.contains(MINIMIZED)) {
 		classList.remove(MINIMIZED, TRANSITION);
 		$update(windowList);
@@ -132,11 +143,10 @@ const restoreWindow = (w) => {
 const toggleMaximize = (w) => {
 	if (!w?.resizable) return;
 	$update(windowList);
-	return w.element.classList.toggle(MAXIMIZED);
+	return w.root.classList.toggle(MAXIMIZED);
 };
 
 const cloneContent = (node) => typeof node === "function" ? $computed(node) : node.cloneNode?.(true) || node;
-const extractText = (node) => node.textContent || node;
 
 const MIN_W = 280;
 const MIN_H = 200;
@@ -258,7 +268,14 @@ export const openWindow = ({
 	if (height <= 1) height = ih * height;
 	else if (height > ih) height = ih;
 
-	if (typeof element === "function") element = element(state);
+	let onFocus;
+	if (typeof element === "function") {
+		element = element(state);
+		if (element.element) {
+			onFocus = element.onFocus;
+			element = element.element;
+		}
+	}
 
 	let top, left;
 	if (dock) {
@@ -284,12 +301,14 @@ export const openWindow = ({
 					<button className="ri-close-line" title="关闭" onClick={() => closeWindow(state)}></button>
 				</span>
 			</div>
-			<div className={"win-body "+id.replaceAll(' ', '-')}>{element}</div>
+			<div className={"win-body "+id}>{element}</div>
 			{resizable && <div className="win-resize" onPointerDown.left={startResize}></div>}
 		</div>
 	);
 
-	state.element = root;
+	state.onFocus = onFocus;
+	state.element = element;
+	state.root = root;
 	registerWindow(id, state);
 	EVENT_BUS.post(['openWindow', id], state);
 	focusWindow(state);
@@ -299,19 +318,24 @@ export const openWindow = ({
 };
 
 let mounted = false;
+let taskbarTimer;
 
 const Taskbar = () => {
-	$watchWithCleanup(windowList, () => {
-		document.body.classList.toggle('taskbar-open', windowList.length > 0);
+	const app = document.body;
+	$watchWithCleanup($computed(() => windowList.length > 0), () => {
+		clearTimeout(taskbarTimer);
+		taskbarTimer = setTimeout(() => app.classList.remove('taskbar-transition'), 250);
+		app.classList.toggle('taskbar-open', windowList.length > 0);
+		app.classList.add('taskbar-transition');
 	});
 
 	return (
 		<aside className="taskbar">
 			{$foreach(windowList, w => {
 				return <div
-					className={'item' + (w.element.className.slice(6)) + (w === focusedWindow ? ' active' : '')}
+					className={'item' + (w.root.className.slice(6)) + (w === focusedWindow ? ' active' : '')}
 					onClick={() => {
-						if (w.element.classList.contains(MINIMIZED)) restoreWindow(w);
+						if (w.root.classList.contains(MINIMIZED)) restoreWindow(w);
 						else if (w === focusedWindow) minimizeWindow(w);
 						else focusWindow(w);
 					}}>
@@ -321,7 +345,7 @@ const Taskbar = () => {
 				</div>
 			}, AS_IS, {
 				onReuse(node, w) {
-					node.className = 'item' + (w.element.className.slice(6)) + (w === focusedWindow ? ' active' : '');
+					node.className = 'item' + (w.root.className.slice(6)) + (w === focusedWindow ? ' active' : '');
 				}
 			})}
 		</aside>
@@ -332,6 +356,15 @@ const Taskbar = () => {
 const mountTaskbar = () => {
 	if (mounted) return;
 	mounted = true;
-	appendChild(document.body, <Taskbar/>);
-	appendChild(document.body, container);
+	const body = document.body;
+	appendChild(body, <Taskbar/>);
+	appendChild(body, container);
+
+	body.addEventListener('click', ({target}) => {
+		if (focusedWindow && !target.closest('.MDI')) {
+			focusedWindow.onFocus?.(false);
+			focusedWindow = null;
+			$update(windowList);
+		}
+	});
 };

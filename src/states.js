@@ -133,7 +133,7 @@ export const ensureConversation = async () => {
 
 		selectedConversation.value = conv;
 
-		EVENT_BUS.post(['convNew'], conv, unconscious(messages));
+		await EVENT_BUS.post(['convNew'], conv, unconscious(messages));
 	}
 };
 

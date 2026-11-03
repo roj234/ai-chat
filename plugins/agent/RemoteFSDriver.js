@@ -86,14 +86,25 @@ export const createRemoteFileSystem = (baseUrl, pat, fileBase) =>
 
 		// ── Binary write / append: send raw Uint8Array body ──
 		let body, headers = {
-			Authorization: 'Bearer ' + pat,
-			Accept: "application/json,*/*"
+			authorization: 'Bearer ' + pat,
+			accept: "application/json,*/*"
 		};
+
+		if (func === 'getUrl') {
+			return {
+				base: baseUrl,
+				root: fileBase,
+				headers
+			};
+		}
+
+		let method;
 		if (func.endsWith("Raw") && parameters) {
 			// Append extra params as query string
 			const sep = endpoint.includes('?') ? '&' : '?';
 			endpoint += sep + 'path='+encodeURIComponent(parameters.path);
 			body = parameters.content;
+			if (parameters.metaOnly) method = "HEAD";
 			if (body) headers['Content-Type'] = 'application/octet-stream';
 			else parameters = null;
 		} else if (parameters) {
@@ -105,7 +116,7 @@ export const createRemoteFileSystem = (baseUrl, pat, fileBase) =>
 		let response;
 		try {
 			response = await fetch(endpoint, {
-				method: parameters ? 'POST' : 'GET',
+				method: method ?? (parameters ? 'POST' : 'GET'),
 				headers,
 				body,
 			});
@@ -127,6 +138,14 @@ export const createRemoteFileSystem = (baseUrl, pat, fileBase) =>
 				throw (await response.json()).error;
 			}
 			throw (await response.text());
+		}
+
+		if (method === 'HEAD') {
+			return {
+				lastModified: Date.parse(response.headers.get('last-modified')),
+				// 反向代理比如 nginx 启用 gzip 会把这个抹了
+				size: parseInt(response.headers.get('content-length')) || 0,
+			}
 		}
 
 		if (mime === "application/octet-stream" || func === 'readRaw') return await response.blob();

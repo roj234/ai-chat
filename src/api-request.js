@@ -622,6 +622,17 @@ const NO_RETRY_STATUS = new Set([400, 401, 402, 403, 404, 422, 413]);
 
 /**
  *
+ * @param {AbortController} parent
+ * @return {AbortController}
+ */
+const forkAborter = parent => {
+	const child = new AbortController();
+	parent.signal.addEventListener('abort', ev => child.abort(parent.signal.reason));
+	return child;
+};
+
+/**
+ *
  * @param {AiChat.Conversation} conversation
  * @param {AiChat.Message[] | import("unconscious").Reactive<AiChat.Message[]>} messages
  * @param {boolean=} toolChoice
@@ -738,6 +749,16 @@ async function sendCompletionRequest(
 	assistantMessage[PROGRESS_VALUE] = progressValue;
 
 	onProgress?.();
+	const ac = forkAborter(abortCompletion);
+
+	/** @type {number} */
+	let lastActivity, lastActivityTO;
+	const readTimeout = config.readTimeout && setInterval(() => {
+		if (finishReason) return;
+
+		if (lastActivity === lastActivityTO) ac.abort({status: 598, message: `连续 ${config.readTimeout}s 未收到有效数据`});
+		else lastActivityTO = lastActivity;
+	}, config.readTimeout * 1000);
 
 	// Request
 	try {
@@ -746,7 +767,7 @@ async function sendCompletionRequest(
 		await sseFetch(url, {
 			...data,
 			key: config.accessToken,
-			signal: abortCompletion.signal
+			signal: ac.signal
 		}, (json, messageType) => {
 			if (config.logSSE) console.log("chunk", json);
 
@@ -897,6 +918,7 @@ async function sendCompletionRequest(
 				if (!text) return;
 			}
 
+			lastActivity = Date.now();
 			progressKind.value = SP_GENERATE;
 
 			if (context.antiSlop?.sample(chunk, assistantMessage)) {
@@ -938,7 +960,7 @@ async function sendCompletionRequest(
 					};
 
 					if (!content && !assistantMessage.tool_calls) {
-						thinkState.start = Date.now() + localTimeDelta;
+						thinkState.start = lastActivity + localTimeDelta;
 						thinkState.index = 0;
 						thinkState = $state(thinkState);
 					}
@@ -1010,9 +1032,9 @@ async function sendCompletionRequest(
 			assistantMessage.error = conversation.resumeId ? ALLOW_RESUME : "连接意外终止";
 		}
 	} catch (err) {
-		if (err.name === 'AbortError') {
-			finishReason = "interrupt";
-		} else if (err.status === 409 && err.message.includes("\"cache_expired\"")) {
+		if (err.name === 'AbortError') err = ac.signal.reason;
+		if (err.name === 'AbortError') finishReason = "interrupt";
+		else if (err.status === 409 && err.message.includes("\"cache_expired\"")) {
 			const errorInfo = err[ORIGINAL_ERROR];
 			setMessageCacheState(conversation, messages, errorInfo.hashes, false);
 			messages.pop();
@@ -1040,7 +1062,7 @@ async function sendCompletionRequest(
 
 				const count = context.retryCount = (context.retryCount ?? 0) + 1;
 				if (!noRetry && count <= config.apiRetry) {
-					const delay = Math.round(Math.min(30000, 800 * (1 << (count - 1))) * Math.random());
+					const delay = Math.round(Math.min(300000, 800 * (1 << (count - 1))) * Math.random());
 					progressKind.value = SP_RETRY;
 					progressValue.value = [count, config.apiRetry, delay];
 					onProgress?.(MARKDOWN_END, assistantMessage);
@@ -1051,6 +1073,8 @@ async function sendCompletionRequest(
 			abortCompletion.abort();
 		}
 	} finally {
+		clearInterval(readTimeout);
+
 		if (isReactive(thinkState)) endThinking();
 		streamResponseCompleted(assistantMessage, genImages);
 
@@ -1126,8 +1150,10 @@ async function buildCompletionPayload(
 		}
 
 		const finishReason = assistantMessage.finish_reason;
-		if (!allowPrefillFinishReasons.includes(finishReason)) assistantMessage = null;
-		else if (finishReason === 'error' || !canPrefill) {
+		if (!allowPrefillFinishReasons.includes(finishReason)) {
+			if (!assistantMessage.tool_calls) throw "Missing user message";
+			assistantMessage = null;
+		} else if (finishReason === 'error' || !canPrefill) {
 			messages.pop();
 			assistantMessage = null;
 		} else {

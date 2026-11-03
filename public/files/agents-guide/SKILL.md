@@ -3,17 +3,17 @@ name: 'agent-guide'
 description: 'How to write sub-agent definitions (frontmatter, mounts, ACL, redirect) and plan multi-agent workflows.'
 ---
 
-# 子代理编写指南
+# 子智能体编写指南
 
 ## 定义文件的发现
 
-系统自动扫描以下位置的 `*.md`，frontmatter 含 `name` 字段的才会注册为可用子代理：
+系统自动扫描以下位置的 `*.md`，frontmatter 含 `name` 字段的才会注册为可用子智能体：
 
 - `./agents`（根文件系统下）
 - `~/.skills/agents`（需激活 Skills 模块）
 
 已注册定义的 `name` 和 `description` 会注入主代理的系统提示，主代理按名引用（`promptType: "name"`）。
-因此这两个位置只应放项目通用/全局通用的子代理；不具备通用性的定义请放在其他路径，通过文件路径引用
+因此这两个位置只应放项目通用/全局通用的子智能体；不具备通用性的定义请放在其他路径，通过文件路径引用
 （`promptType: "file"`）——它们不会被扫描，也不占用系统提示。
 
 ## Frontmatter 参考
@@ -44,7 +44,7 @@ mounts:
   # 使用这个（扩展运算符），继承调用方文件系统，而不是覆盖
   '...': true
 
-# 控制子代理的根文件系统权限
+# 控制子智能体的根文件系统权限
 acl: path/to/acl/file
 
 # 使用 gitignore 语法在根文件系统的 Glob 中排除项目
@@ -62,11 +62,11 @@ mcpServers:
 # 重定向配置，详见下文
 redirect: { target: file, path: asd.txt, id: 0 }
 
-# 子代理类别（见下文）
+# 子智能体类别（见下文）
 kind: basic
 ---
 
-正文：子代理系统提示词
+正文：子智能体系统提示词
 ```
 
 ### mcpServers
@@ -113,7 +113,7 @@ type Mount = {
 
 - 不写 `mounts`：完整继承调用方的根文件系统与所有挂载。
 - 写了 `mounts` 且含 `'...': true`：自定义挂载与继承的挂载合并，自定义优先。
-- 写了 `mounts` 但不含 `'...'`：完全不继承，此时**必须显式定义 `/`**，否则子代理没有可用的根文件系统。
+- 写了 `mounts` 但不含 `'...'`：完全不继承，此时**必须显式定义 `/`**，否则子智能体没有可用的根文件系统。
 
 > 只有 `api` 文件系统可以执行 shell 命令，其它文件系统仅可用 `RunJS` 沙箱。
 
@@ -129,8 +129,8 @@ type Mount = {
 
 ## 工具配置建议
 
-- 想让子代理的输出符合特定格式：简单场景给它 `ValidateJson` 和 schema 路径，让它写入文件并自行验证；复杂场景用 `redirect` 重定向到脚本（见下文）。没有 JSON 相关工具时，先激活 `JsonEditor` 模块。
-- 给子代理 `CreateAgent` 可以递归创建，深度由用户设置限制（默认 3）。允许递归时，别忘了同时给 `NotifyAgent`、`TerminateAgent` 等工具。
+- 想让子智能体的输出符合特定格式：简单场景给它 `ValidateJson` 和 schema 路径，让它写入文件并自行验证；复杂场景用 `redirect` 重定向到脚本（见下文）。没有 JSON 相关工具时，先激活 `JsonEditor` 模块。
+- 给子智能体 `CreateAgent` 可以递归创建，深度由用户设置限制（默认 3）。允许递归时，别忘了同时给 `NotifyAgent`、`TerminateAgent` 等工具。
 
 ## 占位符（argv 模板）
 
@@ -159,7 +159,7 @@ acl: path/to/{{ argv2 | "test.acl" }}
 ## 重定向（redirect）
 
 每轮回复结束（即任何 finish_reason 非 `tool_calls` 的消息）时触发，将本轮结果送往指定目标。
-**设置 redirect 会强制后台运行**：创建调用立即返回，不等待子代理完成。
+**设置 redirect 会强制后台运行**：创建调用立即返回，不等待子智能体完成。
 
 ```yaml
 # 追加写入文件，完成后向 id 指定的代理发送 ping 通知
@@ -173,22 +173,22 @@ redirect: { target: agent, id: 12 }
 - `id`：file / script 目标在完成（或出错）后接收 `<agent-message role="ping">` 通知的代理 ID。
   回复本体进入文件/脚本，ping 只是通知（脚本目标的通知内容是脚本的控制台输出）。
   特殊值 `0` = 创建者（仅 frontmatter 中可用）；其它取值必须是当前会话拥有的代理，否则创建失败。
-- file 目标为**追加写入**；子代理出错时写入内容带 `Agent error:` 前缀，脚本异常时通知内容带 `Script error:` 前缀。
+- file 目标为**追加写入**；子智能体出错时写入内容带 `Agent error:` 前缀，脚本异常时通知内容带 `Script error:` 前缀。
 
 ### script 目标
 
 `path` 必须指向**代理启动者**文件系统中的 ESM 模块。脚本在独立的 RunJS 沙箱中运行：
 
 - 60 秒运行超时；无 network / eval 额外权限；文件访问和权限继承主代理的文件系统。
-- 同一子代理的多次触发复用同一个持久化线程，**模块级变量在触发之间保留**，但线程会因为 10 分钟无触发被终止，因此，只靠模块变量保存状态是不可靠的。
+- 同一子智能体的多次触发复用同一个持久化线程，**模块级变量在触发之间保留**，但线程会因为 10 分钟无触发被终止，因此，只靠模块变量保存状态是不可靠的。
 - `process.env` 环境变量：
 
   | 变量 | 类型 | 含义 |
   |---|---|---|
-  | `AGENT_ID` | number | 子代理 ID |
-  | `AGENT_OWNER` | number | 子代理创建者 ID |
+  | `AGENT_ID` | number | 子智能体 ID |
+  | `AGENT_OWNER` | number | 子智能体创建者 ID |
   | `AGENT_ERROR` | boolean | 本轮是否以错误结束 |
-  | `AGENT_RESPONSE` | string | 子代理的回复内容，或者错误详情 |
+  | `AGENT_RESPONSE` | string | 子智能体的回复内容，或者错误详情 |
 
 - `"agents"` 宿主模块：
 
@@ -198,7 +198,7 @@ redirect: { target: agent, id: 12 }
   // 直接发送原始消息，不会附加 XML 标签；id = 0 表示创建者
   await notifyAgent(1, "example"); // (id, content)
 
-  // 把消息发回子代理自身并再运行一轮，实现 ReAct 循环等高级特性
+  // 把消息发回子智能体自身并再运行一轮，实现 ReAct 循环等高级特性
   // 注意：retry 总是抛出 name="RetryError" 的特殊 Error
   if (retryCount < 10)
     await retry("格式不符合要求，再试一次");
@@ -217,15 +217,15 @@ redirect: { target: agent, id: 12 }
 
 - 经济性：不强行增加 agent；复杂度必须有回报。
    - 能用编程解决的事情，绝对不用子 agent 实现。
-   - 如果多个子代理需要读取类似的文件，它们应该合成一个。
+   - 如果多个子智能体需要读取类似的文件，它们应该合成一个。
    - 只有委派能带来上下文隔离、并行效率、专业审查、重复批处理等收益时，才使用子 agent。
    - 最终方案是否比"全部交给一个 agent"更快/更省钱/更好效果。
 - 并行性：派发互不依赖的并行任务。
-   - 可选：用 ACL、ignore 避免子代理读写查到无关文件（如其他子代理的任务）
+   - 可选：用 ACL、ignore 避免子智能体读写查到无关文件（如其他子智能体的任务）
 - 主体性：主 agent 始终保留全局目标、关键决策权、冲突处理和最终输出责任。
 - 可验证性：结构化输出使用 JSON Schema 和 ValidateJson，而不是让子 agent 以文本形式回复 JSON；必要时基于代码的硬 Gate。
 - 精确性：不写空泛建议，不使用"分析一下"这类模糊任务。子 agent 任务必须边界清晰、输入范围明确、输出格式明确、可独立验收。
-- 安全性：复杂、高风险、影响面大或关键决策场景添加独立的 Review 子代理。
+- 安全性：复杂、高风险、影响面大或关键决策场景添加独立的 Review 子智能体。
 
 ## 流程
 

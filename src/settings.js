@@ -423,7 +423,7 @@ export const GLOBAL_SETTINGS = [
 		_tab: 'prompt',
 		_group: 'prompt',
 		name: "系统提示词",
-		title: "留空使用默认提示词。不影响子代理会话。",
+		title: "留空使用默认提示词。不影响子智能体会话。",
 		type: "textbox",
 		placeholder: defaultSystemPrompt
 	},
@@ -676,10 +676,23 @@ export const GLOBAL_SETTINGS = [
 	{
 		id: "apiRetry",
 		name: "API 错误重试",
+		title: "仅限429等可重试错误。",
 		type: "number",
 		min: 0,
 		max: 10,
 		default: 3
+	},
+	{
+		id: "readTimeout",
+		name: "读取空闲超时",
+		title: "连续无文本增量（卡了）时自动重试。",
+		unit: "秒",
+		type: "number",
+		min: 30,
+		max: 600,
+		step: 1,
+		inline: true,
+		default: 120
 	},
 	{
 		name: "开发",
@@ -710,22 +723,22 @@ export const GLOBAL_SETTINGS = [
 		},
 		title: {
 			"后台": "关闭动画，尽力防止中断",
-			"监督": "输入框存在文本时暂停",
-			"介入": "工具出错后，你选编辑或继续",
+			"监督": "输入框有内容就暂停",
+			"介入": "出错时你选：改或继续"
 		},
-		default: 1
+		default: PP_AUTO
 	},
 	{
 		id: "toolRetryLimit",
 		_tab: "tools",
-		name: "工具失败重试次数",
+		name: "工具参数错误重试",
+		title: "把错误交给模型前先尝试重新生成。",
 		type: "number",
 		min: 0,
 		max: 3,
 		step: 1,
-		default: 1,
+		default: 0,
 		inline: true,
-		title: "工具参数校验失败时，重新生成几次。"
 	},
 	{
 		id: "permittedTools",

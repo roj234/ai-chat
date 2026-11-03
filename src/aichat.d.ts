@@ -95,7 +95,7 @@ declare namespace AiChat {
     }
 
     export type SubagentConversation = Conversation & {
-        /** 子代理宿主 */
+        /** 子智能体宿主 */
         owner: number;
 
         sa_maxTurns?: number;
@@ -291,6 +291,7 @@ declare namespace AiChat {
         checkUpdate: 0 | 1,
 
         apiRetry: number
+        readTimeout: number
     }
 
     type LocalPreset = ModelConfig & SamplingConfig & PromptConfig & TitleModelConfig & MiscPreset & ManualOverridePreset & AgentFSPreset;
@@ -412,6 +413,9 @@ declare namespace AiChat {
         // - 'stateless':  script()在渲染前执行一次，适用于无状态工具（如 chart 从参数构造图表）
         reentrant?: FunctionToolReentrantMode;
 
+        // 禁止在子代理中使用
+        requireUI?: boolean;
+
         /**
          * 是否允许并行执行（true=总体并行, same=单工具并行）
          */
@@ -477,7 +481,7 @@ declare namespace AiChat {
          * @param has_successor 是否不是最后一条消息
          * @param message 如果渲染器修改了消息（主要是那些 interactive=true 的）需要调用 markMessageDirty 函数
          */
-        keyFunc?: (keys: Array, context: ToolResponse & Payload, has_successor: boolean, message: AssistantMessage) => void;
+        keyFunc?: (keys: any[], context: ToolResponse & Payload, has_successor: boolean, message: AssistantMessage) => void;
     }
 
     type FunctionTool<Payload> = OpenAI.FunctionToolJSON & FunctionToolImpl<Payload>;
@@ -511,10 +515,18 @@ declare namespace AiChat {
         noHighlight?: boolean,
         stream?: boolean,
         noImage?: boolean,
-        trusted?: boolean
+        trusted?: boolean,
+
+        fs?: AiChat.FileSystemInstance,
+        base?: string,
     }
 
     type FileSystemInstance = {};
+
+    class Cancellable<T> {
+        done: Promise<T>
+        cancel(): void
+    }
 
     namespace DnD {
         //region 酒馆类型定义
@@ -798,9 +810,9 @@ declare namespace AiChat {
 
         constructor(conversation: Conversation, messages: Message[]);
 
-        push(...items: Message): number;
+        push(...items: Message[]): number;
         pop(): Message;
-        unshift(...items: Message): void;
+        unshift(...items: Message[]): void;
 
         /**
          * 分支数组的核心操作方法，目前只允许开头插入不入库消息，末尾插入消息，以及删除某一段到末尾的整体。

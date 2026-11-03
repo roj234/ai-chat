@@ -20,6 +20,7 @@ import {parseJson5} from "unconscious/common/Json.js";
 import {highlightJsonLike} from "./markdown/highlight.js";
 import {markMessageDirty} from "./database.js";
 import {resolvePreset} from "./presets.js";
+import {ONCE_EVENT} from "@roj234/shared";
 
 export const TOOL_NAME = debugSymbol("ToolName");
 export const TOOL_IS_RUNNING = debugSymbol("Running");
@@ -584,6 +585,15 @@ const UNSAFE_TOOL_DENY_MESSAGE_AFK = "AutoDenied: user is not present and cannot
 export const TC_SCHEMA_ERROR = 4, TC_NEED_INTERACTION = 1, TC_ERROR = 2;
 
 /**
+ * 可取消的工具 (请尽量撤销副作用)
+ */
+export class Cancellable {
+	/** @return {Promise<any>} */
+	done() {}
+	cancel() {}
+}
+
+/**
  *
  * @param {AiChat.AssistantMessage} response
  * @param {AiChat.Conversation} conv
@@ -709,9 +719,12 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 			let result = fn.script(parameters, msg, conv, name, response);
 			if (result instanceof Promise) {
 				$update(updateMessageUI);
-				// 这太危险了，可能导致无法撤销的副作用
-				//if (signal) result = abortable(result, signal);
 				result = await result;
+			} else if (result instanceof Cancellable) {
+				$update(updateMessageUI);
+				if (signal.aborted) result.cancel();
+				signal.addEventListener('abort', () => result.cancel(), ONCE_EVENT);
+				result = await result.done();
 			}
 			if (result !== undefined) {
 				if (typeof result !== "string")

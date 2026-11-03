@@ -100,6 +100,9 @@ export default defineConfig(async ({mode}) => {
         }),
         purgecss({
             safelist: [
+                // Explorer.jsx
+                /^ri-folder(?:-open)?-(?:fill|line)$/,
+
                 // katex
                 'katex-sizing',
                 'delimsizing',
@@ -126,20 +129,6 @@ export default defineConfig(async ({mode}) => {
                     '</head>',
                     `<script>console.log("build: ${commit} · ${buildTime}")</script></head>`
                 );
-            }
-        },
-        {
-            name: 'sw-helper',
-            configureServer(server) {
-                server.middlewares.use((req, res, next) => {
-                    const originalUrl = req.url;
-                    if (!originalUrl.endsWith("/sw.js")) return next();
-
-                    const code = fs.readFileSync("sw.js", "utf-8");
-                    res.writeHead(200, {"Content-Type": "text/javascript"});
-                    res.write(Object.entries(define).map(([k, v]) => `const ${k} = ${k === 'IS_ANDROID_BUILD' ? true : v};`).join('') + code);
-                    res.end();
-                });
             }
         },
     ],

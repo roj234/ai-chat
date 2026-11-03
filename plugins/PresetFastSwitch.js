@@ -1,9 +1,17 @@
 import {$computed, $vforeach, unconscious} from "unconscious";
-import {config, selectedConversation} from "/src/states.js";
+import {config, EVENT_BUS, selectedConversation} from "/src/states.js";
 import "./PresetFastSwitch.css";
-import {updateConversation} from "/src/database.js";
-import {loadPreset, manualOverrideKeys, markCombinedPresetDirty, presets} from "/src/presets.js";
+import {kvListGet, updateConversation} from "/src/database.js";
+import {
+	getProviderId,
+	loadPreset,
+	manualOverrideKeys,
+	markCombinedPresetDirty,
+	PRESET_KVS_ID,
+	presets
+} from "/src/presets.js";
 import {CUSTOM_CONTROLS} from "../src/customControls.js";
+import {showToast} from "../src/components/Toast.js";
 
 const getLockedPresetName = () => {
 	const p = selectedConversation.presets;
@@ -13,8 +21,8 @@ const getLockedPresetName = () => {
 
 const currentPreset = $computed(() => getLockedPresetName() ?? ((config._dirty||'') + (config.name || config.model)));
 const main = <div className={"pretty-select preset-switch up"} style={"width: auto; max-width: min(200px, 30vw)"}>
-	<div className="input" tabIndex={0} role="button" title={"预设切换菜单"} onClick.stop={() => main.classList.toggle("open")}>
-		<span className={"ri-lock-line"} title={"锁定当前对话的预设"}
+	<div className="input" tabIndex={0} role="button" title={"模型选单"} onClick.stop={() => main.classList.toggle("open")}>
+		<span className={"ri-lock-line"} title={"锁定此对话的模型"}
 			style:display={() => unconscious(selectedConversation) ? '' : 'none'}
 			class:locked={() => selectedConversation.presets}
 			onClick.stop={e => {
@@ -67,3 +75,12 @@ const main = <div className={"pretty-select preset-switch up"} style={"width: au
 </div>;
 
 CUSTOM_CONTROLS.unshift(main);
+EVENT_BUS.on(['convNew'], async (conv) => {
+	const presetId = getProviderId(unconscious(config))+'/'+config.model;
+	try {
+		await kvListGet(PRESET_KVS_ID, presetId);
+		conv.presets = presetId;
+	} catch (e) {
+		showToast("当前会话的模型/供应商未自动锁定");
+	}
+});

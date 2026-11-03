@@ -413,8 +413,10 @@ class PathMatcher {
 }
 
 export class Router {
-	// 外部会改这个
+	// 外部字段
 	zipRouter;
+	sync;
+
 	// hook
 	#filter;
 

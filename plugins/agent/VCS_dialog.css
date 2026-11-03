@@ -136,9 +136,6 @@
 
 	& > .textDiff {
 		padding: 0;
-		border-radius: 0;
-		border: none;
-		max-height: none;
 	}
 	& > .row {
 		padding: 8px 12px;

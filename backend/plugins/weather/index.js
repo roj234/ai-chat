@@ -209,7 +209,7 @@ mcp.tool(
 		const {us_aqi: unused1, european_aqi: unused2, ...currentUnits} = json.current_units;
 
 		let str = `${time}\n`;
-		for (const key of Object.keys(current)) {
+		for (const key in current) {
 			str += convertToCamelCase(key)+": "+current[key]+(currentUnits[key]||'')+'\n';
 		}
 		const result = str.trim();

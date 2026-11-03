@@ -27,7 +27,12 @@ const vfsData = new Map;
 // ===== 请求拦截 =====
 self.addEventListener('fetch', (event) => {
 	const request = event.request;
-	if (!IS_ANDROID_BUILD) {
+
+	if (request.url.startsWith(vfsScope)) {
+		event.respondWith(handleVfsRequest(request, event));
+	}
+
+	if (!IS_ANDROID_BUILD && !import.meta.env.DEV) {
 		const url = new URL(request.url);
 		url.search = url.hash = '';
 
@@ -41,16 +46,12 @@ self.addEventListener('fetch', (event) => {
 		}
 	}
 
-	if (BLOB_URL_PATTERN.test(request.url)) {
+	if (!import.meta.env.DEV && BLOB_URL_PATTERN.test(request.url)) {
 		if (request.method === 'GET') {
 			event.respondWith(handleGetBlobRequest(request, event));
 		} else if (request.method === 'POST') {
 			event.respondWith(handleSetBlobRequest(request, event));
 		}
-	}
-
-	if (request.url.startsWith(vfsScope)) {
-		event.respondWith(handleVfsRequest(request, event));
 	}
 });
 
@@ -74,7 +75,7 @@ const RPC = (type, payload) => new Promise((resolve) => {
 const handleVfsRequest = async (request, event) => {
 	// TODO 支持修改文件的请求 PUT PATCH 等等
 	if (request.method !== 'GET') {
-		return new Response("", { status: 403 });
+		return new Response("", { status: 503 });
 	}
 
 	const parts = request.url.slice(vfsScope.length).split('/');
@@ -96,17 +97,62 @@ const handleVfsRequest = async (request, event) => {
 		// OPFS-like
 		let cur = vfs.handle;
 		for (const p of parts.slice(0, -1)) cur = await cur.getDirectoryHandle(p);
-		return new Response(await (await cur.getFileHandle(parts.at(-1))).getFile(), {
+		const blob = await (await cur.getFileHandle(parts.at(-1))).getFile();
+
+		const m = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get('range'));
+		if (!m) return new Response(blob, {
+			status: 200,
 			headers: {
-				"Cache-Control": "no-store",
-				"Content-Type": getContentType(parts.at(-1))
+				'Content-Type': getContentType(parts.at(-1)),
+				'Accept-Ranges': 'bytes'
+			}
+		});
+
+		const size = blob.size;
+
+		let start, end;
+		const [, s, e] = m;
+		if (s === '') {
+			const n = Number(e);
+			start = Math.max(0, size - n);
+			end = size - 1;
+		} else {
+			start = Number(s);
+			end = e === '' ? size - 1 : Math.min(Number(e), size - 1);
+		}
+
+		if (start > end || start >= size) {
+			return new Response(null, {
+				status: 416,
+				headers: { 'Content-Range': `bytes */${size}` }
+			});
+		}
+
+		const chunk = blob.slice(start, end + 1);
+		return new Response(chunk, {
+			status: 206,
+			headers: {
+				'Content-Type': getContentType(parts.at(-1)),
+				'Content-Length': String(chunk.size),
+				'Content-Range': `bytes ${start}-${end}/${size}`,
+				'Accept-Ranges': 'bytes'
 			}
 		});
 	} else {
+		let headers = request.headers;
+		const pat = vfs.pat;
+		if (pat) {
+			headers = new Headers(headers);
+			headers.set('Authorization', 'Bearer '+vfs.pat);
+		}
+
+		const url = new URL(vfs.uri+"readRaw?path="+parts.join('/'));
+
+		const root = params[1];
+		if (root) url.searchParams.set('root', params[1]);
+
 		// real server
-		const upstream = await fetch(vfs.uri+"readRaw?root="+encodeURIComponent(params[1])+"&path="+encodeURIComponent(parts.join('/')), {
-			headers: vfs.pat ? {Authorization: 'Bearer '+vfs.pat} : undefined,
-		});
+		const upstream = await fetch(url, {headers});
 		return new Response(upstream.body, upstream);
 	}
 };
@@ -193,7 +239,7 @@ const handleAssetRequest = async (request, event) => {
 	if (cached) return cached;
 
 	// 浏览器可能发起 opaque 请求，比如背景图
-	const response = await fetch(request.url, { mode: 'cors' });
+	const response = await fetch(request.url, { mode: 'cors', cache: 'no-store' });
 	if (response.ok) {
 		event.waitUntil(cache.put(request, response.clone()));
 	}
@@ -464,7 +510,8 @@ self.addEventListener('message', (event) => {
 			break;
 		case 'vfs':
 			vfsData.clear();
-			break;
+			client.postMessage([ id, 1 ]);
+		return;
 		case 'rpc':
 			const callback = rpcTasks.get(id);
 			if (callback) {

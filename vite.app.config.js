@@ -35,6 +35,9 @@ export default {
         }),
         purgecss({
             safelist: [
+                // Explorer.jsx
+                /^ri-folder(?:-open)?-(?:fill|line)$/,
+
                 // katex
                 'katex-sizing',
                 'delimsizing',

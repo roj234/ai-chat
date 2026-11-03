@@ -106,7 +106,7 @@ function buildData(messages, logs) {
 		breakdown: [
 			{ key: 'thinking', label: '推理', sec: thinkTimeSum / 1000 },
 			{ key: 'tool',     label: '工具调用', sec: toolTimeSum / 1000 },
-			{ key: 'subagent', label: '子代理', sec: subagentTimeSum / 1000 },
+			{ key: 'subagent', label: '子智能体', sec: subagentTimeSum / 1000 },
 			{ key: 'waiting',  label: '等待',  sec: waitingTimeSum / 1000 },
 		],
 		inTokens, outTokens,

@@ -132,7 +132,7 @@ export function deserializeRow(row, decompression = decompressGeneric) {
 		v = rest;
 	} else {
 		v = decompression(data);
-		for (const key of Object.keys(rest)) {
+		for (const key in rest) {
 			if (null == v[key]) v[key] = rest[key];
 		}
 	}

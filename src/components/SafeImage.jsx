@@ -18,7 +18,7 @@ const whiteList = new Set([
 	"avatars.githubusercontent.com"
 ]);
 
-export function SafeImage({src, title = "", external}) {
+export function SafeImage({src, title = "", external, fs}) {
 	const state = $state("");
 	let image, error;
 
@@ -36,7 +36,7 @@ export function SafeImage({src, title = "", external}) {
 			if (!state.value) {
 				let safe = url.startsWith("blob:") || url.startsWith("data:");
 				if (!external && !safe && !/^https?:\/\//i.test(url)) {
-					const tmp = EVENT_BUS.post(['resolveUrl'], url);
+					const tmp = EVENT_BUS.post(['resolveUrl'], url, fs);
 					if (tmp instanceof Promise) {
 						tmp.then(
 							([first]) => {

@@ -1,5 +1,4 @@
-export {createFileSystemAsync} from "./Mounts.js";
-export {fileAccess, createFileSystem, FS_INSTANCE} from "./Mounts.js";
+export {fileAccess, createFileSystem, createFileSystemAsync, callFileSystemFunc, getFileSystem, FS_SOURCE, FS_INSTANCE, vfsUUID} from "./Mounts.js";
 export {getChangeableFiles, FileChangerNames} from "./overwrite-monitor.js";
 
 export {VirtualDirectory, VirtualFile, NAMED_VFS} from "./VirtualFileSystem.js";

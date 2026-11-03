@@ -2,7 +2,7 @@ import {IndexedDBAccess} from "/src/utils/dbAccess.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {connectBestServer, prettyError, updateOnIntersected} from "/src/utils/utils.js";
 import {GLOBAL_SETTINGS} from "/src/settings.js";
-import {config} from "/src/states.js";
+import {config, EVENT_BUS} from "/src/states.js";
 import {showToast} from "/src/components/Toast.js";
 import {createWebFileSystem} from "./WebFSDriver.js";
 import {createConfigFileSystem} from "./ConfigFileSystem.js";
@@ -292,6 +292,7 @@ async function callFBI(mount) {
 				p = folderDB((tx) => tx.objectStore(FOLDER_STORE_NAME).put(rest), true, FOLDER_STORE_NAME);
 			}
 
+			p.then(() => EVENT_BUS.post(['vfsConfig', 'set'], item));
 			return p;
 		};
 		/**
@@ -302,6 +303,7 @@ async function callFBI(mount) {
 		 */
 		const deleteItem = (btn, item) => {
 			const onDeleted = () => {
+				EVENT_BUS.post(['vfsConfig', 'del'], item);
 				const i = rootItems.indexOf(item);
 				if (i >= 0) {
 					if (unconscious(activeItem) === item)
@@ -646,6 +648,14 @@ async function callFBI(mount) {
 	return materializeFileSystem(mount);
 }
 
+export const FS_SOURCE = debugSymbol("UUID");
+/**
+ *
+ * @param {AiChat.Mount} _mount
+ * @return {string}
+ */
+export const vfsUUID = _mount => `${_mount.fs_type}://${_mount.fs_server||''}/${_mount.fs_base}${_mount.fs_branch ? `#${_mount.fs_branch}` : ''}`;
+
 /**
  * 根据配置初始化文件系统
  * @param {AiChat.Mount} mount
@@ -658,7 +668,10 @@ export const createFileSystem = (mount) => {
 	let promise = mount[FS_OPENING];
 	if (!promise) {
 		promise = mount[FS_OPENING] = callFBI(mount);
-		promise.then(fs => mount[FS_INSTANCE] = fs);
+		promise.then(fs => {
+			mount[FS_INSTANCE] = fs;
+			fs[FS_SOURCE] = mount;
+		});
 		promise.finally(() => {delete mount[FS_OPENING];});
 	}
 	return promise;
@@ -681,13 +694,13 @@ export const createFileSystemAsync = (mount, promise) => {
  * @param {string} func
  * @param {Record<String, any>} parameters
  * @param {AiChat.Conversation} [conv]
- * @return {Promise<string>}
+ * @return {Promise<string | Blob | Object>}
  */
 export const callFileSystemFunc = (fs, func, parameters, conv) => {
 	if (typeof fs === 'function') return fs(func, parameters, conv);
 
 	const handler = fs[func];
-	if (!handler) throwDOMException(`${func} is not implemented in this VFS`, FSE_NotSupported);
+	if (!handler) return Promise.reject(new DOMException(`${func} is not implemented in this VFS`, FSE_NotSupported));
 	return handler(parameters);
 };
 
@@ -772,6 +785,7 @@ export const crossVFSCopyMove = async({src, dest, move}, _, conv) => {
 			path: src,
 			pattern: '**',
 			json: true,
+			limit: 100000,
 			showDir: false,
 			showHidden: true,
 			//showModified: true,
@@ -799,7 +813,9 @@ export const crossVFSCopyMove = async({src, dest, move}, _, conv) => {
 const state = $state();
 const updateEstimate = () => navigator.storage.estimate().then(t => state.value = formatSize(t.usage) + "/" + formatSize(t.quota));
 const opfsDialog = <div className="choice-scroll row">
-	<button className={"btn ghost"} onClick={() => callFBI({fs_label: "管理文件系统"}).catch(PROMISE_CATCH)}>管理文件系统</button>
+	<button className={"btn ghost"} onClick={() => createFileSystem({fs_label: "管理文件系统"}).then((fs) => {
+		return EVENT_BUS.post(['viewUrl'], '', null, fs);
+	}, PROMISE_CATCH)}>管理文件系统</button>
 	<button className={"btn danger"} onClick={() => {
 		SimpleModal({
 			title: "清空私库（OPFS）？",

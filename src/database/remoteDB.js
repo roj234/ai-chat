@@ -429,7 +429,7 @@ export const kvListSet = async (value, type, name) => {
 	});
 	return (p1 ? Promise.all([p1, p2]) : p2).then(
 		() => {
-			EVENT_BUS.post(['kvs', type, 'set'], name);
+			EVENT_BUS.post(['kvs', type, 'set'], name, rep(value.meta));
 			kvsCache.set(cacheKey, value);
 		},
 		(e) => {

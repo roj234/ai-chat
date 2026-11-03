@@ -224,7 +224,7 @@
 }
 
 /* 移动端适配 */
-@media (max-width: 640px) {
+@media (max-width: 639px) {
     .fa-modal {
 
         /* 移动端常驻展示操作按钮，保持透明度柔和 */

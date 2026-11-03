@@ -2,7 +2,7 @@ import {fileAccess} from "./Mounts.js";
 import {getToolParameters, prefixTitle} from "/src/toolset.js";
 import {trackProcess} from "./RemoteFSEvent.js";
 import {lightSync, loadLanguage} from "/src/markdown/highlight.js";
-import {SetTimeout} from "../rp_kit/SetTimeout.js";
+import {Wait} from "../rp_kit/Wait.js";
 import {prettyError} from "/src/utils/utils.js";
 
 /** @type {AiChat.FunctionTool} */
@@ -148,7 +148,7 @@ const Shell = {
 	}
 };
 
-export const shellTools = [RunProgram, Shell, TerminateProcess, WriteStdin, SetTimeout];
+export const shellTools = [RunProgram, Shell, TerminateProcess, WriteStdin, Wait];
 
 export async function shellPrompt(conv) {
 	let shellType = '';
@@ -157,12 +157,15 @@ export async function shellPrompt(conv) {
 	try {
 		data = await fileAccess('env')({}, {}, conv);
 	} catch (e) {
-		throw `文件访问服务系统提示请求失败\n`+prettyError(e);
+		throw `初始化执行环境失败\n`+prettyError(e);
 	}
-	let {prompt, location} = data;
+	let {programs, location} = data;
 
-	if (prompt.startsWith("os: Windows")) {
-		if (!prompt.includes("bash: No")) {
+	// 后端现在可以不开exec了
+	if (programs == null) return '';
+
+	if (programs.startsWith("os: Windows")) {
+		if (!programs.includes("bash: No")) {
 			shellType = `bash.
 - Note: \`/tmp\` and other UNIX directories may not exist`;
 		} else {
@@ -176,7 +179,7 @@ export async function shellPrompt(conv) {
 	return `<command-execution>
 ### Environment
 
-${prompt}
+${programs}
 
 ### Rules
 

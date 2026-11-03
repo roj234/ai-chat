@@ -4,11 +4,10 @@
     --taskbar: 0;
 }
 
-body.taskbar-open { --taskbar: 1; }
-
 .app {
     height: calc(100vh - var(--taskbar-height) * var(--taskbar));
-    transition: height 0.25s ease;
+    &.taskbar-open { --taskbar: 1; }
+    &.taskbar-transition {transition: height 0.25s ease;}
 }
 
 .taskbar {

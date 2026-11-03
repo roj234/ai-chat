@@ -77,7 +77,7 @@ const createVCSDialog = (conv, state) => {
 	const fileSystems = ['./', ...Object.keys(conv.mnt ?? {}).map(name => '~/'+name+'/')];
 	const selectedFileSystem = $state(fileSystems[0]);
 	const viewingOverlay = $state(VCS_BASE_BRANCH);
-	const isReadonly = $computed(() => !!(conv.mnt[selectedFileSystem.slice(2, -1)] ?? conv).fs_readonly, null, true);
+	const isReadonly = $computed(() => !!(conv.mnt?.[selectedFileSystem.slice(2, -1)] ?? conv).fs_readonly, null, true);
 
 	const callVCS = async (opt) => {
 		const [path, fs] = await getFileSystem(unconscious(selectedFileSystem), conv);

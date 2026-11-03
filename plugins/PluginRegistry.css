@@ -12,7 +12,7 @@
 }
 
 /* 主容器 */
-.plugin-manager {
+.plugins {
     &.win-body {
         flex-direction: row;
     }

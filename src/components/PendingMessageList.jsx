@@ -109,6 +109,7 @@ export function PendingMessageList({attachments, items, input} = {}) {
 							<button className="pm-recall" title="下一条发送" tabIndex={0}
 									onClick={({currentTarget}) => {
 										delete message.defer;
+										EVENT_BUS.post(['__undefer'], message);
 										updateConversation(unconscious(selectedConversation));
 										currentTarget.remove();
 									}}>

@@ -3,7 +3,7 @@ import {GLOBAL_SETTINGS} from "/src/settings.js";
 import {onLoad} from "/src/hooks.js";
 import {$derived, $state, $watch, unconscious} from "unconscious";
 import {formatSize} from "unconscious/common/Utils.js";
-import {config} from "/src/states.js";
+import {config, EVENT_BUS} from "/src/states.js";
 
 const SW_URL = './sw.js';
 
@@ -15,18 +15,18 @@ if (swc) {
 	GLOBAL_SETTINGS.push({
 		_tab: "data",
 		type: "element",
-		name: "远程资源缓存",
+		name: "资源缓存和VFS静态服务",
 		element: <div className={"choice-scroll row"} ref={element} />
 	});
 	GLOBAL_SETTINGS.push({
 		_tab: "data",
 		id: "blobCacheCapacity",
 		type: "number",
-		name: "容量限制",
-		min: 10,
+		name: "资源缓存容量",
+		min: 0,
 		max: 500,
 		step: 10,
-		default: 100,
+		default: 50,
 		unit: "MiB",
 		inline: true,
 	});
@@ -35,30 +35,31 @@ if (swc) {
 		if (!swc.controller) {
 			element.replaceChildren(<button className={"btn primary"} onClick={() => enableBlobCache().then(cb)}>启用</button>);
 		} else {
+			EVENT_BUS.on(['vfsConfig'], vfs => sendMessage('vfs'));
+
 			const size = $state(0);
 			updateOnIntersected(element, () => getCacheSize().then(size1 => size.value = size1));
 			$watch($derived(config.blobCacheCapacity), () => {
-				const cap = config.blobCacheCapacity;
-				if (cap) setMaxCacheSize(cap << 20).then(([before, after]) => {
+				setMaxCacheSize(config.blobCacheCapacity << 20).then(([before, after]) => {
 					console.log("Size reduced: "+formatSize(before-after));
 				});
 			});
 
 			element.replaceChildren(
-				<span style="font-size:14px">已用：{() => formatSize(unconscious(size))}</span>,
-				<button className="btn ghost" onClick={() => sendMessage('vfs')}>刷新VFS</button>,
-				<button className={"btn danger"} onClick={() => unregisterCache().then((removed) => {
+				<button className="btn danger" title="关闭并清除缓存" onClick={() => unregisterCache().then((removed) => {
 					if (removed) location.reload();
-				})}>卸载</button>,
+				})}>关闭</button>,
+				<span style="font-size:14px">已用：{() => formatSize(unconscious(size))}</span>,
 			);
 		}
 	};
 	onLoad(() => swc.addEventListener('message', (event) => {
 		const [id, value] = event.data;
-		const resolve = transactions.get(id);
-		if (resolve) {
+		const data = transactions.get(id);
+		if (data) {
 			transactions.delete(id);
-			resolve(value);
+			clearTimeout(data[0]);
+			data[1](value);
 		}
 	}));
 	onLoad(cb);
@@ -92,20 +93,16 @@ const enableBlobCache = () => (
 
 /**
  * 向 SW 发送消息并等待对应类型的回复
- * @param {'get'|'set'|'del'} type - 请求类型
+ * @param {'get'|'set'|'del'|'vfs'} type - 请求类型
  * @param {*} [value] - 附加数据（SET_MAX_SIZE 时需要）
  * @returns {Promise<*>}
  */
 const sendMessage = (type, value) => enableBlobCache().then((reg) => {
 	return new Promise((resolve, reject) => {
 		const key = id += 2;
-		transactions.set(key, resolve);
+		const timer = setTimeout(() => reject(new Error(`RPC ${type} Timeout`)), 3000);
+		transactions.set(key, [timer, resolve]);
 		swc.controller.postMessage([key, type, value]);
-		setTimeout(() => {
-			if (transactions.delete(key)) {
-				reject(new Error(`Timeout`));
-			}
-		}, 10000);
 	})
 });
 

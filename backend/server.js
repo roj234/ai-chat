@@ -209,7 +209,7 @@ if (WEBSOCKET_SYNC_ENABLE) {
 	const wss = new WebSocketServer({
 		server,
 		path: "/api/sync",
-		maxPayload: 4096,
+		maxPayload: 65536,
 		verifyClient: createSyncValidateMiddleware(DATA_PATH),
 		perMessageDeflate: true
 	});

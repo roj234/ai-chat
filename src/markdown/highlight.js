@@ -106,9 +106,8 @@ const getOrCreateVL = node => {
 		vl = node._vl = new VirtualList({
 			overscan: 50,
 			itemHeight: null,
-			data: [{text: ""}],
-			renderer: (item, index) => <div className={'line'} dangerouslySetInnerHTML={item.text ?? item}/>,
-			keyFunc: (item) => item.text ?? item
+			data: [{s: ""}],
+			renderer: (item, index) => <div className={'line'} dangerouslySetInnerHTML={item.s}/>,
 		});
 		$cleanup(node, () => {
 			vl.destroy();
@@ -151,7 +150,7 @@ export const highlight = (code, language, node, is_finished) => {
 				if (needVirtualList) {
 					installVirtualList();
 					// noinspection JSPrimitiveTypeWrapperUsage
-					virtualList.setItems(lines.map(s => new String(s)));
+					virtualList.setItems(lines.map(s => ({s})));
 					node.style.height = '50lh';
 				} else {
 					node.textContent = code;
@@ -166,7 +165,7 @@ export const highlight = (code, language, node, is_finished) => {
 
 					if (!virtualList) installVirtualList();
 					// noinspection JSPrimitiveTypeWrapperUsage
-					virtualList.items = splitMultilineHTML(value).map(s => new String(s));
+					virtualList.items = splitMultilineHTML(value).map(s => ({s}));
 
 					// 避免同步布局
 					queueMacrotask(() => virtualList.scrollToBottom());
@@ -223,8 +222,8 @@ export const highlight = (code, language, node, is_finished) => {
 					if (testHtml === stableHtml) {
 						const lines = splitMultilineHTML(testHtml, []);
 
-						vl.items.at(-1).text += lines.shift();
-						vl.items.push(...lines.map(i => {return{text:i}}));
+						vl.items.at(-1).s += lines.shift();
+						vl.items.push(...lines.map(i => ({s:i})));
 						vl.render();
 						syncStagingArea();
 
@@ -240,7 +239,7 @@ export const highlight = (code, language, node, is_finished) => {
 			if (newCode.length > 500) {
 				syncStagingArea();
 
-				const sumHtml = vl.items.at(-1).text += newHtml;
+				const sumHtml = vl.items.at(-1).s += newHtml;
 				staging.insertAdjacentHTML("beforebegin", newHtml);
 				const dom = vl.getValue(vl.items.length-1);
 				if (dom) dom[ITEM_KEY] = sumHtml; // 更新虚拟列表内的key
@@ -376,9 +375,10 @@ const trimLastTopLevelElement = originalHtml => {
 /**
  * 加载语言
  * @param {string} languageName
+ * @param {boolean} [simulate]
  * @return {null | Promise<string>}
  */
-export const loadLanguage = languageName => {
+export const loadLanguage = (languageName, simulate) => {
 	const initial_id = languageName;
 	let asyncLoader;
 
@@ -391,8 +391,8 @@ export const loadLanguage = languageName => {
 
 		asyncLoader = LANGUAGES[languageName];
 		if (typeof asyncLoader !== 'string') {
-			if (typeof asyncLoader !== 'function')
-				return asyncLoader;
+			if (typeof asyncLoader !== 'function') return asyncLoader;
+			if (simulate) return Promise.resolve(languageName);
 
 			let promise = asyncLoader().then(async m => {
 				hljs.registerLanguage(languageName, m.default);
@@ -451,10 +451,19 @@ const DEPS = {
 	yaml: ['ruby'],
 };
 const LANGUAGES = {
+	// extension
+	"hpp": "cpp",
+	"cc": "cpp",
+	"cuda": "cpp",
+	"h": "c",
+	"rb": "ruby",
+	"rs": "rust",
 	'mjs': 'javascript',
 	'cjs': 'javascript',
 	"jsonl": "json",
 	"vue": "xml",
+	"ps1": "powershell",
+
 	"asp": "vbscript-html",
 	"aspx": "asp",
 	"abnf": () => import('highlight.js/lib/languages/abnf'),

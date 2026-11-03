@@ -1,7 +1,6 @@
 import * as fastmd from '@roj234/mdstream';
 
 import {SafeImage} from "../components/SafeImage.jsx";
-import {unconscious} from "unconscious";
 import {highlight} from "./highlight.js";
 import {EVENT_BUS} from "../states.js";
 
@@ -12,6 +11,8 @@ const customCodeRenderer = {};
  * @param {function(code: string, language: string, node: HTMLElement, is_finished: boolean): void} htmlGenerator
  */
 export const registerCodeBlockRenderer = (type, htmlGenerator) => customCodeRenderer[type] = htmlGenerator;
+
+const EXTERNAL_URL = /^(?:https?:\/\/|blob:|data:)/i;
 
 const getInnerHTML = node => {
 	if (node._value) return node._value;
@@ -232,7 +233,7 @@ export function createMarkdownRenderer(root, options = {}) {
 
 			if (!options.trusted) {
 				if (name === fastmd.SRC && !options.noImage) {
-					node.replaceWith(unconscious(<SafeImage src={value} title={node.title} external={options.external} />));
+					node.replaceWith(<SafeImage fs={options.fs} src={EXTERNAL_URL.test(value) ? value : (options.base||'')+value} title={node.title} external={options.external} />);
 					return;
 				}
 
@@ -240,12 +241,13 @@ export function createMarkdownRenderer(root, options = {}) {
 					if (value.toLowerCase().startsWith("javascript:")) return;
 
 					if (value[0] !== '#') {
-						if (/^https?:\/\//i.test(value)) {
+						if (EXTERNAL_URL.test(value)) {
 							node.target = "_blank";
 							node.rel = "noopener noreferrer";
+							node.prepend(<i className="ri-external-link-line" />)
 						} else if (!options.external) {
 							node.style.cursor = 'pointer';
-							node.addEventListener('click', () => EVENT_BUS.post(['viewUrl'], value, node));
+							node.addEventListener('click', () => EVENT_BUS.post(['viewUrl'], (options.base||'')+value, node, options.fs));
 							return;
 						}
 					}

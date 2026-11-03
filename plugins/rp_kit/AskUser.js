@@ -18,6 +18,7 @@ export const AskUser = {
 		+" Use when the next step requires user decision, clarification, or interactive branching."
 		+" Call this tool in parallel to ask multiple questions."
 	,
+	requireUI: true,
 	parameters: {
 		type: "object",
 		properties: {

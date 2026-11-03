@@ -53,7 +53,7 @@ import {getToolName, getToolParameters, TOOL_IS_RUNNING, toolScriptRegistry, und
 import {getImmediateMessages, markMessageDirty} from "../database.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
 import {cloneMessage, enableBranches, switchBranch} from "../utils/BranchManager.js";
-import {ITEM_KEY, PINNED, VirtualList} from "unconscious/common/VirtualList.js";
+import {PINNED, VirtualList} from "unconscious/common/VirtualList.js";
 import {EditWidget} from "./EditWidget.jsx";
 import {AudioPlayer} from "./AudioPlayer.jsx";
 
@@ -1123,18 +1123,14 @@ export function MessageList({messages}) {
 	const vl = new VirtualList({
 		itemHeight: 1000,
 		overscan: 500,
-		keyFunc: (item) => [item.key, item.key.time],
-		reuseHook(node, newKey, item) {
-			const oldKey = node[ITEM_KEY];
+		keyFunc: (item) => item.key,
+		onReuse(node, item) {
 			const msg = item.key;
-
-			if (oldKey[0] !== msg) return false;
-			if (oldKey[1] === msg.time) return true;
-			if (msg.role === "assistant" && msg === messages.at(-1)) {
-				node.firstElementChild.replaceWith(renderRole(item));
-				return true;
+			if (msg.role === "assistant" && msg === messages.at(-1) && msg.finish_reason === '') {
+				const nodes = node.firstElementChild.children;
+				nodes[0].textContent = roleName(item);
+				nodes[1].textContent = formatDate('Y-m-d H:i:s', msg.time ?? null);
 			}
-			return false;
 		},
 		renderer: renderBlock
 	});

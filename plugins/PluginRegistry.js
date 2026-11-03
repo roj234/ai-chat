@@ -4,7 +4,7 @@ import {ContentPart, registerToolset} from "/src/toolset.js";
 // 记住输入框
 import "./persistInputBox.js";
 // Blob ServiceWorker 缓存
-import "./blobCache.js";
+import "./blobCacheAndVirtualUrl.js";
 // 对话原始数据编辑
 import "./conversationEditor.js";
 // Blob管理器
@@ -32,8 +32,8 @@ import "./agent/agents-md.js";
 import "./agent/files.js";
 // 技能
 import "./agent/skills.js";
-// 文件预览
-import "./file-preview.js";
+// 文件预览（包含完整的VFS文件管理、预览、编辑，40-50KB）
+import "./fileManager/index.js";
 
 // 预装工具
 // JSON编辑
@@ -42,7 +42,7 @@ import "./tools/json_editor.js";
 import "./context_mgmt/subjective-compaction.js";
 // 任务列表
 import "./tools/task_list.js";
-// 子代理
+// 子智能体
 import "./tools/subagent.js";
 // 记忆
 import "./tools/memories.js";
@@ -71,16 +71,9 @@ import {registerCodeBlockRenderer, renderMarkdownToElement} from "/src/markdown/
 import {createDragSort} from "/common/DragSort.js";
 import {registerSchemaMessageRole} from "/common/ReactiveJSON.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
-import {GetTime} from "./rp_kit/interactive_simulation.js";
 import {markMessageDirty} from "/src/database.js";
 import {openWindow} from "/src/components/Windows.jsx";
 import {resolvePreset} from "../src/presets.js";
-
-// 时间工具
-registerToolset("GetTime", "获取时间", [GetTime], {
-	default: true,
-	hidden: "manual"
-});
 
 // 插件API
 window.AiChatAPI = {
@@ -244,7 +237,7 @@ GLOBAL_SETTINGS.push({
 	element: <div className={"choice-scroll"}>
 		<button className={"btn ghost"} onClick={() => {
 			openWindow({
-				id: "plugin-manager",
+				id: "plugins",
 				title: "插件管理器",
 				actions: <span className="pm-badge">启用 {pluginOrder.length} / {pluginDefinitions.length} 插件</span>,
 				element: pluginManager,

@@ -257,8 +257,9 @@ svg.icon {
 .sidebar {z-index: 1;}
 .taskbar {z-index: 2;}
 .MDI {z-index: 3;}
+.menu {z-index: 4;}
 /* 注意，模态框 SimpleDialog 用的是 dialog 天生有着最大的 zindex 无法降低 */
-.toasts {z-index: 4;}
+.toasts {z-index: 5;}
 
 
 /* 统一按钮 */
@@ -895,7 +896,7 @@ body._fileUI .hide-human {
     }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
     ::-webkit-scrollbar { width: 6px; }
 
     .panel {

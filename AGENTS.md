@@ -32,7 +32,7 @@ plugins/           前端插件
   rp_basic/          基础角色扮演插件（角色卡/世界书/预设）
   rp_kit/            交互式模拟插件（骰子、变量、QTE、覆盖层）
   rpg/               实验性JSON Schema游戏框架（已弃用）
-  tools/             插件化工具（图表、记忆、JSON编辑、任务列表、图像生成、子代理等）
+  tools/             插件化工具（图表、记忆、JSON编辑、任务列表、图像生成、子智能体等）
   voiceInput/        录音插件
 backend/           可选 Node 后端
   routes/          HTTP 路由（agent、sse-proxy、database、vectordb…）

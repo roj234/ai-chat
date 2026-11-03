@@ -133,10 +133,19 @@ export const createWebFileSystem = async (rootHandle, config = {}) => {
 			return 'Success';
 		},
 
-		async stat({path}) {
+		async stat({path, json}) {
 			const [ parent, name, handle, isDir ] = await myResolveHandle(path, READ);
 
 			const file = isDir ? null : await handle.getFile();
+			if (json) {
+				const resp = { type: isDir ? 'dir' : file };
+				if (file) {
+					resp.size = file.size;
+					resp.mtimeMs = file.lastModified;
+				}
+				return resp;
+			}
+
 			let str = `type: ${(isDir ? 'dir' : 'file')}`;
 			if (file) {
 				str += `
@@ -250,7 +259,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			for await (const [name, handle, relDir] of entries) {
 				const displayPath = relDir ? relDir + '/' + name : name;
 
-				if (!json && result.length >= limit) {
+				if (result.length >= limit) {
 					prefix = `[TRUNCATED to ${limit} entries, use a more specific path or pattern]\n`;
 					break;
 				}

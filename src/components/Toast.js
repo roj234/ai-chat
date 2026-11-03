@@ -40,7 +40,7 @@ export class PausableTimer {
 	}
 }
 
-let container;
+let defc;
 
 /**
  * @template T
@@ -49,10 +49,14 @@ let container;
  * @param {number} [timeout]
  * @param {function(closedBy: Event | T | undefined): void} [onClose]
  * @param {import("unconscious").Renderable} [closeBtn]
+ * @param {HTMLDivElement} dom
  * @return {function(T?): void}
  */
-export const showToast = (message, type, timeout = 5000, {onClose, closeBtn} = {}) => {
-	if (!container) document.body.append(container = <div className="toasts" />);
+export const showToast = (message, type, timeout = 5000, {onClose, closeBtn, dom} = {}) => {
+	if (!dom) {
+		if (!defc) document.body.append(defc = <div className="toasts" />);
+		dom = defc;
+	}
 
 	const closeToast = (event) => {
 		onClose?.(event);
@@ -83,6 +87,6 @@ export const showToast = (message, type, timeout = 5000, {onClose, closeBtn} = {
 		</div>;
 	}
 
-	container.append(el);
+	dom.append(el);
 	return closeToast;
 };

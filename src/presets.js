@@ -241,6 +241,11 @@ export const maxTokensClamped = $computed(() => {
 
 export const manualOverrideKeys = new Set(["think", "reasoningBudget", "reasoningEffort"]);
 
+/**
+ * @param {string} key
+ * @param value
+ * @return {Promise<void>}
+ */
 export const setCombinedConfig = (key, value) => {
 	const isLocked = selectedConversation.presets;
 	if (isLocked) {
@@ -252,8 +257,17 @@ export const setCombinedConfig = (key, value) => {
 	}
 }
 
+/**
+ * @param {AiChat.Conversation} conv
+ */
 export const markCombinedPresetDirty = (conv) => {
 	delete conv[MERGED_CONFIG];
 	if (conv === unconscious(selectedConversation))
 		$update(_updateCombinedPreset);
 }
+
+/**
+ * @param {AiChat.LocalPreset} settings
+ * @return {string}
+ */
+export const getProviderId = settings => settings.provider || new URL(resolveDBRelativeURL(settings.endpoint)).host;

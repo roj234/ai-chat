@@ -1,8 +1,7 @@
 import './ConversationList.css';
 import {$state, $update, $watchWithCleanup, debugSymbol, ONCE_EVENT, unconscious} from 'unconscious';
-import {ITEM_KEY, VirtualList} from 'unconscious/common/VirtualList.js';
+import {VirtualList} from 'unconscious/common/VirtualList.js';
 import {formatDate} from 'unconscious/common/Utils.js';
-import {deepEqual} from "unconscious/common/deepEqual.js";
 import {deleteConversation, setConversationTitle, updateConversation} from "../database.js";
 import {
 	auxMainlyTouch,
@@ -257,14 +256,10 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 		gap: 8,
 		data: groupAndConvArr,
 		keyFunc,
-		reuseHook(node, newKey, item) {
-			if (!deepEqual(node[ITEM_KEY], newKey)) return false;
-
-			if (Array.isArray(newKey)) {
+		onReuse(node, item) {
+			if (item.textContent == null) {
 				node.classList.toggle('spin-before', runningConversations.has(item.id));
 			}
-
-			return true;
 		},
 		renderer(conv) {
 			if (conv.nodeType) return conv;

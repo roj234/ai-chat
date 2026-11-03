@@ -1,15 +1,9 @@
 .textDiff {
-    border: 1px solid var(--border);
-    border-top: none;
     font: 14px/1.5 monospace;
-
-    padding: 8px 10px;
-
     overflow: auto;
-
     transition: max-height 0.2s ease;
 
-    border-radius: 8px;
+    padding: 8px 10px;
 
     color: var(--code-fg);
     background: var(--code-bg);
@@ -47,4 +41,7 @@
 
 .tool-call .textDiff {
     max-height: 20lh;
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 8px;
 }

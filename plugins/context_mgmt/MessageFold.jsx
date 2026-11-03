@@ -2,7 +2,6 @@ import "./MessageFold.css";
 import {openWindow} from "/src/components/Windows.jsx";
 import {$computed, $state, $update, $vforeach, $watch, AS_IS, ref, unconscious} from "unconscious";
 import {showToast} from "/src/components/Toast.js";
-import {ITEM_KEY} from "unconscious/common/VirtualList.js";
 import {messages, selectedConversation} from "/src/states.js";
 import {markMessageDirty, updateConversation} from "/src/database.js";
 import {enableBranches} from "/src/utils/BranchManager.js";
@@ -183,11 +182,8 @@ function MessageFoldManager({conversation, messages, onChange}) {
 			_renderMessages(row, i);
 			return row;
 		}, AS_IS, {
-			reuseHook(node, key, item, i) {
-				if (node[ITEM_KEY] !== key) return false;
+			onReuse(node, item, i) {
 				_renderMessages(node, i);
-
-				return true;
 			}
 		})}</div>
 		<div className="mb-select-bar">

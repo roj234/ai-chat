@@ -6,7 +6,7 @@ import {Transform} from 'node:stream';
 import {createJsonStream} from "../../common/StreamJsonSerializer.js";
 import {deepEntries} from "unconscious/common/json-schema-utils.js";
 import {isLanAddress} from "../../common/isLanAddress.js";
-import {getProxyAgent} from "../utils/socks5-agent.js";
+import {getProxyAgent} from "../utils/fetch-hook.js";
 import {convertRequest, responsesProxyHandler} from "./api-proxy-responses.js";
 import {apiProxyLog as log, checkToken, processMessageRefs} from "./api-proxy-utils.js";
 import {finishedRequests, ProxyResumeManager, registerResumeRoutes} from "./api-proxy-resume.js";

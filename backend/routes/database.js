@@ -12,7 +12,7 @@ import {
 import fs from "node:fs/promises";
 import path from "node:path";
 import {LLM_COST_SCALE} from "../sync.js";
-import {getProxyAgent} from "../utils/socks5-agent.js";
+import {getProxyAgent} from "../utils/fetch-hook.js";
 import {exclusiveLock} from "../utils/lock.js";
 
 /**
