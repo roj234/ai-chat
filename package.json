@@ -1,7 +1,7 @@
 {
 	"name": "ai-chat",
 	"private": true,
-	"version": "4.3.0",
+	"version": "4.4.0",
 	"type": "module",
 	"scripts": {
 		"dev": "ie dev",
@@ -19,6 +19,7 @@
 		"@roj234/logdb": "^1.0.0",
 		"@roj234/lru-cache": "^1.0.0",
 		"@roj234/web-audio-engine": "^1.0.0",
+		"@roj234/util-inspect": "^1.0.0",
 		"@roj234/workerbox": "^1.0.0",
 		"@roj234/ws": "^1.0.0",
 

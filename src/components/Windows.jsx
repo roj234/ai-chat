@@ -9,6 +9,7 @@ import {auxSmallScreen, EVENT_BUS} from "../states.js";
  * @property {HTMLElement} root
  * @property {HTMLElement} element
  * @property {(boolean) => void} [onFocus]
+ * @property {() => ?boolean} [onBack]
  * @property {boolean} resizable
  * @property {boolean} minimized
  * @property {boolean} active
@@ -146,6 +147,17 @@ const toggleMaximize = (w) => {
 	return w.root.classList.toggle(MAXIMIZED);
 };
 
+export const unmaximizeFocusedWindow = () => {
+	if (focusedWindow) {
+		const cl = focusedWindow.root.classList;
+		if (cl.contains(MAXIMIZED)) {
+			cl.remove(MAXIMIZED);
+			return true;
+		}
+	}
+	return false;
+};
+
 const cloneContent = (node) => typeof node === "function" ? $computed(node) : node.cloneNode?.(true) || node;
 
 const MIN_W = 280;
@@ -268,11 +280,11 @@ export const openWindow = ({
 	if (height <= 1) height = ih * height;
 	else if (height > ih) height = ih;
 
-	let onFocus;
 	if (typeof element === "function") {
 		element = element(state);
 		if (element.element) {
-			onFocus = element.onFocus;
+			state.onFocus = element.onFocus;
+			state.onBack = element.onBack;
 			element = element.element;
 		}
 	}
@@ -293,7 +305,7 @@ export const openWindow = ({
 			 onPointerDown={() => focusWindow(state)}>
 			<div className="win-header">
 				<span className="icon">{cloneContent(icon)}</span>
-				<span className="title" onPointerDown.left={startDrag} onDblclick={handleMaximize}>{cloneContent(title)}</span>
+				<span className="title" onPointerDown.left={startDrag} onDblClick={handleMaximize}>{cloneContent(title)}</span>
 				<span className="controls">
 					{actions}
 					<button className="ri-subtract-line ghost" title="最小化" onClick={() => minimizeWindow(state)}></button>
@@ -306,7 +318,6 @@ export const openWindow = ({
 		</div>
 	);
 
-	state.onFocus = onFocus;
 	state.element = element;
 	state.root = root;
 	registerWindow(id, state);

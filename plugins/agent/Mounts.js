@@ -1,7 +1,6 @@
 import {IndexedDBAccess} from "/src/utils/dbAccess.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
-import {connectBestServer, prettyError, updateOnIntersected} from "/src/utils/utils.js";
-import {GLOBAL_SETTINGS} from "/src/settings.js";
+import {connectBestServer, prettyError} from "/src/utils/utils.js";
 import {config, EVENT_BUS} from "/src/states.js";
 import {showToast} from "/src/components/Toast.js";
 import {createWebFileSystem} from "./WebFSDriver.js";
@@ -230,7 +229,7 @@ async function callFBI(mount) {
 		...(!isIDB ? [{name: "典藏", el: <span className={"desc ellipsis"}>技能行于云端，多端同步如一。</span>, type: "db", lastAccessed: 0}] : []),
 		{name: "化卷", el: <span className={"desc ellipsis"}>映射内部数据为虚拟目录。<br/><b
 				style={"color:var(--error)"}>注意数据安全！</b></span>, type: "config", lastAccessed: 0 },
-		{name: "暗渊", el: <span className={"desc ellipsis"}>藏于浏览器私库 (OPFS)，亦可导出。</span>, type: "opfs", lastAccessed: 0},
+		{name: "暗渊", el: <span className={"desc ellipsis"}>藏于浏览器私库 (OPFS)。<br/>{await navigator.storage.estimate().then(t => "已用："+formatSize(t.usage)+"/"+formatSize(t.quota))}</span>, type: "opfs", lastAccessed: 0},
 	];
 	const pathStack = $state([]);
 
@@ -334,17 +333,22 @@ async function callFBI(mount) {
 		 */
 		const editItem = (item) => {
 			const defaultChoice = (item.handle?.name || item.uri);
+			if (item.type === BACKEND_SERVER_KVLIST_ID) {
+				return addRemoteFileSystem(item).then(data => {
+					const i = rootItems.indexOf(item);
+					itemTree[i] = data;
+					EVENT_BUS.post(['vfsConfig', 'set'], data);
+				}, e => {});
+			}
+
 			SimpleModal({
 				title: "修改名称 (slug)",
 				type: "input",
 				placeholder: defaultChoice,
 				onConfirm(name) {
+					if (!name) return false;
 					const i = rootItems.indexOf(item);
-					if (item.type === BACKEND_SERVER_KVLIST_ID) {
-						kvListDel(BACKEND_SERVER_KVLIST_ID, item.name);
-					} else {
-						folderDB((tx) => tx.objectStore(FOLDER_STORE_NAME).delete(item.name), true, FOLDER_STORE_NAME);
-					}
+					folderDB((tx) => tx.objectStore(FOLDER_STORE_NAME).delete(item.name), true, FOLDER_STORE_NAME);
 					saveItem(itemTree[i] = {...item, name: name || defaultChoice});
 				}
 			});
@@ -486,8 +490,10 @@ async function callFBI(mount) {
 				mount.fs_base = [...pathStack.slice(item.type === "local" ? 1 : 2), dirName].join('/');
 			}
 
-			item.lastAccessed = Date.now();
-			await saveItem(item);
+			if (!mount._noupdate) {
+				item.lastAccessed = Date.now();
+				await saveItem(item);
+			}
 
 			modal.remove();
 			resolve(item);
@@ -807,36 +813,3 @@ export const crossVFSCopyMove = async({src, dest, move}, _, conv) => {
 		await callFileSystemFunc(srcFileSystem, 'delete', { path: src });
 	}
 }
-
-// UI
-
-const state = $state();
-const updateEstimate = () => navigator.storage.estimate().then(t => state.value = formatSize(t.usage) + "/" + formatSize(t.quota));
-const opfsDialog = <div className="choice-scroll row">
-	<button className={"btn ghost"} onClick={() => createFileSystem({fs_label: "管理文件系统"}).then((fs) => {
-		return EVENT_BUS.post(['viewUrl'], '', null, fs);
-	}, PROMISE_CATCH)}>管理文件系统</button>
-	<button className={"btn danger"} onClick={() => {
-		SimpleModal({
-			title: "清空私库（OPFS）？",
-			message: "这包括:\n源私有文件系统（藏渊）中的所有数据\n申请了存储权限的插件数据\n\n重要数据请提前打包导出",
-			async onConfirm() {
-				const dir = await navigator.storage.getDirectory();
-				for await (const [name] of dir.entries()) {
-					await dir.removeEntry(name, {recursive: true});
-				}
-				updateEstimate();
-			}
-		})
-	}}>清空私库
-	</button>
-	<small>已用：{state}</small>
-</div>;
-
-updateOnIntersected(opfsDialog, updateEstimate);
-
-GLOBAL_SETTINGS.push({
-	_tab: "tools",
-	type: "element",
-	element: opfsDialog
-});

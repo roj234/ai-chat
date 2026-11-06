@@ -10,49 +10,221 @@ import {showToast} from "/src/components/Toast.js";
 import {formatDate, formatSize, immutableObjectMap} from "unconscious/common/Utils.js";
 import {renderMarkdownToElement} from "/src/markdown/markdown.js";
 import {ImagePane} from "../agent/ImagePane.jsx";
-import {FSE_IsDir} from "/common/pure-utils.js";
+import {webviewStreamDownloadFile} from "/vendor/jsBridge.js";
 import {callFileSystemFunc, FS_SOURCE, vfsUUID} from "../agent/index.js";
 import {openFileBrowser} from "./Explorer.jsx";
 import {config} from "/src/states.js";
 import "./preview.css";
+import {createAsyncQueue} from "../../common/pure-utils.js";
+
+/** 单次下载的体积上限：1 GiB */
+const MAX_DOWNLOAD_SIZE = 1024 ** 3;
+/** 超过这个体积就不再压缩，Store 更快也更省内存 */
+const MAX_COMPRESS_SIZE = 32 * 1024 ** 2;
+/** 小块攒到这个体积再 flush */
+const FLUSH_THRESHOLD = 1024 ** 2;
+/** 默认打包名 */
+const DEFAULT_ARCHIVE_NAME = '下载';
+
+const tooLargeError = (size) => new Error(`体积 ${formatSize(size)}，超过单次 1 GB 的下载上限`);
 
 /**
- * @param {AiChat.FileSystemInstance} fs
- * @param {string} path
- * @param {string} fileName
- * @return {Promise<void>}
+ * @param {(data: Blob, isLast: boolean) => Promise<void>} send
+ * @param {(any) => Promise<void>} [abort]
  */
-export const vfsDownload = async (fs, path, fileName) => {
-	let blob;
-
-	try {
-		blob = await callFileSystemFunc(fs, 'readRaw', {path});
-		blob = new File([blob], fileName, { type: blob.type });
-	} catch (e) {
-		if (!(e.message || e).includes("ISDIR") && e.name !== FSE_IsDir) throw e;
-
-		const files = await callFileSystemFunc(fs, 'list', { path, pattern: "**", json: true, limit: 10000, showDir: false });
-		const zw = ZipWriter();
-
-		const done = $state(0);
-
-		const dialog = showToast(<>正在打包，请稍候。已完成 {done}/{files.length}</>, '', -1)
-
-		try {
-			for (const [relPath] of files) {
-				const blob = await callFileSystemFunc(fs, 'readRaw', { path: path+"/"+relPath });
-				await zw.add(relPath, blob, { compression: true });
-				done.value ++;
+const bufferedWriter = (send, abort) => {
+	let tmp = [];
+	let tmpSize = 0;
+	return new WritableStream({
+		write(arr) {
+			if (tmpSize + arr.length > FLUSH_THRESHOLD) {
+				const blob = new Blob(tmp);
+				tmp = [arr];
+				tmpSize = 0;
+				return send(blob, false);
 			}
-		} finally {
-			dialog();
-		}
+			tmp.push(arr);
+			tmpSize += arr.length;
+		},
+		close: () => {
+			const blob = new Blob(tmp);
+			return send(blob, true);
+		},
+		abort,
+	});
+};
 
-		blob = zw.finish();
-		blob.name = fileName + ".zip";
+/**
+ * 挑一种落盘方式
+ * @param {string} filename
+ * @param {number} [knownSize]
+ * @return {FileSystemWritableFileStream | null} null 表示用户关掉了保存对话框
+ */
+const createDownloadTarget = async (filename, knownSize) => {
+	if (IS_ANDROID_BUILD) {
+		let id = null;
+		const cb = i => id = i;
+		return bufferedWriter((blob, isLast) => {
+			return webviewStreamDownloadFile(blob, filename, isLast, id).then(cb);
+		}, () => {
+			//return id && webviewCancelDownloadFile(id);
+		});
 	}
 
-	downloadFile(blob);
+	if (streamSavingIsSupported) {
+		try {
+			const handle = await showSaveFilePicker({ suggestedName: filename });
+			/**
+			 * @type {FileSystemWritableFileStream}
+			 */
+			const writable = await handle.createWritable();
+
+			return bufferedWriter((blob, isLast) => {
+				let p = writable.write(blob);
+				if (isLast) p = p.then(() => writable.close());
+				return p;
+			}, (r) => writable.abort(r));
+		} catch (e) {
+			if (e?.name === 'AbortError') return;
+		}
+	}
+
+	if (knownSize > MAX_DOWNLOAD_SIZE) throw tooLargeError(knownSize);
+	return null;
+};
+
+const streamSavingIsSupported = window.showSaveFilePicker;
+
+/**
+ * @typedef {{ name: string, path: string, size: number, mtime?: number }} DownloadJob
+ */
+
+/**
+ * 下载单个路径
+ * @param {AiChat.FileSystemInstance} fs
+ * @param {string} path
+ * @param {string} name
+ * @return {Promise<void>}
+ */
+export const vfsDownload = (fs, path, name) => vfsDownloadMany(fs, [{ path, name }], name);
+
+/**
+ * 下载多个文件/文件夹：只有一项且是文件时直接下载，其余情况打包为 zip
+ * @param {AiChat.FileSystemInstance} fs
+ * @param {{ path: string, name?: string, type?: 'file' | 'dir' }[]} items
+ * @param {string} [archiveName] 打包文件名（不含 .zip）
+ * @return {Promise<void>}
+ */
+export const vfsDownloadMany = async (fs, items, archiveName) => {
+	const state = $state("正在列目录");
+	let cancel = false;
+	const close = showToast(state, '', 0, {
+		closeBtn: <button className="dct-undo" onClick={() => {
+			cancel = true;
+		}}>取消下载</button>
+	});
+	/** @type {DownloadJob[]} */
+	const jobs = [];
+	let writer;
+	let totalSize = 0;
+	try {
+		for (const item of items) {
+			if (cancel) return;
+
+			const info = item.type === 'dir' ? item : await callFileSystemFunc(fs, 'stat', {
+				path: item.path,
+				json: true
+			});
+
+			if (info.type !== 'dir') {
+				jobs.push({ name: item.name, path: item.path, size: info.size, mtime: info.mtimeMs });
+				totalSize += info.size;
+				continue;
+			}
+
+			const files = await callFileSystemFunc(fs, 'list', {
+				path: item.path, pattern: "**", json: true, limit: 10000, showDir: false, showModified: true
+			});
+			for (const [relPath, , size, mtime] of files) {
+				jobs.push({
+					name: item.name + "/" + relPath,
+					path: item.path + "/" + relPath,
+					size,
+					mtime,
+				});
+				totalSize += size;
+			}
+		}
+
+		if (jobs.length === 1 && jobs[0].type !== 'dir') {
+			const {name, path, size} = jobs[0];
+
+			const target = await createDownloadTarget(name, totalSize);
+			if (target === undefined) return;
+
+			state.value = "正在下载 (无法获取进度)";
+
+			if (target === null) {
+				let blob = await callFileSystemFunc(fs, 'readRaw', {path});
+				blob = new File([blob], name, { type: blob.type });
+				downloadFile(blob);
+			} else {
+				const res = await callFileSystemFunc(fs, 'readRaw', {path, stream: true});
+				await res.body.pipeTo(target);
+			}
+		} else {
+			const filename = (archiveName||DEFAULT_ARCHIVE_NAME)+".zip";
+			const target = await createDownloadTarget(filename, totalSize);
+			if (target === undefined) return;
+
+			const startTime = Date.now();
+			let downloadSize = 0;
+			let downloadCount = 0;
+
+			writer = target?.getWriter();
+			const zw = ZipWriter(writer);
+
+			const [enqueue, flush] = createAsyncQueue(4);
+
+			for (let i = 0; i < jobs.length; i++) {
+				if (cancel) return;
+
+				const it = jobs[i];
+				if (it.size > MAX_DOWNLOAD_SIZE) {
+					showToast(`文件 ${it.path} 过大，跳过`, 'error');
+					continue;
+				}
+
+				await enqueue(async () => {
+					const blob = await callFileSystemFunc(fs, 'readRaw', {path: it.path});
+					if (cancel) return;
+					// TODO 流式CRC32
+					await zw.add(it.name, new Uint8Array(await blob.arrayBuffer()), {
+						compression: blob.size < MAX_COMPRESS_SIZE,
+						timestamp: it.mtime,
+					});
+					downloadCount++;
+					downloadSize += blob.size;
+
+					state.value = filename+": "+i+"/"+jobs.length+` 已下载 (${formatSize(downloadSize)}/${formatSize(totalSize)}}, ${formatSize(downloadSize / (Date.now() - startTime) * 1000)}/s)`;
+
+				});
+			}
+			await flush();
+
+			const blob = await zw.finish();
+			if (writer) {
+				await writer.write(blob);
+				await writer.close();
+			} else {
+				blob.name = filename;
+				downloadFile(blob);
+			}
+		}
+	} finally {
+		writer?.abort();
+		close();
+	}
 };
 
 const IMAGE_EXT = /jpg|jpeg|jpe|jfif|png|apng|gif|webp|bmp|svg|ico|avif|heic|heif/;
@@ -138,7 +310,7 @@ function htmlRenderer(fs, s, path) {
 
 			{closeBtn()}
 		</div>
-		<iframe sandbox="allow-scripts" srcDoc={s} style="width:100%;height:100%;border:none"/>
+		<iframe sandbox="allow-scripts" srcDoc={s} />
 	</>;
 }
 
@@ -151,7 +323,7 @@ const EISDIR = '\0';
  * 打开预览窗口，TODO：实时更新
  * @param {AiChat.FileSystemInstance} fs
  * @param {string} path
- * @param {showToast} [overrideFileName]
+ * @param {string} [overrideFileName]
  * @param {(string) => void} [editText]
  * @return {Promise<import("/src/components/Windows.jsx").WindowState>}
  */
@@ -204,7 +376,11 @@ export async function vfsPreview(fs, path, overrideFileName, editText) {
 				closeWindow(previewWindow);
 				editText(data);
 			}} />}
-			<button className="ri-download-line btn primary" title="下载" onClick={() => vfsDownload(fs, path, overrideFileName || filename)} />
+			<button className="ri-download-line btn primary" title="下载" onClick={() => {
+				vfsDownload(fs, path, overrideFileName || filename).catch(err => {
+					showToast('下载失败：' + (err?.message ?? err), 'error');
+				});
+			}} />
 		</div>,
 		element: () => {
 			let el;

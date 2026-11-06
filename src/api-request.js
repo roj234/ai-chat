@@ -23,7 +23,8 @@ import {
 	state,
 	updateConversationListUI,
 	updateConversationUI,
-	updateMessageUI
+	updateMessageUI,
+	VID_ASSISTANT_GENERATING
 } from "./states.js";
 import {
 	getAvailableTools,
@@ -143,6 +144,14 @@ const notifyUser = (conv, message, success) => {
 			//icon: ""
 		})
 	}
+};
+
+/**
+ * @param {AiChat.Message[]} messages
+ */
+const safelyRemoveLastMessage = messages => {
+	const idx = messages.findLastIndex(s => s.id === VID_ASSISTANT_GENERATING && s.role === 'assistant');
+	if (idx > 0) idx === messages.length - 1 ? messages.pop() : messages.splice(idx, 1);
 };
 
 /**
@@ -329,9 +338,9 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		let finishReason = result.finish_reason;
 		const assistantMessage = messages.at(-1);
 
-		// 读锁也应该能看消息
+		// 抢了锁没法自动继续：这条消息的ID之后才会同步。
 		if (writeProtect) {
-			messages.pop();
+			safelyRemoveLastMessage(messages);
 			return 'interrupt';
 		}
 
@@ -409,7 +418,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 					notifyUser(conversation, "请回答问题", true);
 				} else if (retryCount < cfg.toolRetryLimit && (flags&TC_SCHEMA_ERROR)) {
 					conversation[RETRY_COUNT] = retryCount + 1;
-					messages.pop();
+					safelyRemoveLastMessage(messages);
 				}
 			}
 
@@ -680,7 +689,7 @@ async function sendCompletionRequest(
 			role: 'assistant',
 			content: '',
 			model: config.model,
-			id: -1,
+			id: VID_ASSISTANT_GENERATING,
 			finish_reason: ''
 		};
 		if (resumableMessage) {
@@ -719,6 +728,8 @@ async function sendCompletionRequest(
 		if (config.sound) failure();
 		assistantMessage.error = error;
 		assistantMessage.finish_reason = 'error';
+		// 我应该持久化这种错误吗？
+		// if (assistantMessage.id === VID_) delete assistantMessage.id;
 		return false;
 	}
 
@@ -1554,7 +1565,7 @@ const extractUsageMetrics = (json, log) => {
  * @param {OpenAI.ImagePart[]} genImages
  */
 const streamResponseCompleted = (assistantMessage, genImages) => {
-	if (assistantMessage.id === -1) delete assistantMessage.id;
+	if (assistantMessage.id === VID_ASSISTANT_GENERATING) delete assistantMessage.id;
 
 	const {reasoning_details, tool_calls, think, content} = assistantMessage;
 

@@ -113,7 +113,7 @@ try {
 
 		const repl = [];
 
-		if (INTERACTIVE_LOGIN && !PAT_SERVER_SALT) repl.push(['PAT_SERVER_SALT', crypto.randomUUID()]);
+		if ((INTERACTIVE_LOGIN||FS_SERVICE_PAT) && !PAT_SERVER_SALT) repl.push(['PAT_SERVER_SALT', crypto.randomUUID()]);
 		if (!INSTANCE_ID) repl.push(['INSTANCE_ID', crypto.randomUUID()]);
 
 		if (repl.length) {

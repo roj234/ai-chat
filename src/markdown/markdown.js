@@ -45,8 +45,9 @@ const SLICE_PER_FRAME = 10000;
  * @param {HTMLElement} container
  * @param {string} md
  * @param {import("@roj234/mdstream").ParserOptions & AiChat.MarkdownRendererOptions} options
+ * @param {Function} [callback]
  */
-export const renderMarkdownToElement = (container, md, options = {}) => {
+export const renderMarkdownToElement = (container, md, options = {}, callback) => {
 	const renderer = createMarkdownRenderer(container, options);
 	const parser = createMarkdownParser(renderer, {
 		...mdParserOptions,
@@ -56,8 +57,12 @@ export const renderMarkdownToElement = (container, md, options = {}) => {
 	let i = 0;
 	const chunkedRender = () => {
 		parser.write(md.slice(i, i += SLICE_PER_FRAME));
-		if (i >= md.length) parser.end();
-		else queueMacrotask(chunkedRender);
+		if (i >= md.length) {
+			parser.end();
+			callback?.();
+		} else {
+			queueMacrotask(chunkedRender);
+		}
 	};
 	chunkedRender();
 	return container;
@@ -81,19 +86,22 @@ const relayoutNodes = el => {
 /**
  *
  * @param {string} md
- * @param {boolean} [plaintext]
+ * @param {boolean} [plaintext=false]
+ * @param {import("@roj234/mdstream").ParserOptions & AiChat.MarkdownRendererOptions} [options]
  * @return {string}
  */
-export const renderMarkdownToString = (md, plaintext) => {
+export const renderMarkdownToString = (md, plaintext, options) => {
 	const root = <div />;
 
 	const renderer = createMarkdownRenderer(root, {
 		noHighlight: true,
-		noImage: true
+		noImage: true,
+		...options
 	});
 	const parser = createMarkdownParser(renderer, {
 		...mdParserOptions,
 		parseQuotes: false,
+		...options
 	});
 	parser.write(md);
 	parser.end();

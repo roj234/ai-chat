@@ -86,7 +86,6 @@ export default defineConfig(async ({mode}) => {
         APP_NAME: JSON.stringify(packageInfo.name),
         APP_VERSION: JSON.stringify(packageInfo.version + (process.env.BUILD_NUMBER ? '' : ` (dev)`)),
         DB_MODE: JSON.stringify('mixed'), // local remote mixed
-        RESUME_TIMEOUT: JSON.stringify(3600000),
         IS_ANDROID_BUILD: JSON.stringify(false),
         BUILD_NUMBER: JSON.stringify(process.env.BUILD_NUMBER || `build: ${commit} · ${buildTime}`),
     };

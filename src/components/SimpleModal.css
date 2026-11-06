@@ -20,7 +20,7 @@ dialog.modal { padding: 0; }
 
     &:not(.full) {
         max-width: min(768px, 100vw);
-        min-width: max(384px, 20%);
+        min-width: min(100vw, max(384px, 20%));
         max-height: 80vh;
     }
     &.full {

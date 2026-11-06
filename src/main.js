@@ -35,7 +35,7 @@ import {MessageList} from "./components/MessageList.jsx";
 import {showToast} from "./components/Toast.js";
 import {TitleEditor} from "./components/TitleEditor.jsx";
 import {createSettingDialog} from "./components/SettingDialog.jsx";
-import SimpleModal from "./components/SimpleModal.jsx";
+import SimpleModal, {closeTopmostModal} from "./components/SimpleModal.jsx";
 import {createUserInputComposer} from "./components/UserInputComposer.jsx";
 import {onPluginLoaded} from "/plugins/PluginRegistry.js";
 import {DI, DID_TITLE_POSITION, injectCommonDI} from "./hooks.js";
@@ -43,6 +43,8 @@ import {checkUpdate} from "../common/updater.js";
 import {setAllowHTMLTags} from "./markdown/markdown.js";
 import {sseFetch} from "../common/fetch-utils.js";
 import {sleep} from "../common/pure-utils.js";
+import {setBackHandler} from "../vendor/jsBridge.js";
+import {unmaximizeFocusedWindow} from "./components/Windows.jsx";
 
 const $ = sel => document.getElementById(sel);
 
@@ -312,16 +314,9 @@ const createApp = () => {
 
 				if (conv?.ready) {
 					if (prevId !== id && !runningConversations.has(conv.id) && conv.resumeId) {
-						if (conv[LOCKED]) {
-							submitUserChatMessage();
-						} else if (Date.now() - conv.time < RESUME_TIMEOUT) {
-							submitUserChatMessage(true);
-							showToast("继续意外中断的请求", 'ok');
-						} else {
-							delete conv.resumeId;
-							delete conv.resumeParent;
-							updateConversation(conv);
-						}
+						const loop = !conv[LOCKED] && Date.now() - conv.time < 3600000;
+						if (loop) showToast("继续意外中断的请求", 'ok');
+						submitUserChatMessage(loop);
 					}
 
 					prevId = id;
@@ -333,7 +328,7 @@ const createApp = () => {
 			}, false);
 
 			if (!isIDB) {
-				// 只有远程数据库存在这个函数
+				// 只有远程数据库需要在这里调用这个函数
 				const wsConnected = initialize();
 
 				// batch 优化 对话和消息放在同一个响应里
@@ -532,3 +527,10 @@ addEventListener("keydown", e => {
 	if (e.key === "Enter" && btn.matches("[tabindex=\"0\"]"))
 		btn.click();
 });
+
+if (IS_ANDROID_BUILD) {
+	setBackHandler(() => {
+		if (closeTopmostModal()) return true;
+		if (unmaximizeFocusedWindow()) return true;
+	});
+}

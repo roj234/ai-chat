@@ -19,6 +19,7 @@ import {isLanAddress} from "../common/isLanAddress.js";
  */
 
 const rpc = /* #__PURE__ */ new Map;
+let backHandler = null;
 
 if (IS_ANDROID_BUILD) {
 	window.__imageUploaded = (id, url) => {
@@ -45,7 +46,21 @@ if (IS_ANDROID_BUILD) {
 		rpc.delete(id);
 		resolve(granted);
 	};
+
+	window.__onBack = () => {
+		try {
+			if (typeof backHandler === 'function') {
+				const r = backHandler();
+				if (r === true) return true;
+			}
+		} catch (e) {
+			console.warn('onBack() error', e);
+		}
+		return false;
+	}
 }
+
+export const setBackHandler = (fn) => backHandler = fn;
 
 /**
  * @returns {Promise<boolean>}
@@ -59,6 +74,19 @@ export const webviewRequestAudio = () => {
 	});
 }
 
+export const webviewStreamDownloadFile = (blob, filename, isLast, id) => {
+	const port = WebViewApi.serverPort();
+	const token = WebViewApi.getToken();
+	let url = `http://127.0.0.1:${port}/save?filename=${encodeURIComponent(filename)}&tk=${token}&last=${isLast?1:0}`;
+	if (id != null) url += `&id=${id}`;
+	return fetch(url, {
+		method: 'POST',
+		body: blob,
+	}).then(r => r.text(), e => {
+		alert(e.message);
+	});
+};
+
 const saveBlobByLocalHttp = (blob, filename) => {
 	const port = WebViewApi.serverPort();
 	const token = WebViewApi.getToken();
@@ -66,7 +94,7 @@ const saveBlobByLocalHttp = (blob, filename) => {
 	return fetch(url, {
 		method: 'POST',
 		body: blob,
-	}).catch(e => {
+	}).then(r => r.text(), e => {
 		alert(e.message);
 	});
 };

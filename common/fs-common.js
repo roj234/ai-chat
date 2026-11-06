@@ -423,10 +423,10 @@ totalLines: ${lines.length + delta} (${delta >= 0 ? '+': ''}${delta})`;
 			}
 
 			if (!overwrite) throw 'File exists but you have never read, Read or Delete it.';
-
-			let cached = cache.get(absPath);
-			// TODO 搞一个 Diff 工具返回本地文件系统和缓存的差异，这样fsync也可以用上了
-			if (overwrite !== 'force' && cached && cached.mtime < mtime - 150) throw "File modified externally, Read it.";
+			/*if (!allowExec) {
+				let cached = cache.get(absPath);
+				if (overwrite !== 'force' && cached && cached.mtime < mtime - 150) throw "File modified externally, Read it.";
+			}*/
 		}
 		await fs.write(absPath, content, ctx, 1);
 

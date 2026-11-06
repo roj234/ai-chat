@@ -24,7 +24,6 @@ export default {
         APP_NAME: JSON.stringify(packageInfo.name),
         APP_VERSION: JSON.stringify(packageInfo.version),
         DB_MODE: JSON.stringify('mixed'),
-        RESUME_TIMEOUT: JSON.stringify(3600000),
         IS_ANDROID_BUILD: JSON.stringify(true),
         BUILD_NUMBER: JSON.stringify(process.env.BUILD_NUMBER || "0"),
     },

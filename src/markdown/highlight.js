@@ -104,8 +104,9 @@ const getOrCreateVL = node => {
 	let vl = node._vl;
 	if (!vl?._wrapper) {
 		vl = node._vl = new VirtualList({
-			overscan: 50,
-			itemHeight: null,
+			overscan: 100,
+			itemKey: true,
+			keyFunc: (item) => item.s,
 			data: [{s: ""}],
 			renderer: (item, index) => <div className={'line'} dangerouslySetInnerHTML={item.s}/>,
 		});
@@ -191,9 +192,7 @@ export const highlight = (code, language, node, is_finished) => {
 		let newCode = code.slice(cache.pos);
 		let newHtml = lightSync(newCode, language);
 
-		// 除去白名单内的流式语言（例如JSON），在单行内做增量 DOM 更新
-		// 是的这就是他妈的比 shiki-stream 快，你去 benchmark 吧
-		// 但是不支持 subLanguage 比如 JS/CSS in HTML 因为没有上下文
+		// 除去白名单内的流式语言（例如JSON），在单行内做增量 DOM 更新，不支持 subLanguage 比如 JS/CSS in HTML 因为没有上下文
 		let stableHtml = (fullStreamableLanguages.has(language) || newCode.includes("\n")) && trimLastTopLevelElement(newHtml);
 
 		const staging = cache.work;

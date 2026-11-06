@@ -1,6 +1,11 @@
+# 仓库内一律存 LF、检出也一律 LF。
+# 这样无论谁机器上 core.autocrlf 设成什么，都不会出现"整仓被修改"的假改动。
+* text=auto eol=lf
+
 media/*.txt -text
 media/*.json -text
-media/*.md -text
-public/*.md -text
-# 需要用 GBK
-misc/*.bat -text
+
+# Windows 脚本：禁止文本转换（cmd/PowerShell 对行尾敏感，misc/*.bat 还需要 GBK）
+*.bat -text
+*.cmd -text
+*.ps1 -text

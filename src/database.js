@@ -6,7 +6,8 @@ import {
 	EVENT_BUS,
 	LOCKED,
 	selectedConversation,
-	updateConversationListUI
+	updateConversationListUI,
+	VID_DATABASE_PROMISE
 } from "./states.js";
 import {deepEqual, delta} from "unconscious/common/deepEqual.js";
 import {cloneNamed, prettyError} from "./utils/utils.js";
@@ -357,7 +358,7 @@ const updateConversation_ = async (conversation, messages, keepTime) => {
 				}
 			} else {
 				// 新消息防止重复入库
-				message.id = -2;
+				message.id = VID_DATABASE_PROMISE;
 			}
 
 			if (!keepTime) conversation.time = Date.now();
@@ -383,7 +384,7 @@ const updateConversation_ = async (conversation, messages, keepTime) => {
 			}, (err) => {
 				// 回滚
 				delete message[M_CLEAN];
-				if (message.id === -2) delete message.id;
+				if (message.id === VID_DATABASE_PROMISE) delete message.id;
 
 				throw err;
 			}));

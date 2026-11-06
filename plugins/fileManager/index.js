@@ -1,10 +1,12 @@
 import {EVENT_BUS, selectedConversation} from "/src/states.js";
 import {unconscious} from "unconscious";
-import {callFileSystemFunc, getFileSystem} from "../agent/index.js";
+import {callFileSystemFunc, createFileSystem, getFileSystem} from "../agent/index.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {GLOBAL_SETTINGS} from "/src/settings.js";
-import {prefixTitle, registerToolset} from "../../src/toolset.js";
+import {prefixTitle, registerToolset} from "/src/toolset.js";
 import {normalizePath} from "@roj234/shared/path";
+import {onLoad} from "/src/hooks.js";
+import {PROMISE_CATCH} from "/common/pure-utils.js";
 
 GLOBAL_SETTINGS.push({
 	id: "trustHTML",
@@ -73,4 +75,15 @@ const RevealPath = {
 
 registerToolset("RevealPath", "让AI给你打开文件夹", [RevealPath], {
 	hidden: "manual"
-})
+});
+
+// UI
+onLoad(() => {
+	const pos = document.querySelector("aside.sidebar .ri-wrench-line").parentElement;
+	pos.insertBefore(<button className={"ri-folder-open-line btn ghost"} title="管理文件系统" onClick={() => createFileSystem({
+		fs_label: "管理文件系统",
+		_noupdate: true
+	}).then((fs) => {
+		return EVENT_BUS.post(['viewUrl'], '', null, fs);
+	}, PROMISE_CATCH)} />, pos.lastElementChild);
+});

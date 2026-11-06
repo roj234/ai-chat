@@ -263,28 +263,42 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 			// 消息状态更新
 			case SYNC_MESSAGE:
 			case SYNC_MESSAGE_DEL: {
-				const {owner, ...message} = data;
+				const {owner, ...diff} = data;
 				const conv = findConversation(owner);
 				if (!conv) return;
 
-				const msg = getImmediateMessages(conv);
-				if (!msg) return;
+				const msgs = getImmediateMessages(conv);
+				if (!msgs) return;
 
 				checkConcurrentModification(conv);
 
-				const isUpdate = type === SYNC_MESSAGE;
-				let nextEnd;
-
-				const index = msg.findIndex(item => item.id === message.id);
-				if (index >= 0) {
-					if (isUpdate) patch(msg[index], message);
-					else msg.splice(index, 1);
-				} else if (isUpdate) {
-					msg.push(nextEnd = message);
-				}
-				clearMessageDirty(conv, message.id, isUpdate && message);
-
 				const isCurrent = conv === unconscious(selectedConversation);
+				const isUpdate = type === SYNC_MESSAGE;
+				let message;
+
+				const index = msgs.findIndex(item => item.id === diff.id);
+				if (index >= 0) {
+					if (isUpdate) message = patch(msgs[index], diff);
+					else msgs.splice(index, 1);
+				} else if (isUpdate) {
+					message = msgs.raw?.find(item => item.id === diff.id);
+					if (message) {
+						message = patch(message, diff);
+					} else {
+						showToast(<div>[DEBUG] 从服务端收到不存在的消息补丁！<br/><span dangerouslySetInnerHTML={highlightJsonLike(data)}></span></div>, 'error', 0);
+						if (diff.$ === '=' && !msgs.raw) {
+							msgs.push(diff.v);
+						} else {
+							conv.ready = false;
+							if (isCurrent) {
+								$update(selectedConversation);
+							}
+							return;
+						}
+					}
+				}
+				clearMessageDirty(conv, diff.id, message);
+
 				if (isCurrent) $update(updateMessageUI);
 				break;
 			}

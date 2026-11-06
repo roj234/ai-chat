@@ -141,7 +141,7 @@ async function saveCard(name) {
 	}
 }
 
-const allowedTags = new Set([...HTMLTagKinds.basic, ...HTMLTagKinds.style]);
+const allowedTags = new Set([...HTMLTagKinds.basic, ...HTMLTagKinds.style, "link"]);
 
 async function showDetail(c) {
 	const text = c.creatorNotes || c.description;
@@ -154,7 +154,28 @@ async function showDetail(c) {
 		width: 600,
 		height: 800,
 		title: name+(creator ? " by "+creator : ""),
-		element: () => renderMarkdownToElement(<div className="md"/>, text, { external: true, allowedTags })
+		element: () => {
+			let placeholder = <div className="spin">加载中</div>;
+			let node;
+
+			let done;
+			const ok = (s) => {
+				if (!s) done = true;
+
+				if (done&&node) {
+					if (node.querySelector("style,link")) {
+						node = <iframe sandbox="" srcDoc={`<style>html, body { color-scheme: light dark; }</style>\n`+node.innerHTML} />
+					}
+
+					if (placeholder.isConnected)
+						placeholder.replaceWith(node);
+				}
+			};
+			node = renderMarkdownToElement(<div className="md" />, text, { external: true, trusted: true, parseQuotes: false, noHighlight: true, allowedTags }, ok);
+			ok(1);
+
+			return done ? node : placeholder;
+		}
 	})
 }
 

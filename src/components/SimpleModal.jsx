@@ -109,9 +109,24 @@ const SimpleModal = ({
 		</div>
 	</dialog>;
 
+	modal.addEventListener('cancel', (e) => {
+		if (e.target !== modal) return;
+		e.preventDefault();
+		handleClose();
+	});
+
 	document.body.append(modal);
 	modal.showModal();
 	return modal;
 };
 
 export default SimpleModal;
+
+export const closeTopmostModal = () => {
+	const element = document.elementFromPoint(0, 0);
+	if (element.matches("dialog.modal")) {
+		element.dispatchEvent(new Event('close'));
+		return true;
+	}
+	return false;
+};

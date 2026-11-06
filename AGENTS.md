@@ -63,7 +63,7 @@ npm run preview      # 预览构建产物
 
 ### 构建期注入的全局常量（vite `define`）
 
-`APP_NAME`、`APP_VERSION`、`DB_MODE`（`local`/`remote`/`mixed`）、`RESUME_TIMEOUT`、`IS_ANDROID_BUILD`、`BUILD_NUMBER`。
+`APP_NAME`、`APP_VERSION`、`DB_MODE`（`local`/`remote`/`mixed`）、`IS_ANDROID_BUILD`、`BUILD_NUMBER`。
 它们在 `vite.config.js` / `vite.app.config.js` 中定义，源码里直接当全局变量使用。
 
 新增顶层 HTML 页面时，需要在 `vite.config.js` 的 `rollupOptions.input` 中登记。

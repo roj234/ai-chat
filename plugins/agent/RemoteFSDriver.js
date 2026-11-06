@@ -15,6 +15,13 @@ export const addRemoteFileSystem = (prevData = { servers: [''] }) => new Promise
 		type: "filter",
 		value: [
 			{
+				id: "name",
+				type: "input",
+				name: "名称 (slug)",
+				required: true,
+				placeholder: "不能重复 (重复将替换)"
+			},
+			{
 				type: "list",
 				name: "服务器地址",
 				title: "连接延迟最低的服务器（绕开NAT回环）",
@@ -25,16 +32,10 @@ export const addRemoteFileSystem = (prevData = { servers: [''] }) => new Promise
 				required: true
 			},
 			{
-				type: "input",
+				type: "secret",
 				name: "个人访问密钥 (PAT)",
 				placeholder: "sk-xxxxxx",
 				id: "pat",
-			},
-			{
-				id: "name",
-				type: "input",
-				name: "名称 (slug)",
-				placeholder: "不能重复 默认用第一个服务器的地址"
 			},
 		],
 		placeholder: prevData,
@@ -98,12 +99,13 @@ export const createRemoteFileSystem = (baseUrl, pat, fileBase) =>
 			};
 		}
 
-		let method;
+		let method, stream;
 		if (func.endsWith("Raw") && parameters) {
 			// Append extra params as query string
 			const sep = endpoint.includes('?') ? '&' : '?';
 			endpoint += sep + 'path='+encodeURIComponent(parameters.path);
 			body = parameters.content;
+			stream = parameters.stream;
 			if (parameters.metaOnly) method = "HEAD";
 			if (body) headers['Content-Type'] = 'application/octet-stream';
 			else parameters = null;
@@ -141,6 +143,7 @@ export const createRemoteFileSystem = (baseUrl, pat, fileBase) =>
 		}
 
 		if (method === 'HEAD') {
+			await response.body?.cancel();
 			return {
 				lastModified: Date.parse(response.headers.get('last-modified')),
 				// 反向代理比如 nginx 启用 gzip 会把这个抹了
@@ -148,7 +151,7 @@ export const createRemoteFileSystem = (baseUrl, pat, fileBase) =>
 			}
 		}
 
-		if (mime === "application/octet-stream" || func === 'readRaw') return await response.blob();
+		if (mime === "application/octet-stream" || func === 'readRaw') return stream ? response : await response.blob();
 		if (mime.startsWith("image/")) return new ContentPart().image(await response.blob());
 		if (mime.includes("application/json")) return await response.json();
 		return await response.text() || "Success";

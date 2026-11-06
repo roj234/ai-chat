@@ -81,6 +81,7 @@ export const TextDiff = ({ start, diff, filename = '' }) => {
 		element: container,
 		data: diff,
 		itemHeight: 21,
+		itemKey: true,
 		keyFunc: item => item.html ?? item.text,
 		renderer: ({type, html, text, line}, i) => {
 			return (type === 'hunk'
@@ -124,6 +125,7 @@ export const HighlightBox = ({ start = 1, code, filename = '' }) => {
 		element: container,
 		data: lines,
 		itemHeight: 21,
+		itemKey: true,
 		keyFunc: item => item.html ?? item.text,
 		renderer: ({html, text}, line) => {
 			return <div className={'line'}>

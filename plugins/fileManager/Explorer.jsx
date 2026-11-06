@@ -2,9 +2,9 @@ import {openWindow} from "/src/components/Windows.jsx";
 
 import "./Explorer.css";
 import {$asyncState, $computed, $foreach, $state, $update, $vforeach, $watch, unconscious} from "unconscious";
-import {selectedConversation} from "/src/states.js";
+import {auxSmallScreen, selectedConversation} from "/src/states.js";
 import {callFileSystemFunc, createFileSystem, FS_SOURCE, vfsUUID} from "../agent/index.js";
-import {vfsDownload, vfsPreview} from "./preview.js";
+import {vfsDownloadMany, vfsPreview} from "./preview.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {ref} from "@roj234/shared";
 import {Icon_search, Icon_warning} from "/src/components/Icons.jsx";
@@ -15,6 +15,7 @@ import {showToast} from "/src/components/Toast.js";
 import {iconClassOf, iconColorOf} from "./fileTypes.js";
 import {prettyError} from "/src/utils/utils.js";
 import {openTerminal} from "./Terminal.jsx";
+import {NestedMap} from "unconscious/common/NestedMap.js";
 
 /* ============================== 工具函数 ============================== */
 
@@ -100,11 +101,15 @@ const Explorer = (fs) => {
 	/* ------------------------------ 状态 ------------------------------ */
 	const cwd = $state('');
 	const query = $state('');
+	let highlightAfterChange = '';
 
 	/**
 	 * @type {import("unconscious").ReactivePromise<FileEntry[]>}
 	 */
 	const entries = $asyncState(async path => {
+		const t = highlightAfterChange;
+		highlightAfterChange = '';
+
 		const q = unconscious(query);
 
 		const entries = await call('list', {
@@ -119,9 +124,12 @@ const Explorer = (fs) => {
 
 		const prefix = path || '';
 		loadTreeChildren('').then(() => revealInTree(prefix));
-		return entries.map(([name, type, size, mtime]) => ({
-			name, type, size: size || 0, mtime: mtime || 0, path: joinPath(prefix, name),
-		}));
+		return entries.map(([name, type, size, mtime]) => {
+			const path = joinPath(prefix, name);
+			const e = {name, type, size: size || 0, mtime, path,};
+			if (path === t) selection.value = new Set([e]);
+			return e;
+		});
 	}, cwd, []);
 
 	const selection = $state(new Set());
@@ -133,9 +141,15 @@ const Explorer = (fs) => {
 	const historyIndex = $state(-1);
 
 	/**
-	 * @type {import("unconscious").Reactive<{ mode: string, path: string }>}
+	 * 剪贴板
+	 * @type {import("unconscious").Reactive<{ cut: boolean, items: FileEntry[] } | null>}
 	 */
 	const clipboard = $state(null);
+
+	/** 处于「剪切」状态的路径，用于行高亮 */
+	const cutPaths = $computed(() => (
+		 new Set(clipboard.cut ? clipboard.items.map(it => it.path) : [])
+	));
 
 	const editingPath = $state(false);
 	const dropActive = $state(false);
@@ -159,8 +173,8 @@ const Explorer = (fs) => {
 	// 目录树：Set/Map 就地修改，靠 treeTick 通知
 	/** @type {Set<string>} */
 	const treeOpen = new Set(['']);
-	/** @type {Map<string, string[]>} */
-	const treeKids = new Map();
+	/** @type {Map<string[], string[]>} */
+	const treeKids = new NestedMap();
 	const treeTick = $state(0);
 	const bumpTree = () => { treeTick.value++; };
 
@@ -184,7 +198,7 @@ const Explorer = (fs) => {
 			if (key !== 'size' && (a.type === 'dir') !== (b.type === 'dir')) return a.type === 'dir' ? -1 : 1;
 
 			let r = 0;
-			if (key === 'size') r = (a.size || 0) - (b.size || 0);
+			if (key === 'size') r = (a.size) - (b.size);
 			else if (key === 'mtime') r = (a.mtime || 0) - (b.mtime || 0);
 			if (r === 0) r = sorter.compare(a.name, b.name);
 			return r * dir;
@@ -198,7 +212,7 @@ const Explorer = (fs) => {
 		/** @type {{path: string, depth: string}[]} */
 		const rows = [];
 		const walk = (path, depth) => {
-			const kids = treeKids.get(path);
+			const kids = treeKids.get(path.split('/'));
 			const open = treeOpen.has(path);
 			rows.push({path, depth});
 			if (open && kids) kids.forEach(k => walk(joinPath(path, k), depth + 1));
@@ -300,15 +314,18 @@ const Explorer = (fs) => {
 	 * @return {Promise<string[]>}
 	 */
 	async function loadTreeChildren(path, force = false) {
-		if (!force && treeKids.has(path)) return treeKids.get(path);
-		let dirs = [];
-		try {
-			const list = await call('list', {path: path || '.', pattern: '*', json: true, limit: 2000});
-			dirs = (Array.isArray(list) ? list : []).filter(x => x[1] === 'dir').map(x => x[0]);
-		} catch {
-			dirs = [];
-		}
-		treeKids.set(path, dirs);
+		const keys = path.split('/');
+
+		let s;
+		if (!force && (s = treeKids.get(keys))) return s;
+
+		const dirs = await call('list', {
+			path: path || '.', pattern: '*',
+			json: true, showDir: 'only',
+			limit: 1000
+		}).then(list => list.map(x => x[0]), () => []);
+
+		treeKids.set(keys, dirs);
 		bumpTree();
 		return dirs;
 	}
@@ -319,13 +336,13 @@ const Explorer = (fs) => {
 	 */
 	async function revealInTree(path) {
 		treeOpen.add('');
-		let acc = '';
+		let acc = [];
 		for (const p of path.split('/')) {
-			acc = joinPath(acc, p);
-			treeOpen.add(acc);
-			if (!treeKids.has(acc)) await loadTreeChildren(acc);
+			acc.push(p);
+			const merged = acc.join('/');
+			treeOpen.add(merged);
+			if (!treeKids.has(acc)) await loadTreeChildren(merged);
 		}
-		bumpTree();
 	}
 
 	/**
@@ -343,7 +360,7 @@ const Explorer = (fs) => {
 		}
 
 		treeOpen.add(path);
-		if (!treeKids.has(path)) loadTreeChildren(path);
+		if (!treeKids.has(path.split('/'))) loadTreeChildren(path);
 		else bumpTree();
 
 		if (!dontLoad) loadDir(path);
@@ -397,28 +414,37 @@ const Explorer = (fs) => {
 		applySel(new Set([path]));
 	}
 
-	function selectAll() {
-		applySel(new Set(sorted.value));
-	}
+	const selectAll = () => applySel(new Set(unconscious(sorted)));
+
+	/**
+	 * 当前被选中的条目（按目录列表顺序）
+	 * @return {FileEntry[]}
+	 */
+	const getSelectedItems = () => {
+		const sel = unconscious(selection);
+		return unconscious(sorted).filter(e => sel.has(e));
+	};
 
 	/* ------------------------------ 打开 ------------------------------ */
 	/** @param {FileEntry} e */
-	function openEntry(e) {
+	const openEntry = e => {
 		if (e.type === 'dir') loadDir(e.path);
 		else openPreview(e);
-	}
+	};
 
 	/* ------------------------------ 右键菜单 ------------------------------ */
 	/**
 	 * @typedef {{label: string, icon?: JSX.Element, danger?: boolean, disabled?: boolean, act?: Function} | {sep: true}} CtxItem
 	 */
 
+	let scrollContainer = ref();
+
 	const closeCtx = () => {
 		if (!ctxEl) return;
 		ctxEl.remove();
 		ctxEl = null;
 		document.removeEventListener('mousedown', onDocDown, true);
-		document.removeEventListener('scroll', closeCtx, true);
+		scrollContainer.removeEventListener('scroll', closeCtx, true);
 	};
 
 	/** @param {MouseEvent} ev */
@@ -453,31 +479,51 @@ const Explorer = (fs) => {
 		el.style.top = Math.min(y, innerHeight - r.height - 8) + 'px';
 		ctxEl = el;
 		document.addEventListener('mousedown', onDocDown, true);
-		document.addEventListener('scroll', closeCtx, true);
+		scrollContainer.addEventListener('scroll', closeCtx, true);
 	}
 
-	/** @param {MouseEvent} ev @param {FileEntry} e */
+	/**
+	 * @param {MouseEvent} ev
+	 * @param {FileEntry} e
+	 */
 	function onRowMenu(ev, e) {
 		ev.preventDefault();
 		ev.stopPropagation();
-		if (!selection.value.has(e)) selectRow(e);
-		const target = e;
-		showCtx(ev.clientX, ev.clientY,  [
-			{label: target.type === 'dir' ? '打开' : '预览', icon: target.type === 'dir' ? "ri-folder-line" : "ri-eye-line", act: () => openEntry(target)},
-			{label: '下载', icon: "ri-download-line", act: () => downloadEntry(target)},
+
+		const targets = selection.value.has(e) ? getSelectedItems() : (selectRow(e), [e]);
+		const multi = targets.length > 1;
+
+		const items = [];
+
+		if (!multi) {
+			items.push({label: e.type === 'dir' ? '打开' : '预览', icon: e.type === 'dir' ? "ri-folder-line" : "ri-eye-line", act: () => openEntry(e)},);
+		}
+
+		items.push(
+			{label: '下载', icon: "ri-download-line", act: () => downloadEntries(targets)},
 			{sep: true},
-			{label: '复制', icon: "ri-file-copy-line", act: () => setClipboard(target, 'copy')},
-			{label: '剪切', icon: "ri-scissors-line", act: () => setClipboard(target, 'cut')},
-			{label: '重命名', icon: "ri-edit-line", act: () => renameEntry(target)},
-			{label: '复制路径', icon: "ri-link", act: () => copyText(target.path)},
+			{label: '复制', icon: "ri-file-copy-line", act: () => setClipboard(targets, false)},
+			{label: '剪切', icon: "ri-scissors-line", act: () => setClipboard(targets, true)},
+		);
+
+		if (!multi) {
+			items.push(
+				{label: '重命名', icon: "ri-edit-line", act: () => renameEntry(e)},
+				{label: '复制路径', icon: "ri-link", act: () => copyText(targets.at(-1).path)},
+			);
+		}
+
+		items.push(
 			{sep: true},
 			{
-				label: `删除${selection.value.size > 1 ? ` ${selection.value.size} 项` : ''}`,
+				label: `删除`,
 				icon: "ri-delete-bin-line",
 				danger: true,
-				act: () => deleteEntries(),
+				act: () => deleteEntries(targets),
 			},
-		]);
+		);
+
+		showCtx(ev.clientX, ev.clientY, items);
 	}
 
 	/** 空白处右键 @param {MouseEvent} ev */
@@ -500,37 +546,65 @@ const Explorer = (fs) => {
 
 	/* ------------------------------ 剪贴板 ------------------------------ */
 	/**
-	 * @param {FileEntry} e
-	 * @param {'copy'|'cut'} mode
+	 * @param {FileEntry | FileEntry[]} items
+	 * @param {boolean} cut
 	 */
-	const setClipboard = (e, mode) => clipboard.value = {...e, mode};
+	const setClipboard = (items, cut) => {
+		if (!items.length) return;
+		clipboard.value = {cut, items};
+	};
 
 	async function paste() {
-		const c = clipboard.value;
+		const c = unconscious(clipboard);
 		if (!c) return;
-		const {path, name, mode} = c;
-		if (parentOf(path) === cwd.value && mode === 'cut') {
-			toast('源和目标相同', 'warn');
+
+		const {cut, items} = c;
+		const resolver = createNameConflictResolver();
+		/** @type {string[]} */
+		const pasted = [];
+		let skipSame = 0;
+		let skipInner = 0;
+		let fail = 0;
+
+		const _cwd = unconscious(cwd);
+		for (const it of items) {
+			a:
+			if (cut) {
+				if (_cwd === parentOf(it.path)) skipSame++;
+				else if (_cwd === it.path || _cwd.startsWith(it.path + '/')) skipInner++;
+				else break a;
+				continue;
+			}
+
+			const dest = joinPath(_cwd, resolver(it.name));
+			try {
+				await call('copy', {src: it.path, dest, move: cut});
+				pasted.push(dest);
+				invalidateDirectoryContents(it.path);
+				invalidateDirectoryContents(dest);
+			} catch (e) {
+				fail++;
+				toast('粘贴失败：' + it.name + ' — ' + (e.message ?? e), 'err', 5000);
+			}
+		}
+
+		if (!pasted.length) {
+			if (!fail) toast(skipSame ? '目标文件夹和源相同' : '目标文件夹是源文件夹的子文件夹', 'warn');
 			return;
 		}
-		let dest = joinPath(cwd.value, name);
-		if (entries.value.some(e => e.name === name)) {
-			const dot = name.lastIndexOf('.');
-			const stem = dot > 0 ? name.slice(0, dot) : name;
-			const ext = dot > 0 ? name.slice(dot) : '';
-			let n = 1;
-			while (entries.value.some(e => e.name === `${stem} (${n})${ext}`)) n++;
-			dest = joinPath(cwd.value, `${stem} (${n})${ext}`);
-		}
-		try {
-			await call('copy', {src: path, dest, move: mode === 'cut'});
-			if (mode === 'cut') clipboard.value = null;
-			toast('已粘贴到 ' + (cwd.value || '根目录'), 'ok');
-			$update(cwd);
-			treeKids.clear();
-			bumpTree();
-		} catch (e) {
-			toast('粘贴失败：' + e.message, 'err', 5000);
+
+		if (cut) clipboard.value = null;
+
+		highlightAfterChange = pasted[0];
+		$update(cwd);
+
+		if (pasted.length < items.length) toast(`已粘贴 ${pasted.length} / ${items.length} 项`, 'warn');
+	}
+
+	function invalidateDirectoryContents(key) {
+		if (treeKids.delete(key.split('/'), true)) {
+			if (treeOpen.has(key)) loadTreeChildren(key, true);
+			else bumpTree();
 		}
 	}
 
@@ -541,7 +615,6 @@ const Explorer = (fs) => {
 			time: Date.now(),
 			type: 'dir'
 		};
-		sorted.push(e);
 		processNameInput(e, () => {
 			const name = e.name;
 			if (!name) {
@@ -550,30 +623,28 @@ const Explorer = (fs) => {
 				return;
 			}
 
-			call('mkdir', {path: joinPath(cwd.value, name)}).then(
+			const path = joinPath(cwd.value, name);
+			call('mkdir', {path}).then(
 				() => {
+					highlightAfterChange = path;
 					$update(cwd);
-					if (treeKids.delete(cwd.value)) {
-						if (treeOpen.has(cwd.value)) loadTreeChildren(cwd.value, true);
-						else bumpTree();
-					}
-					toast('已创建 ' + name, 'ok');
+					invalidateDirectoryContents(cwd.value);
 				},
 				(e) => {
 					$update(cwd);
 					toast('创建失败：'+(e.message??e), 'err');
 				}
 			);
-		})
+		}, true);
 	}
 
 	function newFile() {
 		const e = {
 			name: "新建文本文档.txt",
 			time: Date.now(),
-			type: 'file'
+			type: 'file',
+			size: 0
 		};
-		sorted.push(e);
 		processNameInput(e, () => {
 			const name = e.name;
 			if (!name) {
@@ -582,43 +653,38 @@ const Explorer = (fs) => {
 				return;
 			}
 
-			call('write', {path: joinPath(cwd.value, name), content: ''}).then(
+			const path = joinPath(cwd.value, name);
+			call('write', {path, content: ''}).then(
 				() => {
+					highlightAfterChange = path;
 					$update(cwd);
-					toast('已创建 ' + name, 'ok');
 				},
 				(e) => {
 					$update(cwd);
 					toast('创建失败：'+(e.message??e), 'err');
 				}
 			);
-		})
+		}, true);
 	}
 
 	/** @param {FileEntry} e */
 	function renameEntry(e) {
 		const old = e.name;
-		$update(sorted);
 		processNameInput(e, () => {
 			const name = e.name;
-			if (old === name) {
+			if (old === name || !name) {
 				delete e.edit;
 				$update(sorted);
 				return;
 			}
 
-			if (entries.value.some(x => x !== e && x.name === name)) {
-				delete e.edit;
-				e.name = old;
-				$update(sorted);
-				return toast('同名项目已存在', 'warn');
-			}
-
-			call('copy', {src: e.path, dest: joinPath(cwd.value, name), move: true, overwrite: false}).then(() => {
-				toast('已重命名为 ' + name, 'ok');
+			const src = e.path;
+			const dest = joinPath(cwd.value, name);
+			call('copy', {src, dest, move: true, overwrite: false}).then(() => {
+				highlightAfterChange = dest;
 				$update(cwd);
-				treeKids.clear();
-				bumpTree();
+				invalidateDirectoryContents(src);
+				invalidateDirectoryContents(dest);
 			}, (e) => {
 				toast('重命名失败：'+(e.message??e), 'err');
 				$update(cwd);
@@ -626,13 +692,30 @@ const Explorer = (fs) => {
 		});
 	}
 
-	function processNameInput(e, save2) {
+	function processNameInput(e, save2, add) {
+		if (auxSmallScreen || !sorted.length) {
+			SimpleModal({
+				title: "输入名称",
+				type: "input",
+				value: e.name,
+				onConfirm(text) {
+					e.name = text;
+					save2();
+				},
+				onCancel() {}
+			})
+			return;
+		}
+
 		const save = () => {
 			if (!save2) return;
 			input.disabled = true;
 			save2();
 			save2 = null;
 		}
+
+		if (add) sorted.push(e);
+		else $update(sorted);
 
 		const dot = e.name.lastIndexOf('.');
 		const input = <input className="text-input" spellCheck={false} value={e.name} onInput={({currentTarget}) => {
@@ -660,7 +743,6 @@ const Explorer = (fs) => {
 	 * @param {FileEntry[]} [items]
 	 */
 	function deleteEntries(items) {
-		items ??= entries.value.filter(e => selection.value.has(e));
 		if (!items.length) return;
 
 		const dialog = SimpleModal({
@@ -695,7 +777,7 @@ const Explorer = (fs) => {
 					}
 				}
 				if (!fail) toast(items.length > 1 ? `已删除 ${items.length} 项` : `已删除 ${items[0].name}`, 'ok');
-				if (clipboard.value && items.some(i => i.path === clipboard.value.path)) clipboard.value = null;
+				clipboard.value = null;
 				$update(cwd);
 				treeKids.clear();
 				bumpTree();
@@ -703,12 +785,31 @@ const Explorer = (fs) => {
 		});
 	}
 
-	/** @param {FileEntry} e */
-	async function downloadEntry(e) {
+	/**
+	 * 下载若干条目：单个直接下载，多个打包为 zip
+	 * @param {FileEntry[]} items
+	 */
+	async function downloadEntries(items) {
+		if (!items.length) return;
 		try {
-			await vfsDownload(fs, e.path, e.name);
+			let commonPath = items[0].path;
+			items.forEach(item => {
+				const p = item.path;
+				for (let i = 0; i < p.length; i++) {
+					if (commonPath[i] !== p[i]) {
+						commonPath = commonPath.slice(0, i);
+						break;
+					}
+				}
+			})
+
+			await vfsDownloadMany(
+				fs,
+				items,
+				baseName(commonPath) || '根目录',
+			);
 		} catch (err) {
-			toast('下载失败：' + err.message, 'err');
+			toast('下载失败：' + (err.message ?? err), 'err');
 		}
 	}
 
@@ -721,18 +822,27 @@ const Explorer = (fs) => {
 	}
 
 	/* ------------------------------ 上传 ------------------------------ */
-	/** @param {File[]} files */
-	async function uploadFiles(files) {
+
+	const createNameConflictResolver = () => {
 		const set = new Set([...entries.map(e => e.name)]);
-		for (const f of files) {
-			let name = f.name;
+		return initName => {
 			let ord = 1;
+			const pos = initName.lastIndexOf('.');
+
+			let name = initName;
 			while (set.has(name)) {
-				const pos = name.lastIndexOf('.');
-				name = pos < 0 ? name + `(${ord})` : `${name.slice(0, pos)}(${ord})${name.slice(pos)}`;
+				name = pos < 0 ? initName + ` (${ord})` : `${initName.slice(0, pos)} (${ord})${initName.slice(pos)}`;
 				ord++;
 			}
-			startUpload(f);
+			return name;
+		};
+	};
+
+	/** @param {File[]} files */
+	async function uploadFiles(files) {
+		const resolve = createNameConflictResolver();
+		for (const f of files) {
+			startUpload(f, resolve(f.name));
 		}
 	}
 
@@ -781,9 +891,10 @@ const Explorer = (fs) => {
 			xhr.send(f);
 		} else {
 			await call('writeRaw', { path: target, content: f }).then(() => {
-
+				$update(cwd);
+				toast('上传成功：' + f.name, 'ok');
 			}, (e) => {
-
+				toast('上传失败：' + prettyError(e), 'err');
 			}).finally(() => {
 				el.remove();
 				$update(cwd);
@@ -904,7 +1015,8 @@ const Explorer = (fs) => {
 	 * @param {KeyboardEvent} ev
 	 */
 	function onGlobalKey(ev) {
-		if (!body.isConnected) return;   // 窗口已关闭，忽略残留监听
+		if (document.elementFromPoint(0,0).matches('dialog.modal')) return;
+
 		const tag = (ev.target.tagName || '').toLowerCase();
 		const typing = (tag === 'input' && ev.target.type !== 'checkbox') || tag === 'textarea' || ev.target.isContentEditable;
 		const meta = ev.ctrlKey || ev.metaKey;
@@ -950,7 +1062,7 @@ const Explorer = (fs) => {
 		}
 		if (ev.key === 'Delete' && selectedCount) {
 			ev.preventDefault();
-			deleteEntries();
+			deleteEntries(getSelectedItems());
 			return;
 		}
 
@@ -960,14 +1072,12 @@ const Explorer = (fs) => {
 				selectAll();
 				return;
 			}
-			if ((key === 'c') && selectedCount === 1) {
-				const e = entries.value.find(x => x === firstItem);
-				if (e) setClipboard(e, 'copy');
+			if (key === 'c' && selectedCount) {
+				setClipboard(getSelectedItems(), false);
 				return;
 			}
-			if ((key === 'x') && selectedCount === 1) {
-				const e = entries.value.find(x => x === firstItem);
-				if (e) setClipboard(e, 'cut');
+			if (key === 'x' && selectedCount) {
+				setClipboard(getSelectedItems(), true);
 				return;
 			}
 			if (key === 'v' && clipboard.value) {
@@ -1022,8 +1132,8 @@ const Explorer = (fs) => {
 		}
 
 		return <div className="row"
-					class:sel={() => selection.value.has(e)}
-					class:cut={() => clipboard.mode === 'cut' && clipboard.path === e.path}
+					class:sel={() => selection.has(e)}
+					class:cut={() => cutPaths.has(e.path)}
 					onClick={ev => {
 						if (ev.target.nodeName === "INPUT") return;
 						selectRow(e, {toggle: ev.ctrlKey || ev.metaKey, range: ev.shiftKey});
@@ -1036,7 +1146,7 @@ const Explorer = (fs) => {
 					onContextMenu={ev => onRowMenu(ev, e)}>
 			<div className="chk">
 				<input type="checkbox" tabIndex={-1}
-					   checked={() => selection.value.has(e)}
+					   checked={() => selection.has(e)}
 					   onChange={() => toggleSel(e)}/>
 			</div>
 			<div className="name" onClick={ev => {
@@ -1108,7 +1218,7 @@ const Explorer = (fs) => {
 	const body = <div className="explorer" onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
 		<div className="sidebar2 col">
 			<div className="tree">{$vforeach(treeRows, ({depth, path}) => {
-				const kids = treeKids.get(path);
+				const kids = treeKids.get(path.split('/'));
 				const open = treeOpen.has(path);
 				const hasKids = kids?.length;
 
@@ -1120,7 +1230,7 @@ const Explorer = (fs) => {
 						className={`ico ri-folder${open && hasKids ? '-open' : ''}-${kids != null ? 'fill' : 'line'}`}/>
 					<span className="ellipsis">{baseName(path) || '根目录'}</span>
 				</div>;
-			}, ({path}) => path+'\0'+(+treeOpen.has(path))+(+(treeKids.get(path)!=null)), { volatileValue: true })}</div>
+			}, ({path}) => path+'\0'+(+treeOpen.has(path))+(+(treeKids.get(path.split('/'))!=null)), { volatileValue: true })}</div>
 			<div className="row">
 				<button className="ri-upload-line btn ghost" onClick={() => fileInput.click()}>上传</button>
 				<button ref={terminalBtn} className="ri-terminal-line btn ghost" onClick={terminal}>终端</button>
@@ -1163,7 +1273,7 @@ const Explorer = (fs) => {
 				</div>
 			</div>
 
-			<div className="list scroll" onContextMenu={onBlankMenu}>
+			<div ref={scrollContainer} className="list scroll" onContextMenu={onBlankMenu}>
 				{$computed(() => {
 					if (entries.loading) {
 						return <div className="empty">
@@ -1187,7 +1297,7 @@ const Explorer = (fs) => {
 						return <div className="empty">
 							<i className="ri-folder-unknow-line" />
 							<p>这个目录是空的</p>
-							<p style="font-size:12px;color:var(--dim)">冷知识：可以把文件拖进来上传</p>
+							<p style="font-size:12px;color:var(--dim)">可以把文件拖进来上传</p>
 						</div>;
 					} else {
 						return $vforeach(sorted, makeRow, k => k.edit ?? k);
@@ -1213,8 +1323,12 @@ const Explorer = (fs) => {
 					}
 				}}</span>
 				<span style:display={() => clipboard.value ? '' : 'none'}>
-					{() => clipboard.mode === 'cut' ? '剪切：' : '复制：'}
-					<b>{() => clipboard.value ? baseName(clipboard.value.path) : ''}</b>
+					{() => clipboard.cut ? '剪切：' : '复制：'}
+					{() => {
+						const items = clipboard.items;
+						if (!items?.length) return '';
+						return baseName(items[0].path) + (items.length > 1 ? ` 和其它 ${items.length-1} 项` : '');
+					}}
 				</span>
 			</div>
 		</main>

@@ -123,9 +123,14 @@ export const createWebFileSystem = async (rootHandle, config = {}) => {
 			return 'Success';
 		},
 
-		async copy({ src, dest, move }) {
-			const [ srcParent, srcName, srcHandle ] = await myResolveHandle(src, move ? READ | WRITE : READ);
-			const [ destParent, destName ] = await myResolveHandle(dest, WRITE | CREATE | CREATE_LEAF | (srcHandle.kind === "file" ? REQUIRE_FILE : REQUIRE_DIR));
+		async copy({ src, dest, move, overwrite = true }) {
+			const [ srcParent, srcName, srcHandle ] =
+				await myResolveHandle(src, move ? READ | WRITE : READ);
+			const isFile = srcHandle.kind === "file";
+			const [ destParent, destName, destHandle ] =
+				await myResolveHandle(dest, WRITE | CREATE | (overwrite ? CREATE_LEAF : 0) | (isFile ? REQUIRE_FILE : REQUIRE_DIR));
+
+			if (!overwrite && destHandle) throw 'Destination already exists';
 
 			await copyEntry(srcHandle, destParent, destName, move);
 			if (move) await EAT(srcParent.removeEntry(srcName, RECURSIVE));
@@ -138,7 +143,7 @@ export const createWebFileSystem = async (rootHandle, config = {}) => {
 
 			const file = isDir ? null : await handle.getFile();
 			if (json) {
-				const resp = { type: isDir ? 'dir' : file };
+				const resp = { type: isDir ? 'dir' : 'file' };
 				if (file) {
 					resp.size = file.size;
 					resp.mtimeMs = file.lastModified;
@@ -265,6 +270,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 				}
 
 				if (handle.kind === 'file') {
+					if (showDir === 'only') continue;
 					const file = await handle.getFile();
 					if (file.lastModified >= modSince) {
 						const item = [displayPath, "file", json ? file.size : formatSize(file.size)];
@@ -368,7 +374,10 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			if (writable && config.fs_readonly) throwDOMException("Write-protect is enabled for this VFS", "ReadOnlyError");
 			return (await myResolveHandle(path, READ | REQUIRE_FILE | (writable * (CREATE | CREATE_LEAF | WRITE))))[2]
 		},
-		readRaw: ({path}) => resolveFile(path),
+		readRaw: async ({path, stream}) => {
+			const blob = await resolveFile(path);
+			return stream ? new Response(blob, { headers: { 'content-length': String(blob.size) } }) : blob;
+		},
 		writeRaw: ({path, content}) => fsCommonApi.write(path, content, null, 1).then(() => teh.del(path)),
 		appendRaw: api.append,
 

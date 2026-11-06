@@ -19,7 +19,7 @@ import {safeStat, serveFile} from "@roj234/ie/utils/serveFile.js";
 import {HttpError} from "../router.js";
 import {FS_UPDATE_BASH} from "../config.js";
 import {registerTerminalRoutes} from "./terminal.js";
-import {killProcess} from "../utils/process.js";
+import {IS_WIN, killProcess} from "../utils/process.js";
 import {ANSI_SEQ} from "@roj234/ansi2html/seq";
 
 const devNull = () => new Writable({
@@ -266,7 +266,7 @@ export async function registerFsRoutes(router, allowExec) {
 			const stats = await fsp.stat(fullPath);
 
 			if (!isDir) {
-				if (stats.mtimeMs >= modSince) {
+				if (showDir !== 'only' && stats.mtimeMs >= modSince) {
 					const item = [displayPath, "file", json ? stats.size : formatSize(stats.size)];
 					if (showModified || modSince) item.push(json ? stats.mtimeMs : stats.mtime.toISOString().slice(0, -5));
 					result.push(item);
@@ -460,7 +460,8 @@ export async function registerFsRoutes(router, allowExec) {
 	router.post('/stat', async (ctx) => {
 		const { path: filePath, json } = await ctx.readAsObject();
 		const stats = await fsp.stat(pathFilter(filePath, ctx));
-		ctx.send(200, json ? stats : `type: ${stats.isDirectory() ? "dir" : "file"}
+		const type = stats.isDirectory() ? "dir" : "file";
+		ctx.send(200, json ? {...stats, type} : `type: ${type}
 mode: ${modeToString(stats.mode)}
 size: ${stats.size}
 atime: ${new Date(stats.atimeMs).toISOString()}
@@ -481,9 +482,19 @@ nlink: ${stats.nlink}`);
 		ctx.send(204);
 	});
 	router.post('/copy', async (ctx) => {
-		const { src, dest, move } = await ctx.readAsObject();
+		const { src, dest, move, overwrite = true } = await ctx.readAsObject();
 		const safeSrc = await (move ? pathFilterWithIgnore(ctx, src, true) : pathFilter(src, ctx));
 		const safeDest = await pathFilterWithIgnore(ctx, dest, true);
+
+		const srcStat = await fsp.stat(safeSrc);
+		const destStat = await safeStat(safeDest);
+
+		if (!destStat.notExist) {
+			if (!overwrite) throw 'Destination already exists';
+			if (srcStat.isDirectory() !== destStat.isDirectory())
+				throw 'Source kind !== destination kind (file/folder)';
+		}
+
 		if (move) {
 			await fsp.mkdir(path.dirname(safeDest), { recursive: true });
 			await fsp.rename(safeSrc, safeDest);
@@ -647,7 +658,12 @@ nlink: ${stats.nlink}`);
 		const startTime = Date.now();
 		let notify = false;
 
-		let reject;
+		let reject, resolve;
+		const result = new Promise((res, rej) => {
+			resolve = res;
+			reject = rej;
+		});
+
 		let timer = setTimeout(() => {
 			child.stdout.removeAllListeners('data');
 			child.stderr.removeAllListeners('data');
@@ -681,47 +697,43 @@ nlink: ${stats.nlink}`);
 
 		console.log("[进程] 已启动", child.pid, command, args);
 
-		const result = new Promise((resolve, rej) => {
-			reject = rej;
+		child.on('error', (err) => {
+			clearTimeout(timer);
+			if (!inline) processes.delete(child.pid);
+			resolve({ code: -1, text: err.message });
+		});
 
-			child.on('error', (err) => {
-				clearTimeout(timer);
-				if (!inline) processes.delete(child.pid);
-				resolve({ code: -1, text: err.message });
-			});
+		child.on('exit', (code, signal) => {
+			const info = !inline ? processes.get(child.pid) : null;
+			if (!inline) processes.delete(child.pid);
 
-			child.on('exit', (code, signal) => {
-				const info = !inline ? processes.get(child.pid) : null;
-				if (!inline) processes.delete(child.pid);
+			file?.end();
+			clearTimeout(timer);
 
-				file?.end();
-				clearTimeout(timer);
+			const codeStr = signal || "0x"+code.toString(16);
+			console.log("[进程] 已停止", child.pid, codeStr);
 
-				const codeStr = signal || "0x"+code.toString(16);
-				console.log("[进程] 已停止", child.pid, codeStr);
-
-				if (notify) {
-					fsp.stat(dir+filename).catch(() => ({})).then(async state => {
-						let logFile = dir+filename;
-						if (state.size === 0) {
-							await fsp.rm(logFile).then(() => logFile = '0B, deleted', () => {});
-						}
-						postEvent('process-exit', {
-							pid: child.pid,
-							code: codeStr,
-							logFile,
-							message: !info ? true : info?.message
-						});
+			if (notify) {
+				fsp.stat(dir+filename).catch(() => ({})).then(async state => {
+					let logFile = dir+filename;
+					if (state.size === 0) {
+						await fsp.rm(logFile).then(() => logFile = '0B, deleted', () => {});
+					}
+					postEvent('process-exit', {
+						pid: child.pid,
+						code: codeStr,
+						logFile,
+						message: !info ? true : info?.message
 					});
-					processes.delete(child.pid);
-				}
-
-				if (head == null) return;
-
-				resolve({
-					code: codeStr,
-					text: getLog()
 				});
+				processes.delete(child.pid);
+			}
+
+			if (head == null) return;
+
+			resolve({
+				code: codeStr,
+				text: getLog()
 			});
 		});
 
@@ -855,11 +867,10 @@ logPath: ${logFile}`
 		};
 
 		getEnv().then((prompt) => {
+			if (!defaultShell.startsWith("bash") && FS_UPDATE_BASH) updateBash();
 			console.log(prompt);
 			console.log("\n命令宿主: "+defaultShell);
-		})
-
-		if (FS_UPDATE_BASH) updateBash();
+		});
 
 		router.get('/env', async (ctx) => {
 			return ctx.send(200, { programs: await getEnv(), location: ctx.fsRoot })

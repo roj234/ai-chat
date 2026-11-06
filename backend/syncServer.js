@@ -393,6 +393,9 @@ export function createSyncManager(wss) {
 		 * @param resp
 		 */
 		onBatch(ctx, func, body, resp) {
+			// 失败的请求不发送
+			if (resp.error) return;
+
 			const clientId = parseInt(ctx.req.headers['x-ci']);
 			let shouldSend = (client) => client.id !== clientId;
 

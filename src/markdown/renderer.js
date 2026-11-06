@@ -237,24 +237,25 @@ export function createMarkdownRenderer(root, options = {}) {
 					return;
 				}
 
-				if (name === fastmd.HREF) {
-					if (value.toLowerCase().startsWith("javascript:")) return;
-
-					if (value[0] !== '#') {
-						if (EXTERNAL_URL.test(value)) {
-							node.target = "_blank";
-							node.rel = "noopener noreferrer";
-							node.prepend(<i className="ri-external-link-line" />)
-						} else if (!options.external) {
-							node.style.cursor = 'pointer';
-							node.addEventListener('click', () => EVENT_BUS.post(['viewUrl'], (options.base||'')+value, node, options.fs));
-							return;
-						}
-					}
-				}
-
 				if (name === "style" && value.includes("url")) return;
 				if (!allowedAttributes.has(name)) return;
+			}
+
+			if (name === fastmd.HREF) {
+				if (value.toLowerCase().startsWith("javascript:")) return;
+
+				if (value[0] !== '#') {
+					if (EXTERNAL_URL.test(value)) {
+						node.target = "_blank";
+						node.rel = "noopener noreferrer";
+						if (!options.trusted)
+							node.prepend(<i className="ri-external-link-line" />)
+					} else if (!options.external) {
+						node.style.cursor = 'pointer';
+						node.addEventListener('click', () => EVENT_BUS.post(['viewUrl'], (options.base||'')+value, node, options.fs));
+						return;
+					}
+				}
 			}
 
 			const filter = options.attrFilter;
