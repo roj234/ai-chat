@@ -9,7 +9,7 @@ import {inspect} from "@roj234/util-inspect";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {isIDB} from "/src/database.js";
 
-const MAX_TEXT = 1666;
+const MAX_TEXT = 20000;
 
 function TextRing(btn, it) {
 	const SIZE = 30 + 4 + 4;
@@ -98,7 +98,7 @@ function openDMWindow(user, messages) {
 			</div>
 			<div>
 				<div className="query">
-						<textarea placeholder="来聊聊天吧，暂不支持附件！" value={inputText}
+						<textarea className="userInput" placeholder="来聊聊天吧，暂不支持附件！" value={inputText}
 								  onInput={e => inputText.value = e.target.value}
 								  onKeyDown={e => {
 									  if (!e.shiftKey && e.key === "Enter") {
@@ -106,16 +106,8 @@ function openDMWindow(user, messages) {
 										  e.preventDefault();
 									  }
 								  }}/>
-					<div className="attachments"></div>
 					<div className="controls">
 						<div className="spacer"></div>
-						{/*<div className="dropdown">
-							<button className="ri-attachment-2 btn ghost" title="添加附件" disabled />
-							<div className="list mid up">
-								<label className="ri-mic-fill">录制语音</label>
-								<label className="ri-attachment-2">选择文件</label>
-							</div>
-						</div>*/}
 						{TextRing(<button className="ri-send-plane-fill btn primary" title="发送"
 										  disabled={() => !unconscious(inputText) || inputText.length >= MAX_TEXT}
 										  onClick={submit} />, inputText)}
@@ -143,7 +135,7 @@ function openDM(user) {
 			messages.push({
 				label: "系统",
 				time: null,
-				content: "对方不在线，预览版本，暂时没有消息历史和上线通知功能（后者要靠轮询，哈哈哈）"
+				content: "对方不在线，测试版，暂无历史记录和上线通知"
 			})
 		}
 

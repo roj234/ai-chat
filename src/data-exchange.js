@@ -202,7 +202,7 @@ export const importConversation = async e => {
 	}
 };
 
-export const duplicateConversation = async () => {
+export const duplicateConversation = async (ignoreMessages) => {
 	const conv = unconscious(selectedConversation);
 	if (!conv?.ready) {
 		showToast('无对话选中', 'error');
@@ -210,9 +210,12 @@ export const duplicateConversation = async () => {
 	}
 	conv.title += ' 另存 '+new Date().toISOString();
 
-	await importConversationData(structuredClone(conv), structuredClone(unconscious(messages).filter(item => item.id >= 0)));
+	const copied = structuredClone(conv);
+	await importConversationData(copied, ignoreMessages ? [] : structuredClone(unconscious(messages).filter(item => item.id >= 0)));
 
 	showToast('已将当前对话另存为', 'ok');
+
+	return copied;
 };
 
 /**

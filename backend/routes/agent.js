@@ -401,6 +401,12 @@ export async function registerFsRoutes(router, allowExec) {
 			}
 		}
 
+		if (ctx.req.headers['if-none-match'] === '*') {
+			if (!(await safeStat(safePath)).notExist) {
+				throw new HttpError(412, { type: "FILE_ALREADY_EXIST" });
+			}
+		}
+
 		// 带offset不加锁并发上传。
 		//const unlock = start != null ? () => {} : await fileLock(ctx, safePath);
 		try {
@@ -873,7 +879,7 @@ logPath: ${logFile}`
 		});
 
 		router.get('/env', async (ctx) => {
-			return ctx.send(200, { programs: await getEnv(), location: ctx.fsRoot })
+			return ctx.send(200, { programs: ctx.fsNoShell ? undefined : await getEnv(), location: ctx.fsRoot })
 		});
 
 		router.post('/feed', async (ctx) => {
@@ -889,6 +895,8 @@ logPath: ${logFile}`
 		});
 
 		router.post('/spawn', async (ctx) => {
+			if (ctx.fsNoShell) return ctx.send(403);
+
 			const {
 				program, arguments: args, cwd = '',
 				timeout = 10, background = false,
@@ -919,6 +927,8 @@ logPath: ${logFile}`
 		});
 
 		router.post('/shell', async (ctx) => {
+			if (ctx.fsNoShell) return ctx.send(403);
+
 			let {
 				command, cwd = '', shell = defaultShell,
 				timeout = 10, background = false,

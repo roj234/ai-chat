@@ -7,10 +7,10 @@ namespace AiChatBackend {
         push(relPath: string);
         pop();
 
-        post(url: string, handler: function(RouteContext): void | Promise<void>);
-        get(url: string, handler: function(RouteContext): void | Promise<void>);
-        put(url: string, handler: function(RouteContext): void | Promise<void>);
-        delete(url: string, handler: function(RouteContext): void | Promise<void>);
+        post(url: string, handler: (ctx: RouteContext) => void | Promise<void>);
+        get(url: string, handler: (ctx: RouteContext) => void | Promise<void>);
+        put(url: string, handler: (ctx: RouteContext) => void | Promise<void>);
+        delete(url: string, handler: (ctx: RouteContext) => void | Promise<void>);
 
         zipRouter?: ZipRouter
         sync?: SyncManager
@@ -23,9 +23,10 @@ namespace AiChatBackend {
         searchParams: URLSearchParams,
         readAsBuffer(maxLength?: number): Promise<Buffer>,
         readAsString(maxLength?: number): Promise<string>,
-        readAsObject(sizeLimit?: number = 1048576): Promise<Record<string, any>>,
+        /** @param [sizeLimit=1048576] */
+        readAsObject(sizeLimit?: number): Promise<Record<string, any>>,
         params: Record<string, string>,
-        send(number, Object?): void,
+        send(status: number, jsonBody?: Object): void,
         req: import("node:http").IncomingMessage,
         res: import("node:http").ServerResponse,
 
@@ -34,10 +35,10 @@ namespace AiChatBackend {
         variables: Function[];
     } & User;
 
-    type ModerationHandler = function(SSEProxyTarget, RouteContext): [
-        onStart: function(OpenAI.ChatCompletionRequest, SSEProxyTarget): Partial<SSEProxyTarget>,
-        onError: function(Error): void,
-        onFinally: function(OpenAI.ChatCompletionResponse): void,
+    type ModerationHandler = (target: SSEProxyTarget, ctx: RouteContext) => [
+        onStart: (req: OpenAI.ChatCompletionRequest, target: SSEProxyTarget) => Partial<SSEProxyTarget>,
+        onError: (err: Error) => void,
+        onFinally: (req: OpenAI.ChatCompletionResponse) => void,
     ]
 
     type VectorDB = {
@@ -64,7 +65,7 @@ namespace AiChatBackend {
     }
 
     type SyncManager = {
-        onBatch(ctx: RouteContext, func: string, body: *): void;
+        onBatch(ctx: RouteContext, func: string, body: any): void;
     }
 
     type User = {

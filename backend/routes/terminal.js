@@ -6,10 +6,12 @@ import {killProcess} from "../utils/process.js";
  * @param {AiChatBackend.Router} router
  */
 export function registerTerminalRoutes(router) {
-	router.get('/terminal',  (ctx) => ctx.send(204));
+	router.get('/terminal',  (ctx) => ctx.send(ctx.fsNoShell ? 403 : 204));
 	const instances = new Map;
 
 	router.post('/terminal', async (ctx) => {
+		if (ctx.fsNoShell) return ctx.send(403);
+
 		let {
 			id,
 			shell = process.platform === 'win32' ? "cmd" : "bash",
@@ -94,6 +96,8 @@ export function registerTerminalRoutes(router) {
 		send('E', `--- Process ${shell} started at ${new Date().toISOString()} ---`);
 	});
 	router.post('/terminalWrite', async (ctx) => {
+		if (ctx.fsNoShell) return ctx.send(403);
+
 		const {
 			id,
 			content

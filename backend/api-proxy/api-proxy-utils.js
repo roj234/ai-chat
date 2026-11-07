@@ -71,9 +71,9 @@ export async function processMessageRefs(messages, blobDir) {
 		if (val?.$ === 'BlobH') {
 			const hash = val.hash;
 			const hashBuf = Buffer.from(hash, 'base64url');
-			const row = blobDB.prepare('SELECT name, type FROM blobs WHERE hash = ?').get(hashBuf);
+			const row = blobDB.prepare('SELECT type FROM blobs WHERE hash = ?').get(hashBuf);
 
-			const err = () => {throw new Error("附件 "+(val.name || row?.name || hash)+" 丢失或损坏");};
+			const err = () => {throw new Error("附件 "+(val.name || hash)+" 丢失或损坏");};
 			if (!row) err();
 
 			const filePath = path.join(blobDir, hash.slice(0, 2).toLowerCase(), hash);

@@ -2,8 +2,8 @@ import {openWindow} from "/src/components/Windows.jsx";
 
 import "./Explorer.css";
 import {$asyncState, $computed, $foreach, $state, $update, $vforeach, $watch, unconscious} from "unconscious";
-import {auxSmallScreen, selectedConversation} from "/src/states.js";
-import {callFileSystemFunc, createFileSystem, FS_SOURCE, vfsUUID} from "../agent/index.js";
+import {auxMainlyTouch, auxSmallScreen, selectedConversation} from "/src/states.js";
+import {callFileSystemFunc, createFileSystem, FS_SOURCE, vfsIdentity} from "../agent/index.js";
 import {vfsDownloadMany, vfsPreview} from "./preview.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {ref} from "@roj234/shared";
@@ -13,9 +13,11 @@ import {normalizePath} from "@roj234/shared/path";
 import {queueMacrotask} from "unconscious/common/queueMacrotask.js";
 import {showToast} from "/src/components/Toast.js";
 import {iconClassOf, iconColorOf} from "./fileTypes.js";
-import {prettyError} from "/src/utils/utils.js";
+import {copyWithAnimation, prettyError} from "/src/utils/utils.js";
 import {openTerminal} from "./Terminal.jsx";
 import {NestedMap} from "unconscious/common/NestedMap.js";
+import {webviewUploadImage} from "../../vendor/jsBridge.js";
+import {openRecorder} from "../voiceInput/Recorder.jsx";
 
 /* ============================== 工具函数 ============================== */
 
@@ -50,7 +52,7 @@ function errText(text, status) {
 	const t = (text || '').trim();
 	try {
 		const o = JSON.parse(t);
-		if (o && o.error) return o.error;
+		if (o && o.error) return prettyError(o.error);
 	} catch {}
 	if (!t) return 'HTTP ' + status;
 	if (/^<(!doctype|html|head)/i.test(t)) return `服务返回的响应格式有误：${status} （检查地址或反向代理）`;
@@ -75,11 +77,10 @@ const TOAST_ICON = {ok: '✓', err: '×', warn: '!', info: 'i'};
 export const openFileBrowser = async (fs, path = '') => {
 	fs ??= await createFileSystem(unconscious(selectedConversation));
 	const browser = openWindow({
-		id: "preview "+encodeURI(vfsUUID(fs[FS_SOURCE])+"/"),
+		id: "preview "+encodeURI(vfsIdentity(fs[FS_SOURCE])),
 		title: "文件管理",
 		icon: iconFolder2(),
 		element: () => Explorer(fs),
-		actions: <span>{vfsUUID(fs[FS_SOURCE])}</span>
 	});
 	await browser.element.navigateTo(path);
 	return browser;
@@ -154,7 +155,7 @@ const Explorer = (fs) => {
 	const editingPath = $state(false);
 	const dropActive = $state(false);
 
-	const terminalAvailable = call('env').then(s => !!s.programs, () => false);
+	const terminalAvailable = call('terminal').then(() => true, () => false);
 	const terminal = async () => {
 		if (!await terminalAvailable) {
 			return showToast("该实现不支持", 'error');
@@ -509,7 +510,7 @@ const Explorer = (fs) => {
 		if (!multi) {
 			items.push(
 				{label: '重命名', icon: "ri-edit-line", act: () => renameEntry(e)},
-				{label: '复制路径', icon: "ri-link", act: () => copyText(targets.at(-1).path)},
+				{label: '复制路径', icon: "ri-link", act: () => copyWithAnimation(vfsIdentity(fs[FS_SOURCE]) + targets.at(-1).path)},
 			);
 		}
 
@@ -768,15 +769,12 @@ const Explorer = (fs) => {
 				dialog.querySelectorAll("button").forEach(b => b.remove());
 
 				let fail = 0;
-				for (const it of items) {
-					try {
-						await call('delete', {path: it.path, recursive: true, force: false});
-					} catch (e) {
-						fail++;
-						toast('删除失败：' + it.name + ' — ' + e.message, 'err');
-					}
-				}
-				if (!fail) toast(items.length > 1 ? `已删除 ${items.length} 项` : `已删除 ${items[0].name}`, 'ok');
+				let all = items.map(it => call('delete', {path: it.path, recursive: true, force: false}).catch(e => {
+					fail++;
+					toast('删除失败：' + it.name + ' — ' + e.message, 'err');
+				}));
+				await Promise.allSettled(all);
+				if (fail) toast(items.length > 1 ? `已删除 ${items.length} 项` : `已删除 ${items[0].name}`, 'ok');
 				clipboard.value = null;
 				$update(cwd);
 				treeKids.clear();
@@ -813,19 +811,13 @@ const Explorer = (fs) => {
 		}
 	}
 
-	/** @param {string} t */
-	function copyText(t) {
-		navigator.clipboard?.writeText(t).then(
-			() => toast('已复制路径：' + t, 'ok'),
-			() => toast('复制失败，请手动选择', 'err'),
-		);
-	}
-
 	/* ------------------------------ 上传 ------------------------------ */
 
 	const createNameConflictResolver = () => {
 		const set = new Set([...entries.map(e => e.name)]);
 		return initName => {
+			initName = initName.replaceAll(/[:<>\\/*?|"]/g, '-');
+
 			let ord = 1;
 			const pos = initName.lastIndexOf('.');
 
@@ -846,18 +838,21 @@ const Explorer = (fs) => {
 		}
 	}
 
-	/** @param {File} f */
-	async function startUpload(f) {
+	/**
+	 * @param {File} f
+	 * @param {string} name
+	 */
+	async function startUpload(f, name) {
 		const pct = <span className="pct">0%</span>;
 		const bar = <div className="timer" style="animation:none;transform:scaleX(0)" />;
 		const el = <div className="toast info">
-			<span className="ellipsis" title={f.name}>{f.name}</span>
+			<span className="ellipsis" title={name}>{name}</span>
 			{pct}
 			{bar}
 		</div>;
 		uploadDiv.append(el);
 
-		const target = joinPath(cwd.value, f.name);
+		const target = joinPath(cwd.value, name);
 
 		const kind = fs[FS_SOURCE].fs_type;
 		if (kind === 'api' || kind === 'db') {
@@ -878,21 +873,23 @@ const Explorer = (fs) => {
 			xhr.onload = () => {
 				el.remove();
 				if (xhr.status >= 200 && xhr.status < 300) {
+					highlightAfterChange = target;
 					$update(cwd);
-					toast('上传成功：' + f.name, 'ok');
+					toast('上传成功：' + name, 'ok');
 				} else {
-					toast('上传失败：' + f.name + ' — ' + errText(xhr.responseText, xhr.status), 'err');
+					toast('上传失败：' + name + ' — ' + errText(xhr.responseText, xhr.status), 'err');
 				}
 			};
 			xhr.onerror = () => {
-				toast('上传失败：' + f.name + ' — ' + '网络错误', 'err');
+				toast('上传失败：' + name + ' — ' + '网络错误', 'err');
 				el.remove();
 			};
 			xhr.send(f);
 		} else {
 			await call('writeRaw', { path: target, content: f }).then(() => {
+				highlightAfterChange = target;
 				$update(cwd);
-				toast('上传成功：' + f.name, 'ok');
+				toast('上传成功：' + name, 'ok');
 			}, (e) => {
 				toast('上传失败：' + prettyError(e), 'err');
 			}).finally(() => {
@@ -955,11 +952,9 @@ const Explorer = (fs) => {
 				id: "editor "+encodeURI(e.path),
 				title: "文本编辑 (实验性) "+e.path,
 				actions: <>
-					<span className="dot" title={() => dirty.value ? '有未保存的修改' : ''}
-						  class:dirty={() => dirty.value}/>
+					<span className="dot" title={() => dirty.value ? '有未保存的修改' : ''} class:dirty={() => dirty.value}/>
 					{formatSize(e.size)} · 很多 行
-					<button className="btn primary" disabled={() => !dirty.value || saving.value}
-							onClick={save}>{() => saving.value ? '保存中…' : '保存'}</button>
+					<button className="btn primary" disabled={() => !dirty.value || saving.value} onClick={save}>{() => saving.value ? '保存中…' : '保存'}</button>
 				</>,
 				element: ta
 			})
@@ -1091,6 +1086,8 @@ const Explorer = (fs) => {
 			if (e) openEntry(e);
 		}
 
+		if (!sorted.length) return;
+
 		if (ev.key === 'ArrowDown') {
 			if (selectedCount === 1) {
 				selectRow(sorted[sorted.indexOf(firstItem)+1] ?? sorted[0]);
@@ -1150,7 +1147,7 @@ const Explorer = (fs) => {
 					   onChange={() => toggleSel(e)}/>
 			</div>
 			<div className="name" onClick={ev => {
-				if (selection.has(e) && selection.size === 1) {
+				if (!auxSmallScreen && selection.has(e) && selection.size === 1) {
 					clearTimeout(e.timer);
 					e.timer = setTimeout(() => {
 						if (selection.has(e) && selection.size === 1) {
@@ -1231,9 +1228,22 @@ const Explorer = (fs) => {
 					<span className="ellipsis">{baseName(path) || '根目录'}</span>
 				</div>;
 			}, ({path}) => path+'\0'+(+treeOpen.has(path))+(+(treeKids.get(path.split('/'))!=null)), { volatileValue: true })}</div>
-			<div className="row">
-				<button className="ri-upload-line btn ghost" onClick={() => fileInput.click()}>上传</button>
-				<button ref={terminalBtn} className="ri-terminal-line btn ghost" onClick={terminal}>终端</button>
+			<div className="hab">
+				<div className="row">
+					<div className="dropdown">
+						<button className="ri-upload-line btn ghost" onClick={() => {
+							if (auxMainlyTouch) return;
+							fileInput.click()
+						}}>上传
+						</button>
+						<div className="list mid up">
+							{IS_ANDROID_BUILD && <label className="ri-camera-4-fill" onClick={() => {webviewUploadImage().then(b => uploadFiles([b]))}}>拍摄照片</label>}
+							<label className="ri-mic-fill" role="button" tabIndex={0} onClick={() => {openRecorder().then(b => uploadFiles([b]), () => {})}}>录制语音</label>
+							<label className="ri-attachment-2" role="button" tabIndex={0} onClick={() => fileInput.click()}>选择文件</label>
+						</div>
+					</div>
+					<button ref={terminalBtn} className="ri-terminal-line btn ghost" onClick={terminal}>终端</button>
+				</div>
 			</div>
 		</div>
 
@@ -1273,7 +1283,9 @@ const Explorer = (fs) => {
 				</div>
 			</div>
 
-			<div ref={scrollContainer} className="list scroll" onContextMenu={onBlankMenu}>
+			<div ref={scrollContainer} className="list scroll" onClick={e => {
+				if (!e.target.closest('.row')) resetSel();
+			}} onContextMenu={onBlankMenu}>
 				{$computed(() => {
 					if (entries.loading) {
 						return <div className="empty">
@@ -1330,6 +1342,8 @@ const Explorer = (fs) => {
 						return baseName(items[0].path) + (items.length > 1 ? ` 和其它 ${items.length-1} 项` : '');
 					}}
 				</span>
+				<span className="spacer" />
+				<span title="虚拟路径">{vfsIdentity(fs[FS_SOURCE])}</span>
 			</div>
 		</main>
 

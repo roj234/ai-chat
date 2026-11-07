@@ -125,7 +125,7 @@ export default SimpleModal;
 export const closeTopmostModal = () => {
 	const element = document.elementFromPoint(0, 0);
 	if (element.matches("dialog.modal")) {
-		element.dispatchEvent(new Event('close'));
+		element.dispatchEvent(new Event('cancel'));
 		return true;
 	}
 	return false;

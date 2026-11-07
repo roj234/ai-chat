@@ -74,7 +74,7 @@ export const decodeObjects = async (input, zr) => {
  */
 export const encodeObjects = (input, replacer, zipWriter) => {
 	const promises = [];
-	for (const [val] of deepEntries(input)) {
+	for (const [val, obj, key] of deepEntries(input)) {
 		const fn = val?.constructor;
 		switch (fn) {
 			case Blob:
@@ -98,12 +98,17 @@ export const encodeObjects = (input, replacer, zipWriter) => {
 					}));
 				} else {
 					const p = beforeUpload(uploadBlob(val)).then(hash => {
-						replacer.set(val, {
+						const cloudData = {
 							$: "BlobH",
 							hash,
 							name: val.name
-						});
+						};
+						replacer.set(val, cloudData);
 						afterUpload();
+						return getBlob(cloudData).then((fakeBlob) => {
+							obj[key] = fakeBlob;
+							replacer.set(fakeBlob, cloudData);
+						});
 					});
 					promises.push(p);
 					p.catch(err => {

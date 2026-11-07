@@ -8,21 +8,25 @@ import {
 	toolScriptRegistry,
 	toolset
 } from "/src/toolset.js";
-import {GLOBAL_SETTINGS} from "/src/settings.js";
-import {config, conversations, findConversation, messages} from "/src/states.js";
+import {conversations, EVENT_BUS, findConversation, messages, switchToConversation} from "/src/states.js";
 import {agentLoop} from "/src/api-request.js";
 import {$stampLock, $state, $unwatch, $watch} from "unconscious";
 import {renderMarkdownToString} from "/src/markdown/markdown.js";
 import {showToast} from "/src/components/Toast.js";
 import {throttled} from "/common/pure-utils.js";
 import {getMessages} from "/src/database.js";
-import {COMMAND_REGISTRY} from "/src/commands.js";
 import {onLoad} from "/src/hooks.js";
+import {duplicateConversation} from "../../src/data-exchange.js";
+import {prettyError} from "../../src/utils/utils.js";
+import SimpleModal from "../../src/components/SimpleModal.jsx";
+import {debugSymbol} from "@roj234/shared";
+
+const BOT = debugSymbol("Chatbot");
 
 /** @type {AiChat.FunctionTool} */
 const SendMessage = {
 	name: "SendMessage",
-	description: "Send message to the user. Use this tool to send media files, or reference previous messages. For other text replies, you can output directly.",
+	description: "Send message to the user. Use this tool to send media files, or reference previous messages. For text-only replies, you can output directly.",
 	parameters: {
 		type: "object",
 		properties: {
@@ -38,24 +42,24 @@ const SendMessage = {
 		},
 		required: ["type", "content"]
 	},
-	script({ type, content, referenceMessage }) {
-		return chatbotInstance.send(type, content, referenceMessage);
+	script({ type, content, referenceMessage }, _, conv) {
+		return conv[BOT].send(type, content, referenceMessage);
 	}
 };
 
 /** @type {AiChat.FunctionTool} */
 const ListTools = {
 	name: "ListTools",
-	description: "List all tools subagents can use.",
+	description: "List all tools agents can use.",
 	script({ searchTerms }) {
-		let prompt = 'MCP工具 (名称为 MODULE:XXX 而不是 XXX)\n\n';
+		let prompt = 'MCP工具 (传参时必须加 MCP: 前缀) \n\n';
 
 		const myTools = [];
 		for (const key in toolset) {
 			const val = toolset[key];
 			if (val.hidden === true) continue;
 
-			if (val.data === 'MCP') prompt += "MODULE:"+key+" - "+val.description+"\n\n";
+			if (val.data === 'MCP') prompt += "MCP:"+key+" - "+val.description+"\n\n";
 			else if (!val.hidden && val.tools) myTools.push(...val.tools);
 		}
 
@@ -70,23 +74,6 @@ const ListTools = {
 		return prompt.trim();
 	}
 };
-
-registerToolset("Chatbot", "将该对话接入聊天机器人", [SendMessage, ListTools], {
-	hidden: "manual",
-	onActivated(conv) {
-		config.chatbot_cid = conv.id;
-	},
-	async systemPrompt(conv) {
-		if (conv.id !== config.chatbot_cid)
-			throw '该对话已经不是 chatbot_cid, 请关闭此功能';
-		return ``
-	}
-});
-
-/**
- * @type {Chatbot}
- */
-let chatbotInstance;
 
 const renderItem = item => {
 	if (item.kind === "text") return item.text;
@@ -117,28 +104,31 @@ class Chatbot {
 		this.#delaySend = throttled(() => this.loop(), 5000);
 	}
 
-	async connect(url) {
-		const st = $state(`正在连接 ${url} ...`);
-		const closeToast = showToast(st, '', 0);
+	connect(url) {
+		return new Promise((resolve, reject) => {
+			const st = $state(`正在连接 ${url} ...`);
+			const closeToast = showToast(st, '', 0);
 
-		const sock = new WebSocket(url);
-		this.#ws = sock;
+			const sock = new WebSocket(url);
+			this.#ws = sock;
 
-		sock.onopen = () => {
-			st.value = (`✅ 连接成功`);
-			closeToast();
-		};
-		sock.onmessage = (ev) => {
-			let msg;
-			try { msg = JSON.parse(ev.data); } catch { return; }
-			this.#onMessage(msg);
-		};
-		sock.onclose = (e) => {
-			if (this.#ws === sock) this.#ws = null;
-			st.value = (e.code === 4003 ? "账号未登录/加载失败" : "连接已断开");
-			closeToast();
-		};
-		sock.onerror = () => {};
+			sock.onopen = () => {
+				st.value = (`✅ 连接成功`);
+				closeToast();
+				resolve();
+			};
+			sock.onmessage = (ev) => {
+				let msg;
+				try { msg = JSON.parse(ev.data); } catch { return; }
+				this.#onMessage(msg);
+			};
+			sock.onclose = (e) => {
+				if (this.#ws === sock) this.#ws = null;
+				st.value = (e.code === 4003 ? "账号未登录/加载失败" : "连接已断开");
+				closeToast();
+			};
+			sock.onerror = () => reject();
+		})
 	}
 
 	send(type, content, ref) {
@@ -182,6 +172,10 @@ class Chatbot {
 		}
 	}
 
+	async destroy() {
+		this.#ws.close();
+	}
+
 	async loop() {
 		await this.#initialize();
 		const conversation = this.#conversation;
@@ -197,6 +191,13 @@ class Chatbot {
 				const am = messages.at(-1);
 				let textContent = am.content && renderMarkdownToString(am.content, true);
 
+				let error = am.error;
+				if (!error) {
+					if (result === 'interrupt') error = "你中断了生成";
+					if (result === 'length') error = "达到最大输出长度";
+				}
+				if (error) textContent += '\n\n发生错误：\n'+prettyError(error);
+
 				if (am.tool_responses) {
 					const toolCalls = am.tool_calls;
 					for (let i = 0; i < toolCalls.length; i++){
@@ -210,17 +211,22 @@ class Chatbot {
 						} catch (e) {
 							console.error("工具标题生成异常", e);
 						}
-						textContent += '\n调用工具: '+name;
-						if (secure) textContent += " (需要审批)";
+						if (secure) textContent += `
+
+工具需要审批: ${name}
+输入 /allow 允许
+注：永远允许需要在UI中修改
+输入其它内容拒绝`;
 					}
 				}
 
 				if (textContent) {
-					await this.send("text", textContent).catch(err => {
+					await this.send("text", textContent.trim()).catch(err => {
 						messages.push({
 							time: Date.now(),
 							role: "user",
-							content: `<system-remainder>Error: faield to send message to user: ${err}</system-remainder>`
+							label: "消息发送失败回执",
+							content: `<system-remainder>Error: cannot send message: ${err}</system-remainder>`
 						})
 					});
 				}
@@ -266,10 +272,11 @@ class Chatbot {
 
 				if (str.startsWith("/")) {
 					const cmd = str.slice(1);
-					if (cmd === 'deny') {
-						runTools(messages.at(-1), conversation, true, false).then(() => {
-							this.loop();
-						});
+					if (cmd === 'new') {
+						const firstMessage = messages[0];
+						const conv = await duplicateConversation(true);
+						await switchToConversation(conv);
+						delete conversation.meta.bot;
 					} else if (cmd === 'allow') {
 						runTools(messages.at(-1), conversation, true, true).then(() => {
 							this.loop();
@@ -282,7 +289,7 @@ class Chatbot {
 						this.send('text', `指令帮助：
 /allow 允许工具调用
 /deny 拒绝工具调用 (或者直接输入任意回复，默认拒绝)
-/regen 重新生成回复`)
+/new 开启新会话 (尚未实现！！)`)
 					}
 					return;
 				}
@@ -300,37 +307,50 @@ class Chatbot {
 	}
 }
 
-async function connectChatbotServer() {
-	if (!chatbotInstance) {
-		const bot = new Chatbot(config.chatbot_cid);
-		await bot.connect(config.chatbot_ws_url).then(() => {
-			chatbotInstance = bot;
-		});
-	}
-}
+registerToolset("Chatbot", "将该对话接入聊天机器人", [SendMessage, ListTools], {
+	hidden: "manual",
+	onActivated(conv) {
+		return new Promise((resolve, reject) => {
+			SimpleModal({
+				title: "输入服务器地址",
+				message: "WIP，没有输入校验，如果要改，你需要重新打开此功能",
+				type: "input",
+				confirmMessage: "连接",
+				async onConfirm(server) {
+					const bot = new Chatbot(conv.id);
+					try {
+						await bot.connect(server);
+					} catch (e) {
+						return false;
+					}
 
-COMMAND_REGISTRY['ccc'] = [
-	async () => {
-		await connectChatbotServer();
-		chatbotInstance.loop();
+					(conv.meta ??= {}).bot = {server}
+					resolve();
+				},
+				onCancel: reject
+			})
+		})
 	},
-	"连接聊天服务器"
-]
+	onDeactivated(conv) {
+		delete conv.meta.bot;
+		conv[BOT]?.destroy();
+	}
+});
 
 onLoad(() => {
 	const handler = () => {
 		$unwatch(conversations, handler);
-		connectChatbotServer();
+		for (const conv of conversations) {
+			const cfg = conv.meta?.bot;
+			if (cfg) {
+				const instance = new Chatbot(conv.id);
+				conv[BOT] = instance;
+				instance.connect(cfg.server).then(() => {
+					EVENT_BUS.on(['convDel', conv.id], () => instance.destroy());
+					return instance.loop();
+				});
+			}
+		}
 	}
-	if (config.chatbot_ws_url) $watch(conversations, handler, false);
-});
-
-GLOBAL_SETTINGS.push({
-	id: "chatbot_ws_url",
-	name: "Chatbot WebSocket 服务器地址",
-	type: "input",
-}, {
-	id: "chatbot_cid",
-	name: "Chatbot 绑定到的对话ID",
-	type: "input"
+	$watch(conversations, handler, false);
 });

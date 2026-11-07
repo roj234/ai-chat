@@ -37,7 +37,7 @@ import {
 } from "../states.js";
 import {submitUserChatMessage} from "../api-request.js";
 import {
-	copyButtonAnimation,
+	copyWithAnimation,
 	downloadFile,
 	errorBlock,
 	getRandomString,
@@ -605,13 +605,13 @@ const buttonOnLeft = (selectedConversation, messages, e) => {
 		case "copy": {
 			const m = message[MessageCopyHandler]?.() || getTextContent(self);
 			if (window.ClipboardItem) {
-				copyButtonAnimation([new ClipboardItem({
+				copyWithAnimation([new ClipboardItem({
 					'text/html': new Blob([renderMarkdownToString(m)], {type: 'text/html'}),
 					'text/plain': new Blob([m], {type: 'text/plain'})
 				})], btn);
 			} else {
 				// FUCK Secure Context
-				copyButtonAnimation(m, btn);
+				copyWithAnimation(m, btn);
 			}
 		}
 		break;
@@ -1101,7 +1101,6 @@ export function MessageList({messages}) {
 		const msg = item.key;
 
 		const buttonDiv = <div className="btn-line"><span className="buttons" style="display:none" ref={buttons}></span></div>;
-		const isNormalConversation = !selectedConversation.noAI;
 		const div = <div onMouseEnter={() => {
 			if (hoverElement) {
 				findButtonContainer(hoverElement).style.display = "none";
@@ -1109,7 +1108,7 @@ export function MessageList({messages}) {
 			hoverElement = div;
 			updateButtons(item, buttons);
 		}} className={`msg ${msg.role}`} _identity={item}>
-			{renderRole(item, isNormalConversation)}
+			{renderRole(item, true)}
 			{auxSmallScreen ? null : buttonDiv}
 			<div className="body">{chunkRenderer(item)}</div>
 			{!auxSmallScreen ? null : buttonDiv}

@@ -3,7 +3,6 @@ import {config, messages} from "./states.js";
 import {unconscious} from "unconscious";
 import {tokenize} from "unconscious/common/StringTokenizer.js";
 import {submitUserChatMessage} from "./api-request.js";
-import SimpleModal from "./components/SimpleModal.jsx";
 
 /**
  * 指令处理器定义
@@ -39,17 +38,6 @@ export const COMMAND_REGISTRY = {
 			submitUserChatMessage();
 		},
 		"继续上一条助手消息"
-	],
-	"share": [
-		async () => {
-			const qr = await import("unconscious/common/qr.js");
-			const canvas = qr.renderQRCodeToCanvas(location.href);
-			SimpleModal({
-				title: "手机浏览器扫码打开",
-				message: <>{location.href}<br/>{canvas}</>
-			})
-		},
-		"在手机上打开这条对话 (WIP)"
 	]
 };
 

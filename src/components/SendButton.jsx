@@ -86,7 +86,7 @@ export const createSendButton = (attachments, submitInput) => {
 		setIcon(value ? value.signal.aborted ? 5 : 1 : 0);
 		if (value) return !value.signal.aborted;
 
-		if (!last || selectedConversation.noAI) return false;
+		if (!last) return false;
 
 		if (selectedConversation.resumeId) {
 			setIcon(2);

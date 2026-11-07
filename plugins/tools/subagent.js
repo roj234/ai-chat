@@ -132,7 +132,7 @@ async function createSubagent(par, response, conv, tools) {
 	 * @type {AiChat.Conversation}
 	 */
 	const agent = {
-		title: par.label || '无标题子智能体',
+		title: par.label || '无标题',
 		time: Date.now(),
 		// 有些工具比如Wait判断它是否存在从而进入假设无UI的无头模式
 		meta: { owner: conv.id },
@@ -236,6 +236,7 @@ async function createSubagent(par, response, conv, tools) {
 				if (typeof key === "string")
 					newModules.push(key);
 				else {
+					//addMCPServer()
 					throw "Sorry add MCP servers on the fly is not supported yet";
 				}
 			}
@@ -334,7 +335,14 @@ async function createSubagent(par, response, conv, tools) {
 	agent.tools.clear();
 	for (let t of tools) {
 		const reg = toolScriptRegistry[t = t.trim()];
-		if (!reg) throw "Tool "+JSON.stringify(t)+" not found";
+		if (!reg) {
+			if (t.startsWith("MCP:")) {
+				await toolScriptRegistry['Use'].script({ modules: [t.slice(4)] }, {}, agent);
+				continue;
+			}
+
+			throw "Tool "+JSON.stringify(t)+" not found";
+		}
 
 		if (isInheritedTools && noInherit.has(t)) continue;
 		if (reg.requireUI) {

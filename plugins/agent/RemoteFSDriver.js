@@ -99,13 +99,14 @@ export const createRemoteFileSystem = (baseUrl, pat, fileBase) =>
 			};
 		}
 
-		let method, stream;
+		let method, stream, signal;
 		if (func.endsWith("Raw") && parameters) {
 			// Append extra params as query string
 			const sep = endpoint.includes('?') ? '&' : '?';
 			endpoint += sep + 'path='+encodeURIComponent(parameters.path);
 			body = parameters.content;
 			stream = parameters.stream;
+			signal = parameters.signal;
 			if (parameters.metaOnly) method = "HEAD";
 			if (body) headers['Content-Type'] = 'application/octet-stream';
 			else parameters = null;
@@ -121,6 +122,7 @@ export const createRemoteFileSystem = (baseUrl, pat, fileBase) =>
 				method: method ?? (parameters ? 'POST' : 'GET'),
 				headers,
 				body,
+				signal
 			});
 		} catch (e) {
 			throw "FileService dead";

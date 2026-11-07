@@ -1,8 +1,4 @@
 
-:root {
-    --msidebar-width: 280px;
-}
-
 .pm-badge {
     background: var(--accent);
     color: white;
@@ -13,13 +9,14 @@
 
 /* 主容器 */
 .plugins {
-    &.win-body {
-        flex-direction: row;
-    }
+    flex: 1;
+    display: flex;
 
     /* 左侧边栏 */
     & .msidebar {
-        width: var(--msidebar-width);
+        width: 200px;
+        height: 100%;
+
         border-right: 1px solid var(--border);
         overflow-y: auto;
         display: flex;
@@ -32,7 +29,6 @@
             padding: 12px 8px;
             border-left: 3px solid transparent;
             transition: background 0.15s ease, border-color 0.15s ease;
-            position: relative;
 
             &:hover {
                 background: var(--chip-active);
@@ -40,29 +36,6 @@
             &.active {
                 border-color: var(--chip-active-border);
             }
-            &.ds-drag {
-                opacity: 0.5;
-                background: var(--chip-bg);
-                box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
-            }
-        }
-        &>.ds-shadow {
-            border: 1px dashed var(--chip-active-border);
-        }
-    }
-
-    /* 拖拽手柄 */
-    & .drag-handle {
-        color: var(--muted);
-        font-size: 18px;
-        line-height: 1;
-        cursor: grab;
-        flex-shrink: 0;
-        user-select: none;
-        touch-action: none;
-
-        &:active {
-            cursor: grabbing;
         }
     }
 

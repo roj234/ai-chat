@@ -9,6 +9,7 @@ import {DI_messageContainer} from "../hooks.js";
 import {jsonFetch} from "/common/fetch-utils.js";
 import {throwDOMException} from "/common/pure-utils.js";
 import {SHA256} from "unconscious/common/SHA256.js";
+import {AS_IS} from "@roj234/shared";
 
 export const getRandomString = (length) => {
 	const view = new Uint8Array(length);
@@ -116,11 +117,11 @@ export const jsHide = element => {
 	}
 };
 
-export const copyButtonAnimation = (data, btn) => {
-	const successCallback = () => {
+export const copyWithAnimation = (data, btn) => {
+	const successCallback = btn ? () => {
 		btn.className = "ri-checkbox-line ghost";
 		setTimeout(() => btn.className = "ri-file-copy-line ghost", 1000);
-	};
+	} : AS_IS;
 
 	if (navigator.clipboard) {
 		navigator.clipboard[typeof data === "string" ? 'writeText' : 'write'](data)

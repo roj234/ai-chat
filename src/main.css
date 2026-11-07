@@ -365,9 +365,6 @@ body._locked {
         display: none;
     }
 }
-body._fileUI .hide-human {
-    display: none !important;
-}
 
 /* 新对话 */
 .composer .logo { display: none; }

@@ -118,7 +118,7 @@ const runBatch = async () => {
 		// 如果切换了数据库服务器
 		if (!config._new) {
 			const keys = new Set();
-			queue.forEach((item) => keys.add(item[0][1][IdempotencyKeyForReplay]));
+			queue.forEach((item) => keys.add(item[0][1]?.[IdempotencyKeyForReplay]));
 
 			const tmp = [];
 			mq.forEach(item => {
@@ -259,7 +259,8 @@ const showIncompatibleDialog = backendVersion => {
 			"警告：数据无价，请勿在更新前执行写入操作。",
 		confirmMessage: "了解风险，继续",
 		accent: "danger",
-		onCancel: null
+		onCancel: null,
+		onConfirm() {}
 	});
 };
 
@@ -510,7 +511,7 @@ export const uploadBlob = async blob => {
 	Object.defineProperty(blob, 'hash', { value: hash, });
 
 	try {
-		await u_getBlobInfo(hash);
+		await u_getBlobInfo([hash, blob.name || '']);
 	} catch {
 		if (maxBlobSize && blob.size > maxBlobSize) throw '文件 '+blob.hash+' 过大';
 
@@ -540,7 +541,7 @@ export const uploadBlob = async blob => {
  * @return {Promise<Blob>}
  */
 export const getBlob = async ({hash, name}) => {
-	const serverData = await u_getBlobInfo(hash).catch((e) => {
+	const serverData = await u_getBlobInfo([hash]).catch((e) => {
 		return {
 			size: -1,
 			type: e

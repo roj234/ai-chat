@@ -18,9 +18,8 @@ import {handleCommand} from "../commands.js";
 import SimpleModal from "./SimpleModal.jsx";
 import {getBlob} from "../database.js";
 import {webviewUploadImage} from "/vendor/jsBridge.js";
-import {Recorder} from "/plugins/voiceInput/Recorder.jsx";
+import {openRecorder} from "/plugins/voiceInput/Recorder.jsx";
 import {resolvePreset} from "../presets.js";
-import {closeWindow, openWindow} from "./Windows.jsx";
 import {cannotInsertAfter, injectMessages} from "../inject-message.js";
 import {PendingMessageList} from "./PendingMessageList.jsx";
 import {DI, DID_INPUT_BOX_POSITION} from "../hooks.js";
@@ -202,25 +201,8 @@ export const createUserInputComposer = (scroller) => {
 							fileInput.click()
 						}}></button>
 						<div className="list mid up">
-							{IS_ANDROID_BUILD && <label className="ri-camera-4-fill" onClick={() => {
-								webviewUploadImage().then(blobCallback)
-							}}>
-								拍摄照片
-							</label>}
-							<label className="ri-mic-fill" role="button" tabIndex={0} onClick={() => {
-								const handle = openWindow({
-									id: 'recorder',
-									icon: <i className={"ri-mic-fill"}></i>,
-									title: "录音机",
-									element: () => <div style={"padding:8px"}><Recorder onSubmit={(blob) => {
-										blobCallback(blob);
-										closeWindow(handle);
-									}}/></div>,
-									width: 500,
-									height: 230,
-									resizable: false
-								});
-							}}>录制语音</label>
+							{IS_ANDROID_BUILD && <label className="ri-camera-4-fill" onClick={() => {webviewUploadImage().then(blobCallback)}}>拍摄照片</label>}
+							<label className="ri-mic-fill" role="button" tabIndex={0} onClick={() => {openRecorder().then(blobCallback, () => {});}}>录制语音</label>
 							<label className="ri-attachment-2" role="button" tabIndex={0} onClick={() => fileInput.click()}>选择文件</label>
 						</div>
 					</div>
@@ -327,8 +309,6 @@ export const createUserInputComposer = (scroller) => {
 			messages.push({role: 'user', content, time: Date.now()});
 			scrollMessagesToBottom(true);
 		}
-
-		if (selectedConversation.noAI) return;
 
 		await ensureConversation();
 

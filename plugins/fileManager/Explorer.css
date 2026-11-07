@@ -126,6 +126,7 @@ html[data-theme="light"] .explorer {
 			flex:1;position:relative;
 
 			.row{
+				user-select: none;
 				gap:8px;align-items:center;height:40px;padding:0 4px 0 8px;
 				font-size: 14px;
 				&:hover{background:var(--chip-bg)}
@@ -238,6 +239,10 @@ html[data-theme="light"] .explorer {
 			width:230px;
 			border-right:1px solid var(--line);
 			background:var(--bg2);
+
+			.hab > .row {
+				justify-content: center;
+			}
 		}
 	}
 }
@@ -245,17 +250,38 @@ html[data-theme="light"] .explorer {
 	.explorer {
 		.sidebar2 {
 			position: absolute;
-			right: 10px;
+			right: 40px;
 			bottom: 40px;
 			z-index: 1;
 
 			.tree{display:none}
-			> .row {
+			.hab {
+				display: flex;
 				flex-direction: column;
-				padding: 0;
+				align-items: center;
+
+				border-radius: 50%;
+				background: var(--accent);
+				width: 32px;
+				height: 32px;
+
+				&:before {
+					content: "+";
+					font-size: 24px;
+				}
+				& .row { display: none; }
 				& button {
 					background: var(--accent);
 				}
+
+				&:hover .row {
+					display: block;
+					position: relative;
+					width: 100px;
+					top: -100px;
+					left: 20px;
+				}
+
 			}
 		}
 		.fa-search{width:120px}

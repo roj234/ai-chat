@@ -21,7 +21,7 @@ export const openTerminal = async (fs, cwd = '') => {
 	fs ??= await createFileSystem(unconscious(selectedConversation));
 	const id = crypto.randomUUID();
 
-	const lines = $state([]);
+	const lines = $state([{s:'前台终端：网断了/关窗口=杀进程树，无法后台运序'}]);
 	const disabled = $state(true);
 	const clearOutput = () => lines.value = [{s:`输出已清除 (${new Date().toLocaleString()})`}];
 
@@ -29,6 +29,8 @@ export const openTerminal = async (fs, cwd = '') => {
 		id: "terminal "+id,
 		title: "终端 (前台)",
 		icon: iconTerminal(),
+		width: 800,
+		height: 600,
 		element: () => {
 			const HISTORY_LIMIT = 200;
 			const commandHistory = [];
@@ -37,6 +39,8 @@ export const openTerminal = async (fs, cwd = '') => {
 			let outEl = ref();
 
 			const onInputKeydown = e => {
+				if (e.isComposing) return;
+
 				if (e.key === 'ArrowUp') {
 					e.preventDefault();
 					if (commandHistory.length > 0) {
@@ -92,12 +96,12 @@ export const openTerminal = async (fs, cwd = '') => {
 
 			io.observe(lastLine);
 
-			callFileSystemFunc(fs, 'getUrl').then(({base, root = '.', headers}) => sseFetch(base+'terminal', {
+			callFileSystemFunc(fs, 'getUrl').then(({base, root = '', headers}) => sseFetch(base+'terminal', {
 				key: headers.authorization.slice('Bearer '.length),
 				json: false,
 				body: JSON.stringify({
 					id,
-					cwd: normalizePath(root+'/'+cwd).join('/'),
+					cwd: normalizePath(root+'/'+cwd).join('/') || '.',
 				})
 			}, chunk => {
 				const type = chunk[0];
@@ -125,7 +129,7 @@ export const openTerminal = async (fs, cwd = '') => {
 				<div className="in">
 					<span className="icon">&gt;</span>
 					<textarea className="input" autoComplete="off" spellCheck="false"
-						placeholder="输入命令，按Enter发送，Shift+Enter换行..."
+						placeholder="输入命令，Enter发送，Shift+Enter换行..."
 						ref={inputEl}
 						disabled={disabled} onKeyDown={onInputKeydown} />
 				</div>

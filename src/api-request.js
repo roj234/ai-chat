@@ -165,6 +165,7 @@ const safelyRemoveLastMessage = messages => {
  * @returns {Promise<false|string>}
  */
 export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
+	if (conversation.noAI) throw new DOMException("文件传输助手功能已经弃用。这条提示很快也将删除");
 	if (runningConversations.has(conversation.id)) throw new DOMException("agentLoop is running for "+conversation.id);
 
 	const abort = $state(new AbortController());
@@ -378,6 +379,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 				assistantMessage[LOG_CACHE] = result;
 			} else
 
+			// 这里不存 LOG_CACHE 是为了让服务端计算价格
 			if (needUpdate || needLog || isContentfulMessage(assistantMessage)) {
 				markMessageDirty(assistantMessage);
 				promises.push(updateConversation(conversation, messages_uc));

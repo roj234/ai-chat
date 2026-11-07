@@ -115,10 +115,10 @@ export function PendingMessageList({attachments, items, input} = {}) {
 									}}>
 								<i className="ri-flashlight-fill" />
 							</button>}
-						<button className="pm-recall" title="放回输入框" tabIndex={0}
-								onClick={() => recall(message)}>
+						{message.label == null && <button className="pm-recall" title="放回输入框" tabIndex={0}
+								 onClick={() => recall(message)}>
 							<i className="ri-corner-right-down-line"/>
-						</button>
+						</button>}
 					</div>
 				);
 			})}</div>

@@ -285,7 +285,6 @@ const createApp = () => {
 			$watch(selectedConversation, () => {
 				const conv = unconscious(selectedConversation);
 				const id = conv?.id;
-				app.classList.toggle("_fileUI", !!conv?.noAI);
 
 				if (conv && !conv.ready) {
 					if (prevId !== id) messages.value = [];

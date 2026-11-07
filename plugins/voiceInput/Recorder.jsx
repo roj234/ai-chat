@@ -3,8 +3,10 @@ import "./Recorder.css";
 import {formatSize} from "unconscious/common/Utils.js";
 import {$cleanup, $computed, $state, unconscious} from "unconscious";
 import {AudioPlayer} from "/src/components/AudioPlayer.jsx";
+import {closeWindow, openWindow} from "../../src/components/Windows.jsx";
+import {EVENT_BUS} from "../../src/states.js";
 
-export const Recorder = ({ onSubmit }) => {
+const Recorder = ({ onSubmit }) => {
 	let statusEl;
 	const canvas = <canvas/>;
 
@@ -124,3 +126,25 @@ export const Recorder = ({ onSubmit }) => {
 	}
 	return elm;
 }
+
+/**
+ * @return {Promise<Blob>}
+ */
+export const openRecorder = () => new Promise((resolve, reject) => {
+	const handle = openWindow({
+		id: 'recorder',
+		icon: <i className={"ri-mic-fill"}></i>,
+		title: "录音机",
+		element: () => <div style={"padding:8px"}><Recorder onSubmit={(blob) => {
+			resolve(blob);
+			closeWindow(handle);
+		}}/></div>,
+		width: 500,
+		height: 230,
+		resizable: false
+	});
+	const off = EVENT_BUS.onoff(['closeWindow', 'recorder'], () => {
+		off();
+		reject();
+	});
+});

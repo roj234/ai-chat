@@ -38,7 +38,7 @@
    .TaskListPanel
    ═══════════════════════════════════════ */
 .TaskListPanel {
-    width: var(--tl-panel-width);
+    max-width: var(--tl-panel-width) !important;
     max-height: var(--tl-panel-max-height);
     background: var(--tl-panel-bg) !important;
     border: 1px solid var(--tl-panel-border);
@@ -56,7 +56,8 @@
     /* 折叠态 */
     &.collapsed {
         & .body,
-        & .footer { display: none; }
+        & .footer,
+        & .progressBar { display: none; }
 
         & .collapse { rotate: 90deg; }
     }

@@ -8,6 +8,7 @@ import {
 	onConversationSwitchOut,
 	onConversationSwitchTo,
 	selectedConversation,
+	switchToConversation,
 	updateMessageUI
 } from "/src/states.js";
 import {importConversationData, registerDataImportHandler} from "/src/data-exchange.js";
@@ -59,7 +60,6 @@ import {Icon_save} from "/src/components/Icons.jsx";
 
 import "./BasicRoleplay.css";
 import {HighlightBox} from "/src/components/TextDiff.jsx";
-import {switchToConversation} from "../../src/states.js";
 
 compileSchema(schema);
 

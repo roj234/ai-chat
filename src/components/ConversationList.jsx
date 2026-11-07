@@ -264,7 +264,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 		renderer(conv) {
 			if (conv.nodeType) return conv;
 
-			const btn = conv.id === 0 ? <button className="ri-folder-transfer-fill" title={"文件传输助手"}/> : <button className={"edit-btn ri-menu-line"} title={"菜单"} />;
+			const btn = <button className={"edit-btn ri-menu-line"} title={"菜单"} />;
 			btn.addEventListener(auxMainlyTouch ? 'click' : 'mouseover', mouseHandler);
 			const running = runningConversations.has(conv.id);
 

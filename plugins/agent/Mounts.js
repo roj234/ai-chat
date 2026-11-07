@@ -499,14 +499,18 @@ async function callFBI(mount) {
 			resolve(item);
 		};
 
-		const modal = <dialog className="modal fa-modal" role="dialog" aria-modal="true">
+		const modal = <dialog className="modal fa-modal" role="dialog" aria-modal="true" oncancel={e => {
+			if (e.target !== modal) return;
+			e.preventDefault();
+			modal.remove();
+			reject(fsError?.message ?? fsError ?? "未选择文件系统");
+		}}>
 			<div>
 				<div style={"display:flex"}>
 					{mount.fs_label || ("挂载" + (mount.fs_name || "工作区"))}
 					<span className={"spacer"}></span>
 					<button className="ri-close-line btn sm danger" title={"关闭窗口"} onClick={() => {
-						modal.remove();
-						reject(fsError?.message ?? fsError ?? "未选择文件系统");
+						modal.dispatchEvent(new Event('cancel'));
 					}}/>
 				</div>
 				{fsError && <div className="fa-alert row">
@@ -660,7 +664,13 @@ export const FS_SOURCE = debugSymbol("UUID");
  * @param {AiChat.Mount} _mount
  * @return {string}
  */
-export const vfsUUID = _mount => `${_mount.fs_type}://${_mount.fs_server||''}/${_mount.fs_base}${_mount.fs_branch ? `#${_mount.fs_branch}` : ''}`;
+export const vfsIdentity = ({fs_type, fs_server, fs_base, fs_branch}) => {
+	let str = `vfs://${fs_type}/`;
+	if (fs_server) str += fs_server+'/';
+	if (fs_base) str += fs_base+'/';
+	if (fs_branch) str += '#'+fs_branch;
+	return str;
+};
 
 /**
  * 根据配置初始化文件系统

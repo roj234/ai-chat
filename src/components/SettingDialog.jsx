@@ -17,7 +17,8 @@ let currentTab = $state("general");
  *
  * @type {Record<string, {
  *     name: HTMLElement | string,
- *     elements: HTMLElement[]
+ *     elements: HTMLElement[],
+ *     external?: boolean
  * }>}
  */
 let tabs = {};
@@ -28,14 +29,15 @@ let tabs = {};
  * @param {string} id
  * @param {string} name
  * @param {string} icon
- * @param {string=} after 未实现
+ * @param {HTMLElement[]=} elements
  */
-export const createTab = (id, name, icon, after) => {
+export const createTab = (id, name, icon, elements) => {
 	if (id in tabs) return;
 	tabs[id] = {
 		icon,
 		name,
-		elements: []
+		elements: elements ?? [],
+		external: !!elements
 	};
 };
 
@@ -45,7 +47,7 @@ const NEW_PROVIDER_TAB = immutableObjectMap({
 	"model2": "高级配置",
 });
 
-createTab("general", "通用", "ri-wrench-line");
+createTab("general", "通用", "ri-settings-3-line");
 createTab("provider", "模型", "ri-key-line");
 createTab("prompt", "提示词", "ri-menu-2-line");
 createTab("customize", "个性化", "ri-brush-line");
@@ -128,7 +130,9 @@ export function createSettingDialog(optionsArray, settings, onSettingChanged) {
 		}
 	}
 
-	const filtered = Object.entries(tabs).filter(([key, {elements}]) => {
+	const filtered = Object.entries(tabs).filter(([key, {external, elements}]) => {
+		if (external) return elements;
+
 		return elements.length && !(NEW_PROVIDER_TAB[key]) && elements.sort((a, b) => (a[ITEM_KEY]._order || 0) - (b[ITEM_KEY]._order || 0));
 	});
 
@@ -213,13 +217,16 @@ export function createSettingDialog(optionsArray, settings, onSettingChanged) {
 
 	$watch(currentTab, () => {
 		if (unconscious(currentTab) === "provider") {
+			body.classList.remove('ext');
 			body.classList.add("sd-provider");
 			body.replaceChildren(tabHeader, tabValue);
 			return;
 		}
 
 		body.classList.remove("sd-provider");
-		body.replaceChildren(...tabs[unconscious(currentTab)].elements);
+		const tab = tabs[unconscious(currentTab)];
+		body.classList.toggle('ext', tab.external);
+		body.replaceChildren(...tab.elements);
 	});
 
 	appendChild(byId.get("systemPrompt"), <PromptDropdown/>);

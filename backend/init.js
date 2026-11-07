@@ -73,7 +73,7 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 
 	/** @type {AiChatBackend.Router} */
 	const router = new Router( (ctx) => {
-		let fsRoot;
+		let fsRoot = '';
 
 		const urlPath = ctx.path;
 		const method = ctx.req.method;
@@ -111,17 +111,23 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 
 			fsRoot = path.join(workspace, userId);
 		} else {
+			fsRoot = workspace;
+
 			if (workspacePath) {
 				if (method === 'POST' && /\/(ping)$/.test(urlPath)) return;
 
 				const pat = (ctx.req.headers.authorization || '').slice("Bearer ".length);
 				if (pat !== FS_SERVICE_PAT) {
-					ctx.send(401, {error: "invalid token"});
-					return true;
+					if (typeof FS_SERVICE_PAT === 'object') {
+						const {base, shell} = FS_SERVICE_PAT[pat] ?? {};
+						if (base) fsRoot = path.join(fsRoot, base);
+						if (!shell) ctx.fsNoShell = true;
+					} else {
+						ctx.send(401, {error: "invalid PAT"});
+						return true;
+					}
 				}
 			}
-
-			fsRoot = workspace;
 		}
 
 		const relativePath = ctx.searchParams.get("root");

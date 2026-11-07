@@ -26,7 +26,7 @@
         }
     }
 
-    & .sd-provider.filter {
+    & .sd-provider.filter, & .ext.filter {
         padding: 0;
         gap: 0;
         flex: 1;

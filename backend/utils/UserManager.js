@@ -1,9 +1,9 @@
-import {ENABLE_FILE_TRANSFER, MAX_OPEN_DATABASES, SEMANTIC_SEARCH_ENABLE, STARTUP_SQL} from "../config.js";
+import {MAX_OPEN_DATABASES, SEMANTIC_SEARCH_ENABLE, STARTUP_SQL} from "../config.js";
 import {VectorDB} from "../rag/VectorDB.js";
 import {DatabaseSync} from "node:sqlite";
 import fs from "node:fs";
 import {cachePreparedSql} from "./sqliteUtils.js";
-import {compressLog, compressMessage, decompressLog} from "./compression.js";
+import {compressLog, decompressLog} from "./compression.js";
 import {NULL_OWNER, TSDB} from "@roj234/logdb";
 import {LRUCache} from "@roj234/lru-cache";
 
@@ -131,11 +131,6 @@ PRAGMA user_version = `+DB_VERSION);
 
 		db.exec(STARTUP_SQL);
 		db.exec("PRAGMA optimize;");
-		if (ENABLE_FILE_TRANSFER) {
-			db.prepare("INSERT INTO conversations (id, title, time, data) VALUES (0, '文件传输助手', ?, ?) ON CONFLICT(id) DO NOTHING").run(
-				Date.now(), compressMessage({ noAI: true })
-			);
-		}
 
 		return db;
 	});

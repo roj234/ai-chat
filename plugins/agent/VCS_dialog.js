@@ -32,7 +32,7 @@ import {compileGlobPattern} from "/common/fs-glob.js";
 import {EVENT_BUS} from "/src/states.js";
 import {SHA256} from "unconscious/common/SHA256.js";
 import {sleep, throttledPromiseLast} from "/common/pure-utils.js";
-import {ImagePane} from "./ImagePane.jsx";
+import {ImagePane} from "/src/components/ImagePane.jsx";
 
 export const showVCSDialog = (conv) => {
 	return openWindow({

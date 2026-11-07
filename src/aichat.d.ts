@@ -74,9 +74,6 @@ declare namespace AiChat {
         /** 当前已用上下文大小（从response的usage提取） */
         contextUsage?: number;
 
-        // 禁用AI功能
-        noAI?: true;
-
         /** 分支对话，最后一条对话的ID */
         bm_leaf?: number;
 

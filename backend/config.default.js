@@ -14,6 +14,7 @@
  * 访问时需要的密钥
  * 带 --workspace 启动时唯一读取的参数，默认为空
  * 暴露到公网时必须设置
+ * @type {string | Record<string, { base?: string, shell?: boolean }>}
  */
 export const FS_SERVICE_PAT = '';
 
@@ -123,11 +124,6 @@ export const STARTUP_SQL = `
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = NORMAL;
 `;
-
-/**
- * 启用文件传输助手
- */
-export const ENABLE_FILE_TRANSFER = true;
 
 /**
  * 启用简易聊天室

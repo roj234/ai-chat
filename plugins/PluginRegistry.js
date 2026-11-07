@@ -8,7 +8,7 @@ import "./blobCacheAndVirtualUrl.js";
 // 对话原始数据编辑
 import "./conversationEditor.js";
 // Blob管理器
-import "./managers/BlobManager.js";
+import "./managers/BlobManager.index.js";
 // 搜索消息
 import "./search.js";
 // 连接测试插件，测试端点是否可用
@@ -68,12 +68,11 @@ import {GLOBAL_SETTINGS} from "/src/settings.js";
 import {config, conversations, EVENT_BUS, messages, selectedConversation} from "/src/states.js";
 import "./PluginRegistry.css";
 import {registerCodeBlockRenderer, renderMarkdownToElement} from "/src/markdown/markdown.js";
-import {createDragSort} from "/common/DragSort.js";
 import {registerSchemaMessageRole} from "/common/ReactiveJSON.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {markMessageDirty} from "/src/database.js";
-import {openWindow} from "/src/components/Windows.jsx";
 import {resolvePreset} from "../src/presets.js";
+import {createTab} from "../src/components/SettingDialog.jsx";
 
 // 插件API
 window.AiChatAPI = {
@@ -104,7 +103,7 @@ window.AiChatAPI = {
  *     load: (function(): Promise<*>)
  * }>}
  */
-const pluginDefinitions = [
+const plugins = [
 	{
 		name: "基础角色扮演",
 		description: "实现角色卡、世界书、预设等数据结构的导入和导出支持，以及请求体的构造，提供基础角色扮演能力",
@@ -112,20 +111,20 @@ const pluginDefinitions = [
 		load: () => import("./rp_basic/BasicRoleplay.js")
 	},
 	{
-		name: "Mermaid流程图",
-		description: "提供Mermaid流程图的渲染能力",
+		name: "Mermaid图表",
+		description: "提供Mermaid图的渲染能力",
 		defaultEnabled: true,
 		// 2. 修改默认的系统提示词避免LLM继续使用mermaid
 		load: registerMermaidRenderer
 	},
 	{
-		name: "多媒体资源生成工具",
+		name: "多媒体资源生成",
 		description: "提供ComfyUI/SD WebUI文生图工具，以及TTS工具（后者WIP）",
 		load: registerMultimediaGeneration
 	},
 	{
-		name: "Llama.cpp扩展",
-		description: "通过GUI加载和卸载路由模式的模型，另提供Token计数功能",
+		name: "本地推理扩展",
+		description: "通过GUI加载和卸载Llama.cpp路由模式的模型",
 		load: () => import("./llamaCpp.js")
 	},
 	{
@@ -135,7 +134,7 @@ const pluginDefinitions = [
 	},
 	{
 		name: "远程控制",
-		description: "需要两端都启用，并且被控端设为无人值守模式。",
+		description: "需要两端都启用该插件，并且被控端允许。",
 		defaultEnabled: true,
 		load: registerRemoteControl
 	},
@@ -146,106 +145,74 @@ const pluginDefinitions = [
 		load: () => import("./actime/actime.js")
 	},
 	{
-		name: "微信机器人 (WIP)",
+		name: "机器人 (实验性)",
 		description: "开发中",
 		load: () => import("./chatbot/chatbot.js")
 	},
 ];
 
 if (DB_MODE !== "local") {
-	pluginDefinitions.splice(2, 0, {
+	plugins.splice(2, 0, {
 		name: "配置备份还原",
 		description: "切换数据库服务器时备份当前配置",
 		defaultEnabled: true,
 		load: registerConfigSync
 	});
-	pluginDefinitions.push({
-		name: "私信 (WIP)",
+	plugins.push({
+		name: "私信",
 		description: "与其他用户聊天，使用 /dm <user> 打开界面，需要服务器支持",
 		load: () => import("./DM.js")
 	});
 }
 
-const pluginOrder = (config.pluginOrder?.map(i => pluginDefinitions[i])  || pluginDefinitions.map(item => item.defaultEnabled&&item)).filter(Boolean);
+const pluginByName = new Map(plugins.map((def, idx) => [def.name, def]));
+const loadedPlugins = (config.pluginOrder?.map(i => pluginByName.get(i)) || plugins.map(item => item.defaultEnabled&&item)).filter(Boolean);
 
-const orderedItems = new Set(pluginOrder);
-pluginDefinitions.forEach((def, idx) => {
-	def.id = idx;
-	orderedItems.add(def);
-});
-
-const pluginIndexMap = new Map(
-	pluginOrder.map((def, idx) => [def, idx])
-);
-
-export const onPluginLoaded = Promise.all(pluginOrder.map(i => i.load()));
+export const onPluginLoaded = Promise.all(loadedPlugins.map(i => i.load()));
 
 let pluginListContainer;
 let detailPanel;
 
 const updatePluginSet = () => {
-	config.pluginOrder = [...pluginListContainer.childNodes].map(el => el.querySelector(".switch").checked && el._key).filter(Boolean).map(i => i.id);
+	config.pluginOrder = [...pluginListContainer.childNodes].map(el => el.querySelector(".switch").checked && el._key).filter(Boolean).map(i => i.name);
 }
 
 const setDetails = (plugin, self) => {
 	pluginListContainer.querySelector(".active")?.classList.remove("active");
 	self.classList.add("active");
 
-	const idx = pluginOrder.indexOf(plugin);
-	const det = <main className="detail">
+	const idx = loadedPlugins.indexOf(plugin);
+	const det = <template>
 		<div className="detail-header">
 			<h2>{plugin.name}</h2>
-			{idx >= 0 ? <span className="status-badge enabled">已启用 (#{idx+1})</span> : <span className="status-badge">未启用</span>}
+			{idx >= 0 ? <span className="status-badge enabled">已启用</span> : <span className="status-badge">未启用</span>}
 		</div>
 		<div className="detail-meta">
-			<div className="meta-item"><span className="label">版本</span> {plugin.version||"内置"}</div>
 			<div className="meta-item"><span className="label">作者</span> {plugin.author||"Roj234"}</div>
 			<div className="meta-item"><span className="label">主页</span> <a href={plugin.url} rel={"noreferrer noopener"}>{plugin.url}</a></div>
 		</div>
 		{plugin.description && renderMarkdownToElement(<div className="md"/>, plugin.description)}
-	</main>;
+	</template>;
 
 	detailPanel.replaceChildren(...det.childNodes);
 };
 
-const pluginManager = (<>
+const pluginManager = <div className="plugins">
 	<aside className="msidebar" ref={pluginListContainer}>
-		{[...orderedItems].map((item) => {
+		{plugins.map((item) => {
 			const el = <div className="item" onClick={(e) => setDetails(item, el)} _key={item}>
-				<span className="drag-handle" title="调整加载顺序">⠿</span>
 				<span className="plugin-info">
 					<b className="plugin-name ellipsis">{item.name}</b>
-					<span className="plugin-author ellipsis">{item.author || 'Roj234'}</span>
+					<span className="plugin-author ellipsis">{item.author || '系统'}</span>
 				</span>
-				<input type={"checkbox"} className="switch" onClick.stop={updatePluginSet} checked={pluginIndexMap.has(item)}/>
+				<input type={"checkbox"} className="switch" onClick.stop={updatePluginSet}
+					   checked={loadedPlugins.includes(item)}/>
 			</div>;
 			return el;
 		})}
 	</aside>
 	<main className="detail" ref={detailPanel}/>
-</>);
+</div>;
 
-createDragSort(pluginListContainer, {
-	itemSelector: ".item",
-	handleSelector: ".drag-handle",
-	onMovedTo: updatePluginSet
-});
-
-GLOBAL_SETTINGS.push({
-	id: "pluginOrder",
-	type: "element",
-	element: <div className={"choice-scroll"}>
-		<button className={"btn ghost"} onClick={() => {
-			openWindow({
-				id: "plugins",
-				title: "插件管理器",
-				actions: <span className="pm-badge">启用 {pluginOrder.length} / {pluginDefinitions.length} 插件</span>,
-				element: pluginManager,
-				width: 768,
-				height: 600,
-				reuse: true
-			});
-		}}>插件管理
-		</button>
-	</div>
-});
+createTab('_plugins', '插件', 'ri-apps-2-line', [pluginManager]);
+GLOBAL_SETTINGS.push({id: "pluginOrder",});

@@ -68,6 +68,8 @@ export const InspectImage = {
 			blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
 		}
 
-		return new ContentPart().image(await compressImage(blob, cfg));
+		blob = await compressImage(blob, cfg);
+		// 清除File中的名字
+		return new ContentPart().image(blob.name ? new Blob([blob], { type: blob.type }) : blob);
 	}
 };

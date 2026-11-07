@@ -26,6 +26,6 @@ export const
 
 ;
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 // 实际上可能需要1e8的精度，但是粗略统计够了
 export const LLM_COST_SCALE = 1e6;

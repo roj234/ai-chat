@@ -11,6 +11,7 @@ import {HighlightBox} from "/src/components/TextDiff.jsx";
 import {inspect} from "@roj234/util-inspect";
 import {config} from "/src/states.js";
 import {FSE_NotAllowed, FSE_NotFound, FSE_NotSupported, throwDOMException} from "../../common/pure-utils.js";
+import {injectMessages} from "/src/inject-message.js";
 
 /**
  *
@@ -46,6 +47,15 @@ export const JS_HOST_MODULES = {
 
 				return resp[0];
 			}
+		}
+	}),
+	'sandbox': conv => ({
+		sendNotification(message) {
+			return injectMessages(conv, {
+				role: 'user',
+				label: 'JS沙箱',
+				content: `<js-sandbox>\n${message}\n</js-sandbox>`
+			});
 		}
 	})
 };
@@ -461,7 +471,7 @@ export const RunJS = {
 		let logFile = null;
 
 		worker.handlers.log = (log) => {
-			if (import.meta.env.DEV && log === '[DEBUG] [vite] connected.') return;
+			if (import.meta.env.DEV && log === '[DEBUG] [ie] connected.') return;
 
 			const line = log + '\n';
 			totalChars += line.length;
@@ -539,7 +549,7 @@ export const RunJS = {
 			if (worker) {
 				hostModules.clear();
 				const handlers = worker.handlers;
-				delete handlers.rpc;
+				//delete handlers.rpc;
 				delete handlers.load;
 				handlers.detachLogs = 0;
 				handlers.log = (log) => {

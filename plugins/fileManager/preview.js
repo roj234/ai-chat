@@ -9,13 +9,13 @@ import {ZipWriter} from "unconscious/common/zip-io.js";
 import {showToast} from "/src/components/Toast.js";
 import {formatDate, formatSize, immutableObjectMap} from "unconscious/common/Utils.js";
 import {renderMarkdownToElement} from "/src/markdown/markdown.js";
-import {ImagePane} from "../agent/ImagePane.jsx";
+import {ImagePane} from "/src/components/ImagePane.jsx";
 import {webviewStreamDownloadFile} from "/vendor/jsBridge.js";
-import {callFileSystemFunc, FS_SOURCE, vfsUUID} from "../agent/index.js";
+import {callFileSystemFunc, FS_SOURCE, vfsIdentity} from "../agent/index.js";
 import {openFileBrowser} from "./Explorer.jsx";
 import {config} from "/src/states.js";
 import "./preview.css";
-import {createAsyncQueue} from "../../common/pure-utils.js";
+import {createAsyncQueue} from "/common/pure-utils.js";
 
 /** 单次下载的体积上限：1 GiB */
 const MAX_DOWNLOAD_SIZE = 1024 ** 3;
@@ -117,10 +117,13 @@ export const vfsDownload = (fs, path, name) => vfsDownloadMany(fs, [{ path, name
  */
 export const vfsDownloadMany = async (fs, items, archiveName) => {
 	const state = $state("正在列目录");
-	let cancel = false;
+
+	const cancel = new AbortController();
+	const signal = cancel.signal;
+
 	const close = showToast(state, '', 0, {
 		closeBtn: <button className="dct-undo" onClick={() => {
-			cancel = true;
+			cancel.abort();
 		}}>取消下载</button>
 	});
 	/** @type {DownloadJob[]} */
@@ -129,7 +132,7 @@ export const vfsDownloadMany = async (fs, items, archiveName) => {
 	let totalSize = 0;
 	try {
 		for (const item of items) {
-			if (cancel) return;
+			if (signal.aborted) return;
 
 			const info = item.type === 'dir' ? item : await callFileSystemFunc(fs, 'stat', {
 				path: item.path,
@@ -165,12 +168,12 @@ export const vfsDownloadMany = async (fs, items, archiveName) => {
 			state.value = "正在下载 (无法获取进度)";
 
 			if (target === null) {
-				let blob = await callFileSystemFunc(fs, 'readRaw', {path});
+				let blob = await callFileSystemFunc(fs, 'readRaw', {path, signal});
 				blob = new File([blob], name, { type: blob.type });
 				downloadFile(blob);
 			} else {
 				const res = await callFileSystemFunc(fs, 'readRaw', {path, stream: true});
-				await res.body.pipeTo(target);
+				await res.body.pipeTo(target, {signal});
 			}
 		} else {
 			const filename = (archiveName||DEFAULT_ARCHIVE_NAME)+".zip";
@@ -187,7 +190,7 @@ export const vfsDownloadMany = async (fs, items, archiveName) => {
 			const [enqueue, flush] = createAsyncQueue(4);
 
 			for (let i = 0; i < jobs.length; i++) {
-				if (cancel) return;
+				if (signal.aborted) break;
 
 				const it = jobs[i];
 				if (it.size > MAX_DOWNLOAD_SIZE) {
@@ -196,9 +199,7 @@ export const vfsDownloadMany = async (fs, items, archiveName) => {
 				}
 
 				await enqueue(async () => {
-					const blob = await callFileSystemFunc(fs, 'readRaw', {path: it.path});
-					if (cancel) return;
-					// TODO 流式CRC32
+					const blob = await callFileSystemFunc(fs, 'readRaw', {path: it.path, signal});
 					await zw.add(it.name, new Uint8Array(await blob.arrayBuffer()), {
 						compression: blob.size < MAX_COMPRESS_SIZE,
 						timestamp: it.mtime,
@@ -368,7 +369,7 @@ export async function vfsPreview(fs, path, overrideFileName, editText) {
 	}
 
 	const previewWindow = openWindow({
-		id: "preview "+encodeURI(vfsUUID(fs[FS_SOURCE])+"/"+path),
+		id: "preview "+encodeURI(vfsIdentity(fs[FS_SOURCE])+path),
 		icon: <i className={"ri-file-line"}/>,
 		title: path,
 		actions: <div className="row">

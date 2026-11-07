@@ -1,4 +1,4 @@
-import {copyButtonAnimation, downloadFile} from "../utils/utils.js";
+import {copyWithAnimation, downloadFile} from "../utils/utils.js";
 
 import {createMarkdownRenderer} from "./renderer.js";
 import {createMarkdownParser} from "@roj234/mdstream";
@@ -136,7 +136,7 @@ export const copyCodeEventHandler = (e) => {
 	const code = btn.closest('.sticky').nextElementSibling;
 	switch (btn.dataset.action) {
 		case "copy": {
-			copyButtonAnimation(code._value || code.textContent, btn);
+			copyWithAnimation(code._value || code.textContent, btn);
 		}
 		break;
 		case "save": {

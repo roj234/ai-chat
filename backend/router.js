@@ -583,6 +583,8 @@ export class Router {
 			},
 			variables: newVariables,
 			send(status, data) {
+				if (res.headersSent) return;
+
 				if (undefined === data) {
 					res.writeHead(status);
 					res.end();
