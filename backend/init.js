@@ -7,7 +7,7 @@ import {registerKVRoutes} from "./routes/kv.js";
 import {registerSearchRoutes} from "./routes/search.js";
 import {registerLogRoutes} from "./routes/log.js";
 import {registerDatabaseRoutes} from "./routes/database.js";
-import {registerFsRoutes} from "./routes/agent.js";
+import {registerFsRoutes} from "./routes/file-service.js";
 import {BLOB_HASH_REGEX, registerBlobRoutes} from "./routes/blob-storage.js";
 import {registerVectorDBRoutes} from "./routes/vectordb.js";
 import {proxyHandler, registerSSEProxyRoutes} from "./api-proxy/api-proxy-openai.js";
@@ -31,6 +31,7 @@ import {registerPairingRoutes} from "./routes/pairing.js";
 // Export plugin APIs to globalThis
 import "./pluginApi.js";
 import {createHash} from "node:crypto";
+import {registerTerminalRoutes} from "./routes/fs/terminal.js";
 
 /**
  * @param router {AiChatBackend.Router}
@@ -110,6 +111,7 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 			}
 
 			fsRoot = path.join(workspace, userId);
+			ctx.fsNoShell = true;
 		} else {
 			fsRoot = workspace;
 
@@ -118,10 +120,11 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 
 				const pat = (ctx.req.headers.authorization || '').slice("Bearer ".length);
 				if (pat !== FS_SERVICE_PAT) {
-					if (typeof FS_SERVICE_PAT === 'object') {
-						const {base, shell} = FS_SERVICE_PAT[pat] ?? {};
-						if (base) fsRoot = path.join(fsRoot, base);
+					if (typeof FS_SERVICE_PAT === 'object' && pat in FS_SERVICE_PAT) {
+						const {base, shell, terminal} = FS_SERVICE_PAT[pat];
+						if (base) fsRoot = path.resolve(fsRoot, base);
 						if (!shell) ctx.fsNoShell = true;
+						if (!terminal) ctx.fsNoTerminal = true;
 					} else {
 						ctx.send(401, {error: "invalid PAT"});
 						return true;
@@ -161,7 +164,8 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 
 	if (workspacePath) {
 		router.push("fs");
-		await registerFsRoutes(router, workspacePath);
+		await registerFsRoutes(router, true);
+		registerTerminalRoutes(router);
 		router.pop();
 		registerPingHandler(router, 'fs');
 		router.pop();
@@ -173,7 +177,7 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 	router.push('v2/:userId');
 
 	router.push("fs");
-	await registerFsRoutes(router, workspacePath);
+	await registerFsRoutes(router, false);
 	router.pop();
 
 	registerSSEProxy(router, dataPath);

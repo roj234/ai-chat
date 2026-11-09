@@ -77,7 +77,7 @@ export class ACL {
 	#rules = [[],[],[],[]];
 
 	constructor() {
-		this.parseRule(`-wl /.trash/\n-wl .git/`);
+		this.parseRule(`-wl .git/`);
 	}
 
 	/**

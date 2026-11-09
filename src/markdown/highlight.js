@@ -9,6 +9,7 @@ import json5 from "/common/json5-highlight.js";
 import {inspect} from "@roj234/util-inspect";
 import {patchChildren} from "/common/morphpostfix.js";
 import {queueMacrotask} from "unconscious/common/queueMacrotask.js";
+import {escapeHtmlAttr, escapeHtmlText} from "@roj234/shared/strings";
 
 hljs.registerLanguage('json5', json5);
 
@@ -29,7 +30,12 @@ const light = (newCode, language) => hljs.highlight(newCode, {
  * @returns {(function(): void)|*}
  */
 export const lightAsync = (code, language, onDone, shouldStop) => {
-	const gen = light(code, language);
+	const gen = hljs.highlight(code, {
+		language,
+		ignoreIllegals: true,
+		_returnTokens: true
+	});
+
 	let cancelled = false;
 	let result;
 
@@ -56,7 +62,7 @@ export const lightSync = (newCode, language) => {
 };
 
 // 辅助工具：提取并修补不完整的 HTML 行
-export const splitMultilineHTML = (rawHtml, openTagsStack = []) => {
+const splitMultilineHTML = (rawHtml, openTagsStack = []) => {
 	const lines = rawHtml.split('\n');
 	return lines.map((lineContent, index) => {
 		// 1. 在行首补全之前未闭合的标签
@@ -82,6 +88,18 @@ export const splitMultilineHTML = (rawHtml, openTagsStack = []) => {
 		return prefix + currentLineHtml + suffix;
 	});
 };
+
+export const tokenToLineHtml = (lineArray) => lineArray.map(line => {
+	let s = '';
+	line.forEach(i => {
+		if (i.className) {
+			s += `<span class="${escapeHtmlAttr(i.className)}">${escapeHtmlText(i.text)}</span>`;
+		} else {
+			s += escapeHtmlText(i.text);
+		}
+	});
+	return s;
+});
 
 const PATCH_TEMPLATE = <template/>;
 
@@ -160,13 +178,13 @@ export const highlight = (code, language, node, is_finished) => {
 
 			if (language && loadLanguage(language)) {
 				lightAsync(code, language, (value) => {
-					if (!needVirtualList) { node.innerHTML = value; return; }
+					if (!needVirtualList) { node.innerHTML = tokenToLineHtml(value).join('\n'); return; }
 					node.style.height = '50lh';
 					node._value = code;
 
 					if (!virtualList) installVirtualList();
 					// noinspection JSPrimitiveTypeWrapperUsage
-					virtualList.items = splitMultilineHTML(value).map(s => ({s}));
+					virtualList.items = tokenToLineHtml(value).map(s => ({s}));
 
 					// 避免同步布局
 					queueMacrotask(() => virtualList.scrollToBottom());
@@ -208,6 +226,7 @@ export const highlight = (code, language, node, is_finished) => {
 		syncStagingArea();
 
 		success: {
+			// FIXME 用新的 tokens 数组优化掉这些
 			if (stableHtml) {
 				for (let reduced = 1; reduced < Math.min(250, newCode.length); reduced++) {
 					const testLength = newCode.length - reduced;
@@ -219,7 +238,7 @@ export const highlight = (code, language, node, is_finished) => {
 					if (!testHtml.startsWith(stableHtml)) break;
 
 					if (testHtml === stableHtml) {
-						const lines = splitMultilineHTML(testHtml, []);
+						const lines = splitMultilineHTML(testHtml);
 
 						vl.items.at(-1).s += lines.shift();
 						vl.items.push(...lines.map(i => ({s:i})));
@@ -408,6 +427,8 @@ export const loadLanguage = (languageName, simulate) => {
 		languageName = asyncLoader;
 	}
 };
+
+export const isSameLanguage = (la, lb) => hljs.getLanguage(la) === hljs.getLanguage(lb);
 
 //region 程序生成，勿动
 const DEPS = {

@@ -77,6 +77,7 @@
     --warning-bg: #2a2118;
     --warning-border: #4d381d;
     --warning-accent: #f59e0b;
+    --amber:#d29922;
 
     --safe-image-subtle-bg: rgba(255,255,255,0.05);
 
@@ -155,6 +156,7 @@
     --warning-bg: #fffbeb;
     --warning-border: #fcd34d;
     --warning-accent: #d97706;
+    --amber:#b45309;
 
     --safe-image-subtle-bg: rgba(0,0,0,0.04);
 

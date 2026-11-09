@@ -10,7 +10,7 @@ export const globMacroPlugin = () => {
 		 * @return {Promise<{code: string, map: null}>}
 		 */
 		async transform(code, id) {
-			if (!id.endsWith('WebFSDriver.js') && !id.endsWith("agent.js")) return;
+			if (!id.endsWith('WebFSDriver.js') && !id.endsWith("file-service.js")) return;
 
 			code = code.replace(/return eval\(generateGlobCode\((true|false)\)\);/, (_, m) => generateGlobCode(m === "true", true));
 			return { code, map: null };

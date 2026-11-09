@@ -6,7 +6,7 @@ import {
 	SEMANTIC_SEARCH_CHUNK_MODE,
 	SEMANTIC_SEARCH_EMBEDDING_SIZE
 } from "../config.js";
-import {TopK} from "../utils/TopK.js";
+import {TopK} from "./TopK.js";
 import removeMd from "remove-markdown";
 import {float16ToFloat32Bits, float32ToFloat16Bits} from "./fp16.js";
 

@@ -156,7 +156,6 @@ async function createSubagent(par, response, conv, tools) {
 	const presets = conv.presets;
 	if (presets) agent.presets = presets;
 
-	let _async = par.background;
 	let hasFileSystem;
 	let systemPrompt = '';
 	let _skills;
@@ -204,7 +203,7 @@ async function createSubagent(par, response, conv, tools) {
 			tools: tools1, model = 'inherit',
 			maxToolTurns, maxTurns,
 			redirect, mounts, skills,
-			background, mcpServers,
+			mcpServers,
 			kind = 'basic',
 			acl, ignore
 		} = info;
@@ -244,10 +243,6 @@ async function createSubagent(par, response, conv, tools) {
 			await toolScriptRegistry['Use'].script({ modules: newModules }, {}, agent);
 		}
 
-		if (background != null) {
-			_async = background;
-		}
-
 		if (tools1) {
 			if (typeof tools1 === 'string') tools1 = tools1.split(" ");
 			tools = tools1;
@@ -262,8 +257,6 @@ async function createSubagent(par, response, conv, tools) {
 		}
 
 		if (redirect) {
-			_async = true;
-
 			agent.sa_redirect = redirect;
 			if (redirect.target === "script") {
 				await readFile({path: redirect.path}, response, conv);
@@ -289,7 +282,7 @@ async function createSubagent(par, response, conv, tools) {
 		systemPrompt = content;
 	}
 
-	if (_async) agent.sa_notify = 0;
+	agent.sa_notify = 0;
 	if (!hasFileSystem) {
 		// 复制文件系统
 		if (!agent.fs_type) Object.assign(agent, cloneNamed(conv, FS_KEYS));
@@ -353,7 +346,11 @@ async function createSubagent(par, response, conv, tools) {
 		agent.tools.add(t);
 	}
 
-	agent.overrides.systemPrompt = (systemPrompt+'\n\n'+toolsetPrompt) || '---\n---';
+	if (agent.tools.has(NotifyAgent.name)) {
+		systemPrompt += `\nOwner's agentId: 0`;
+	}
+
+	agent.overrides.systemPrompt = (systemPrompt+'\n\n'+toolsetPrompt).trim();
 
 	markCombinedPresetDirty(agent);
 
@@ -471,11 +468,6 @@ export const subagentLoopWrapper = ctx => {
 	promise = agent[EVAL_AGENT_SYM] = subagentLoop(agent);
 	promise.then(resp => {
 		const lastNotify = agent.sa_notify;
-		if (lastNotify == null) {
-			agent.sa_notify = resp.id;
-			return updateConversation(agent);
-		}
-
 		if (lastNotify >= resp.id) return;
 		agent.sa_notify = resp.id;
 
@@ -542,7 +534,7 @@ export const subagentLoopWrapper = ctx => {
 				role: 'user',
 				label: "子智能体",
 				time: Date.now(),
-				content: `<agent-message from="${agent.id}"${resp.error?" errored":""}>\n${resp.content}\n</agent-message>`,
+				content: `<agent-message from="${agent.id}" type="${resp.error?`error`:`done`}">\n${resp.content}\n</agent-message>`,
 			}));
 		}
 
@@ -558,7 +550,7 @@ export const subagentLoopWrapper = ctx => {
  */
 const CreateAgent = {
 	name: 'CreateAgent',
-	description: "Creates an agent to autonomously execute a task and return the result.",
+	description: "Creates an agent to autonomously execute a task. The call returns immediately with agentId; You will receive message `<agent-message from=\"agentId\" type=\"error | done | reply\">...</agent-message>` asynchronously.",
 	interactive: "secure",
 	parameters: {
 		type: 'object',
@@ -575,11 +567,6 @@ const CreateAgent = {
 				description: "Inherit by default, emit to overwrite (whitelist)",
 				items: { type: "string" },
 			},
-			background: {
-				type: "boolean",
-				default: false,
-				description: "The call returns immediately with agentId; You will receive an XML message <agent-message from=\"agentId\">...</agent-message> when it finishes."
-			},
 			argv: {
 				type: "array",
 				description: "omit unless specified",
@@ -589,13 +576,9 @@ const CreateAgent = {
 		required: ['label', 'promptType', 'prompt', 'firstMessage'],
 	},
 	async script(par, ctx, conv) {
-		const start = Date.now();
 		const agent = await createSubagentWrapper(ctx, par, conv);
 		const loop = subagentLoopWrapper(ctx);
-		if (agent.sa_notify != null) return "Agent id="+ctx.agentId+" started";
-
-		const result = await loop;
-		return ctx.content = `agentId=${ctx.agentId}, duration: ${((Date.now() - start) / 1000).toFixed(1)}s\n`+result.content;
+		return "Agent id="+ctx.agentId+" started";
 	},
 	title(req, ctx) {
 		const par = getToolParameters(ctx, req);
@@ -627,22 +610,11 @@ const CreateAgent = {
 				updateConversation(conv, msg);
 			}
 
-			let promise = subagentLoopWrapper(ctx);
-			const agent = findAgent(ctx);
+			let loop = subagentLoopWrapper(ctx);
 
-			if (agent.sa_notify != null) {
-				ctx.success = true;
-				ctx.content = "Agent id="+ctx.agentId+" started";
-			} else {
-				try {
-					ctx.content = (await promise).content;
-					ctx.success = true;
-				} catch (e) {
-					ctx.success = false;
-					ctx.content = "Error: "+prettyError(e);
-				}
-				ctx.duration = agent.time - ctx.time;
-			}
+			ctx.success = true;
+			ctx.content = "Agent id="+ctx.agentId+" started";
+
 			markMessageDirty(message);
 			$update(updateMessageUI);
 		};
@@ -721,7 +693,7 @@ const NotifyAgent = {
 	parameters: {
 		type: 'object',
 		properties: {
-			agentId: { type: 'integer', },
+			agentId: { type: 'integer' },
 			message: { type: 'string' },
 		},
 		required: ['agentId', 'message'],
@@ -733,17 +705,26 @@ const NotifyAgent = {
 	async script(par, resp, conv, toolName) {
 		const isTerminate = toolName === TerminateAgent.name;
 		const isResume = toolName === ResumeAgent.name;
+		let id = par.agentId;
 
-		const agent = await findOwnAgent(par, conv);
-		if (agent[LOCKED]) return 'Error: Agent is opened on another device, close must done by user. Message did not sent.';
+		const owner = conv.meta?.owner;
+		let agent;
+		if (id === 0 && toolName === 'NotifyAgent' && owner != null) {
+			agent = findConversation(owner);
+			par.agentId = id = owner;
+		} else {
+			agent = await findOwnAgent(par, conv);
+		}
 
-		const state = runningConversations.get(par.agentId);
+		if (agent[LOCKED]) throwDOMException('Agent is opened on another device, close must done by user. Message did not sent.', "ReadOnlyError");
+
+		const state = runningConversations.get(id);
 		if (!state) {
 			const messages = await getMessages(agent);
 			const lastMessage = messages.at(-1);
 
 			const finishReason = lastMessage.finish_reason;
-			if (finishReason !== 'stop') {
+			if (finishReason !== 'stop' && finishReason !== 'tool_calls') {
 				if (!isResume || lastMessage.error === TERMINATED_MESSAGE)
 					return `Agent is dead (reason=${finishReason})`;
 				messages.pop();
@@ -763,13 +744,13 @@ const NotifyAgent = {
 			if (isResume) return "Agent is health, and is running.";
 		}
 
-		const isDirectlyOwner = agent.meta.owner === conv.id;
+		const isDirectlyOwner = id !== owner && agent.meta.owner === conv.id;
 
 		let label = `父代理 (${conv.id})`;
 		let content = par.message;
 		if (!content) throwDOMException("Message cannot be empty", FSE_NotAllowed);
 
-		if (!isDirectlyOwner) content = `<agent-message from=${conv.id}>\n${content}\n</agent-message>`;
+		if (!isDirectlyOwner) content = `<agent-message from="${conv.id}"${id === owner ? ` type="reply"` : ''}>\n${content}\n</agent-message>`;
 
 		await injectMessages(agent, {
 			role: 'user',

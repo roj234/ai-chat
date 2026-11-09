@@ -263,7 +263,7 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 			// 消息状态更新
 			case SYNC_MESSAGE:
 			case SYNC_MESSAGE_DEL: {
-				const {owner, ...diff} = data;
+				let {owner, ...diff} = data;
 				const conv = findConversation(owner);
 				if (!conv) return;
 
@@ -285,14 +285,15 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 					if (message) {
 						message = patch(message, diff);
 					} else {
-						showToast(<div>[DEBUG] 从服务端收到不存在的消息补丁！<br/><span dangerouslySetInnerHTML={highlightJsonLike(data)}></span></div>, 'error', 0);
-						if (diff.$ === '=' && !msgs.raw) {
-							msgs.push(diff.v);
+						if (diff.$ === '=') diff = diff.v;
+						if (typeof diff.role === 'string' && diff.content != null && diff.time != null) {
+							// 同步服务没有请求快
+							if (msgs.at(-1)?.[LOCKED]) msgs.pop();
+							msgs.push(diff);
 						} else {
+							showToast(<div>[DEBUG] 从服务端收到不完整的消息！<br/><span dangerouslySetInnerHTML={highlightJsonLike(data)}></span></div>, 'error');
 							conv.ready = false;
-							if (isCurrent) {
-								$update(selectedConversation);
-							}
+							if (isCurrent) $update(selectedConversation);
 							return;
 						}
 					}

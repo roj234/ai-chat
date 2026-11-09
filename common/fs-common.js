@@ -1,5 +1,6 @@
 import {createAsyncQueue} from "./pure-utils.js";
 import {LRUCache} from "@roj234/lru-cache";
+import {SHA256} from "unconscious/common/SHA256.js";
 
 // ────────────────────────────────── Grep and TextFileEditHelper ──────────────────────────
 
@@ -37,7 +38,7 @@ export function compileGrepPattern(pattern) {
  *     absPath: function(string, any): string,
  *     read: (function(string, any): Promise<string>),
  *     write: (function(string, string, any): Promise<void>),
- *     mtime: (function(string, any): Promise<number>)
+ *     mtime: (function(string, any): Promise<number>),
  * }} fs
  */
 export function createTextFileEditHelper(fs) {
@@ -145,7 +146,7 @@ export function createTextFileEditHelper(fs) {
 		};
 	};
 
-	const read = async ({ path, offset, limit, maxChars = 50000, format = 'raw', noTruncate }, ctx) => {
+	const read = async ({ path, offset, limit, maxChars = 50000, format = 'raw', noTruncate, noWarn }, ctx) => {
 		let needWarning;
 
 		const lines = await readLines(path, ctx);
@@ -194,7 +195,7 @@ export function createTextFileEditHelper(fs) {
 		let content = respLines.join('\n') + '\x03';
 		if (truncated || needWarning) {
 			if (truncated) content += `TRUNCATED(maxChars): Only ${respLines.length} of ${last - first} lines shown.\n`;
-			if (needWarning) content += `OVERFLOW(${needWarning}): Only ${last - first} lines available in the range.\n`;
+			if (!noWarn && needWarning) content += `OVERFLOW(${needWarning}): Only ${last - first} lines available in the range.\n`;
 		} else if (last === lineCount) {
 			content += 'EOF\n';
 		}
@@ -412,6 +413,26 @@ changedRange: ${prefixLines}-${prefixLines + Math.max(0, replaceLines - 1)}`;
 totalLines: ${lines.length + delta} (${delta >= 0 ? '+': ''}${delta})`;
 	};
 
+	const atomicEdit = async ({ path, oldTextHash, newText, startLine, endLine }, ctx) => {
+		const lines = await readLines(path, ctx);
+		const hash = new SHA256().update(lines.slice(startLine, endLine).join("\n")).digest('hex');
+		if (hash !== oldTextHash) throw '文件已被外部修改';
+
+		const newLines = [
+			...lines.slice(0, startLine),
+			...newText.split('\n'),
+			...lines.slice(endLine)
+		];
+
+		const absPath = fs.absPath(path, ctx);
+		await fs.write(absPath, newLines.join('\n'), ctx);
+
+		newLines.mtime = Date.now();
+		cache.set(absPath, newLines);
+
+		return '';
+	};
+
 	const write = async ({ path, content, overwrite }, ctx) => {
 		const absPath = fs.absPath(path, ctx);
 		check: {
@@ -520,5 +541,5 @@ totalLines: ${lines.length + delta} (${delta >= 0 ? '+': ''}${delta})`;
 		return results || '[No match]';
 	};
 
-	return { read, patch, edit, write, del, grep };
+	return { read, patch, edit, write, del, grep, atomicEdit };
 }

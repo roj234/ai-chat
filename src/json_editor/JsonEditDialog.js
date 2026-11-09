@@ -12,6 +12,7 @@ import {Icon_warning} from "../components/Icons.jsx";
  * @param {function(): string} getValue
  * @param {function(Object): void} setValue
  * @return {[(function(): void), (function(function(): void): void)]}
+ * @deprecated
  */
 export function openJsonEditor(key, getValue, setValue) {
 	if (getWindow(key)) return;

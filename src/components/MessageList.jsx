@@ -470,7 +470,7 @@ function chunkKeyFunc(message, chunk) {
 		case "html": keys.push(chunk.html); break;
 	}
 
-	if (type === "text" || type === "think") {
+	if (type === "text" || type === "think" || type === 'tool') {
 		if (isEditing(message.key)) keys.push(1);
 	}
 

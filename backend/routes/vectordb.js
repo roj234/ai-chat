@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import {VectorDB} from "../rag/VectorDB.js";
 import {LRUCache} from "@roj234/lru-cache";
 import {SEMANTIC_SEARCH_EMBEDDING_SIZE} from "../config.js";
-import {pathFilter} from "./agent.js";
+import {pathFilter} from "./fs/paths.js";
 
 const MAX_OPEN_DBS = 64;
 
@@ -169,7 +169,7 @@ export function registerVectorDBRoutes(router, dataPath) {
 
 		const db = dbCache.get(ctx.fsRoot+'\0'+dbName);
 		if (!db) {
-			const filePath = pathFilter(`vectors/${dbName}.db`, ctx.fsRoot);
+			const filePath = pathFilter(`vectors/${dbName}.db`, ctx);
 			let fileSize = 0;
 			try {
 				fileSize = (await fs.stat(filePath)).size;

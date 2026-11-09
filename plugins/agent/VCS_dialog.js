@@ -81,13 +81,13 @@ const createVCSDialog = (conv, state) => {
 
 	const callVCS = async (opt) => {
 		const [path, fs] = await getFileSystem(unconscious(selectedFileSystem), conv);
-		return callFileSystemFunc(fs, "vcs", opt, conv);
+		return callFileSystemFunc(fs, "vcs", opt);
 	}
 
 	const branches = $asyncState(async mnt => {
 		const [path, fs] = await getFileSystem(mnt, conv);
 
-		const [branch, branches] = await callFileSystemFunc(fs, "vcs", {mode: VCS_BRANCHES}, conv);
+		const [branch, branches] = await callFileSystemFunc(fs, "vcs", {mode: VCS_BRANCHES});
 		viewingOverlay.value = branch ?? VCS_BASE_BRANCH;
 		return branches;
 	}, selectedFileSystem);
@@ -98,7 +98,7 @@ const createVCSDialog = (conv, state) => {
 	const changes = $asyncState(throttledPromiseLast(async mnt => {
 		if (mnt === VCS_BASE_BRANCH) return [];
 		const [path, fs] = await getFileSystem(mnt, conv);
-		return callFileSystemFunc(fs, "vcs", {mode: VCS_DIFF, path: glob || '**'}, conv);
+		return callFileSystemFunc(fs, "vcs", {mode: VCS_DIFF, path: glob || '**'});
 	}), viewingOverlay, []);
 
 	const selectedFile = $state("");

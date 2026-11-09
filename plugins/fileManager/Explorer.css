@@ -1,22 +1,4 @@
 
-.explorer {
-	--bg:#0b0e14; --bg2:#0e131b; --panel:#121822; --panel2:#161e29; --hover:#1b2531;
-	--line:#232c3a; --line2:#2c3748;
-	--dim:#63708a;
-	--accent:#4f8cff; --accent-soft:rgba(79,140,255,.14);
-	--green:#3fb950; --red:#f85149; --amber:#d29922;
-	--shadow:0 18px 48px rgba(0,0,0,.55);
-	--mono:ui-monospace,SFMono-Regular,"Cascadia Code",Consolas,"Liberation Mono",monospace;
-}
-html[data-theme="light"] .explorer {
-	--bg:#f4f6fa; --bg2:#eef1f7; --panel:#ffffff; --panel2:#f8fafc; --hover:#eef2f8;
-	--line:#e2e8f0; --line2:#cfd8e3;
-	--dim:#8593a5;
-	--accent:#2563eb; --accent-soft:rgba(37,99,235,.10);
-	--green:#0f9d58; --red:#dc2626; --amber:#b45309;
-	--shadow:0 18px 48px rgba(16,24,40,.16);
-}
-
 /* ---------- 布局 ---------- */
 .explorer{
 	display:flex;min-height:0;height: 100%;
@@ -28,7 +10,7 @@ html[data-theme="light"] .explorer {
 		width:32px;height:32px;
 		color:var(--muted);
 		transition:.15s;
-		&:hover{background:var(--hover);color:var(--text)}
+		&:hover{background:var(--chip-hover);color:var(--text)}
 	}
 
 	/* ---------- 目录树 ---------- */
@@ -77,7 +59,7 @@ html[data-theme="light"] .explorer {
 		}
 		& .crumb:hover{background:var(--chip-hover);color:var(--text)}
 		& .crumb.last{color:var(--text);font-weight:600}
-		& .sep{color:var(--dim);font-size:11px;flex:none}
+		& .sep{color:var(--muted);font-size:11px;flex:none}
 		& input{
 			flex:1;
 			min-width:60px;
@@ -89,7 +71,7 @@ html[data-theme="light"] .explorer {
 
 	.toolbar{
 		display:flex;align-items:center;
-		border-bottom:1px solid var(--line);
+		border-bottom:1px solid var(--border);
 		flex-wrap:wrap;
 
 		.text-input {
@@ -100,7 +82,7 @@ html[data-theme="light"] .explorer {
 		height: 32px;
 		color:var(--muted);
 
-		&:hover:not(:disabled){border-color:var(--line2);color:var(--text);background:var(--hover)}
+		&:hover:not(:disabled){color:var(--text);background:var(--chip-hover)}
 		&:disabled{opacity:.4;cursor:not-allowed}
 	}
 
@@ -112,7 +94,7 @@ html[data-theme="light"] .explorer {
 		.head {
 			align-items:center;flex:none;padding:0 10px 0 14px;height:34px;
 			font-size:11px;color:var(--muted);
-			border-bottom:1px solid var(--line);user-select:none;
+			border-bottom:1px solid var(--border);user-select:none;
 
 			& .sortable{
 				padding:0 8px;display:flex;align-items:center;gap:4px;height:100%;
@@ -147,19 +129,19 @@ html[data-theme="light"] .explorer {
 
 		.statusbar{
 			display:flex;align-items:center;gap:14px;height:30px;flex:none;padding:0 14px;
-			border-top:1px solid var(--line);background:var(--bg2);font-size:11.5px;color:var(--muted);
+			border-top:1px solid var(--border);font-size:12px;color:var(--muted);
 		}
 
 		.empty{
 			display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
-			height:100%;min-height:260px;color:var(--dim);text-align:center;padding:24px;
+			height:100%;min-height:260px;color:var(--muted);text-align:center;padding:24px;
 
-			& svg{width:44px;height:44px;stroke:var(--line2);fill:none;stroke-width:1.4}
+			& svg{width:44px;height:44px;stroke:var(--muted);fill:none;stroke-width:1.4}
 			& i { font-size: 48px; line-height: 1; }
 
 			& p{margin:0;}
 			& code{
-				font-family:var(--mono);font-size:11.5px;background:var(--panel2);border:1px solid var(--line);
+				font-family:var(--code-font);font-size:12px;background:var(--panel-2);border:1px solid var(--border);
 				padding:6px 10px;border-radius:7px;color:var(--muted)
 			}
 			& button{margin-top:4px}
@@ -175,42 +157,21 @@ html[data-theme="light"] .explorer {
 		position:fixed;right:16px;bottom:46px;width:330px;z-index:50;display:flex;flex-direction:column;gap:8px;
 	}
 
-	/* toast */
-	.toasts2 {
-		position:fixed;left:50%;bottom:44px;transform:translateX(-50%);z-index:1;display:flex;flex-direction:column;gap:8px;
-
-		.toast{
-			background:var(--panel);border:1px solid var(--border);
-			animation:up .2s ease-out;
-			max-width:min(560px,90vw);
-
-			.ic{width:16px;height:16px;flex:none;display:grid;place-items:center;border-radius:50%;font-size:11px;font-weight:700;color:#fff}
-			&.ok .ic{background:var(--green)}
-			&.err .ic{background:var(--red)}
-			&.warn .ic{background:var(--amber)}
-			&.info .ic{background:var(--accent)}
-		}
-	}
-
 	.dropMask {
-		position:fixed;inset:0;z-index:70;display:none;place-items:center;
+		display: none;
+		position:fixed;inset:0;z-index:1;place-items:center;
 		background:rgba(11,14,20,.72);border:2px dashed var(--accent);
 
 		&.on{display:grid}
 		& .box{
-			padding:26px 40px;border-radius:16px;background:var(--panel);border:1px solid var(--line2);
+			padding:26px 40px;border-radius:16px;background:var(--panel);
 			text-align:center;box-shadow:var(--shadow);
 		}
 		& .box b{display:block;font-size:15px;margin-bottom:5px}
-		& .box span{font-size:12px;color:var(--muted);font-family:var(--mono)}
+		& .box span{font-size:12px;color:var(--muted);}
 	}
 }
 
-
-.pv-editor{
-	flex:1;border:none;resize:none;padding:14px 16px;
-	background:var(--code-bg);color:var(--text);font:13px/1.65 var(--code-font);
-}
 
 /* 右键菜单 */
 .menu{
@@ -229,6 +190,23 @@ html[data-theme="light"] .explorer {
 	& hr{border:none;border-top:1px solid var(--border);margin:4px 2px}
 }
 
+/* toast */
+.win-toasts {
+	position:fixed;left:50%;bottom:44px;transform:translateX(-50%);z-index:1;display:flex;flex-direction:column;gap:8px;
+
+	.toast{
+		background:var(--panel);border:1px solid var(--border);
+		animation:up .2s ease-out;
+		max-width:min(560px,90vw);
+
+		.ic{width:16px;height:16px;flex:none;display:grid;place-items:center;border-radius:50%;font-size:11px;font-weight:700;color:#fff}
+		&.ok .ic{background:var(--ok)}
+		&.err .ic{background:var(--error)}
+		&.warn .ic{background:var(--amber)}
+		&.info .ic{background:var(--accent)}
+	}
+}
+
 @keyframes fade{from{opacity:0}to{opacity:1}}
 @keyframes pop{from{transform:scale(.97) translateY(6px);opacity:.6}to{transform:none;opacity:1}}
 @keyframes up{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
@@ -237,8 +215,7 @@ html[data-theme="light"] .explorer {
 	.explorer {
 		.sidebar2 {
 			width:230px;
-			border-right:1px solid var(--line);
-			background:var(--bg2);
+			border-right:1px solid var(--border);
 
 			.hab > .row {
 				justify-content: center;

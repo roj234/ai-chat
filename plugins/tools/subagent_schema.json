@@ -36,9 +36,6 @@
           "type": "integer",
           "minimum": 1
         },
-        "background": {
-          "type": "boolean"
-        },
         "kind": {
           "type": "string"
         },

@@ -1,26 +1,32 @@
 import iconv from "iconv-lite";
 import {spawn} from "node:child_process";
-import {killProcess} from "../utils/process.js";
+import {killProcess} from "./process.js";
+import {pathFilter} from './paths.js';
+import {safeStat} from "@roj234/ie/utils/serveFile.js";
 
 /**
  * @param {AiChatBackend.Router} router
  */
 export function registerTerminalRoutes(router) {
-	router.get('/terminal',  (ctx) => ctx.send(ctx.fsNoShell ? 403 : 204));
+	router.get('/terminal',  (ctx) => ctx.send(ctx.fsNoTerminal ? 403 : 204));
 	const instances = new Map;
 
 	router.post('/terminal', async (ctx) => {
-		if (ctx.fsNoShell) return ctx.send(403);
+		if (ctx.fsNoTerminal) return ctx.send(403);
 
 		let {
 			id,
 			shell = process.platform === 'win32' ? "cmd" : "bash",
 			charset = process.platform === 'win32' ? "gbk" : "utf8",
-			cwd = process.cwd(),
+			cwd = '.',
 			env,
 		} = await ctx.readAsObject();
 
 		if (typeof id !== 'string') return ctx.send(400, { error: 'id not string' });
+
+		const workdir = pathFilter(cwd || '.', ctx);
+		const dirStat = await safeStat(workdir);
+		if (!dirStat.isDirectory()) return ctx.send(400, { error: `cwd is not a directory` });
 
 		const send = (kind, line) => {
 			if (!ctx.res.writableEnded && !ctx.res.closed)
@@ -32,7 +38,7 @@ export function registerTerminalRoutes(router) {
 		}
 
 		let child = spawn(shell, [], {
-			cwd,
+			cwd: workdir,
 			env: {
 				Path: process.env.Path,
 				...env
@@ -96,7 +102,7 @@ export function registerTerminalRoutes(router) {
 		send('E', `--- Process ${shell} started at ${new Date().toISOString()} ---`);
 	});
 	router.post('/terminalWrite', async (ctx) => {
-		if (ctx.fsNoShell) return ctx.send(403);
+		if (ctx.fsNoTerminal) return ctx.send(403);
 
 		const {
 			id,

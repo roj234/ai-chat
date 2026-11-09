@@ -344,7 +344,7 @@ export const kvListGetKeys = (type, val) => {
 				if (idx < 0) return;
 				raw.splice(idx, 1);
 			} else if (idx < 0) {
-				raw.push({name, meta});
+				raw.push(patch({}, {name, meta}));
 			} else {
 				raw[idx].meta = patch(raw[idx].meta, meta);
 			}

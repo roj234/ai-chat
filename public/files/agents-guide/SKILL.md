@@ -34,8 +34,6 @@ model: inherit
 maxToolTurns: 300
 # 最大总消息数 默认无限制
 maxTurns: 500
-# 覆盖调用处的 background 参数
-background: true
 
 # 文件系统配置（见下文） 默认继承
 mounts:

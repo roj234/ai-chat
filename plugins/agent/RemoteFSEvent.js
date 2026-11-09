@@ -179,10 +179,12 @@ export const dispatchProcessExit = (callback, event) => {
 		label: "异步进程结束",
 		time: Date.now(),
 		content: event
-			? `<process pid=${callback.pid} exitCode="${event.code}" logFile="${event.logFile}">${desc || 'exited'}</process>`
+			? `<process pid=${callback.pid} exitCode="${event.code}" elapsed="${(event.duration/1000).toFixed(1)}s" logFile="${event.logFile}">${prefixOrNone(event.message, '\n')}${prefixOrNone(event.log, '\n\n### Latest log\n\n')}</process>`
 			: `<system-remainder>PID ${callback.pid} state tracker was stopped.</system-remainder>`
 	});
 };
+
+const prefixOrNone = (s, prefix) => s ? prefix+s : '';
 
 // 重新拉起轮询
 EVENT_BUS.on('convLoad', conv => {

@@ -1,10 +1,10 @@
 import {openWindow} from "/src/components/Windows.jsx";
 
 import "./Explorer.css";
-import {$asyncState, $computed, $foreach, $state, $update, $vforeach, $watch, unconscious} from "unconscious";
-import {auxMainlyTouch, auxSmallScreen, selectedConversation} from "/src/states.js";
+import {$asyncState, $cleanup, $computed, $foreach, $state, $update, $vforeach, $watch, unconscious} from "unconscious";
+import {auxMainlyTouch, auxSmallScreen, EVENT_BUS, selectedConversation} from "/src/states.js";
 import {callFileSystemFunc, createFileSystem, FS_SOURCE, vfsIdentity} from "../agent/index.js";
-import {vfsDownloadMany, vfsPreview} from "./preview.js";
+import {vfsPreview} from "./preview.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {ref} from "@roj234/shared";
 import {Icon_search, Icon_warning} from "/src/components/Icons.jsx";
@@ -16,8 +16,12 @@ import {iconClassOf, iconColorOf} from "./fileTypes.js";
 import {copyWithAnimation, prettyError} from "/src/utils/utils.js";
 import {openTerminal} from "./Terminal.jsx";
 import {NestedMap} from "unconscious/common/NestedMap.js";
-import {webviewUploadImage} from "../../vendor/jsBridge.js";
+import {webviewUploadImage} from "/vendor/jsBridge.js";
 import {openRecorder} from "../voiceInput/Recorder.jsx";
+import {vfsDownloadMany} from "./downloader.js";
+import {vfsCopyMove} from "../agent/Mounts.js";
+import {createAsyncQueue} from "/common/pure-utils.js";
+import {xhrUpload} from "./xhrUploader.js";
 
 /* ============================== 工具函数 ============================== */
 
@@ -43,22 +47,6 @@ const extOf = n => {
 	return i > 0 ? n.slice(i + 1).toLowerCase() : '';
 };
 
-/**
- * @param {string} text
- * @param {number} status
- * @return {string}
- */
-function errText(text, status) {
-	const t = (text || '').trim();
-	try {
-		const o = JSON.parse(t);
-		if (o && o.error) return prettyError(o.error);
-	} catch {}
-	if (!t) return 'HTTP ' + status;
-	if (/^<(!doctype|html|head)/i.test(t)) return `服务返回的响应格式有误：${status} （检查地址或反向代理）`;
-	return t;
-}
-
 /* ============================== 图标 ============================== */
 
 const iconFolder2 = () => <div className="icon ri-folder-fill" style="background:linear-gradient(135deg,#4f8cff,#a371f7);background-clip:text;-webkit-text-fill-color:transparent;-webkit-background-clip:text;" />;
@@ -76,11 +64,14 @@ const TOAST_ICON = {ok: '✓', err: '×', warn: '!', info: 'i'};
  */
 export const openFileBrowser = async (fs, path = '') => {
 	fs ??= await createFileSystem(unconscious(selectedConversation));
+
+	const fsId = vfsIdentity(fs[FS_SOURCE]);
+	const cwd = $state("文件管理");
 	const browser = openWindow({
-		id: "preview "+encodeURI(vfsIdentity(fs[FS_SOURCE])),
-		title: "文件管理",
+		id: "preview "+encodeURI(fsId),
+		title: $computed(() => fsId + (unconscious(cwd) || '')),
 		icon: iconFolder2(),
-		element: () => Explorer(fs),
+		element: () => Explorer(fs, cwd),
 	});
 	await browser.element.navigateTo(path);
 	return browser;
@@ -89,10 +80,23 @@ export const openFileBrowser = async (fs, path = '') => {
 /* ============================== 界面 ============================== */
 
 /**
+ * 全局（跨窗口）剪贴板
+ * @type {import("unconscious").Reactive<{ fs: AiChat.FileSystemInstance, cut: boolean, items: FileEntry[] } | null>}
+ */
+const clipboard = $state(null);
+
+/** 处于「剪切」状态的路径，用于行高亮 */
+const cutPaths = $computed(() => (
+	new Set(clipboard.cut ? clipboard.items.map(it => it.path) : [])
+));
+$watch(cutPaths, () => {});
+
+/**
  * @param {AiChat.FileSystemInstance} fs
+ * @param {import("unconscious").Reactive<string>} cwd
  * @return {JSX.Element & { navigateTo(string): Promise<void> }}
  */
-const Explorer = (fs) => {
+const Explorer = (fs, cwd) => {
 	/**
 	 * @param {string} op
 	 * @param {Record<string, any>} [body]
@@ -100,16 +104,15 @@ const Explorer = (fs) => {
 	const call = (op, body) => callFileSystemFunc(fs, op, body);
 
 	/* ------------------------------ 状态 ------------------------------ */
-	const cwd = $state('');
 	const query = $state('');
-	let highlightAfterChange = '';
+	let highlightAfterChange = null;
 
 	/**
 	 * @type {import("unconscious").ReactivePromise<FileEntry[]>}
 	 */
 	const entries = $asyncState(async path => {
-		const t = highlightAfterChange;
-		highlightAfterChange = '';
+		const t = typeof highlightAfterChange === 'string' ? new Set([highlightAfterChange]) : highlightAfterChange;
+		highlightAfterChange = null;
 
 		const q = unconscious(query);
 
@@ -119,6 +122,7 @@ const Explorer = (fs) => {
 			json: true,
 			limit: q ? 200 : 5000,
 			showModified: true,
+			showHidden: true,
 		});
 
 		resetSel();
@@ -128,7 +132,7 @@ const Explorer = (fs) => {
 		return entries.map(([name, type, size, mtime]) => {
 			const path = joinPath(prefix, name);
 			const e = {name, type, size: size || 0, mtime, path,};
-			if (path === t) selection.value = new Set([e]);
+			if (t?.has(path)) selection.add(e);
 			return e;
 		});
 	}, cwd, []);
@@ -141,21 +145,14 @@ const Explorer = (fs) => {
 	const historyStack = $state([]);
 	const historyIndex = $state(-1);
 
-	/**
-	 * 剪贴板
-	 * @type {import("unconscious").Reactive<{ cut: boolean, items: FileEntry[] } | null>}
-	 */
-	const clipboard = $state(null);
-
-	/** 处于「剪切」状态的路径，用于行高亮 */
-	const cutPaths = $computed(() => (
-		 new Set(clipboard.cut ? clipboard.items.map(it => it.path) : [])
-	));
-
 	const editingPath = $state(false);
 	const dropActive = $state(false);
 
-	const terminalAvailable = call('terminal').then(() => true, () => false);
+	const terminalAvailable = call('terminal').then(() => true, () => {
+		terminalBtn.remove();
+		terminalBtn = null;
+		return false;
+	});
 	const terminal = async () => {
 		if (!await terminalAvailable) {
 			return showToast("该实现不支持", 'error');
@@ -166,10 +163,6 @@ const Explorer = (fs) => {
 	let terminalBtn = ref();
 	let toastDiv = ref();
 	let uploadDiv = ref();
-
-	terminalAvailable.then(avl => {
-		if (!avl) terminalBtn.remove();
-	});
 
 	// 目录树：Set/Map 就地修改，靠 treeTick 通知
 	/** @type {Set<string>} */
@@ -430,7 +423,7 @@ const Explorer = (fs) => {
 	/** @param {FileEntry} e */
 	const openEntry = e => {
 		if (e.type === 'dir') loadDir(e.path);
-		else openPreview(e);
+		else vfsPreview(fs, e.path, e.name, 'auto')
 	};
 
 	/* ------------------------------ 右键菜单 ------------------------------ */
@@ -552,14 +545,13 @@ const Explorer = (fs) => {
 	 */
 	const setClipboard = (items, cut) => {
 		if (!items.length) return;
-		clipboard.value = {cut, items};
+		clipboard.value = {fs, cut, items};
 	};
 
 	async function paste() {
 		const c = unconscious(clipboard);
 		if (!c) return;
 
-		const {cut, items} = c;
 		const resolver = createNameConflictResolver();
 		/** @type {string[]} */
 		const pasted = [];
@@ -568,9 +560,12 @@ const Explorer = (fs) => {
 		let fail = 0;
 
 		const _cwd = unconscious(cwd);
+
+		let {cut, items, fs: srcFS} = c;
+
 		for (const it of items) {
 			a:
-			if (cut) {
+			if (srcFS === fs && cut) {
 				if (_cwd === parentOf(it.path)) skipSame++;
 				else if (_cwd === it.path || _cwd.startsWith(it.path + '/')) skipInner++;
 				else break a;
@@ -579,7 +574,7 @@ const Explorer = (fs) => {
 
 			const dest = joinPath(_cwd, resolver(it.name));
 			try {
-				await call('copy', {src: it.path, dest, move: cut});
+				await vfsCopyMove(srcFS, it.path, fs, dest, cut);
 				pasted.push(dest);
 				invalidateDirectoryContents(it.path);
 				invalidateDirectoryContents(dest);
@@ -596,7 +591,7 @@ const Explorer = (fs) => {
 
 		if (cut) clipboard.value = null;
 
-		highlightAfterChange = pasted[0];
+		highlightAfterChange = new Set(pasted);
 		$update(cwd);
 
 		if (pasted.length < items.length) toast(`已粘贴 ${pasted.length} / ${items.length} 项`, 'warn');
@@ -801,10 +796,13 @@ const Explorer = (fs) => {
 				}
 			})
 
+			if (commonPath.endsWith('/'))
+				commonPath = commonPath.slice(0, -1);
+
 			await vfsDownloadMany(
 				fs,
 				items,
-				baseName(commonPath) || '根目录',
+				baseName(commonPath),
 			);
 		} catch (err) {
 			toast('下载失败：' + (err.message ?? err), 'err');
@@ -826,6 +824,8 @@ const Explorer = (fs) => {
 				name = pos < 0 ? initName + ` (${ord})` : `${initName.slice(0, pos)} (${ord})${initName.slice(pos)}`;
 				ord++;
 			}
+
+			set.add(name);
 			return name;
 		};
 	};
@@ -833,9 +833,11 @@ const Explorer = (fs) => {
 	/** @param {File[]} files */
 	async function uploadFiles(files) {
 		const resolve = createNameConflictResolver();
+		const [enqueue, flush] = createAsyncQueue(4);
 		for (const f of files) {
-			startUpload(f, resolve(f.name));
+			await enqueue(() => startUpload(f, resolve(f.name)));
 		}
+		await flush();
 	}
 
 	/**
@@ -843,60 +845,48 @@ const Explorer = (fs) => {
 	 * @param {string} name
 	 */
 	async function startUpload(f, name) {
-		const pct = <span className="pct">0%</span>;
+		const cancel = new AbortController();
+		const signal = cancel.signal;
+
+		const pct = <span className="pct" />;
 		const bar = <div className="timer" style="animation:none;transform:scaleX(0)" />;
 		const el = <div className="toast info">
 			<span className="ellipsis" title={name}>{name}</span>
 			{pct}
 			{bar}
+			<button className="dct-undo" onClick={({target}) => {
+				target.remove();
+				cancel.abort();
+			}}>取消
+			</button>
 		</div>;
 		uploadDiv.append(el);
 
 		const target = joinPath(cwd.value, name);
 
+		let p;
+
 		const kind = fs[FS_SOURCE].fs_type;
-		if (kind === 'api' || kind === 'db') {
+		if (f.size && kind === 'api' || kind === 'db') {
 			const {base, root, headers} = await call('getUrl');
-
-			const xhr = new XMLHttpRequest();
-
-			xhr.open('POST', base+`writeRaw?${root ? "root="+encodeURIComponent(root)+"&" : ''}path=`+encodeURIComponent(target));
-			xhr.setRequestHeader('Content-Type', 'application/octet-stream');
-			for (const key in headers) xhr.setRequestHeader(key, headers[key]);
-
-			xhr.upload.onprogress = e => {
-				if (!e.lengthComputable) return;
-				const p = e.loaded / e.total;
+			p = xhrUpload(f, base+`writeRaw?${root ? "root="+encodeURIComponent(root)+"&" : ''}path=`+encodeURIComponent(target), headers, signal, p => {
 				bar.style.width = (p * 100).toFixed(1) + '%';
 				pct.textContent = Math.floor(p * 100) + '%';
-			};
-			xhr.onload = () => {
-				el.remove();
-				if (xhr.status >= 200 && xhr.status < 300) {
-					highlightAfterChange = target;
-					$update(cwd);
-					toast('上传成功：' + name, 'ok');
-				} else {
-					toast('上传失败：' + name + ' — ' + errText(xhr.responseText, xhr.status), 'err');
-				}
-			};
-			xhr.onerror = () => {
-				toast('上传失败：' + name + ' — ' + '网络错误', 'err');
-				el.remove();
-			};
-			xhr.send(f);
+			})
 		} else {
-			await call('writeRaw', { path: target, content: f }).then(() => {
-				highlightAfterChange = target;
-				$update(cwd);
-				toast('上传成功：' + name, 'ok');
-			}, (e) => {
-				toast('上传失败：' + prettyError(e), 'err');
-			}).finally(() => {
-				el.remove();
-				$update(cwd);
-			});
+			p = call('writeRaw', { path: target, content: f, signal });
 		}
+
+		return p.then(() => {
+			toast('上传成功：' + name, 'ok');
+		}, (err) => {
+			toast('上传失败：' + name + ' — ' + err.message, 'err');
+		}).finally(() => {
+			highlightAfterChange = new Set([...selection].map(e => e.path));
+			highlightAfterChange.add(target);
+			$update(cwd);
+			el.remove();
+		});
 	}
 
 	/* 拖拽上传 */
@@ -932,64 +922,6 @@ const Explorer = (fs) => {
 		dragDepth = 0;
 		dropActive.value = false;
 		uploadFiles([...ev.dataTransfer.files]);
-	}
-
-	/* ------------------------------ 预览 / 编辑 ------------------------------ */
-	/** @param {FileEntry} e */
-	 function openPreview(e) {
-		return vfsPreview(fs, e.path, e.name, ((content) => {
-			const dirty = $state(false);
-			const saving = $state(false);
-			const mark = () => dirty.value = true;
-
-			/**
-			 *
-			 * @type {HTMLTextAreaElement}
-			 */
-			const ta = <textarea className="pv-editor" spellCheck={false} value={content} onInput={mark} onKeyDown={onEditorKey}/>;
-
-			openWindow({
-				id: "editor "+encodeURI(e.path),
-				title: "文本编辑 (实验性) "+e.path,
-				actions: <>
-					<span className="dot" title={() => dirty.value ? '有未保存的修改' : ''} class:dirty={() => dirty.value}/>
-					{formatSize(e.size)} · 很多 行
-					<button className="btn primary" disabled={() => !dirty.value || saving.value} onClick={save}>{() => saving.value ? '保存中…' : '保存'}</button>
-				</>,
-				element: ta
-			})
-
-			/** @param {KeyboardEvent} ev */
-			function onEditorKey(ev) {
-				if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's') {
-					ev.preventDefault();
-					save();
-					return;
-				}
-
-				if (ev.key === 'Tab') {
-					ev.preventDefault();
-					ta.setRangeText('\t');
-					mark();
-				}
-			}
-
-			async function save() {
-				if (saving.value || !dirty.value) return;
-				saving.value = true;
-				try {
-					await call('write', {path: e.path, content: ta.value, overwrite: true});
-					content = ta.value;
-					dirty.value = false;
-					toast('已保存 ' + e.name, 'ok');
-					$update(cwd);
-				} catch (err) {
-					toast('保存失败：' + err.message, 'err');
-				} finally {
-					saving.value = false;
-				}
-			}
-		}));
 	}
 
 	/* ------------------------------ 视图 / 排序 ------------------------------ */
@@ -1147,7 +1079,7 @@ const Explorer = (fs) => {
 					   onChange={() => toggleSel(e)}/>
 			</div>
 			<div className="name" onClick={ev => {
-				if (!auxSmallScreen && selection.has(e) && selection.size === 1) {
+				if (!auxMainlyTouch && !e.edit && selection.has(e) && selection.size === 1) {
 					clearTimeout(e.timer);
 					e.timer = setTimeout(() => {
 						if (selection.has(e) && selection.size === 1) {
@@ -1342,8 +1274,6 @@ const Explorer = (fs) => {
 						return baseName(items[0].path) + (items.length > 1 ? ` 和其它 ${items.length-1} 项` : '');
 					}}
 				</span>
-				<span className="spacer" />
-				<span title="虚拟路径">{vfsIdentity(fs[FS_SOURCE])}</span>
 			</div>
 		</main>
 
@@ -1355,10 +1285,22 @@ const Explorer = (fs) => {
 		</div>
 
 		<div className="uploads" ref={uploadDiv} />
-		<div className="toasts2" ref={toastDiv} />
+		<div className="win-toasts" ref={toastDiv} />
 	</div>;
 
 	/* ------------------------------ 启动 ------------------------------ */
+
+	$cleanup(body, EVENT_BUS.onoff('fileChanged', (fs1, _, path) => {
+		if (fs1 === fs) {
+			const dir = unconscious(cwd);
+			const pathParent = parentOf(path);
+			invalidateDirectoryContents(pathParent);
+			if (dir === path || dir === pathParent) {
+				highlightAfterChange = new Set([...selection].map(e => e.path));
+				$update(cwd);
+			}
+		}
+	}));
 
 	body.navigateTo = loadDir;
 	return {

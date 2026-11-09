@@ -94,16 +94,17 @@ const handleVfsRequest = async (request, event) => {
 	if (vfs.error) return new Response(vfs.error, { status: 503 });
 
 	if (vfs.handle) {
+		const paths = parts.map(decodeURIComponent);
 		// OPFS-like
 		let cur = vfs.handle;
-		for (const p of parts.slice(0, -1)) cur = await cur.getDirectoryHandle(p);
-		const blob = await (await cur.getFileHandle(parts.at(-1))).getFile();
+		for (const p of paths.slice(0, -1)) cur = await cur.getDirectoryHandle(p);
+		const blob = await (await cur.getFileHandle(paths.at(-1))).getFile();
 
 		const m = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get('range'));
 		if (!m) return new Response(blob, {
 			status: 200,
 			headers: {
-				'Content-Type': getContentType(parts.at(-1)),
+				'Content-Type': getContentType(paths.at(-1)),
 				'Accept-Ranges': 'bytes'
 			}
 		});
@@ -132,7 +133,7 @@ const handleVfsRequest = async (request, event) => {
 		return new Response(chunk, {
 			status: 206,
 			headers: {
-				'Content-Type': getContentType(parts.at(-1)),
+				'Content-Type': getContentType(paths.at(-1)),
 				'Content-Length': String(chunk.size),
 				'Content-Range': `bytes ${start}-${end}/${size}`,
 				'Accept-Ranges': 'bytes'
@@ -149,7 +150,7 @@ const handleVfsRequest = async (request, event) => {
 		const url = new URL(vfs.uri+"readRaw?path="+parts.join('/'));
 
 		const root = params[1];
-		if (root) url.searchParams.set('root', params[1]);
+		if (root) url.searchParams.set('root', root);
 
 		// real server
 		const upstream = await fetch(url, {headers});

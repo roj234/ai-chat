@@ -289,6 +289,8 @@ async function callFBI(mount) {
 			} else if (item.type === "local") {
 				const { type, ...rest } = item;
 				p = folderDB((tx) => tx.objectStore(FOLDER_STORE_NAME).put(rest), true, FOLDER_STORE_NAME);
+			} else {
+				return;
 			}
 
 			p.then(() => EVENT_BUS.post(['vfsConfig', 'set'], item));
@@ -709,11 +711,10 @@ export const createFileSystemAsync = (mount, promise) => {
  * @param {AiChat.FileSystemInstance} fs
  * @param {string} func
  * @param {Record<String, any>} parameters
- * @param {AiChat.Conversation} [conv]
  * @return {Promise<string | Blob | Object>}
  */
-export const callFileSystemFunc = (fs, func, parameters, conv) => {
-	if (typeof fs === 'function') return fs(func, parameters, conv);
+export const callFileSystemFunc = (fs, func, parameters) => {
+	if (typeof fs === 'function') return fs(func, parameters);
 
 	const handler = fs[func];
 	if (!handler) return Promise.reject(new DOMException(`${func} is not implemented in this VFS`, FSE_NotSupported));
@@ -767,10 +768,19 @@ export const fileAccess = (func) => async (parameters, _, conv) => {
 		parameters[key] = newPath;
 	}
 
-	return callFileSystemFunc(fs, func, parameters, conv);
+	return callFileSystemFunc(fs, func, parameters);
 };
 
-export const crossVFSCopyMove = async({src, dest, move}, _, conv) => {
+/**
+ *
+ * @param {string} src
+ * @param {string} dest
+ * @param {boolean} [move]
+ * @param _
+ * @param {AiChat.Conversation} conv
+ * @return {Promise<void>}
+ */
+export const smartCopyMove = async({src, dest, move}, _, conv) => {
 	if (conv.fs_readonly) throwDOMException("Write-protect is enabled globally", "ReadOnlyError");
 	if (src === dest) throw 'src and dest are same';
 
@@ -781,38 +791,51 @@ export const crossVFSCopyMove = async({src, dest, move}, _, conv) => {
 	if (move && srcFileSystem.fs_readonly) throwDOMException("Write-protect is enabled for src VFS", "ReadOnlyError");
 	if (destFileSystem.fs_readonly) throwDOMException("Write-protect is enabled for dest VFS", "ReadOnlyError");
 
-	if (srcFileSystem === destFileSystem) {
-		if (normalizePath(dest).join('/').startsWith(normalizePath(src).join('/')+"/"))
+	return vfsCopyMove(srcFileSystem, src, destFileSystem, dest, move);
+}
+
+/**
+ *
+ * @param {AiChat.FileSystemInstance} src
+ * @param {string} srcPath
+ * @param {AiChat.FileSystemInstance} dst
+ * @param {string} dstPath
+ * @param {boolean} move
+ * @return {Promise<void>}
+ */
+export const vfsCopyMove = async (src, srcPath, dst, dstPath, move) => {
+	if (src === dst) {
+		if (normalizePath(dstPath).join('/').startsWith(normalizePath(srcPath).join('/')+"/"))
 			throwDOMException("Move into descents", FSE_NotAllowed);
 
-		return callFileSystemFunc(srcFileSystem, 'copy', {
-			src,
-			dest,
+		return callFileSystemFunc(src, 'copy', {
+			src: srcPath,
+			dest: dstPath,
 			move
-		}, conv);
+		});
 	}
 
-	const fileType = await callFileSystemFunc(srcFileSystem, 'stat', { path: src });
-	if (fileType.startsWith('type: file')) {
-		const content = await callFileSystemFunc(srcFileSystem, 'readRaw', { path: src });
-		await callFileSystemFunc(destFileSystem, 'writeRaw', { path: dest, content });
+	const stat = await callFileSystemFunc(src, 'stat', {path: srcPath, json: true});
+	if (stat.type === 'file') {
+		const content = await callFileSystemFunc(src, 'readRaw', {path: srcPath});
+		await callFileSystemFunc(dst, 'writeRaw', {path: dstPath, content});
 	} else {
-		const srcFiles = await callFileSystemFunc(srcFileSystem, 'list', {
-			path: src,
+		const srcFiles = await callFileSystemFunc(src, 'list', {
+			path: srcPath,
 			pattern: '**',
 			json: true,
 			limit: 100000,
 			showDir: false,
 			showHidden: true,
 			//showModified: true,
-		}, conv);
+		});
 
 		const [enqueue, waitAll] = createAsyncQueue();
 
 		for (const [path] of srcFiles) {
-			await enqueue(async() => {
-				const content = await callFileSystemFunc(srcFileSystem, 'readRaw', {path: src+'/'+path});
-				await callFileSystemFunc(destFileSystem, 'writeRaw', { path: dest+'/'+path, content });
+			await enqueue(async () => {
+				const content = await callFileSystemFunc(src, 'readRaw', {path: srcPath+'/'+path});
+				await callFileSystemFunc(dst, 'writeRaw', {path: dstPath+'/'+path, content});
 			});
 		}
 
@@ -820,6 +843,6 @@ export const crossVFSCopyMove = async({src, dest, move}, _, conv) => {
 	}
 
 	if (move) {
-		await callFileSystemFunc(srcFileSystem, 'delete', { path: src });
+		await callFileSystemFunc(src, 'delete', {path: srcPath});
 	}
-}
+};

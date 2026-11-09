@@ -24,6 +24,12 @@ export const FS_SERVICE_PAT = '';
  */
 export const FS_UPDATE_BASH = true;
 
+/**
+ * 命令自动转异步避免阻塞模型的超时，单位是秒
+ * @type {number}
+ */
+export const FS_COMMAND_TIMEOUT = 20;
+
 // ==========================================
 // 1. 语义搜索与向量化 (Semantic Search)
 // ==========================================

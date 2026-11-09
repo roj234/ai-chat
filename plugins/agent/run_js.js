@@ -1,4 +1,4 @@
-import {crossVFSCopyMove, fileAccess} from "./Mounts.js";
+import {fileAccess, smartCopyMove} from "./Mounts.js";
 import {showToast} from "/src/components/Toast.js";
 import {getRandomString, prettyError} from "/src/utils/utils.js";
 import {AS_IS} from "unconscious";
@@ -264,7 +264,7 @@ for (const key in rpcMethods) {
 	rpcMethods[key].unshift(fileAccess(key));
 }
 
-rpcMethods['copy'] = [crossVFSCopyMove, (args) => ({ src: args[0], dest: args[1], move: args[2] || false })];
+rpcMethods['copy'] = [smartCopyMove, (args) => ({ src: args[0], dest: args[1], move: args[2] || false })];
 
 const readFile = fileAccess("read");
 const appendFn = fileAccess("append");

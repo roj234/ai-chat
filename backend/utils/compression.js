@@ -1,7 +1,7 @@
 import {bakeSchema, decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
 import {brotliCompress, brotliDecompressSync, constants} from 'node:zlib';
 import {DB_COMPRESS_LEVEL, DB_COMPRESS_MIN_SIZE} from "../config.js";
-import {compressBase64, compressStr, decompressStr} from "./string-compression.js";
+import {compressBase64, compressStr, decompressStr} from "./cmplIdCompression.js";
 
 // 注意，这些schema只能追加，规则和protobuf相同
 const finish_reason = ["finish_reason", null, ["stop", "length", "tool_calls", "error", "interrupt"]];

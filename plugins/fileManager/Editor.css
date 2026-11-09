@@ -1,0 +1,42 @@
+
+.win-body.preview {
+    .vje {
+        font-size: 14px;
+        line-height: 16px;
+    }
+
+    .-status {
+        display: flex;
+        align-items: center;
+        padding: 0 18px;
+        height: 28px;
+        border-top: 1px solid var(--border);
+        font-size: 12px;
+        color: var(--muted);
+
+        & .-item {
+            &.ok {
+                color: var(--ok);
+                background: var(--ok-bg);
+                padding: 1px 7px;
+                border-radius: 20px;
+            }
+
+            &.err {
+                color: var(--error);
+                background: var(--error-bg);
+                padding: 1px 7px;
+                border-radius: 20px;
+            }
+        }
+
+        & .-sep {
+            margin: 0 5px;
+            width: 1px;
+            height: 12px;
+            background: var(--muted);
+            flex: none;
+        }
+    }
+}
+

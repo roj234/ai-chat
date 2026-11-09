@@ -38,7 +38,6 @@ const options = {
 	port: { type: 'string', short: 'p', default: '3000' },
 	cert: { type: 'string', default: '' },
 	static: { type: 'string', default: '' },
-	'no-sandbox': { type: 'boolean', default: false },
 	'hide-user': { type: 'boolean', default: false },
 	config: { type: 'string', short: 'c', default: './config.js' },
 	data: { type: 'string', default: 'data' },
@@ -49,7 +48,7 @@ const { values: {
 	static: zipPath,
 	config: configPath,
 	data, workspace,
-	'no-sandbox': noSandbox, 'hide-user': hideUser
+	'hide-user': hideUser
 } } = parseArgs({ options });
 const PORT = parseInt(port, 10);
 const DATA_PATH = path.resolve(data);
@@ -217,7 +216,6 @@ if (WEBSOCKET_SYNC_ENABLE) {
 }
 
 globalThis.AIChatArgs = {
-	noSandbox,
 	hideUser
 }
 
@@ -262,7 +260,6 @@ server.listen(PORT, addr, () => {
 	console.log(`  地址:     http${cert?'s':''}://${addr}:${PORT}`);
 	if (workspace) {
 		console.log(`  模式:     专用文件访问服务，位于 ${JSON.stringify(workspace)}`);
-		if (noSandbox) console.log(`  (沙盒已禁用)`);
 		return;
 	}
 	console.log(`  模式:     数据库服务，位于 ${data === '' ? '内存' : JSON.stringify(data)}`);

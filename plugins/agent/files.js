@@ -1,7 +1,7 @@
 import {getToolParameters, prefixTitle, registerToolset, toolset} from "/src/toolset.js";
 import {messages, selectedConversation, updateMessageUI} from "/src/states.js";
 import {$state, $update, debugSymbol, unconscious} from "unconscious";
-import {callFileSystemFunc, createFileSystem, crossVFSCopyMove, fileAccess, FS_INSTANCE,} from "./Mounts.js";
+import {callFileSystemFunc, createFileSystem, fileAccess, FS_INSTANCE, smartCopyMove,} from "./Mounts.js";
 import {RunJS, SearchModules} from "./run_js.js";
 import {errorBlock} from "/src/utils/utils.js";
 import {InspectImage} from "./inspect_image.js";
@@ -387,7 +387,7 @@ const CopyMove = {
 	name: "CopyMove",
 	description: "Copy or move a file/directory",
 	async script(par, ctx, conv) {
-		await crossVFSCopyMove(par, ctx, conv);
+		await smartCopyMove(par, ctx, conv);
 		await getChangeableFiles(conv, par.dest);
 		return 'Success';
 	},
@@ -642,8 +642,11 @@ const Mounts = {
 
 			if (fs_type === 'api') {
 				const shell = await callFileSystemFunc(await createFileSystem(mount), 'env', {}).catch(() => ({}));
-				const loc = shell.location;
-				if (loc) fs_base = loc === '/' ? '/' + (fs_base || '') : normalizePath(loc+'/'+(fs_base || '')).join('/');
+				let loc = shell.location;
+				if (loc) {
+					if (loc.endsWith('/') && loc !== '/') loc = loc.slice(0, -1);
+					fs_base = loc;
+				}
 			}
 
 			let str = `\n${JSON.stringify(i ? "~/" + k : k)} (type=${fs_type||'vfs'}, remote_path=${JSON.stringify(fs_base || "/")}`;
@@ -729,7 +732,7 @@ registerToolset(
 				vcsSupported = false;
 				try {
 					const fs = await createFileSystem(conv);
-					await callFileSystemFunc(fs, 'vcs', {}, conv);
+					await callFileSystemFunc(fs, 'vcs', {});
 					vcsSupported = true;
 				} catch {}
 				conv[vcsAvailableKey] = !!vcsSupported;

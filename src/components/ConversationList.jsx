@@ -19,6 +19,7 @@ import {onLoad} from "../hooks.js";
 import "/plugins/rp_basic/TagList.css";
 import {showToast} from "./Toast.js";
 import {deleteWithDrawback, prettyError} from "../utils/utils.js";
+import {NestedMap} from "unconscious/common/NestedMap.js";
 
 const closeHoverMenu = (e) => {
 	if (hoverMenu.isConnected) {
@@ -255,6 +256,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 		itemHeight: 32,
 		gap: 8,
 		data: groupAndConvArr,
+		mapType: NestedMap,
 		keyFunc,
 		onReuse(node, item) {
 			if (item.textContent == null) {

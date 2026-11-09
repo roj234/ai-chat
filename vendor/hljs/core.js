@@ -1,10 +1,5 @@
 /* eslint-disable no-multi-assign */
-
-function awaitGenerator(gen) {
-	let result;
-	while (!(result = gen.next()).done);
-	return result.value;
-}
+import {escapeHtml} from "@roj234/shared/strings";
 
 function deepFreeze(obj) {
   if (obj instanceof Map) {
@@ -64,14 +59,7 @@ class Response {
  * @param {string} value
  * @returns {string}
  */
-function escapeHTML(value) {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;');
-}
+const escapeHTML = escapeHtml;
 
 /**
  * performs a shallow merge of multiple objects into one
@@ -201,6 +189,95 @@ class HTMLRenderer {
    * @param {string} className */
   span(className) {
     this.buffer += `<span class="${className}">`;
+  }
+}
+
+
+/** @type {Renderer} */
+class TokenRenderer {
+  /**
+   * @param {Tree} parseTree
+   * @param {{ classPrefix?: string, emits?: (node: Node) => boolean, merge?: boolean }} [options]
+   */
+  constructor(parseTree, options = {}) {
+    this.classPrefix = options.classPrefix;
+    this.stack = [];
+    this.className = '';
+    this.rows = [[]];
+
+    parseTree.walk(this);
+  }
+
+  // ---------- walk 回调 ----------
+
+  openNode(node) {
+    if (!emitsWrappingTags(node)) return;
+    this.stack.push(node);
+    this.recompute();
+  }
+
+  closeNode(node) {
+    if (!emitsWrappingTags(node)) return;
+
+    const top = this.stack.pop();
+    if (top !== node) {
+      // walk 正常应严格配对；不配对时兜底按引用移除
+      const i = this.stack.lastIndexOf(node);
+      if (i !== -1) this.stack.splice(i, 1);
+    }
+    this.recompute();
+  }
+
+  addText(text) {
+    if (text == null || text === '') return;
+
+    // 换行统一成 \n（兼容 CRLF / CR）
+    const normalized = String(text).replace(/\r\n?/g, '\n');
+    const className = this.className; // 一段文本内 scope 不变
+    const parts = normalized.split('\n');
+
+    for (let i = 0; i < parts.length; i++) {
+      if (i > 0) {
+        // 遇到换行：结束当前行、开启新行。
+        // 新行里 append 的 token 会带上 className —— 即「换行补 scope」
+        this.rows.push([]);
+      }
+      this.append(parts[i], className);
+    }
+  }
+
+  // ---------- 内部 ----------
+
+  /**
+   * 往当前行追加一个 token
+   * @param {string} text
+   * @param {string} className
+   */
+  append(text, className) {
+    if (!text) return;
+
+    const line = this.rows.at(-1);
+
+    if (line.length) {
+      const last = line[line.length - 1];
+      if (last.className === className) {
+        last.text += text; // 相邻同样式合并，减少碎片
+        return;
+      }
+    }
+
+    line.push({ text, className });
+  }
+
+  recompute() {
+    this.className = this.stack.map((node) => scopeToCSSClass(node.scope, { prefix: this.classPrefix })).join(' ');
+  }
+
+  // ---------- 输出 ----------
+
+  /** @returns {Token[][]} */
+  value() {
+    return this.rows;
   }
 }
 
@@ -514,7 +591,7 @@ function _rewriteBackreferences(regexps, { joinWith }) {
         out += '\\' + String(Number(match[1]) + offset);
       } else {
         out += match[0];
-        if (match[0] === '(') {
+        if (match[0] === '(' || /^\(\?[<']/.test(match[0])) {
           numCaptures++;
         }
       }
@@ -1639,38 +1716,6 @@ const HLJS = function(hljs) {
   /* Utility functions */
 
   /**
-   * Tests a language name to see if highlighting should be skipped
-   * @param {string} languageName
-   */
-  function shouldNotHighlight(languageName) {
-    return options.noHighlightRe.test(languageName);
-  }
-
-  /**
-   * @param {HighlightedHTMLElement} block - the HTML element to determine language for
-   */
-  function blockLanguage(block) {
-    let classes = block.className + ' ';
-
-    classes += block.parentNode ? block.parentNode.className : '';
-
-    // language-* takes precedence over non-prefixed class names.
-    const match = options.languageDetectRe.exec(classes);
-    if (match) {
-      const language = getLanguage(match[1]);
-      if (!language) {
-        warn(LANGUAGE_NOT_FOUND.replace("{}", match[1]));
-        warn("Falling back to no-highlight mode for this block.", block);
-      }
-      return language ? match[1] : 'no-highlight';
-    }
-
-    return classes
-      .split(/\s+/)
-      .find((_class) => shouldNotHighlight(_class) || getLanguage(_class));
-  }
-
-  /**
    * Core highlighting function.
    *
    * OLD API
@@ -1691,8 +1736,9 @@ const HLJS = function(hljs) {
    * @property {CompiledMode} top - top of the current mode stack
    * @property {boolean} illegal - indicates whether any illegal matches were found
   */
-  function* highlight(code, {language, ignoreIllegals = true}) {
-    return yield* _highlight(language, code, ignoreIllegals);
+  function* highlight(code, _myOptions) {
+    const {language, ignoreIllegals = true} = _myOptions;
+    return yield* _highlight(language, code, ignoreIllegals, null, _myOptions);
   }
 
   /**
@@ -1704,7 +1750,7 @@ const HLJS = function(hljs) {
    * @param {CompiledMode?} [continuation] - current continuation mode, if any
    * @returns {HighlightResult} - result of the highlight operation
   */
-  function* _highlight(languageName, codeToHighlight, ignoreIllegals, continuation) {
+  function* _highlight(languageName, codeToHighlight, ignoreIllegals, continuation, _myOptions) {
     const keywordHits = Object.create(null);
 
     /**
@@ -2122,8 +2168,8 @@ const HLJS = function(hljs) {
         language.__emitTokens(codeToHighlight, emitter);
       }
 
-      emitter.finalize();
-      result = emitter.toHTML();
+      if (!_myOptions.continuation) emitter.finalize();
+      result = _myOptions._returnTokens ? new TokenRenderer(emitter, options).value() : emitter.toHTML();
 
       return {
         language: languageName,
@@ -2236,20 +2282,6 @@ const HLJS = function(hljs) {
     result.secondBest = secondBest;
 
     return result;
-  }
-
-  /**
-   * Builds new class name for block given the language name
-   *
-   * @param {HTMLElement} element
-   * @param {string} [currentLang]
-   * @param {string} [resultLang]
-   */
-  function updateClassName(element, currentLang, resultLang) {
-    const language = (currentLang && aliases[currentLang]) || resultLang;
-
-    element.classList.add("hljs");
-    element.classList.add(`language-${language}`);
   }
 
   /**

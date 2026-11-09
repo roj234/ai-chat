@@ -4,7 +4,7 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {readBOM} from "../../common/chardet.js";
 import iconv from "iconv-lite";
-import {getEnvironmentPrompt, updateBash} from "../utils/checkEnv.js";
+import {getToolchainPrompt, updateBash} from "./fs/checkToolchain.js";
 import {createTextFileEditHelper, GREP_MAX_COLUMNS} from "../../common/fs-common.js";
 import {ACL} from "../../common/ACL.js";
 import {pipeline} from "node:stream/promises";
@@ -12,14 +12,14 @@ import {formatSize} from "unconscious/common/Utils.js";
 import {LRUCache} from "@roj234/lru-cache";
 import {compileGlobPattern, emptyAsyncGenerator, generateGlobCode} from "../../common/fs-glob.js";
 import {Transform, Writable} from 'node:stream';
+import {pathFilter} from './fs/paths.js';
 // noinspection ES6UnusedImports
 import {mpscScheduler} from "../../common/pure-utils.js";
 import {getContentType} from "@roj234/ie/utils/mimeTypes.js";
 import {safeStat, serveFile} from "@roj234/ie/utils/serveFile.js";
 import {HttpError} from "../router.js";
-import {FS_UPDATE_BASH} from "../config.js";
-import {registerTerminalRoutes} from "./terminal.js";
-import {IS_WIN, killProcess} from "../utils/process.js";
+import {FS_COMMAND_TIMEOUT, FS_UPDATE_BASH} from "../config.js";
+import {IS_WIN, killProcess} from "./fs/process.js";
 import {ANSI_SEQ} from "@roj234/ansi2html/seq";
 
 const devNull = () => new Writable({
@@ -29,24 +29,6 @@ const devNull = () => new Writable({
 });
 
 const TEXT_FILE_MAX = 10485760;
-
-/**
- * 路径校验
- * @param {string} relPath
- * @param {RouteContext} ctx
- * @return {string}
- */
-export const pathFilter = (relPath, ctx) => {
-	if (null == relPath) throw new HttpError(400, "param error");
-
-	const root = ctx.fsRoot;
-	const targetPath = path.resolve(root, relPath);
-	// allow path like /tmp/... or C:/tmp/
-	if (!globalThis.AIChatArgs.noSandbox && !(targetPath+"\\").startsWith(root) && !/^(?:[a-zA-Z]:)?[\\/]tmp(?:\/|$)/.test(targetPath)) {
-		throw new HttpError(403, 'Path traversal');
-	}
-	return targetPath;
-};
 
 async function pathFilterWithIgnore(ctx, relPath, isDir) {
 	const targetPath = pathFilter(relPath, ctx);
@@ -255,7 +237,6 @@ export async function registerFsRoutes(router, allowExec) {
 		for await (const entry of await glob(pattern, safePath, showHidden, acl, exclude)) {
 			const parentPath = entry.parentPath.slice(safePath.length+1).replaceAll(path.sep, '/');
 			const displayPath = pattern !== '*' && parentPath ? parentPath+'/'+entry.name : entry.name;
-			const isDir = entry.isDirectory();
 
 			if (result.length >= limit) {
 				prefix = `[TRUNCATED to ${limit} entries, use a more specific path or pattern]\n`;
@@ -265,7 +246,7 @@ export async function registerFsRoutes(router, allowExec) {
 			const fullPath = path.join(entry.parentPath, entry.name);
 			const stats = await fsp.stat(fullPath);
 
-			if (!isDir) {
+			if (!stats.isDirectory()) {
 				if (showDir !== 'only' && stats.mtimeMs >= modSince) {
 					const item = [displayPath, "file", json ? stats.size : formatSize(stats.size)];
 					if (showModified || modSince) item.push(json ? stats.mtimeMs : stats.mtime.toISOString().slice(0, -5));
@@ -292,7 +273,7 @@ export async function registerFsRoutes(router, allowExec) {
 			const stats = await fsp.stat(path);
 			if (stats.size > TEXT_FILE_MAX) {
 				const msg = `File too large (${stats.size} > ${TEXT_FILE_MAX})`;
-				if (!ctx) throw msg; // for grep
+				if (!ctx?.send) throw msg; // for grep
 				return ctx.send(400, { error: msg });
 			}
 			return readAsString(await fsp.readFile(path));
@@ -316,6 +297,9 @@ export async function registerFsRoutes(router, allowExec) {
 	});
 	router.post('/edit', async (ctx) => {
 		sendText(ctx.res, await teh.edit(await ctx.readAsObject(), ctx));
+	});
+	router.post('/atomicEdit', async (ctx) => {
+		sendText(ctx.res, await teh.atomicEdit(await ctx.readAsObject(TEXT_FILE_MAX), ctx));
 	});
 	router.post('/write', async (ctx) => {
 		sendText(ctx.res, await teh.write(await ctx.readAsObject(TEXT_FILE_MAX), ctx));
@@ -589,7 +573,7 @@ nlink: ${stats.nlink}`);
 	 * 统一执行命令并限制输出大小，按到达顺序交错拼接 stdout/stderr
 	 * @param {string} command     - 要执行的程序或 shell 命令
 	 * @param {string[]} args      - 程序参数（shell 模式时传空数组）
-	 * @param {object}   options   - { cwd, timeout(ms), shell(boolean|string), safeCwd(用于落盘) }
+	 * @param {object}   options   - { cwd, timeout(ms), shell(boolean|string), }
 	 * @returns {AiChat.Cancellable<{code: number, text: string}>}
 	 */
 	function executeCommand(command, args, { cwd, timeout, shell = false, dir = '.', inline, background, env, kill, stdin = true }) {
@@ -608,11 +592,12 @@ nlink: ${stats.nlink}`);
 		let head = Buffer.alloc(0), tail = Buffer.alloc(0);
 		let totalBytes = 0;
 
-		let filename = `/pid-${child.pid}-${Math.random().toString(36).slice(3, 7)}.log`;
+		let logName = `/pid-${child.pid}-${Math.random().toString(36).slice(3, 7)}.log`;
 		let file = null;
+		const logAbsolutePath = path.join(cwd, logName);
 
 		const createLogStream = () => {
-			file = createWriteStream(path.join(cwd, filename), { flags: 'w' });
+			file = createWriteStream(logAbsolutePath, { flags: 'w' });
 			file.on('error', (err) => {
 				child.stdout.unpipe(file);
 				child.stderr.unpipe(file);
@@ -655,7 +640,7 @@ nlink: ${stats.nlink}`);
 		const getLog = () => {
 			if (!file) return decode(tail);
 
-			return `[WARNING: Large output omitted (${formatSize(totalBytes)}), log saved to: ${JSON.stringify(dir + filename)}]\n`
+			return `[WARNING: Large output omitted (${formatSize(totalBytes)}), log saved to: ${JSON.stringify(dir + logName)}]\n`
 				+ decode(head)
 				+ `\n[WARNING: Omitted ${totalBytes - OUTPUT_LIMIT} bytes]\n`
 				+ decode(tail);
@@ -677,14 +662,14 @@ nlink: ${stats.nlink}`);
 			if (kill) {
 				killProcess(child);
 				resolve({
-					code: 'TIMEOUT, killed (pid='+child.pid+', logPath='+JSON.stringify(dir + filename)+')',
+					code: 'TIMEOUT, killed (pid='+child.pid+', logPath='+JSON.stringify(dir + logName)+')',
 					text: getLog(),
 				});
 				return;
 			}
 
 			resolve({
-				code: (background?'':'TIMEOUT, ')+'Running in background (pid='+child.pid+', logPath='+JSON.stringify(dir + filename)+')',
+				code: (background?'':'TIMEOUT, ')+'Running in background (pid='+child.pid+', logPath='+JSON.stringify(dir + logName)+')',
 				text: getLog(),
 			});
 
@@ -699,7 +684,7 @@ nlink: ${stats.nlink}`);
 		}, Math.min(background ? 100 : timeout, 275000));
 
 		if (!inline && child.pid != null)
-			processes.set(child.pid, { child, logFile: dir+filename, cwd, timer });
+			processes.set(child.pid, { child, logFile: dir+logName, cwd, timer });
 
 		console.log("[进程] 已启动", child.pid, command, args);
 
@@ -720,15 +705,23 @@ nlink: ${stats.nlink}`);
 			console.log("[进程] 已停止", child.pid, codeStr);
 
 			if (notify) {
-				fsp.stat(dir+filename).catch(() => ({})).then(async state => {
-					let logFile = dir+filename;
-					if (state.size === 0) {
-						await fsp.rm(logFile).then(() => logFile = '0B, deleted', () => {});
+				safeStat(dir+logName).then(async stat => {
+					let logFile = dir+logName;
+					let log;
+					if (stat.size === 0) {
+						await fsp.rm(logFile)
+							.then(() => logFile = '0B, deleted', () => {});
+					} else {
+						log = await teh.read({ path: logAbsolutePath, offset: -50, maxChars: 4096, noWarn: true }, { fsRoot: '' })
+							.catch((e) => "InternalError: "+(e.message ?? e));
 					}
+
 					postEvent('process-exit', {
 						pid: child.pid,
 						code: codeStr,
 						logFile,
+						log,
+						duration: Date.now() - startTime,
 						message: !info ? true : info?.message
 					});
 				});
@@ -867,7 +860,7 @@ logPath: ${logFile}`
 	if (allowExec) {
 		let defaultShell = 'bash';
 		const getEnv = async () => {
-			const prompt = await getEnvironmentPrompt();
+			const prompt = await getToolchainPrompt();
 			defaultShell = prompt.startsWith("os: Windows") ? prompt.includes("bash: No") ? 'powershell' : "bashemu" : 'bash';
 			return prompt;
 		};
@@ -889,7 +882,12 @@ logPath: ${logFile}`
 			if (!info) return sendText(ctx.res, `Error: process died or not started by agent.`);
 
 			const { child, logFile, timer } = info;
-			child.stdin.write(content);
+
+			const result = await new Promise((resolve, reject) => {
+				child.stdin.write(content, (err) => {
+					err ? reject(err) : resolve();
+				});
+			});
 
 			sendText(ctx.res, `Successfully written, read ${logFile} for new output.`);
 		});
@@ -899,7 +897,7 @@ logPath: ${logFile}`
 
 			const {
 				program, arguments: args, cwd = '',
-				timeout = 10, background = false,
+				timeout = FS_COMMAND_TIMEOUT, background = false,
 				charset = 'utf8',
 				env
 			} = await ctx.readAsObject();
@@ -931,11 +929,13 @@ logPath: ${logFile}`
 
 			let {
 				command, cwd = '', shell = defaultShell,
-				timeout = 10, background = false,
+				timeout = FS_COMMAND_TIMEOUT, background = false,
 				charset = 'utf8',
 				env
 			} = await ctx.readAsObject();
 			let args = [];
+
+			if (command.startsWith('sleep ')) throw 'NotAllowedError: sleep is not allowed, use Wait';
 
 			if (process.env.AINT_EXPERIMENTAL_BASH_GUARD)
 				command = `set -Eeuo pipefail\nIFS=$'\\n\\t'\n`+command;
@@ -969,7 +969,5 @@ logPath: ${logFile}`
 			if (globalThis.AIChatArgs.hideUser) text = text.replaceAll(new RegExp("\\b"+process.env.USERNAME+"\\b", "g"), "user");
 			sendText(ctx.res, `${typeof code === 'number'?'Exit code '+code:code} (wall time ${(duration/1000).toFixed(1)}s)\n${text}`);
 		});
-
-		registerTerminalRoutes(router);
 	}
 }

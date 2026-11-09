@@ -3,7 +3,7 @@ import {textDiff} from "unconscious/common/text-diff.js";
 import "./TextDiff.css";
 import {VirtualList} from "unconscious/common/VirtualList.js";
 import {selectableVirtualListMixin} from "unconscious/common/selectableVirtualListMixin.js";
-import {lightAsync, loadLanguage, splitMultilineHTML} from "../markdown/highlight.js";
+import {lightAsync, loadLanguage, tokenToLineHtml} from "../markdown/highlight.js";
 import {immutableObjectMap} from "unconscious/common/Utils.js";
 
 /**
@@ -15,7 +15,7 @@ import {immutableObjectMap} from "unconscious/common/Utils.js";
 export const makeDiff = (oldText, newText, stripCommon = false) => {
 	const oldLines = !oldText ? [] : unconscious(oldText).split('\n');
 	const newLines = !newText ? [] : unconscious(newText).split('\n');
-	return textDiff(oldLines, newLines, stripCommon);
+	return textDiff(oldLines, newLines, stripCommon)[0];
 }
 
 export const DiffHeader = ({diff}) => {
@@ -97,10 +97,10 @@ export const TextDiff = ({ start, diff, filename = '' }) => {
 
 	const ext = loadLanguage(filename.slice(filename.lastIndexOf('.') + 1));
 	if (ext) {
-		ext.then(name => lightAsync(diff.map(d => d.text).join('\n'), name, (html) => {
-			const lights = splitMultilineHTML(html, []);
-			for (let i = 0; i < lights.length; i++) {
-				diff[i].html = lights[i];
+		ext.then(name => lightAsync(diff.map(d => d.text).join('\n'), name, (tokens) => {
+			const html = tokenToLineHtml(tokens);
+			for (let i = 0; i < html.length; i++) {
+				diff[i].html = html[i];
 			}
 
 			vl.render();
@@ -139,10 +139,10 @@ export const HighlightBox = ({ start = 1, code, filename = '' }) => {
 
 	const ext = loadLanguage(filename.slice(filename.lastIndexOf('.') + 1));
 	if (ext) {
-		ext.then(name => lightAsync(code, name, (html) => {
-			const lights = splitMultilineHTML(html, []);
-			for (let i = 0; i < lights.length; i++) {
-				lines[i].html = lights[i];
+		ext.then(name => lightAsync(code, name, (tokens) => {
+			const html = tokenToLineHtml(tokens, []);
+			for (let i = 0; i < html.length; i++) {
+				lines[i].html = html[i];
 			}
 
 			vl.render();

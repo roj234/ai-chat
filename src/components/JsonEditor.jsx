@@ -1,7 +1,7 @@
 import "./JsonEditor.css";
 import {$cleanup, $state, $watchWithCleanup, AS_IS} from "unconscious";
 import {createJsonParser} from "unconscious/common/Json.js";
-import {lightAsync} from "../markdown/highlight.js";
+import {lightAsync, tokenToLineHtml} from "../markdown/highlight.js";
 
 const commonPrefix = (a, b) => {
 	const n = Math.min(a.length, b.length);
@@ -30,6 +30,14 @@ const findPosition = (root, targetOffset) => {
 	return [ root, root.childNodes.length ];
 };
 
+/**
+ *
+ * @deprecated
+ * @param value
+ * @param state
+ * @return {JSX.Element}
+ * @constructor
+ */
 export const JsonEditor = ({value = "", state}) => {
 	const currentText = $state(value);
 	let pre;
@@ -54,10 +62,10 @@ export const JsonEditor = ({value = "", state}) => {
 				errorPos = parser.pos();
 			}
 
-			cancelHighlight = lightAsync(codeStr, "json", (html) => {
+			cancelHighlight = lightAsync(codeStr, "json", (chunks) => {
 				cancelHighlight = null;
 				lastText = codeStr;
-				pre.innerHTML = html+"&nbsp;";
+				pre.innerHTML = tokenToLineHtml(chunks).join('\n')+"&nbsp;";
 				if (errorPos != null) {
 					const cursor = <span className='cursor'></span>;
 

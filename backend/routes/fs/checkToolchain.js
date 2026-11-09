@@ -5,7 +5,7 @@ import path from 'node:path';
 import {promisify} from "node:util";
 import {exec} from "node:child_process";
 import {safeStat} from "@roj234/ie/utils/serveFile.js";
-import {sleep} from "../../common/pure-utils.js";
+import {sleep} from "../../../common/pure-utils.js";
 
 const execPromise = promisify(exec);
 
@@ -38,7 +38,7 @@ async function execCommand(cmd) {
 /**
  * 并发收集各工具版本信息
  */
-async function detectEnv() {
+async function checkToolchain() {
 	// 并不是我歧视谁，而是LLM常用的脚本语言不就 node 和 python，最多再加一个 cpp，你看我最爱的 java 都没写 —— 反正LLM自己能检查
 	let [
 		gitResult,
@@ -74,11 +74,11 @@ async function detectEnv() {
 		const match = bashResult.output.match(/^(BusyBox v[\d.]+)/);
 		env.bash = match ? match[1] : bashResult.output;
 		if (os.platform() === 'win32') {
-			env.bashDialect = !bashMSYSResult.success
-				? "unknown, probe double slashes and absolute path format first"
-				: bashMSYSResult.output === '/'
-					? "Busybox: Windows commands use **single** slashes (`cmd /c`) and absolute path is Windows-like (`C:/Windows/System32/`)"
-					: "MSYS: Windows commands use **double** slashes (`cmd //c`) and absolute path is unix-like (`/cygdrive/c/Windows/System32/`)";
+			env.bashDialect = bashMSYSResult.output === '/'
+				? "Busybox: Windows commands use **single** slashes (`cmd /c`) and absolute path is Windows-like (`C:/Windows/System32/`)"
+				: bashMSYSResult.error?.[0] === '\''
+				? "MSYS: Windows commands use **double** slashes (`cmd //c`) and absolute path is unix-like (`/cygdrive/c/Windows/System32/`)"
+				: "unknown, probe double slashes and absolute path format first";
 		}
 	} else {
 		env.bash = 'Not found';
@@ -99,12 +99,12 @@ async function detectEnv() {
 }
 
 let prompt;
-export async function getEnvironmentPrompt(forceRecheck) {
+export async function getToolchainPrompt(forceRecheck) {
 	if (!prompt || forceRecheck) {
 		console.log("正在检测环境，稍等");
 
 		prompt = '';
-		for (const [tool, version] of Object.entries(await detectEnv())) {
+		for (const [tool, version] of Object.entries(await checkToolchain())) {
 			prompt += `${tool}: ${version}\n`;
 		}
 		prompt = prompt.trim();

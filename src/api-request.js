@@ -92,6 +92,10 @@ export const submitUserChatMessage = async (loop, conv) => {
 	if (false === EVENT_BUS.post(["loopEntry"], conv)) return;
 
 	let versionId = await getMessages(conv);
+
+	if (null == conv.id)
+		await updateConversation(conv, versionId, true);
+
 	let messages_ = $stampLock(messages, versionId);
 	lockConversation(conv.id);
 
@@ -148,9 +152,10 @@ const notifyUser = (conv, message, success) => {
 
 /**
  * @param {AiChat.Message[]} messages
+ * @param {AiChat.AssistantMessage} resp
  */
-const safelyRemoveLastMessage = messages => {
-	const idx = messages.findLastIndex(s => s.id === VID_ASSISTANT_GENERATING && s.role === 'assistant');
+const safelyRemoveLastMessage = (messages, resp) => {
+	const idx = messages.lastIndexOf(resp);
 	if (idx > 0) idx === messages.length - 1 ? messages.pop() : messages.splice(idx, 1);
 };
 
@@ -327,23 +332,29 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 		if (!result) return result; // false
 
+		const [logItem, assistantMessage] = result;
+
+		// 抢了锁没法自动继续：这条消息的ID之后才会同步。
+		if (writeProtect) {
+			// 同步服务比请求更快
+			if (messages.at(-1) !== assistantMessage)
+				safelyRemoveLastMessage(messages, assistantMessage);
+			else
+				// 要是同步服务的消息再也没传过来，那么，它也可以入库（当然，存在重复入库的可能性，但抢锁这种行为本身就不受保护）
+				assistantMessage[LOCKED] = true;
+			return 'interrupt';
+		}
+
 		if (roleId) {
 			try {
-				await MessageRoles[roleId].onCompleted(conversation, messages, cfg, result);
+				await MessageRoles[roleId].onCompleted(conversation, messages, cfg, logItem);
 			} catch (e) {
 				showToast(prettyError(e), 'error');
 			}
 			delete conversation.roleId;
 		}
 
-		let finishReason = result.finish_reason;
-		const assistantMessage = messages.at(-1);
-
-		// 抢了锁没法自动继续：这条消息的ID之后才会同步。
-		if (writeProtect) {
-			safelyRemoveLastMessage(messages);
-			return 'interrupt';
-		}
+		let finishReason = logItem.finish_reason;
 
 		const messages_uc = unconscious(messages);
 		const tone = FINISH_REASON_TONE[finishReason];
@@ -374,9 +385,9 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 				}
 			}
 
-			const needLog = result.request_id && (finishReason !== 'error' || result.input_tokens);
+			const needLog = logItem.request_id && (finishReason !== 'error' || logItem.input_tokens);
 			if (conversation.temporary) {
-				assistantMessage[LOG_CACHE] = result;
+				assistantMessage[LOG_CACHE] = logItem;
 			} else
 
 			// 这里不存 LOG_CACHE 是为了让服务端计算价格
@@ -386,8 +397,8 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 				if (needLog) {
 					promises.push((isIDB ? promises.at(-1) : DONE).then(() => {
-						if (assistantMessage.id >= 0) result.id = assistantMessage.id;
-						return appendBillingLog(result);
+						if (assistantMessage.id >= 0) logItem.id = assistantMessage.id;
+						return appendBillingLog(logItem);
 					}));
 				}
 			}
@@ -420,7 +431,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 					notifyUser(conversation, "请回答问题", true);
 				} else if (retryCount < cfg.toolRetryLimit && (flags&TC_SCHEMA_ERROR)) {
 					conversation[RETRY_COUNT] = retryCount + 1;
-					safelyRemoveLastMessage(messages);
+					safelyRemoveLastMessage(messages, assistantMessage);
 				}
 			}
 
@@ -478,6 +489,10 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 		if (abort.signal.aborted) return false;
 		return finishReason;
+	} catch (e) {
+		// resume failed
+		if (writeProtect && e.status === 404) return 'interrupt';
+		throw e;
 	} finally {
 		runningConversations.delete(conversation.id);
 		const runningNow = runningConversations.size;
@@ -651,7 +666,7 @@ const forkAborter = parent => {
  * @param {function(type?: number, content?: any): void} onProgress - null: refresh, T=Think, C=Content, E=End
  * @param {AiChat.LLMRequestContext} context
  * @param {Partial<AiChat.LocalPreset>} config
- * @return {Promise<false | AiChat.BillingLog>}
+ * @return {Promise<false | [AiChat.BillingLog, AiChat.AssistantMessage]>}
  */
 async function sendCompletionRequest(
 	conversation, messages,
@@ -1075,7 +1090,7 @@ async function sendCompletionRequest(
 
 				const count = context.retryCount = (context.retryCount ?? 0) + 1;
 				if (!noRetry && count <= config.apiRetry) {
-					const delay = Math.round(Math.min(300000, 800 * (1 << (count - 1))) * Math.random());
+					const delay = Math.round(Math.min(300000, 800 * (1 << (count - 1))) * (1 + 0.5 * Math.random()));
 					progressKind.value = SP_RETRY;
 					progressValue.value = [count, config.apiRetry, delay];
 					onProgress?.(MARKDOWN_END, assistantMessage);
@@ -1099,7 +1114,7 @@ async function sendCompletionRequest(
 		onProgress?.(MARKDOWN_END, assistantMessage);
 	}
 
-	return log;
+	return [log, assistantMessage];
 }
 
 // 第一个见 sendCompletionRequest 函数
