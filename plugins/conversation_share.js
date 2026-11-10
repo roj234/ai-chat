@@ -10,7 +10,7 @@ if (!isIDB) {
 		async () => {
 			const {pat} = await requestBackend('shareToken?id='+unconscious(selectedConversation).id);
 			const url = location.href.slice(0, -location.hash.length)+"#!shareView/"+pat;
-			const canvas = (await import("unconscious/common/qr.js")).renderQRCodeToCanvas(url);
+			const canvas = (await import("@roj234/qr")).renderQRCodeToCanvas(url);
 
 			SimpleModal({
 				title: "手机浏览器扫码打开",

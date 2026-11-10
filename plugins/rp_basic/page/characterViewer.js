@@ -6,7 +6,7 @@ import {requestBackend} from "/src/database/remoteDB.js";
 import {EVENT_BUS} from "/src/states.js";
 import {deleteWithDrawback, downloadFile, showImageZoomView} from "/src/utils/utils.js";
 import {writeJPEG, writePNG} from "/common/imate.js";
-import {base64Encode} from "unconscious/common/Base64.js";
+import {base64Encode} from "@roj234/shared/base64";
 import {isIDB, kvListDel, kvListGet, kvListGetKeys} from "/src/database.js";
 import "./characterViewer.css";
 import {openWindow} from "/src/components/Windows.jsx";
@@ -203,9 +203,9 @@ export default function() {
 
 	return <div className="cardList">
 		<div className="toolbar">
-			<div className="fa-search">
+			<div className="my-input -comp">
 				<Icon_search/>
-				<input className="text-input" value={searchTerm} placeholder="搜索角色名称 / 作者 / 标签..." onInput={(e) => {
+				<input value={searchTerm} placeholder="搜索角色名称 / 作者 / 标签..." onInput={(e) => {
 					currentPage.value = 1;
 					searchTerm.value = e.target.value;
 					$update(currentPage);

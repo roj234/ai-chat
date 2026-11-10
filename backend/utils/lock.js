@@ -38,7 +38,10 @@ export const exclusiveLock = (func, wait) => {
 
 		const p = func.apply(null, args);
 		locks.set(lockKey, p);
-		p.finally(() => locks.delete(lockKey));
+
+		const cleanup = () => locks.delete(lockKey);
+		p.then(cleanup, cleanup);
+
 		return p;
 	}
 }

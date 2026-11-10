@@ -2,7 +2,7 @@ import {agentLoop} from "/src/api-request.js";
 import {$stampLock, unconscious} from "unconscious";
 import {config, selectedConversation} from "/src/states.js";
 import {createSandbox} from "@roj234/workerbox";
-import {ZipReader} from "unconscious/common/zip-io.js";
+import {ZipReader} from "@roj234/jszip/io";
 import {schemaToTypeScriptDefinition} from "unconscious/common/json-schema-utils.js";
 
 export {USER_PROMPT} from "/common/ReactiveJSON.js";

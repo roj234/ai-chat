@@ -1,8 +1,20 @@
 
-.win-body.preview {
+.editor {
     .vje {
         font-size: 14px;
-        line-height: 16px;
+
+        --vje-bg: var(--code-bg);
+        --vje-muted: var(--muted);
+        --vje-sel: #264f78;
+        --vje-caret: #58a6ff;
+        --vje-err: var(--error-block-border);
+        color: #e6eaf3;
+
+        .-gutter {
+            border-right: 1px solid #30383f;
+        }
+
+        font-family: var(--code-font);
     }
 
     .-status {
@@ -10,23 +22,15 @@
         align-items: center;
         padding: 0 18px;
         height: 28px;
-        border-top: 1px solid var(--border);
         font-size: 12px;
         color: var(--muted);
 
         & .-item {
-            &.ok {
-                color: var(--ok);
-                background: var(--ok-bg);
-                padding: 1px 7px;
-                border-radius: 20px;
-            }
-
             &.err {
-                color: var(--error);
+                color: var(--error-text-color);
                 background: var(--error-bg);
                 padding: 1px 7px;
-                border-radius: 20px;
+                border-radius: var(--border-radius-sm);
             }
         }
 
@@ -40,3 +44,8 @@
     }
 }
 
+.win-body.editor {
+    .-status {
+        border-top: 1px solid var(--border);
+    }
+}

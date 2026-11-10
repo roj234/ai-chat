@@ -1,7 +1,7 @@
 /**
  * Overlay (Copy-on-Write) File System in Chrome
  */
-import {normalizePath} from "unconscious/common/path-utils.js";
+import {normalizePath} from "@roj234/shared/path";
 import {copyEntry, CREATE_OPT, RECURSIVE, resolveDirectory, resolveHandle} from "./WebFSUtils.js";
 import {createAsyncQueue, FSE_NotFound, throwDOMException} from "/common/pure-utils.js";
 

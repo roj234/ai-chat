@@ -1,4 +1,4 @@
-import {parseJson5} from "unconscious/common/Json.js";
+import {parseJson5} from "@roj234/stream-json";
 import {auxSmallScreen, config, PP_AUTO, PP_INTERACTIVE, PP_SUPERVISED, PP_UNATTENDED} from "./states.js";
 import defaultCoTPrompt from "/media/cotPrompt.txt?raw";
 import {$derived, $watch, isPureObject, unconscious} from "unconscious";
@@ -43,17 +43,13 @@ export const GLOBAL_SETTINGS = [
 		choices: {
 			"关闭": false,
 			"模型总结": true,
-			"模型总结(立即)": "eager"
 		},
-		title: {
-			"模型总结": "在工具调用链结束后生成标题",
-			"模型总结(立即)": "在第一条回复时生成标题"
-		}
 	},
 	{
 		id: "titleModel",
 		name: "标题总结模型",
 		type: "input",
+		inline: true,
 		placeholder: "点击打开下拉菜单"
 	},
 	{
@@ -628,11 +624,10 @@ export const GLOBAL_SETTINGS = [
 	},
 	{
 		_tab: "customize",
-		name: "流式输出时自动展开",
-		title: "在 AI 生成过程中，自动展开对应的内容块，方便查看。",
+		name: "生成时",
 		type: "multiple",
 		choices: {
-			"思考过程": "expandThinkBlock",
+			"自动展开思考过程": "expandThinkBlock",
 		}
 	},
 	{

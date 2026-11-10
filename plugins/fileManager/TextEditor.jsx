@@ -1,10 +1,14 @@
-import "./SyntaxEditor.css";
+import "./TextEditor.css";
 import {$cleanup} from "unconscious";
 import {INDEX, VirtualList} from "unconscious/common/VirtualList.js";
 import {advancePos, History, TextDocument} from "./syntax-editor/document.js";
-import {isSameLanguage, loadLanguage} from "/src/markdown/highlight.js";
-import {highlightWindow, lineDOM} from "./syntax-editor/tokenizer.js";
-import SimpleModal from "../../src/components/SimpleModal.jsx";
+import {loadLanguage} from "/src/markdown/highlight.js";
+import {highlightWindow, isSameLanguage, lineDOM} from "./syntax-editor/tokenizer.js";
+import SimpleModal from "/src/components/SimpleModal.jsx";
+import {openContextMenu} from "/src/components/Menu.js";
+import {copyWithAnimation} from "/src/utils/utils.js";
+import {normalizeLineTerminator} from "@roj234/shared/strings";
+import {AS_IS} from "@roj234/shared";
 
 /**
  * 虚拟列表 + 自绘光标/选区的语法高亮编辑器
@@ -13,12 +17,65 @@ import SimpleModal from "../../src/components/SimpleModal.jsx";
 const TAB = "\t";
 const WORD_BREAK = new Set(" \t\r\n,:\"'[]{}()=;".split(""));
 
+/** 窗口上沿往上带这么多行上下文 */
+const HL_CONTEXT = 5;
+/** 窗口尾部扩展长度 */
+const HL_TAIL = 32;
+/** 起点对不上时往上翻倍，最多翻到可见区上沿往上这么多行 */
+const HL_CONTEXT_MAX = 200;
+/** 用窗口顶端这几行的旧 token 校验起点 */
+const HL_PROBE = 3;
+
 const isHighSurrogate = c => c >= 0xd800 && c <= 0xdbff;
 const isLowSurrogate = c => c >= 0xdc00 && c <= 0xdfff;
 
 const clonePos = (p) => ({line: p.line, ch: p.ch});
 
-export const SyntaxEditor = (props) => {
+/**
+ *
+ * @param {{
+ *     lineHeight?: number,
+ *     language?: string,
+ *     onChange?: Function,
+ *     onStatus?: Function,
+ *     onContextMenu?: Function,
+ *     autofocus?: boolean,
+ *     placeholder?: string,
+ *     readOnly?: boolean,
+ *     value?: string,
+ *     onReady?: Function,
+ *     vPad?: number,
+ * }} props
+ * @return {{
+ * element: HTMLElement,
+ * focus: () => void,
+ * blur: () => void,
+ * refresh: () => void,
+ *
+ * getDocument: () => TextDocument,
+ *
+ * getValue: () => string,
+ * setValue: (string) => void,
+ *
+ * isReadOnly: () => boolean,
+ * setReadOnly: (boolean, boolean) => void,
+ *
+ * getLanguage: () => string,
+ * setLanguage: (string) => Promise<void>,
+ *
+ * canUndo: () => boolean,
+ * canRedo: () => boolean,
+ * undo: () => void,
+ * redo: () => void,
+ *
+ * getSelectedText: () => string,
+ * scrollToLine: (number) => void,
+ * insertText: (string) => void,
+ * selectAll: () => void,
+ * setErrorLine: (number) => void,
+ * }}
+ */
+export const TextEditor = (props) => {
 	const LH = props.lineHeight || 20;
 	let langId = props.language || "plaintext";
 	const onChange = props.onChange;
@@ -26,6 +83,7 @@ export const SyntaxEditor = (props) => {
 	const autofocus = !!props.autofocus;
 	const placeholder = props.placeholder || "";
 
+	let vPadding = props.vPad ?? 4;
 	let readOnly = !!props.readOnly;
 
 	const doc = new TextDocument(props.value || "");
@@ -35,12 +93,9 @@ export const SyntaxEditor = (props) => {
 	let anchor = {line: 0, ch: 0};
 	/** @type {Pos} */
 	let head = {line: 0, ch: 0};
-
 	let preferredCh = 0;
-	let composing = false;
-	let focused = false;
+
 	let errorLine = -1;
-	let lastEditMs = 0;
 	let emitTimer = 0;
 	let curDigits = 0;
 	let gutterWidth = 0;
@@ -62,51 +117,32 @@ export const SyntaxEditor = (props) => {
 	let hlPending = null;
 	/** 语言包是否已加载完 */
 	let hlReady = false;
+	let hlTriggerCount = 0;
 
-	let scrollEl, gutterEl, gutterInner, errMark, caretEl, inputEl, phEl;
-
-	const el = <div className="vje vje-readonly" style={`--lh:${LH}px;--digits:1`} data-language={langId}>
-		<div className="vje-scroll" ref={scrollEl}/>
-		<div className="vje-gutter" ref={gutterEl}>
-			<div className="vje-gutter-nums" ref={gutterInner}/>
-			<div className="vje-err-mark" ref={errMark}/>
-		</div>
-		<div className="vje-caret" ref={caretEl}/>
-		<div className="vje-ph" ref={phEl}>{placeholder}</div>
-		<textarea className="vje-input" ref={inputEl} spellCheck={false} autoCapitalize={"off"} autoCorrect={"off"} wrap={"off"}/>
-	</div>;
-
-	/* ------------------------------------------------------------------ *
-	 * 虚拟列表
-	 * ------------------------------------------------------------------ */
-
-	const vl = new VirtualList({
-		element: scrollEl,
-		data: doc.lines,
-		itemHeight: LH,
-		overscan: LH * 8,
-		itemKey: true,
-		renderer: () => {
-			const code = <span className="vje-lc"/>;
-			return <div className='vje-line' _code={code} _version={-1} _from={-1} _to={-1}>{code}</div>
-		},
-	});
+	/** @type {HTMLElement} */
+	let el, scrollEl, gutterEl, gutterInner, errMark, phEl;
+	/** @type {HTMLTextAreaElement} */
+	let inputEl;
+	/** @type {VirtualList} */
+	let vl;
 
 	/* ------------------------------------------------------------------ *
 	 * 选区
 	 * ------------------------------------------------------------------ */
 
-	const selRange = () => {
+	let selectFrom, selectTo, isSelected = false;
+	const selectionChanged = () => {
+		[selectFrom, selectTo] = getSelection();
+		isSelected = selectFrom.line !== selectTo.line || selectFrom.ch !== selectTo.ch;
+	};
+
+	const getSelection = () => {
 		const a = anchor;
 		const b = head;
 		return (a.line < b.line || (a.line === b.line && a.ch <= b.ch)) ? [a, b] : [b, a];
 	};
 
-	const getSelectedText = () => {
-		const [a, b] = selRange();
-		if (a.line === b.line && a.ch === b.ch) return "";
-		return doc.textInRange(a, b);
-	};
+	const getSelectedText = () => isSelected ? doc.textInRange(selectFrom, selectTo) : "";
 
 	const setSelection = (a, b) => {
 		anchor = clonePos(a);
@@ -120,11 +156,11 @@ export const SyntaxEditor = (props) => {
 	 * 绘制
 	 * ------------------------------------------------------------------ */
 
-	const updateDigits = () => {
+	const updateGutterWidth = () => {
 		const digits = String(doc.lines.length).length;
 		if (digits !== curDigits) {
 			curDigits = digits;
-			el.style.setProperty("--digits", String(digits));
+			el.style.setProperty("--digits", digits);
 			gutterWidth = 0;
 		}
 	};
@@ -152,18 +188,6 @@ export const SyntaxEditor = (props) => {
 		}
 	};
 
-	/** 窗口上沿往上带这么多行上下文 */
-	const HL_CONTEXT = 5;
-	/**
-	 * 窗口下沿多染这么多行。hljs 有些规则要往后看才能定段
-	 * （比如 `const x = (…)=>` 的 params 要看到 `=>`），截太短会把可见区的高亮截坏。
-	 */
-	const HL_TAIL = 32;
-	/** 起点对不上时往上翻倍，最多翻到可见区上沿往上这么多行 */
-	const HL_CONTEXT_MAX = 200;
-	/** 用窗口顶端这几行的旧 token 校验起点 */
-	const HL_PROBE = 3;
-
 	const sameTokens = (a, b) => {
 		if (!a || !b || a.length !== b.length) return false;
 		for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
@@ -172,6 +196,7 @@ export const SyntaxEditor = (props) => {
 
 	const runHighlight = () => {
 		if (!hlReady) return;
+		hlTriggerCount = 0;
 		hlTimer = 0;
 
 		const total = doc.lines.length;
@@ -266,7 +291,7 @@ export const SyntaxEditor = (props) => {
 				}
 
 				if (editLine >= 0 && editLine < to) editLine = -1;
-				paint();
+				vl.render();
 			}, reqLang);
 		};
 		run();
@@ -274,7 +299,7 @@ export const SyntaxEditor = (props) => {
 
 	/** 防抖调度：输入时别把整窗口重排得太频繁 */
 	const scheduleHighlight = () => {
-		if (!hlReady) return;
+		if (!hlReady || hlTriggerCount++ > 6) return;
 		clearTimeout(hlTimer);
 		hlTimer = setTimeout(runHighlight, 80);
 	};
@@ -284,51 +309,38 @@ export const SyntaxEditor = (props) => {
 	 * 返回 Promise，调用方可以 await 之后再刷新界面。
 	 */
 	const setLanguage = async (id) => {
-		if (isSameLanguage(id, langId) && hlReady) return langId;
+		if (isSameLanguage(id, langId) && hlReady) return;
+		if (langId) clearTokens();
 		langId = id;
-		el.dataset.language = langId;
 		hlReady = false;
 		cancelHl?.();
 		cancelHl = null;
-		clearTokens();
-		paint();
 		await loadLanguage(langId);
 		hlReady = true;
 		runHighlight();
-		return langId;
-	};
-
-	const syncLineNode = (node, index, line, selFrom, selTo) => {
-		if (node._tk !== line.tokens || node._version !== line.version ||
-			node._from !== selFrom || node._to !== selTo) {
-			node._tk = line.tokens;
-			node._version = line.version;
-			node._from = selFrom;
-			node._to = selTo;
-			lineDOM(node._code, line.text, line.tokens, selFrom, selTo);
-		}
-		const isError = index === errorLine;
-		if (node._isError !== isError) {
-			node._isError = isError;
-			node.classList.toggle("vje-err", isError);
-		}
 	};
 
 	const syncGutter = () => {
+		if (!gutterWidth) {
+			const w = gutterEl.getBoundingClientRect().width;
+			if (w > 0) gutterWidth = w;
+		}
+
 		const start = vl._start;
 		const end = vl._end;
 		const top = scrollEl.scrollTop;
-		const key = start + ":" + end + ":" + top + ":" + errorLine;
+		const key = start+":"+end+":"+top+":"+errorLine;
 		if (key === gutterKey) return;
 		gutterKey = key;
 
 		if (end > start) {
-			const nums = new Array(end - start);
-			for (let i = start; i < end; i++) nums[i - start] = i + 1;
-			gutterInner.textContent = nums.join("\n");
+			let i = start + 1;
+			let s = String(i);
+			while (i < end) s += '\n' + ++i;
+			gutterInner.textContent = s;
 			gutterInner.style.transform = `translateY(${start * LH - top}px)`;
 		} else {
-			gutterInner.textContent = "";
+			gutterInner.replaceChildren();
 		}
 
 		const hasError = errorLine >= 0 && errorLine < doc.lines.length;
@@ -339,52 +351,36 @@ export const SyntaxEditor = (props) => {
 	};
 
 	/**
-	 * 把文档同步到已渲染的行节点上。
-	 * 改一行会生成新的行对象，虚拟列表随之重建那个 DOM 节点（内容是空的），
-	 * 所以任何「按 x 测量光标位置」的操作都必须等这里跑完。
+	 * @param {HTMLElement} node
+	 * @param line
+	 * @param {number} index
 	 */
-	const syncLines = () => {
-		const children = vl.dom.children;
-		const n = children.length;
-		const [from, to] = selRange();
-		const selected = from.line !== to.line || from.ch !== to.ch;
-
-		for (let k = 0; k < n; k++) {
-			const node = children[k];
-			const index = node[INDEX];
-			if (index == null) continue;
-			const line = doc.lines[index];
-			if (!line) continue;
-
-			let sf = -1;
-			let st = -1;
-			if (selected && index >= from.line && index <= to.line) {
-				sf = index === from.line ? from.ch : 0;
-				st = index === to.line ? to.ch : line.text.length;
-			}
-			syncLineNode(node, index, line, sf, st);
+	const syncLine = (node, line, index) => {
+		let selFrom = -1, selTo = -1;
+		if (isSelected && index >= selectFrom.line && index <= selectTo.line) {
+			selFrom = index === selectFrom.line ? selectFrom.ch : 0;
+			selTo = index === selectTo.line ? selectTo.ch : line.text.length;
 		}
 
-		if (!gutterWidth) {
-			const w = gutterEl.getBoundingClientRect().width;
-			if (w > 0) gutterWidth = w;
+		if (node._tk !== line.tokens || node._from !== selFrom || node._to !== selTo) {
+			node._tk = line.tokens;
+			node._from = selFrom;
+			node._to = selTo;
+			lineDOM(node.firstElementChild, line.text, line.tokens, selFrom, selTo);
 		}
+
+		node.classList.toggle("-sel", isSelected && index > selectFrom.line && index < selectTo.line);
+		node.classList.toggle("-hl", index === errorLine);
 	};
 
 	const paint = () => {
-		syncFocus();
-		syncLines();
+		vl.render();
 		syncGutter();
-		if (phEl) {
-			const empty = doc.lines.length === 1 && doc.lines[0].text === "";
-			phEl.style.display = empty && placeholder ? "block" : "none";
-		}
-		updateCaret();
 	};
 
 	/** 行内字符偏移 -> 屏幕 x */
 	const caretXOfNode = (node, ch) => {
-		const code = node._code;
+		const code = node.firstElementChild;
 		const box = code.getBoundingClientRect();
 		if (ch <= 0) return box.left;
 		// 行内容还没同步（改完之后的新行节点）时不要返回行首，那会让光标跳到行开头
@@ -407,6 +403,8 @@ export const SyntaxEditor = (props) => {
 		return box.right;
 	};
 
+	const topOfLine = line => line * LH + vPadding;
+
 	const caretPoint = () => {
 		const node = vl.getValue(head.line);
 		if (!node) return null;
@@ -415,37 +413,19 @@ export const SyntaxEditor = (props) => {
 			caretContentX = caretXOfNode(node, head.ch) - box.left + scrollEl.scrollLeft;
 		}
 		return {
-			x: caretContentX - scrollEl.scrollLeft,
-			y: head.line * LH - scrollEl.scrollTop,
+			x: caretContentX - scrollEl.scrollLeft + gutterWidth,
+			y: topOfLine(head.line) - scrollEl.scrollTop,
 		};
 	};
 
-	/** 不依赖 focus/blur 事件：无头浏览器 / 后台标签页里 document.hasFocus() 可能是 false */
-	const syncFocus = () => {
-		const active = document.activeElement === inputEl;
-		if (active !== focused) {
-			focused = active;
-			el.classList.toggle("vje-focused", active);
-		}
-	};
-
-	const updateCaret = () => {
-		let p;
-		if (readOnly || !focused || composing || !(p = caretPoint())) {
-			caretEl.style.visibility = "hidden";
-			return;
-		}
-		caretEl.style.visibility = "visible";
-		caretEl.style.transform = `translate(${p.x}px,${p.y}px)`;
-	};
-
-	const syncInputPosition = () => {
+	const syncCaret = () => {
 		const p = caretPoint();
-		if (p) inputEl.style.transform = `translate(${p.x}px,${p.y}px)`;
+		// 实验得出，这2px没有为什么
+		inputEl.style = p ? `left:${p.x}px;top:${p.y}px` : "";
 	};
 
 	const scrollVertically = () => {
-		const top = head.line * LH;
+		const top = topOfLine(head.line);
 		const st = scrollEl.scrollTop;
 		const vh = scrollEl.clientHeight;
 		if (top < st) scrollEl.scrollTop = top;
@@ -463,18 +443,27 @@ export const SyntaxEditor = (props) => {
 		else if (x > limit - 8) scrollEl.scrollLeft += x - (limit - 8);
 	};
 
+	/**
+	 * 改了什么状态完全不知道时的兜底函数，保证没问题，但浪费性能
+	 */
 	const refresh = () => {
 		caretContentX = null;
-		updateDigits();
+		selectionChanged();
+		updateGutterWidth();
 		scrollVertically();
+
 		const keptLeft = scrollEl.scrollLeft;
-		vl.render();
-		syncLines();
-		if (keptLeft && scrollEl.scrollLeft !== keptLeft) scrollEl.scrollLeft = keptLeft;
-		scrollHorizontally();
 		paint();
-		syncInputPosition();
+		if (keptLeft && scrollEl.scrollLeft !== keptLeft) scrollEl.scrollLeft = keptLeft;
+
+		scrollHorizontally();
+		syncCaret();
+
+		const empty = doc.lines.length === 1 && doc.lines[0].text === "";
+		phEl.style.display = empty && placeholder ? "block" : "none";
+
 		// 可见区可能变了，排队重算一次（防抖）
+		hlTriggerCount = 0;
 		scheduleHighlight();
 	};
 
@@ -482,10 +471,9 @@ export const SyntaxEditor = (props) => {
 	 * 状态上报
 	 * ------------------------------------------------------------------ */
 
-	const report = (editMs) => {
+	const report = () => {
 		if (!onStatus) return;
-		if (editMs != null) lastEditMs = editMs;
-		const [a, b] = selRange();
+		const [a, b] = getSelection();
 		let selected = 0;
 		if (a.line !== b.line || a.ch !== b.ch) {
 			if (a.line === b.line) selected = b.ch - a.ch;
@@ -502,7 +490,6 @@ export const SyntaxEditor = (props) => {
 			selected,
 			rendered: vl.dom.childElementCount,
 			total: doc.lines.length,
-			editMs: lastEditMs,
 			readOnly,
 		});
 	};
@@ -529,13 +516,15 @@ export const SyntaxEditor = (props) => {
 	};
 
 	const applyChange = (a, b, text, mergeKind) => {
-		const t0 = performance.now();
 		const before = {anchor: clonePos(anchor), head: clonePos(head)};
 
 		const res = doc.replace(a, b, text);
 		const after = advancePos(a, text);
 
-		// 行对象是新的（tokens 为 null），窗口会在防抖后重新染色
+		if (!res.delta) {
+			// TODO 在插入或删除字符从场景下，应在高亮完成前复用原始行对象的tokens
+		}
+
 		docVer++;
 		markDirty(res.index);
 
@@ -555,7 +544,7 @@ export const SyntaxEditor = (props) => {
 		structureChanged(res);
 		refresh();
 		scheduleEmit();
-		report(performance.now() - t0);
+		report();
 	};
 
 	const indentOfLine = (line) => {
@@ -590,7 +579,7 @@ export const SyntaxEditor = (props) => {
 
 	const insertText = (text) => {
 		if (readOnly || !text) return;
-		const [a, b] = selRange();
+		const [a, b] = getSelection();
 
 		let insert = text;
 		let mergeKind = null;
@@ -668,7 +657,7 @@ export const SyntaxEditor = (props) => {
 	};
 
 	const deleteBackward = (byWord) => {
-		const [a, b] = selRange();
+		const [a, b] = getSelection();
 		if (a.line !== b.line || a.ch !== b.ch) {
 			deleteRange(a, b, null);
 			return;
@@ -678,7 +667,7 @@ export const SyntaxEditor = (props) => {
 	};
 
 	const deleteForward = (byWord) => {
-		const [a, b] = selRange();
+		const [a, b] = getSelection();
 		if (a.line !== b.line || a.ch !== b.ch) {
 			deleteRange(a, b, null);
 			return;
@@ -691,7 +680,6 @@ export const SyntaxEditor = (props) => {
 	const undo = () => {
 		const entry = history.undo();
 		if (!entry) return;
-		const t0 = performance.now();
 		const res = doc.replace(entry.a, advancePos(entry.a, entry.inserted), entry.removed);
 		// 撤销可能改掉跨行构造，版本 +1 让高亮重算
 		docVer++;
@@ -703,13 +691,12 @@ export const SyntaxEditor = (props) => {
 		history.pushRedo(entry);
 		refresh();
 		scheduleEmit();
-		report(performance.now() - t0);
+		report();
 	};
 
 	const redo = () => {
 		const entry = history.redo();
 		if (!entry) return;
-		const t0 = performance.now();
 		const res = doc.replace(entry.a, advancePos(entry.a, entry.removed), entry.inserted);
 		docVer++;
 		markDirty(res.index);
@@ -720,7 +707,7 @@ export const SyntaxEditor = (props) => {
 		history.pushUndo(entry);
 		refresh();
 		scheduleEmit();
-		report(performance.now() - t0);
+		report();
 	};
 
 	const selectAll = () => {
@@ -734,6 +721,7 @@ export const SyntaxEditor = (props) => {
 
 	const moveTo = (p, extend, keepPreferred) => {
 		const target = doc.clamp(p);
+		if (target.ch !== head.ch) caretContentX = null;
 		if (extend) {
 			head = target;
 		} else {
@@ -741,12 +729,17 @@ export const SyntaxEditor = (props) => {
 			head = clonePos(target);
 		}
 		if (!keepPreferred) preferredCh = target.ch;
-		refresh();
+
+		selectionChanged();
+		scrollVertically();
+		scrollHorizontally();
+		paint();
+		syncCaret();
 		report();
 	};
 
 	const moveHorizontal = (dir, extend, byWord) => {
-		const from = extend ? head : selRange()[dir < 0 ? 0 : 1];
+		const from = extend ? head : getSelection()[dir < 0 ? 0 : 1];
 		const target = byWord
 			? (dir < 0 ? prevWordPos(from) : nextWordPos(from))
 			: (dir < 0 ? prevCharPos(from) : nextCharPos(from));
@@ -778,8 +771,7 @@ export const SyntaxEditor = (props) => {
 
 	const findLineNode = (node) => {
 		let cur = node.nodeType === 1 ? node : node.parentElement;
-		while (cur && cur[INDEX] == null) cur = cur.parentElement;
-		return cur;
+		return cur.closest(".-line");
 	};
 
 	/** 段落内的坐标 -> 行内字符偏移 */
@@ -815,14 +807,12 @@ export const SyntaxEditor = (props) => {
 	};
 
 	const caretRangeAt = (x, y) => {
-		if (document.caretRangeFromPoint) return document.caretRangeFromPoint(x, y);
 		if (document.caretPositionFromPoint) {
 			const p = document.caretPositionFromPoint(x, y);
-			if (!p) return null;
-			const range = document.createRange();
-			range.setStart(p.offsetNode, p.offset);
-			range.collapse(true);
-			return range;
+			if (p) return [p.offsetNode, p.offset];
+		} else {
+			const range = document.caretRangeFromPoint?.(x, y);
+			if (range) return [range.startContainer, range.startOffset];
 		}
 		return null;
 	};
@@ -830,14 +820,12 @@ export const SyntaxEditor = (props) => {
 	const posFromPoint = (cx, cy) => {
 		const range = caretRangeAt(cx, cy);
 		if (range) {
-			const lineNode = findLineNode(range.startContainer);
+			const lineNode = findLineNode(range[0]);
 			if (lineNode) {
 				const index = lineNode[INDEX];
-				if (index < doc.lines.length) {
-					const len = doc.lines[index].text.length;
-					const ch = offsetInCode(lineNode._code, range.startContainer, range.startOffset, len, cx);
-					return {line: index, ch: Math.max(0, Math.min(ch, len))};
-				}
+				const len = doc.lines[index].text.length;
+				const ch = offsetInCode(lineNode.firstElementChild, range[0], range[1], len, cx);
+				return {line: index, ch: Math.max(0, Math.min(ch, len))};
 			}
 		}
 
@@ -850,7 +838,7 @@ export const SyntaxEditor = (props) => {
 			return {line: last, ch: doc.lines[last].text.length};
 		}
 		const node = vl.getValue(index);
-		if (node && cx < node._code.getBoundingClientRect().left) return {line: index, ch: 0};
+		if (node && cx < node.firstElementChild.getBoundingClientRect().left) return {line: index, ch: 0};
 		return {line: index, ch: doc.lines[index].text.length};
 	};
 
@@ -906,26 +894,36 @@ export const SyntaxEditor = (props) => {
 			head = clonePos(position);
 			preferredCh = position.ch;
 		}
-		refresh();
+
+		caretContentX = null;
+		selectionChanged();
+		vl.render();
+		syncCaret();
+
 		report();
 
 		const onMove = (e) => {
 			autoScroll(e.clientX, e.clientY);
 			head = posFromPoint(e.clientX, e.clientY);
-			refresh();
+
+			// 顺序不能变
+			caretContentX = null;
+			selectionChanged();
+			vl.render();
+			syncCaret();
 		};
 		const onUp = () => {
 			stopDrag = null;
-			window.removeEventListener("mousemove", onMove);
-			window.removeEventListener("mouseup", onUp);
+			removeEventListener("mousemove", onMove);
+			removeEventListener("mouseup", onUp);
 			report();
 		};
 
-		window.addEventListener("mousemove", onMove);
-		window.addEventListener("mouseup", onUp);
+		addEventListener("mousemove", onMove);
+		addEventListener("mouseup", onUp);
 		stopDrag = () => {
-			window.removeEventListener("mousemove", onMove);
-			window.removeEventListener("mouseup", onUp);
+			removeEventListener("mousemove", onMove);
+			removeEventListener("mouseup", onUp);
 		};
 	};
 
@@ -934,8 +932,7 @@ export const SyntaxEditor = (props) => {
 	};
 
 	/**
-	 * 点在滚动条上：滚动条属于 .vje-scroll，事件照样冒泡到 .vje，
-	 * 不能当成文本点击（否则会清掉选区、还会抢掉浏览器自己的拖动滚动条）。
+	 * 点在滚动条上不能当成文本。
 	 */
 	const onScrollbar = (e) => {
 		const box = scrollEl.getBoundingClientRect();
@@ -944,15 +941,11 @@ export const SyntaxEditor = (props) => {
 	};
 
 	const onMouseDown = (e) => {
-		if (e.button !== 0) return;
-		if (e.target === inputEl) {
-			e.preventDefault();
-			return;
-		}
-		if (onScrollbar(e)) return;   // 交给浏览器处理滚动条
+		const btn = e.button;
+		if (btn !== 0 && (btn !== 2 || isSelected)) return;
+		if (onScrollbar(e)) return;
 		e.preventDefault();
 
-		// 先量点击位置再 focus：focus 可能触发重排/滚动，量晚了坐标就对不上了
 		const position = posFromPoint(e.clientX, e.clientY);
 		focus();
 
@@ -969,7 +962,7 @@ export const SyntaxEditor = (props) => {
 	};
 
 	/* ------------------------------------------------------------------ *
-	 * 键盘 / 输入
+	 * 事件处理器
 	 * ------------------------------------------------------------------ */
 
 	const onKeyDown = (e) => {
@@ -978,25 +971,8 @@ export const SyntaxEditor = (props) => {
 		const mod = e.ctrlKey || e.metaKey;
 		const shift = e.shiftKey;
 		const key = e.key;
-		let handled = true;
 
 		switch (key) {
-			case "G":
-				if (mod) {
-					e.preventDefault();
-					SimpleModal({
-						title: "Go to line:column",
-						type: "input",
-						value: head.line+":"+head.ch,
-						onConfirm(value) {
-							const n = value.split(':').map(s => parseInt(s.trim(), 10));
-							if (!Number.isFinite(n[0])) return false;
-							const a = { line: n[0], ch: n[1] || 0 };
-							setSelection(a, a);
-						}
-					})
-				}
-				break;
 			case "ArrowLeft": moveHorizontal(-1, shift, mod); break;
 			case "ArrowRight": moveHorizontal(1, shift, mod); break;
 			case "ArrowUp": moveVertical(-1, shift); break;
@@ -1025,97 +1001,43 @@ export const SyntaxEditor = (props) => {
 				if (!readOnly) insertText("\n");
 				break;
 			case "Tab":
-				if (readOnly) handled = false;
-				else insertText(TAB);
+				if (readOnly) return;
+				 insertText(TAB);
 				break;
 			case "Escape":
 				focus();
 				break;
 			default: {
-				if (!mod) {
-					handled = false;
-					break;
-				}
+				if (!mod) return;
+
 				const lower = key.toLowerCase();
-				if (lower === "a") selectAll();
-				else if (lower === "z") shift ? redo() : undo();
-				else if (lower === "y") redo();
-				else handled = false;
+				switch (lower) {
+					case "a": return selectAll();
+					case "z": return shift ? redo() : undo();
+					case "y": return redo();
+					case "g":
+						SimpleModal({
+							title: "Go to line:column",
+							type: "input",
+							value: (head.line+1)+":"+(head.ch+1),
+							onConfirm(value) {
+								const n = value.split(':').map(s => parseInt(s.trim(), 10));
+								if (!Number.isFinite(n[0]) || n[0] <= 0 || n[1] <= 0) return false;
+								const a = { line: (n[0]-1), ch: (n[1]-1) || 0 };
+								setSelection(a, a);
+								focus();
+							}
+						});
+						break;
+				}
 			}
 		}
 
-		if (handled) e.preventDefault();
-	};
-
-	const onInput = () => {
-		if (composing) return;
-		const value = inputEl.value;
-		if (!value) return;
-		inputEl.value = "";
-		if (readOnly) return;
-		insertText(value);
-	};
-
-	const onCompositionStart = () => {
-		composing = true;
-		updateCaret();
-	};
-
-	const onCompositionEnd = (e) => {
-		composing = false;
-		const value = inputEl.value || e.data || "";
-		inputEl.value = "";
-		if (!readOnly && value) insertText(value);
-		else updateCaret();
-	};
-
-	const onCopy = (e) => {
-		const text = getSelectedText();
-		if (!text) return;
 		e.preventDefault();
-		e.clipboardData?.setData("text/plain", text);
-	};
-
-	const onCut = (e) => {
-		if (readOnly) return;
-		const text = getSelectedText();
-		if (!text) return;
-		e.preventDefault();
-		e.clipboardData?.setData("text/plain", text);
-		const [a, b] = selRange();
-		deleteRange(a, b, null);
-	};
-
-	const onPaste = (e) => {
-		if (readOnly) return;
-		e.preventDefault();
-		const text = e.clipboardData?.getData("text/plain");
-		if (!text) return;
-		insertText(text.replace(/\r\n?/g, "\n"));
-	};
-
-	const onFocus = () => {
-		syncFocus();
-		syncLines();
-		syncGutter();
-		updateCaret();
-		syncInputPosition();
-	};
-
-	const onBlur = () => {
-		syncFocus();
-		paint();
-	};
-
-	const onScroll = () => {
-		paint();
-		syncInputPosition();
-		// 滚动会让窗口换位置；防抖结束后补一次高亮
-		scheduleHighlight();
 	};
 
 	/* ------------------------------------------------------------------ *
-	 * 对外 API
+	 * API
 	 * ------------------------------------------------------------------ */
 
 	const setValue = (text, keepScroll) => {
@@ -1137,20 +1059,22 @@ export const SyntaxEditor = (props) => {
 			scrollEl.scrollTop = 0;
 			scrollEl.scrollLeft = 0;
 		}
-		gutterWidth = 0;
-		refresh();
-		report();
+		if (selfVisible) {
+			refresh();
+			report();
+		} else {
+			pendingUpdate = true;
+		}
 	};
 
 	const setReadOnly = (value, silent) => {
 		readOnly = !!value;
-		el.classList.toggle("vje-readonly", readOnly);
+		el.classList.toggle("-readonly", readOnly);
 		if (!readOnly && !silent) focus();
 		refresh();
-		report();
 	};
 
-	const setErrorLine = (line) => {
+	const setErrorLine = (line, startCh, endCh) => {
 		const next = line == null || line < 0 ? -1 : line;
 		if (next === errorLine) return;
 		errorLine = next;
@@ -1160,9 +1084,149 @@ export const SyntaxEditor = (props) => {
 	const scrollToLine = (line) => {
 		const last = doc.lines.length - 1;
 		const index = Math.max(0, Math.min(last, line | 0));
-		scrollEl.scrollTop = Math.max(0, index * LH - Math.floor(scrollEl.clientHeight / LH / 2) * LH);
+		scrollEl.scrollTop = Math.max(0, topOfLine(line) - Math.floor(scrollEl.clientHeight / LH / 2) * LH);
 		setSelection({line: index, ch: 0}, {line: index, ch: 0});
 	};
+
+	/* ------------------------------------------------------------------ *
+	 * 装配
+	 * ------------------------------------------------------------------ */
+
+	const onContextMenu = props.onContextMenu ?? AS_IS;
+
+	el = <div className="vje -readonly" style={`--lh:${LH}px;--digits:1;--p:${vPadding}px`} onMouseDown={onMouseDown} onContextMenu.prevent={ev => {
+		openContextMenu(ev, scrollEl, onContextMenu([
+			{label: '撤销', icon: "ri-reset-left-line", disabled: !history.canUndo, act: undo},
+			{label: '重做', icon: "ri-reset-right-line", disabled: !history.canRedo, act: redo},
+			{ sep: true },
+			{label: '剪切', icon: "ri-scissors-line", disabled: readOnly || !isSelected, act: () => {
+				copyWithAnimation(getSelectedText());
+				const [a, b] = getSelection();
+				deleteRange(a, b, null);
+			}},
+			{label: '复制', icon: "ri-file-copy-line", disabled: !isSelected, act: () => copyWithAnimation(getSelectedText())},
+			{label: '粘贴', icon: "ri-clipboard-line", disabled: readOnly, act: () => {
+				navigator.clipboard.readText().then(text => {
+					insertText(normalizeLineTerminator(text));
+				});
+			}},
+			{label: '删除', icon: "ri-delete-bin-line", danger: true, disabled: readOnly || !isSelected, act: () => {
+				const [a, b] = getSelection();
+				deleteRange(a, b, null);
+			}},
+			{label: '全选', icon: 'ri-checkbox-multiple-line', act: selectAll},
+			{ sep: true },
+			{label: '查找/替换 (未实现)', icon: "ri-find-replace-line", disabled: true, act: () => {
+
+			}},
+			{label: `语言 (${langId})`, icon: "ri-global-line", act: () => {
+				SimpleModal({
+					title: "设置语法高亮的语言",
+					placeholder: "下拉框尚未实现！",
+					type: "input",
+					onConfirm(id) {
+						if (!loadLanguage(id, true)) return false;
+						return setLanguage(id);
+					}
+				})
+			}},
+			{label: '自动换行 (未实现)', icon: "ri-text-wrap", disabled: true, act: () => {
+
+			}},
+		]), true);
+	}}>
+		<div className="-fade" />
+		<div className="-gutter" ref={gutterEl}>
+			<div className="-lines" ref={gutterInner}/>
+			<div className="-hl" ref={errMark}/>
+		</div>
+		<div className="-container" ref={scrollEl} onScroll.passive={() => {
+			syncGutter();
+			syncCaret();
+			// 不清 hlTriggerCount，保证至少 500ms 高亮一次，避免连续滚动时完全不高亮
+			scheduleHighlight();
+		}} />
+		<div className="-empty" ref={phEl}>{placeholder}</div>
+		<textarea className="-input" ref={inputEl} spellCheck={false} autoCapitalize={"off"} autoCorrect={"off"} wrap={"off"}
+			onKeyDown={onKeyDown}
+
+			onInput={(ev) => {
+				if (ev.isComposing) {
+					inputEl.style.width = "1px";
+					inputEl.style.width = (inputEl.scrollWidth)+"px";
+					return;
+				}
+				const value = inputEl.value;
+				if (!value) return;
+				inputEl.value = "";
+				if (readOnly) return;
+				insertText(value);
+			}}
+			onCompositionStart={() => {
+				el.classList.add('-composing');
+			}}
+			onCompositionEnd={(ev) => {
+				el.classList.remove('-composing');
+				inputEl.style.width = "";
+				const value = inputEl.value || ev.data;
+				inputEl.value = "";
+				if (!readOnly && value) insertText(value);
+			}}
+
+			onCopy={(ev) => {
+				const text = getSelectedText();
+				if (!text) return;
+				ev.preventDefault();
+				ev.clipboardData?.setData("text/plain", text);
+			}}
+			onCut={(ev) => {
+				if (readOnly) return;
+				const text = getSelectedText();
+				if (!text) return;
+				ev.preventDefault();
+				ev.clipboardData?.setData("text/plain", text);
+				const [a, b] = getSelection();
+				deleteRange(a, b, null);
+			}}
+			onPaste={(ev) => {
+				if (readOnly) return;
+				ev.preventDefault();
+				const text = ev.clipboardData?.getData("text/plain");
+				if (!text) return;
+				insertText(normalizeLineTerminator(text));
+			}}
+
+			onFocus={() => el.classList.add("-focused")}
+			onBlur={() => el.classList.remove("-focused")}
+		/>
+	</div>;
+
+	let selfVisible, pendingUpdate;
+	const io = new IntersectionObserver((entries) => {
+		selfVisible = entries.at(-1).isIntersecting;
+		if (selfVisible && pendingUpdate) {
+			pendingUpdate = false;
+			requestAnimationFrame(() => {
+				refresh();
+				report();
+			});
+		}
+	});
+	io.observe(el);
+
+	vl = new VirtualList({
+		element: scrollEl,
+		data: doc.lines,
+		itemHeight: LH,
+		overscan: LH * 8,
+		itemKey: true,
+		renderer(line, index) {
+			const node = <div className='-line'><span/></div>;
+			syncLine(node, line, index);
+			return node;
+		},
+		onReuse: syncLine
+	});
 
 	const api = {
 		element: el,
@@ -1178,7 +1242,7 @@ export const SyntaxEditor = (props) => {
 		setErrorLine,
 		scrollToLine,
 		selectAll,
-		insertText: (text) => insertText(text),
+		insertText,
 		getSelectedText,
 		canUndo: () => history.canUndo,
 		canRedo: () => history.canRedo,
@@ -1187,50 +1251,22 @@ export const SyntaxEditor = (props) => {
 		refresh,
 	};
 
-	/* ------------------------------------------------------------------ *
-	 * 装配
-	 * ------------------------------------------------------------------ */
-
-	el.addEventListener("mousedown", onMouseDown);
-	scrollEl.addEventListener("scroll", onScroll, {passive: true});
-	inputEl.addEventListener("keydown", onKeyDown);
-	inputEl.addEventListener("input", onInput);
-	inputEl.addEventListener("compositionstart", onCompositionStart);
-	inputEl.addEventListener("compositionend", onCompositionEnd);
-	inputEl.addEventListener("copy", onCopy);
-	inputEl.addEventListener("cut", onCut);
-	inputEl.addEventListener("paste", onPaste);
-	inputEl.addEventListener("focus", onFocus);
-	inputEl.addEventListener("blur", onBlur);
-
-	const ro = new ResizeObserver(() => {
-		paint();
-	});
-	ro.observe(el);
-
 	$cleanup(el, () => {
 		clearTimeout(emitTimer);
 		clearTimeout(hlTimer);
 		cancelHl?.();
-		ro.disconnect();
 		stopDrag?.();
 		vl.destroy();
 	});
 
-	updateDigits();
-	vl._visible = true;
-	vl.render();
-	paint();
-	syncInputPosition();
-	setReadOnly(readOnly, true);
-
-	// 语言包按需加载，加载完再做第一次高亮
-	setLanguage(langId);
-
-	if (autofocus) {
-		focus();
-	}
-
-	props.onReady?.(api);
-	return el;
+	updateGutterWidth();
+	el.classList.toggle("-readonly", readOnly);
+	report();
+	setLanguage(langId).then(() => {
+		paint();
+		syncCaret();
+		if (autofocus) focus();
+		props.onReady?.(api);
+	});
+	return api;
 };

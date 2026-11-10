@@ -470,7 +470,7 @@ totalLines: ${lines.length + delta} (${delta >= 0 ? '+': ''}${delta})`;
 		let listError;
 		let files;
 		try {
-			files = await fs.list({path, pattern: glob, json: true}, ctx);
+			files = await fs.list({path, pattern: glob, json: true, showDir: false}, ctx);
 			if (path) path += '/';
 		} catch (e) {
 			if (glob !== '**' && glob !== '*' && path !== glob && !path.endsWith("/"+glob)) throw e;
@@ -478,8 +478,9 @@ totalLines: ${lines.length + delta} (${delta >= 0 ? '+': ''}${delta})`;
 			files = [["", 'file']];
 		}
 
-		for (const [relPath, type] of files) {
-			if (type !== 'file' || BINARY_EXT.test(relPath)) continue;
+		for (let j = 0; j < files.length; j++){
+			const relPath = files[j][0];
+			if (BINARY_EXT.test(relPath)) continue;
 			if (matchedFiles >= maxFiles) break;
 
 			await enqueue(async () => {

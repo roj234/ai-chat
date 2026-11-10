@@ -3,14 +3,20 @@ import {showToast} from "/src/components/Toast.js";
 import {getRandomString, prettyError} from "/src/utils/utils.js";
 import {AS_IS} from "unconscious";
 import {createSandbox} from "@roj234/workerbox";
-import {normalizePath} from "unconscious/common/path-utils.js";
-import {getToolParameters, runTools} from "/src/toolset.js";
+import {normalizePath} from "@roj234/shared/path";
+import {
+	getToolParameters,
+	runTools,
+	toolScriptRegistry,
+	undoToolCalls,
+	UNSAFE_TOOL_DENY_MESSAGE_AFK
+} from "/src/toolset.js";
 import {formatSize} from "unconscious/common/Utils.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
 import {HighlightBox} from "/src/components/TextDiff.jsx";
 import {inspect} from "@roj234/util-inspect";
 import {config} from "/src/states.js";
-import {FSE_NotAllowed, FSE_NotFound, FSE_NotSupported, throwDOMException} from "../../common/pure-utils.js";
+import {FSE_NotAllowed, FSE_NotFound, FSE_NotSupported, throwDOMException} from "/common/pure-utils.js";
 import {injectMessages} from "/src/inject-message.js";
 
 /**
@@ -24,38 +30,44 @@ import {injectMessages} from "/src/inject-message.js";
 const sandboxInstances = new Map;
 
 /**
- * @type {Record<string, function(AiChat.Conversation): Record<string, Function>>}
+ * @type {Record<string, function(AiChat.Conversation, AiChat.ToolResponse): Record<string, Function>>}
  */
 export const JS_HOST_MODULES = {
-	'tools': conv => new Proxy({}, {
-		get(target, key) {
-			const exist = conv.tools.has(key);
-			if (!exist) return;
-
-			return async (args) => {
-				const resp = [];
-
-				await runTools({
-					tool_calls: [{
-						function: {
-							name: key,
-							arguments: JSON.stringify(args || {})
-						}
-					}],
-					tool_responses: resp
-				}, conv, 0);
-
-				return resp[0];
-			}
-		}
-	}),
-	'sandbox': conv => ({
-		sendNotification(message) {
+	'tools': (conv, ctx) => new Proxy({
+		notify(message) {
 			return injectMessages(conv, {
 				role: 'user',
 				label: 'JS沙箱',
-				content: `<js-sandbox>\n${message}\n</js-sandbox>`
+				content: `<js-sandbox>${message}</js-sandbox>`
 			});
+		}
+	}, {
+		get(target, key) {
+			if (Object.hasOwn(target, key)) return target[key];
+
+			const definition = toolScriptRegistry[key];
+			const allowed = conv.tools.has(key) || definition?.default;
+			if (!allowed) return;
+			if (definition?.requireUI) throwDOMException(key+" tool require UI access", FSE_NotSupported);
+
+			// FIXME
+			if (key === "Wait") throwDOMException("Wait tool is not supported yet.", FSE_NotSupported);
+			if (key === "RunJS") throwDOMException("Recursion is not allowed.", FSE_NotAllowed);
+
+			return async (args) => {
+				const ptc = (ctx.delegatedCalls ??= { tool_calls: [], tool_responses: [] });
+
+				const pos = ptc.tool_calls.push({
+					function: {
+						name: key,
+						arguments: JSON.stringify(args || {})
+					}
+				}) - 1;
+
+				await runTools(ptc, conv, pos, undefined, UNSAFE_TOOL_DENY_MESSAGE_AFK);
+
+				return ptc.tool_responses[pos];
+			}
 		}
 	})
 };
@@ -64,8 +76,8 @@ export const JS_HOST_MODULES = {
  * @type {Record<string, { path?: string, url?: string, description: string, k?: string, alias?: string[] }>}
  */
 export const JS_SANDBOX_MODULES = {
-	'unconscious/common/Json.js': {
-		path: "assets/sandbox/Json.js",
+	'@roj234/stream-json': {
+		path: "assets/sandbox/stream-json.js",
 		description: `Fast Streaming JSON5 Parser
 export {
   createJsonParser(
@@ -93,7 +105,7 @@ export {
 }`,
 		k: "json"
 	},
-	'base64': {
+	'@roj234/shared/base64': {
 		description: `Ultrafast Streaming Base64 Encoder/Decoder
 export {
   createBase64Encoder(urlSafe = false, bufferCapacity = 1024): { 
@@ -402,11 +414,11 @@ export const RunJS = {
 
 		// 它的存在不直接告知模型 (PTC)
 		const hostModules = worker.handlers.hostModules;
-		for (const key in JS_HOST_MODULES) hostModules.set(key, JS_HOST_MODULES[key](conv));
+		for (const key in JS_HOST_MODULES) hostModules.set(key, JS_HOST_MODULES[key](conv, response));
 
 		const hangTimer = setTimeout(() => stopWorker(new DOMException(timeout.toFixed(2)+"s", "TimeoutError")), timeout * 1000);
 
-		worker.handlers.load = (path, systemModule) => {
+		worker.handlers.load = (path, loader, systemModule) => {
 			if (!systemModule || path.startsWith("~/")) return readFile({
 				path,
 				noTruncate: true
@@ -434,6 +446,7 @@ export const RunJS = {
 				});
 			}
 
+			// TODO 实现 nodeResolve 函数
 			return readFile({ path: "node_modules/"+path }, {}, conv).catch(e => {
 				// npm 包名: [@scope/]pkg[@version][/subpath]
 				if (!/^(?:@[^/\s@]+\/)?[^/\s@]+(?:@[^/\s@]+)?(?:\/[^/\s@]+)*$/.test(path))
@@ -560,6 +573,12 @@ export const RunJS = {
 		}
 
 		return (getLog()+err) || '[No console output] (Hint: Have you awaited top-level Promise?)';
+	},
+
+	undo(ctx, conv, tc) {
+		const ptc = ctx.delegatedCalls;
+		if (!ptc) return;
+		undoToolCalls(conv, [ptc], 0);
 	}
 };
 

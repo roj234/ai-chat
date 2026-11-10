@@ -10,12 +10,27 @@
 
     transition: background 0.1s ease, border 0.1s ease;
 
+    &.delegated {
+        margin-left: 2ch;
+    }
+
     & .tool-header {
-        padding: 4px 10px;
+        padding: 0 10px;
         gap: 8px;
         display: flex;
         font-size: 13px;
         align-items: baseline;
+
+        & > .-title {
+            flex: 1;
+            display: flex;
+            padding: 4px 0;
+        }
+
+        & > svg {
+            width: 16px;
+            height: 16px;
+        }
     }
 
     & .tool-body {

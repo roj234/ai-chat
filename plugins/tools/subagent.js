@@ -30,7 +30,7 @@ import {createAsyncQueue, FSE_NotAllowed, FSE_NotFound, throwDOMException} from 
 import schema from "./subagent_schema.json";
 import {markCombinedPresetDirty} from "/src/presets.js";
 import {TemplateFormatter} from "/common/template-formatter.js";
-import {parseJson5} from "unconscious/common/Json.js";
+import {parseJson5} from "@roj234/stream-json";
 import {lockConversation, unlockConversation} from "/src/conversation-lock.js";
 import {Wait} from "../rp_kit/Wait.js";
 import {PP_UNATTENDED} from "../../src/states.js";

@@ -1,4 +1,4 @@
-import {createJsonParser} from 'unconscious/common/Json.js';
+import {createJsonParser} from '@roj234/stream-json';
 import {NestedMap} from 'unconscious/common/NestedMap.js';
 // TODO 移除对内部API的使用
 import {
@@ -160,23 +160,22 @@ export function registerSchemaMessageRole(id, name, renderer, compose, schema, o
 				type: "html",
 				html: () => {
 					if (isEditing(self)) {
-						const state = $state();
-						$watch(state, () => {
-							const val = state.obj;
-							if (val) {
-								let schema1 = schema;
-								if (typeof schema1 === 'function') schema1 = schema(self);
-								const error = validateAndShowError(val, schema1);
-								if (error) {
-									state.value = {error};
-									return;
-								}
-								self.content = val;
-							}
-						})
+						const err = $state();
 						return (<div>
-							<JsonEditor value={JSON.stringify(self.content, null, 2)} state={state} />
-							{() => state.error && <pre className={"error"} >{state.error}</pre> }
+							<JsonEditor value={self.content} onChange={(str, obj, error) => {
+								if (!error) {
+									let schema1 = schema;
+									if (typeof schema1 === 'function') schema1 = schema(self);
+									const error = validateAndShowError(obj, schema1);
+									if (error) {
+										err.value = error;
+										return;
+									}
+									self.content = obj;
+								}
+								err.value = "";
+							}} />
+							{() => unconscious(err) && <pre className={"error"} >{err}</pre> }
 						</div>);
 					} else {
 						let content = self.content;

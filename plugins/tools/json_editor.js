@@ -9,7 +9,7 @@ import {
 	validate,
 	validateAndShowError
 } from "unconscious/common/json-schema-utils.js";
-import {parseJson5} from "unconscious/common/Json.js";
+import {parseJson5} from "@roj234/stream-json";
 
 const readFile = fileAccess("read");
 const writeFile = fileAccess("write");

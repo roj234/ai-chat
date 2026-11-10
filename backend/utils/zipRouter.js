@@ -1,4 +1,4 @@
-import {ZipReader} from "unconscious/common/zip-io.js";
+import {ZipReader} from "@roj234/jszip/io";
 import {pipeline} from 'node:stream/promises';
 import {Readable} from 'node:stream';
 import {createBrotliDecompress, createInflateRaw} from "node:zlib";

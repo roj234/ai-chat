@@ -1,14 +1,15 @@
-import {config, conversations, messages, selectedConversation} from "./states.js";
+import {config, conversations, EVENT_BUS, messages, selectedConversation} from "./states.js";
 import {showToast} from "./components/Toast.js";
 import {deleteDatabase, getMessages, isIDB, kvListGetValues, kvListSet, updateConversation} from "./database.js";
 import {downloadFile, prettyError} from "./utils/utils.js";
-import SimpleModal from "./components/SimpleModal.jsx";
-import {ZipReader, ZipWriter} from "unconscious/common/zip-io.js";
+import {ZipReader, ZipWriter} from "@roj234/jszip/io";
 import {$computed, $state, $update, unconscious} from "unconscious";
 import {decodeObjects, serializeJSON} from "./utils/serialization.js";
 import {GLOBAL_SETTINGS, PRIVATE_CONFIG_KEY} from "./settings.js";
 import {DI_settings} from "./hooks.js";
-import {createJsonParser} from "unconscious/common/Json.js";
+import {createJsonParser} from "@roj234/stream-json";
+import {openContextMenu} from "./components/Menu.js";
+import {Icon_exportAll, Icon_exportChat, Icon_exportChats, Icon_exportProviders} from "./components/Icons.jsx";
 
 const sleep = () => new Promise(resolve => setTimeout(resolve));
 
@@ -219,17 +220,15 @@ export const duplicateConversation = async (ignoreMessages) => {
 };
 
 /**
- *
  * @param {number} type
- * @param _conv
+ * @param {AiChat.Conversation} [conv]
  * @return {Promise<void>}
  */
-export const exportConversation = async (type, _conv) => {
+export const exportConversation = async (type, conv) => {
 	const zw = ZipWriter();
 	await zw.add(APP_NAME, "2");
 
 	if (type&1) {
-		const conv = _conv || unconscious(selectedConversation);
 		if (conv && type === 1) {
 			const jsonData = await serializeToJSONLine(conv, zw);
 			if (zw.fileCount() === 1) {
@@ -323,47 +322,61 @@ const parseJSONLine = (str) => {
 	return messages;
 };
 
+const delDb = () => deleteDatabase().then(() => {
+	location.reload();
+});
+
 GLOBAL_SETTINGS.push(
 	{
 		type: "element",
 		_tab: ["general", "data"],
 		_id: "import",
 		_order: -3,
-		name: "导入对话、预设、备份及更多格式",
+		name: "导入对话、预设、备份等",
 		element: <div className={"choice-scroll"}>
 			<label className="btn ghost" tabIndex={0} role={"button"}>导入
 				<input type="file" accept=".zip,.json,.jsonl,image/png,image/jpeg" style="display:none;" multiple onChange={importConversation}/>
 			</label>
-		</div>
-	},
-	{
-		type: "element",
-		_tab: "data",
-		_order: -2,
-		element: <div className={"choice-scroll"}>
-			<button className="btn ghost" onClick={() => exportConversation(1)}>备份对话</button>
-			<button className="btn ghost" onClick={() => exportConversation(2)}>备份预设</button>
-			<button className="btn ghost" onClick={() => exportConversation(7)}>备份所有</button>
+			<button className="btn ghost" onClick={ev => {
+				const conv = unconscious(selectedConversation);
+				/** @type {MenuItem[]} */
+				const items = [
+					{ icon: <Icon_exportChat />, label: "导出当前对话", disabled: !conv, act: () => exportConversation(1, conv) },
+					{ icon: <Icon_exportChats />, label: "导出所有对话", act: () => exportConversation(1) },
+					{ icon: <Icon_exportProviders />, label: "导出模型供应商", act: () => exportConversation(2) },
+					{ icon: <Icon_exportAll />, label: "导出所有数据", act: () => exportConversation(7) },
+				];
+				EVENT_BUS.post(['getMenu', 'backup'], items);
+				openContextMenu(ev, ev.target.closest(".filter"), items);
+			}}>导出</button>
 		</div>
 	},
 	{
 		_id: "dd",
 		type: "element",
-		_tab: "data",
+		_tab: ["general"],
 		_order: -1,
-		name: "数据调试",
 		element: <div className={"choice-scroll"}>
-			<button className="btn danger" onClick={() => {
-				SimpleModal({
-					message: isIDB ? '删除所有数据（对话、预设、历史记录）？' : '重建后端数据库（压缩），有可能出现问题，请备份',
-					accent: 'danger',
-					onConfirm() {
-						deleteDatabase().then(() => {
-							location.reload();
-						})
-					}
-				});
-			}}>删库</button>
+			<button className="btn ghost" onClick={ev => {
+				/** @type {MenuItem[]} */
+				const items = [
+					{
+						icon: "ri-file-copy-line",
+						label: "复制对话",
+						disabled: !unconscious(selectedConversation),
+						act: duplicateConversation
+					},
+				];
+
+				if (isIDB) {
+					items.push({ icon: "ri-delete-bin-line", label: "删除所有数据", danger: true, act: delDb });
+				} else {
+					items.push({ icon: "ri-collapse-vertical-line", label: "整理数据库", act: delDb });
+				}
+
+				EVENT_BUS.post(['getMenu', 'dev'], items);
+				openContextMenu(ev, ev.target.closest(".filter"), items);
+			}}>开发者选项</button>
 		</div>
 	},
 );

@@ -5,11 +5,11 @@ import {build as esbuildBuild} from 'esbuild';
 
 
 export const SANDBOX_MODULES = [
-	'unconscious/common/Json.js',
+	'@roj234/stream-json',
 	'unconscious/common/SHA256.js',
 	'unconscious/common/text-diff.js',
 	'unconscious/common/xml-parser.js',
-	'unconscious/common/JSZip.js',
+	'@roj234/jszip',
 	'@roj234/web-audio-engine',
 ];
 
@@ -19,7 +19,8 @@ const SANDBOX_BUILTINS = [
 
 const buildOne = async (req, root, specifier) => {
 	const entry = req.resolve(specifier);
-	const outFile = path.join(root, 'public', 'assets', 'sandbox', path.basename(entry));
+	const x = path.extname(specifier);
+	const outFile = path.join(root, 'public', 'assets', 'sandbox', path.basename(x ? specifier.slice(0, -x.length) : specifier)+".js");
 
 	const {outputFiles} = await esbuildBuild({
 		define: {

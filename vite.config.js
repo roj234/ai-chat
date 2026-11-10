@@ -18,6 +18,7 @@ import {promisify} from 'node:util';
 import {rollup} from 'rollup';
 import {defineConfig} from 'vite';
 import {nodeResolve} from '@roj234/ie/plugins/build-backend-helper.js';
+import {HLJS_LANGUAGE_FAMILIES, HLJS_LANGUAGE_RE} from "./misc/hljs-language-families.js";
 
 const VITE_TRICK_CONFIG = path.resolve(__dirname, 'backend/config.js');
 const SERVER_BUNDLE = path.resolve(__dirname, 'node_modules/.ie/.aint-server.mjs');
@@ -26,13 +27,6 @@ if (!fs.existsSync(VITE_TRICK_CONFIG)) {
     fs.copyFileSync(path.resolve(__dirname, 'backend/config.default.js'), VITE_TRICK_CONFIG);
 }
 
-const stringHash = s => {
-    let h = 1;
-    for (let i = 0; i < s.length; i++) {
-        h = (31 * h + s.charCodeAt(i)) & 4294967295;
-    }
-    return h;
-};
 
 const execFilePromise = promisify(execFile);
 const getCommitNumber = async () => {
@@ -161,7 +155,6 @@ export default defineConfig(async ({mode}) => {
                 main: 'index.html',
                 logViewer: 'log_viewer.html',
                 docViewer: 'docs.html',
-                markdownPreview: 'markdown.html',
                 sw: "sw.js",
             },
 
@@ -176,14 +169,17 @@ export default defineConfig(async ({mode}) => {
                 },
                 // 手动控制 chunk 拆分
                 manualChunks(id) {
-                    if (id.includes('highlight.js/es/languages/')) {
-                        if (id.includes("json")) return;
+                    const normalized = id.replaceAll('\\', '/');
 
-                        return 'hljs/'+(stringHash(id)&31).toString(36)
+                    const match = HLJS_LANGUAGE_RE.exec(normalized);
+                    if (match) {
+                        const i = HLJS_LANGUAGE_FAMILIES.findIndex(s => s.languages.includes(match[1]));
+                        if (i >= 0) return "hljs/"+String(i).padStart(2, "0")+"-"+HLJS_LANGUAGE_FAMILIES[i].id;
+                        return 'hljs/'+match[1];
                     }
                 },
 
-                //experimentalMinChunkSize: 10240,
+                experimentalMinChunkSize: 512000,
             },
         }
     },

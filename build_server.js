@@ -6,7 +6,7 @@ import {fileURLToPath} from 'url';
 import serverPackageInfo from './backend/package.json' with {type: 'json'};
 import clientPackageInfo from './package.json' with {type: 'json'};
 import {configProxy, makeBrotliZip, nodeResolve} from '@roj234/ie/plugins/build-backend-helper.js';
-import {ZipWriter} from "unconscious/common/zip-io.js";
+import {ZipWriter} from "@roj234/jszip/io";
 import fs from "node:fs/promises";
 import {globMacroPlugin} from "./common/fs-glob.js";
 

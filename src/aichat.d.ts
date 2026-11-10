@@ -38,7 +38,7 @@ declare namespace AiChat {
         fs_type: FSType;
         fs_base?: string;
         fs_server?: string;
-        fs_builtin?: string;
+        fs_builtin?: boolean;
         fs_events?: FSEvent[];
         fs_readonly?: boolean;
 
@@ -78,7 +78,7 @@ declare namespace AiChat {
         bm_leaf?: number;
 
         mnt?: Record<string, Mount>;
-        fs_readonly?: boolean;
+        fs_secrets?: Record<string, { value: string, domain: string }>;
 
         /** 覆盖全局配置，高于 config 优先级 */
         presets?: string | string[];
@@ -87,8 +87,6 @@ declare namespace AiChat {
 
         /** pending消息缓存 */
         pendingMessages?: Message[];
-
-        fs_secrets?: Record<string, { value: string, domain: string }>;
     }
 
     export type SubagentConversation = Conversation & {
@@ -161,7 +159,12 @@ declare namespace AiChat {
 
         content?: string | OpenAI.ContentPart[];
         success?: boolean;
-    }
+
+        delegatedCalls?: {
+            tool_calls: OpenAI.ToolCall[],
+            tool_responses: ToolResponse[],
+        }
+    } & Record<string, any>;
 
     export type Thinking = {
         format: "r" | "rc" | "rd" | string;
@@ -338,6 +341,7 @@ declare namespace AiChat {
 
     type ToolPart = {
         type: "tool";
+        delegated?: boolean;
         tool: OpenAI.ToolCall;
         message: AssistantMessage;
         // index of message.tool_calls

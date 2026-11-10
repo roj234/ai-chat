@@ -111,6 +111,8 @@ export function createSettingDialog(optionsArray, settings, onSettingChanged) {
 		let element = elements[i];
 
 		let tabNames = item._tab || "general";
+		if (tabNames === 'hide') continue;
+
 		if (!Array.isArray(tabNames)) tabNames = [tabNames];
 		const id = item.id || item._id;
 		if (id) byId.set(id, element.lastElementChild);

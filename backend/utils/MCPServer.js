@@ -101,7 +101,7 @@ export class MCPServer {
 			handler = description;
 			description = undefined;
 		}
-		this.#resources.set(uri, { uri, name, description, mimeType: mimeType || 'text/plain', handler });
+		this.#resources.set(uri, { uri, name, description, mimeType: mimeType || 'text/plain;charset=utf-8', handler });
 		this.#capabilities.resources = { subscribe: false, listChanged: true };
 		return this;
 	}

@@ -1,6 +1,6 @@
-import {bakeSchema} from "unconscious/common/msgpack.js";
+import {bakeSchema} from "@roj234/msgpack";
 
-export const msgpack_schema_version = "14";
+export const msgpack_schema_version = "15";
 export const msgpack_schema = [];
 msgpack_schema.push(
 	// generic
@@ -14,19 +14,43 @@ msgpack_schema.push(
 	// conversation
 	"activatedModules", "tools", "grantedTools",
 	"bm_leaf",
-	"resumeId", "roleId", "contextUsage",
+	"resumeParent", "resumeId",
+	"roleId",
+	"contextUsage",
+
 	// FileSystem
 	["mnt", msgpack_schema],
-	"fs_type", "fs_base", "fs_server", "fs_builtin", "fs_events",
+	["fs_type", null, ['db', 'api', 'local', 'config', 'opfs', 'vfs']],
+	"fs_base", "fs_server", "fs_builtin", "fs_readonly", "fs_branch",
+	["fs_ACL",
+		[
+			"ignore",
+			"acl"
+		]
+	],
+	["fs_events",
+		[
+			"runId",
+			"type",
+			"pid",
+			"explanation",
+			"cwd",
+			"start"
+		]
+	],
+
 	// subagent
 	"presets", "overrides",
 	"sa_notify", "sa_async",
+
 	// inject message
 	["pendingMessages", msgpack_schema],
 
-	// messages
+	// message
 	["role", null, ["system", "user", "assistant"]],
 	"model",
+	["folded", msgpack_schema],
+	"foldGroup",
 	["content",
 		[
 			["type", null, ["text", "image_url", "input_audio"]],
@@ -60,7 +84,10 @@ msgpack_schema.push(
 		]
 	],
 	["tool_responses",
-		["time", "content", "success", "duration"]
+		[
+			"time", "content", "success", "duration",
+			["delegatedCalls", msgpack_schema],
+		]
 	],
 	"label",
 

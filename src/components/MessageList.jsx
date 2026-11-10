@@ -62,10 +62,12 @@ import {ToolCallEditor} from "./ToolCallEditor.jsx";
 import {StatusPill} from "./StatusPill.jsx";
 import {UsageBlock} from "./UsageBlock.jsx";
 import {decodeObjects, encodeObjects} from "../utils/serialization.js";
-import {openJsonEditor} from "../json_editor/JsonEditDialog.js";
 import {inspect} from "@roj234/util-inspect";
 import {formatDuration} from "/common/pure-utils.js";
 import {AUDIO_MIMES, IMAGE_MIMES, TEXT_MIMES} from "./UserInputComposer.jsx";
+import {openContextMenu} from "./Menu.js";
+import {openJsonEditor} from "./JsonEditor.jsx";
+import {createWaveNav} from "./WaveNav.jsx";
 
 const CURRENT_EDITING = debugSymbol("EditingNow");
 const isEditing = message => (selectedConversation[CURRENT_EDITING] === message);
@@ -279,7 +281,7 @@ const chunkRenderer = m => {
 			case "think":
 				return <ThinkBlock {...item} edit={isEditing(m.key)}/>;
 			case "tool":
-				return isEditing(m.key) ? <ToolCallEditor {...item} /> : <ToolCallCard {...item} />;
+				return isEditing(item.message) ? <ToolCallEditor {...item} /> : <ToolCallCard {...item} />;
 			case "tool_ui":
 				const frozen = item.idx < messages.length - 1;
 				try {
@@ -357,8 +359,9 @@ const MAY_HIDE = debugSymbol("CanCollapse");
  * @param {AiChat.ResponseContentPart[]} chunks
  * @param {number} index
  * @param {AiChat.Message[]} messages
+ * @param {boolean} [__isPTC]
  */
-const chunkGather = (message, chunks, index, messages) => {
+const chunkGather = (message, chunks, index, messages, __isPTC) => {
 	let {think, content, tool_calls, error, finish_reason} = message;
 
 	if (think) chunks.push({ type: "think", think, message, [MAY_HIDE]: true });
@@ -369,10 +372,10 @@ const chunkGather = (message, chunks, index, messages) => {
 		renderContent(message, chunks, index, isEditing, messages, defaultRenderContent);
 	} else {
 		if (typeof content !== 'string' && !EditableMessageRoles.has(role)) {
-			chunks.push({
+			if (!__isPTC) chunks.push({
 				type: "error",
 				title: "未定义的消息类型，无法渲染内容。",
-				error: content
+				error: message
 			});
 		} else {
 			defaultRenderContent(message, chunks, content);
@@ -391,6 +394,7 @@ const chunkGather = (message, chunks, index, messages) => {
 
 			chunks.push({
 				type: "tool",
+				delegated: __isPTC,
 				tool,
 				message,
 				idx: j,
@@ -406,6 +410,9 @@ const chunkGather = (message, chunks, index, messages) => {
 					[MAY_HIDE]: !mustKeep && !artifact.includes('o')
 				});
 			}
+
+			const ptc = response?.delegatedCalls;
+			if (ptc) chunkGather(ptc, chunks, -1, null, true);
 		}
 	}
 
@@ -498,17 +505,14 @@ function chunkKeyFunc(message, chunk) {
 //endregion
 //region 悬浮按钮处理
 
-const regenBtn = <button data-action="regen" title="重新生成" className="ri-loop-right-line ghost" />;
-const deleteBtn = <button data-action="del" title="删除" className="ri-delete-bin-line ghost" />;
-const undoBtn = <button data-action="undo" title="撤销最后一步" className="ri-arrow-go-back-line ghost" />;
 const copyBtn = <button data-action="copy" title="复制" className="ri-file-copy-line ghost" />;
-const editBtn = <button data-action="edit" title="编辑 (长按/右键 以JSON编辑)" className="ri-edit-2-fill ghost" />;
-const branchBtn = <button data-action="branch" title="在此处分叉" className="ri-git-fork-line ghost" />
+const editBtn = <button data-action="edit" title="编辑" className="ri-edit-2-fill ghost" />;
 const saveBtn = <button data-action="save" title="保存" className="ri-check-line ghost" />;
 const insertThinkBtn = <button data-action="think" title="插入思考" className="ri-ai-generate-text ghost" />;
 const insertToolBtn = <button data-action="tool" title="插入工具调用" className="ri-tools-line ghost" />;
+const menuBtn = <button data-action='extra' title="更多" className="ri-menu-line ghost" />
 
-const buttonOrder = [editBtn, saveBtn, branchBtn, insertThinkBtn, insertToolBtn, undoBtn, regenBtn, copyBtn, deleteBtn];
+const buttonOrder = [editBtn, copyBtn, saveBtn, insertThinkBtn, insertToolBtn, menuBtn];
 
 /**
  * 更新悬浮按钮
@@ -523,25 +527,14 @@ function updateButtons(m, container) {
 	const notGenerating = !unconscious(abortCompletion);
 	const isLast = (end_index ? end_index === messages.length : index === messages.length-1);
 	const mayChange = (!selectedConversation[CURRENT_EDITING]) && (!isLast || notGenerating) && EditableMessageRoles.has(role);
-	const isComposite = end_index > index + 1;
-	// 不支持编辑组合消息（工具调用）
+
 	const mayModification = notGenerating && mayChange && null == key.label;
-	if (mayModification) {
-		buttons.push(editBtn);
-		if (role !== 'assistant' && !isLast)
-			buttons.push(branchBtn);
-	}
+	if (mayModification) buttons.push(editBtn);
+
 	if (!isEditing(key)) {
 		// 有内容才能复制
 		if ((!isLast || notGenerating) && (key[MessageCopyHandler] || unconscious(content).find(item => item.text))) buttons.push(copyBtn);
-		if (notGenerating && mayChange) {
-			// 最后一条助手消息，而不是最后一条消息，只有助手消息才有end_index
-			if (end_index && role === 'assistant') {
-				if (isLast && isComposite) buttons.push(undoBtn);
-				else if (end_index !== 1) buttons.push(regenBtn);
-			}
-			buttons.push(deleteBtn);
-		}
+		if (notGenerating && mayChange) buttons.push(menuBtn);
 	} else {
 		buttons.push(saveBtn);
 		if (role === "assistant") {
@@ -581,10 +574,11 @@ const BRANCH_TEMP_ID = -3;
 /**
  * @param {import("unconscious").Reactive<AiChat.Conversation>} selectedConversation
  * @param {import("unconscious").Reactive<AiChat.Message[]>} messages
- * @param {Event} e
+ * @param {PointerEvent} ev
+ * @param {string} [overrideAction]
  */
-const buttonOnLeft = (selectedConversation, messages, e) => {
-	const btn = e.target.closest(".btn-line button[data-action]");
+const buttonOnLeft = (selectedConversation, messages, ev, overrideAction) => {
+	const btn = ev.target.closest(".btn-line button[data-action]");
 	if (!btn) return;
 
 	/**
@@ -594,14 +588,14 @@ const buttonOnLeft = (selectedConversation, messages, e) => {
 	 *     key: AiChat.Message
 	 * }}
 	 */
-	let self = e.target.closest(".msg")._identity;
-	const vl = e.target.closest("._vl")._vl;
+	let self = ev.target.closest(".msg")._identity;
+	const vl = ev.target.closest("._vl")._vl;
 
 	const conv = unconscious(selectedConversation);
 	const message = messages[self.end_index - 1] ?? self.key;
 	let msgs = unconscious(messages);
 
-	switch (btn.dataset.action) {
+	switch (overrideAction ?? btn.dataset.action) {
 		case "copy": {
 			const m = message[MessageCopyHandler]?.() || getTextContent(self);
 			if (window.ClipboardItem) {
@@ -640,7 +634,7 @@ const buttonOnLeft = (selectedConversation, messages, e) => {
 					SimpleModal({
 						title: `将删除后续所有消息 (共 ${msgs.length - self.index} 条)`,
 						message: `这是为了保证【工具调用】状态正确回溯。
-使用【在此处分叉】（用户消息）或【重新生成】（LLM消息）功能避免物理删除`,
+使用【编辑并重发】或【重新生成】选项避免物理删除`,
 						onConfirm() {
 							deleteMessage(self.index, msgs.length);
 						}
@@ -649,7 +643,6 @@ const buttonOnLeft = (selectedConversation, messages, e) => {
 				}
 			}
 
-			if (!clickTwice(btn)) return;
 			deleteMessage(self.index, end);
 		}
 		break;
@@ -722,71 +715,88 @@ const buttonOnLeft = (selectedConversation, messages, e) => {
 			}
 		}
 		break;
-	}
-};
-/**
- * @param {import("unconscious").Reactive<AiChat.Conversation>} selectedConversation
- * @param {import("unconscious").Reactive<AiChat.Message[]>} messages
- * @param {Event} e
- */
-const buttonOnRight = async (selectedConversation, messages, e) => {
-	const btn = e.target.closest(".btn-line button[data-action]");
-	if (!btn) return;
+		case "edit2": {
+			openJsonEditor(`conv/${selectedConversation.id}/${message.id}`,
+				(w) => {
+					let skipNext;
+					const data = $state();
+					const setValue = async (obj) => {
+						const changedMessage = await decodeObjects(obj);
 
-	/**
-	 * @type {AiChat.Message & {
-	 *     index: number,
-	 *     end_index: number,
-	 *     key: AiChat.Message
-	 * }}
-	 */
-	let self = e.target.closest(".msg")._identity;
+						const id = message.id;
 
-	const message = messages[self.end_index - 1] ?? self.key;
+						Object.keys(message).forEach(item => { delete message[item]; });
+						Object.assign(message, changedMessage);
 
-	switch (btn.dataset.action) {
-		case "edit": {
-			if (message.id < 0) return;
+						message.id = id;
+						markMessageDirty(message);
+						$update(messages);
+						skipNext = true;
+					}
 
-			e.preventDefault();
-			let jsonText, update, onclose;
-			let updatePromise = async () => {
-				const mapping = new Map;
-				await encodeObjects(message, mapping);
-				jsonText = inspect(message, mapping.size ? (_, value) => mapping.get(value) ?? value : null);
-				update?.();
-			};
-			//conv[CURRENT_EDITING] = message;
+					const syncToEditor = () => {
+						if (skipNext) skipNext = false;
+						else {
+							const mapping = new Map;
+							encodeObjects(message, mapping).then(() => {
+								data.value = inspect(message, mapping.size ? (_, value) => mapping.get(value) ?? value : null);
+							});
+						}
+					}
 
-			let skipNext;
-			[update, onclose] = openJsonEditor("message#"+message.id,
-				() => jsonText,
-				async (obj) => {
-					const changedMessage = await decodeObjects(obj);
+					$watch(messages, syncToEditor);
+					$cleanup(w, () => $unwatch(messages, syncToEditor));
 
-					const id = message.id;
-
-					Object.keys(message).forEach(item => { delete message[item]; });
-					Object.assign(message, changedMessage);
-
-					message.id = id;
-					markMessageDirty(message);
-					$update(messages);
-					skipNext = true;
-				}
+					return [data, setValue];
+				},
 			);
-			const syncToEditor = () => {
-				if (skipNext) skipNext = false;
-				else updatePromise();
-			};
-
-			$watch(messages, syncToEditor);
-			onclose(() => {
-				$unwatch(messages, syncToEditor);
-				//conv[CURRENT_EDITING] = null;
-			})
 		}
 		break;
+		case "extra": {
+			const {index, end_index, content, key} = self;
+			const role = key.role;
+
+			const isLast = (end_index ? end_index === messages.length : index === messages.length-1);
+			const isComposite = end_index > index + 1;
+
+			const items = [];
+
+			const editRaw = [
+				{label: '编辑原始数据', icon: "ri-braces-line", act() {
+						buttonOnLeft(selectedConversation, messages, ev, 'edit2');
+					}},
+				{ sep: true },
+			]
+
+			if (end_index && role === 'assistant') {
+				items.push(
+					{label: '重新生成', icon: "ri-loop-right-line", act() {
+						buttonOnLeft(selectedConversation, messages, ev, 'regen');
+					}},
+					{ sep: true },
+					...editRaw,
+					{label: '撤销最后一步', icon: "ri-arrow-go-back-line", disabled: !isLast, danger: true, act() {
+						buttonOnLeft(selectedConversation, messages, ev, 'undo');
+					}},
+				);
+			} else {
+				if (role === 'user' && !isLast) {
+					items.push(
+						{label: '编辑并重发', icon: "ri-git-fork-line", act: () => {
+							buttonOnLeft(selectedConversation, messages, ev, 'branch');
+						}},
+						{ sep: true },
+					)
+				}
+				items.push(...editRaw);
+			}
+
+			items.push({label: '删除', icon: "ri-delete-bin-line", danger: true, act: () => {
+				buttonOnLeft(selectedConversation, messages, ev, 'del');
+			}});
+
+			openContextMenu(ev, vl.dom, items);
+		}
 	}
 };
 
@@ -800,20 +810,6 @@ function deleteMessage(start, end) {
 	const conv = unconscious(selectedConversation);
 	undoToolCalls(conv, removed, 0);
 	EVENT_BUS.post(['undo'], conv, removed, 0, false);
-}
-
-const TIMEOUT = debugSymbol("_btnTimeout");
-// 点两下
-function clickTwice(btn) {
-	if (!btn.classList.toggle("danger")) {
-		clearTimeout(btn[TIMEOUT]);
-		return true;
-	}
-
-	btn[TIMEOUT] = setTimeout(() => {
-		btn.classList.remove("danger");
-	}, 2000);
-	return false;
 }
 //endregion
 
@@ -1043,10 +1039,11 @@ const roleSelection = ["system", "user", "assistant"];
 /**
  *
  * @param {import("unconscious").Reactive<AiChat.Message[]>} messages
+ * @param {boolean} [navBar]
  * @return {AppendObserver}
  * @constructor
  */
-export function MessageList({messages}) {
+export function MessageList({messages, navBar }) {
 	let hoverElement;
 
 	function findButtonContainer(node) {
@@ -1135,7 +1132,6 @@ export function MessageList({messages}) {
 	});
 
 	vl.dom.addEventListener("click", buttonOnLeft.bind(null, selectedConversation, messages));
-	vl.dom.addEventListener("contextmenu", buttonOnRight.bind(null, selectedConversation, messages));
 	vl.dom.addEventListener("click", copyCodeEventHandler);
 
 	const blocks = $computed((oldBlocks) => {
@@ -1175,10 +1171,12 @@ export function MessageList({messages}) {
 	]);
 	$watch(blocks, () => {vl.setItems(unconscious(blocks));});
 
+
 	return new AppendObserver(self => {
 		const wrapper = self.closest(".chat");
 		vl.attach(wrapper);
 		self.replaceWith(vl.dom);
+		if (navBar) createWaveNav(blocks, vl, wrapper);
 
 		wrapper.scrollToBottom = () => {
 			vl._visible = false;

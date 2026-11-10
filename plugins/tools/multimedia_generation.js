@@ -8,12 +8,12 @@ import {getRandomString, loadingBlock} from "/src/utils/utils.js";
 import {jsonFetch} from "/common/fetch-utils.js";
 import "./multimedia_generation.css";
 import {DI_settings, onLoad} from "/src/hooks.js";
-import {parseJson5} from "unconscious/common/Json.js";
+import {parseJson5} from "@roj234/stream-json";
 
 import {compressImage, limitMaxSide} from "/common/imate.js";
 import {fileAccess} from "../agent/index.js";
 import {TemplateFormatter} from "/common/template-formatter.js";
-import {normalizePath} from "unconscious/common/path-utils.js";
+import {normalizePath} from "@roj234/shared/path";
 import {resolvePreset} from "/src/presets.js";
 
 /**

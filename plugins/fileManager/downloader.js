@@ -4,8 +4,8 @@ import {$state} from "unconscious";
 import {showToast} from "/src/components/Toast.js";
 import {callFileSystemFunc} from "../agent/index.js";
 import {downloadFile} from "/src/utils/utils.js";
-import {ZipWriter} from "unconscious/common/zip-io.js";
-import {createAsyncQueue} from "/common/pure-utils.js";
+import {ZipWriter} from "@roj234/jszip/io";
+import {createAsyncQueue, formatDuration} from "/common/pure-utils.js";
 
 /** 单次下载的体积上限：1 GiB */
 const MAX_DOWNLOAD_SIZE = 1024 ** 3;
@@ -98,6 +98,41 @@ const streamSavingIsSupported = window.showSaveFilePicker;
  */
 export const vfsDownload = (fs, path, name) => vfsDownloadMany(fs, [{ path, name }], name);
 
+const speedMeter = (total, onProgress) => {
+	const t0 = performance.now();
+	let tLast = t0, bLast = 0;
+	let smooth = 0;
+	const SAMPLE_MS = 250;
+
+	return (received) =>{
+		const t = performance.now();
+		const dt = t - tLast;
+		if (dt >= SAMPLE_MS) {
+			// 瞬时速度
+			const instant = ((received - bLast) * 1000) / dt;
+			// 指数平滑，时间常数 1s，避免数字乱跳
+			const alpha = 1 - Math.exp(-dt / 1000);
+			smooth = smooth ? smooth + alpha * (instant - smooth) : instant;
+
+			tLast = t;
+			bLast = received;
+
+			const avg = (received * 1000) / (t - t0);
+			const pct = total ? received / total : null;
+			const eta = smooth > 0 && total ? (total - received) / smooth : null;
+
+			onProgress(pct, {
+				received,
+				total,
+				instant,
+				speed: smooth,
+				average: avg,
+				eta,
+			});
+		}
+	}
+}
+
 /**
  * 下载多个文件/文件夹：只有一项且是文件时直接下载，其余情况打包为 zip
  * @param {AiChat.FileSystemInstance} fs
@@ -165,8 +200,22 @@ export const vfsDownloadMany = async (fs, items, archiveName) => {
 				blob = new File([blob], name, { type: blob.type });
 				downloadFile(blob);
 			} else {
+				/** @type {Response} */
 				const res = await callFileSystemFunc(fs, 'readRaw', {path, stream: true});
-				await res.body.pipeTo(target, {signal});
+				const total = parseInt(res.headers.get('content-length'), 10) || 0;
+				let received = 0;
+
+				const meter = speedMeter(total, (pct, obj) => {
+					state.value = name+` ${(pct * 100).toFixed(2)}% (${formatSize(obj.speed)}/s, ETA ${formatDuration(obj.eta)})`
+				});
+
+				writer = target;
+				await res.body.pipeThrough(new TransformStream({
+					transform(chunk, controller) {
+						controller.enqueue(chunk);
+						meter(received += chunk.byteLength);
+					},
+				})).pipeTo(target, { signal, preventAbort: true });
 			}
 		} else {
 			const filename = (archiveName||DEFAULT_ARCHIVE_NAME)+".zip";
@@ -221,8 +270,6 @@ export const vfsDownloadMany = async (fs, items, archiveName) => {
 				downloadFile(blob);
 			}
 		}
-	} catch (e) {
-		if (!signal.aborted) throw e;
 	} finally {
 		close();
 		await writer?.close();

@@ -7,7 +7,7 @@ import {
 	PP_UNATTENDED,
 	runningConversations,
 	selectedConversation,
-	updateMessageUI
+	updateMessageIf
 } from "./states.js";
 import {$state, $update, $watch, debugSymbol, unconscious} from "unconscious";
 import {loadingBlock, prettyError} from "./utils/utils.js";
@@ -16,7 +16,7 @@ import "./toolset.css";
 import {compileSchema, validateAndShowError} from "unconscious/common/json-schema-utils.js";
 import {showToast} from "./components/Toast.js";
 import {MCPClient} from "/common/MCPClient.js";
-import {parseJson5} from "unconscious/common/Json.js";
+import {parseJson5} from "@roj234/stream-json";
 import {highlightJsonLike} from "./markdown/highlight.js";
 import {markMessageDirty} from "./database.js";
 import {resolvePreset} from "./presets.js";
@@ -580,7 +580,7 @@ const getToolUserInteractionLevel = async (conv, name, parameters) => {
 }
 
 const UNSAFE_TOOL_DENY_MESSAGE = "User doesn't permit this tool use. Nothing changed. STOP and wait for user.";
-const UNSAFE_TOOL_DENY_MESSAGE_AFK = "AutoDenied: user is not present and cannot permit this tool.";
+export const UNSAFE_TOOL_DENY_MESSAGE_AFK = "AutoDenied: user is not present and cannot permit this tool.";
 
 export const TC_SCHEMA_ERROR = 4, TC_NEED_INTERACTION = 1, TC_ERROR = 2;
 
@@ -718,10 +718,10 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 
 			let result = fn.script(parameters, msg, conv, name, response);
 			if (result instanceof Promise) {
-				$update(updateMessageUI);
+				updateMessageIf(conv);
 				result = await result;
 			} else if (result instanceof Cancellable) {
-				$update(updateMessageUI);
+				updateMessageIf(conv);
 				if (signal.aborted) result.cancel();
 				signal.addEventListener('abort', () => result.cancel(), ONCE_EVENT);
 				result = await result.done();
@@ -794,7 +794,7 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
  * @param {AiChat.Conversation} conv
  * @param {AiChat.AssistantMessage[]} messages
  * @param {number} first
- * @param {boolean} reentrantOnly
+ * @param {boolean} [reentrantOnly]
  */
 export const undoToolCalls = (conv, messages, first, reentrantOnly) => {
 	for (let i = messages.length - 1; i >= first; i--) {

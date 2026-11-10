@@ -14,7 +14,7 @@
 	}
 
 	/* ---------- 目录树 ---------- */
-	.sidebar2 {
+	.-left {
 		font-size:13px;
 
 		.tree {
@@ -104,7 +104,7 @@
 			}
 		}
 
-		.list{
+		.fileList {
 			flex:1;position:relative;
 
 			.row{
@@ -130,21 +130,6 @@
 		.statusbar{
 			display:flex;align-items:center;gap:14px;height:30px;flex:none;padding:0 14px;
 			border-top:1px solid var(--border);font-size:12px;color:var(--muted);
-		}
-
-		.empty{
-			display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
-			height:100%;min-height:260px;color:var(--muted);text-align:center;padding:24px;
-
-			& svg{width:44px;height:44px;stroke:var(--muted);fill:none;stroke-width:1.4}
-			& i { font-size: 48px; line-height: 1; }
-
-			& p{margin:0;}
-			& code{
-				font-family:var(--code-font);font-size:12px;background:var(--panel-2);border:1px solid var(--border);
-				padding:6px 10px;border-radius:7px;color:var(--muted)
-			}
-			& button{margin-top:4px}
 		}
 	}
 
@@ -172,22 +157,37 @@
 	}
 }
 
+.fileList {
+	.empty {
+		display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+		height:100%;min-height:260px;color:var(--muted);text-align:center;padding:24px;
 
-/* 右键菜单 */
-.menu{
-	position:fixed;min-width:186px;padding:5px;border-radius:10px;
-	background:var(--card);border:1px solid var(--border);box-shadow:var(--shadow);animation:pop .12s ease-out;
-	& button{
-		display:flex;align-items:center;gap:9px;width:100%;height:30px;padding:0 9px;border-radius:6px;
-		font-size:12.5px;color:var(--muted);text-align:left;
-		&:not(:disabled) {
-			&:hover{background:var(--chip-hover);color:var(--text)}
-			&.danger2:hover{color:var(--error-text-color);background:var(--error-bg)}
+		& svg{width:44px;height:44px;stroke:var(--muted);fill:none;stroke-width:1.4}
+		& i { font-size: 48px; line-height: 1; }
+
+		& p{margin:0;}
+		& code{
+			font-family:var(--code-font);font-size:12px;background:var(--panel-2);border:1px solid var(--border);
+			padding:6px 10px;border-radius:7px;color:var(--muted)
 		}
-		&:disabled{opacity:.4;cursor:not-allowed}
-		& svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+		& button{margin-top:4px}
 	}
-	& hr{border:none;border-top:1px solid var(--border);margin:4px 2px}
+}
+
+.grepDialog {
+	& > .-head {
+		display: flex;
+		gap: 8px;
+		margin: 8px 10px;
+
+		& > div {
+			flex: 1;
+		}
+	}
+	& > .grep-card {
+		overflow: auto;
+		flex: 1;
+	}
 }
 
 /* toast */
@@ -208,12 +208,11 @@
 }
 
 @keyframes fade{from{opacity:0}to{opacity:1}}
-@keyframes pop{from{transform:scale(.97) translateY(6px);opacity:.6}to{transform:none;opacity:1}}
 @keyframes up{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
 
 @media (min-width:641px) {
 	.explorer {
-		.sidebar2 {
+		.-left {
 			width:230px;
 			border-right:1px solid var(--border);
 
@@ -225,7 +224,7 @@
 }
 @media (max-width:640px) {
 	.explorer {
-		.sidebar2 {
+		.-left {
 			position: absolute;
 			right: 40px;
 			bottom: 40px;
@@ -254,13 +253,14 @@
 				&:hover .row {
 					display: block;
 					position: relative;
+					transform: translateY(-100%);
+					top: -40px;
 					width: 100px;
-					top: -100px;
 					left: 20px;
 				}
 
 			}
 		}
-		.fa-search{width:120px}
+		.my-input{width:120px}
 	}
 }

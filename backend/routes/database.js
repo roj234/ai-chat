@@ -14,6 +14,7 @@ import path from "node:path";
 import {LLM_COST_SCALE} from "../sync.js";
 import {getProxyAgent} from "../utils/fetch-hook.js";
 import {exclusiveLock} from "../utils/lock.js";
+import {jsonFetch} from "../../common/fetch-utils.js";
 
 /**
  * 重新映射向量数据库的key
@@ -187,10 +188,10 @@ export function registerDatabaseRoutes(router, rootPath) {
 						}
 					}
 
-					const json = (await fetch("https://zenmux.ai/api/v1/management/generation?id="+logItem.request_id, {
-						headers: { authorization: "Bearer "+zenmuxToken },
+					const json = (await jsonFetch("https://zenmux.ai/api/v1/management/generation?id=" + logItem.request_id, {
+						key: zenmuxToken,
 						agent: getProxyAgent(zenmuxProxy)
-					}).then(r => r.json())).data;
+					})).data;
 
 					let {
 						prompt_tokens, prompt_tokens_details = {},

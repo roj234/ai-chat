@@ -1,10 +1,10 @@
 import {config, EVENT_BUS} from "../states.js";
 import {decodeObjects, encodeObjects, serializeJSON} from "../utils/serialization.js";
 import {initSync} from "./syncClient.js";
-import {decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
+import {decodeMsg, encodeMsg} from "@roj234/msgpack";
 import {msgpack_schema, msgpack_schema_version} from "/common/wire-compression-schema.js";
 import {SHA256} from "unconscious/common/SHA256.js";
-import {base64Encode} from "unconscious/common/Base64.js";
+import {base64Encode} from "@roj234/shared/base64";
 import {connectBestServer, prettyError} from "../utils/utils.js";
 import {$store, $update, AS_IS, debugSymbol, unconscious} from "unconscious";
 import SimpleModal from "../components/SimpleModal.jsx";
@@ -225,6 +225,13 @@ const u_messages = batched("messages", true);
 
 export const getConversation = conv => u_getConversation([conv.id]);
 
+export const _copyConversationData = (conversation, src) => {
+	const readyState = conversation.ready;
+	for (const key in conversation) delete conversation[key];
+	Object.assign(conversation, src);
+	if (readyState != null) conversation.ready = readyState;
+};
+
 export const getMessages = async conversation => {
 	const id = conversation.id;
 	const cached = getImmediateMessages(conversation, true);
@@ -232,10 +239,7 @@ export const getMessages = async conversation => {
 	const messages = u_messages(id);
 
 	return metadata.then(json => {
-		const readyState = conversation.ready;
-		for (const key of Object.keys(conversation)) delete conversation[key];
-		Object.assign(conversation, json);
-		if (readyState != null) conversation.ready = readyState;
+		_copyConversationData(conversation, json);
 		conversation.id = id;
 		return messages.catch(err => {
 			if (err.status !== 304) throw err;

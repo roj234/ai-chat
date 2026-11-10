@@ -77,9 +77,8 @@
 	display: flex;
 	flex-direction: column;
 
-	& input {
-		border-radius: 0;
-		&:not(:focus) { border-bottom: 1px solid var(--border); }
+	& .my-input {
+		&:not(:focus-within) { border-bottom: 1px solid var(--border); }
 	}
 
 	& ul {

@@ -109,9 +109,9 @@ const createVCSDialog = (conv, state) => {
 	})
 
 	const BranchMenu = () => <div className="dropdown">
-		<div className="fa-search" onClick.stop={() => {}}>
+		<div className="my-input" onClick.stop={() => {}}>
 				<Icon_search />
-				<input className="text-input" placeholder="过滤或新建覆盖层..." autoComplete="off"
+				<input placeholder="过滤或新建覆盖层..." autoComplete="off"
 					   value={filterText}
 					   onInput={e => {
 						   filterText.value = e.target.value.toLowerCase();
@@ -240,9 +240,9 @@ const createVCSDialog = (conv, state) => {
 
 		<div className="vcs-body">
 			<section className="vcs-file-pane">
-				<div className="fa-search">
+				<div className="my-input">
 					<Icon_search/>
-					<input type="text" className="text-input" value={glob} onInput={e => {
+					<input type="text" value={glob} onInput={e => {
 						glob = e.target.value;
 						$update(viewingOverlay);
 					}} placeholder="用 Glob 语法搜索"/>

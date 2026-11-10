@@ -1,4 +1,4 @@
-import {normalizePath} from "unconscious/common/path-utils.js";
+import {normalizePath} from "@roj234/shared/path";
 
 export const globMacroPlugin = () => {
 	return {

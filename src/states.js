@@ -1,4 +1,4 @@
-import {$derived, $state, $store, $watch, debugSymbol, unconscious} from 'unconscious';
+import {$derived, $state, $store, $update, $watch, debugSymbol, unconscious} from 'unconscious';
 import {EventBus} from "./utils/EventBus.js";
 import {LRUCache} from "@roj234/lru-cache";
 
@@ -138,6 +138,8 @@ export const ensureConversation = async () => {
 };
 
 export const switchToConversation = (conv) => {
+	if (unconscious(selectedConversation) === conv) return;
+
 	const state = runningConversations.get(conv.id);
 	if (state) messages.value = unconscious(state.messages);
 	conv.ready = !!state;
@@ -216,7 +218,14 @@ export const LOG_CACHE = debugSymbol("BillingLog");
 export const BRANCH_MANAGER = debugSymbol("BranchManager");
 export const LOCKED = debugSymbol("ServerLocked");
 
+/** @param {AiChat.Conversation} conv */
+export const updateMessageIf = (conv) => {
+	if (unconscious(selectedConversation) === conv)
+		$update(updateMessageUI);
+};
+
 export const updateConversationListUI = $state();
+/** @deprecated */
 export const updateConversationUI = $state();
 export const updateMessageUI = $state();
 

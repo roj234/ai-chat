@@ -44,11 +44,11 @@ import {
 	setConversationTitle
 } from "../database.js";
 import {deepEqual, patch} from "unconscious/common/deepEqual.js";
-import {decodeMsg} from "unconscious/common/msgpack.js";
+import {decodeMsg} from "@roj234/msgpack";
 import {msgpack_schema} from "/common/wire-compression-schema.js";
 import {highlightJsonLike} from "../markdown/highlight.js";
 import {prettyError} from "../utils/utils.js";
-import {initialize, serializeMsgpack, serverAcceptMsgpack} from "./remoteDB.js";
+import {_copyConversationData, initialize, serializeMsgpack, serverAcceptMsgpack} from "./remoteDB.js";
 import {enableBranches} from "../utils/BranchManager.js";
 import {conversationLock, lockConversation, unlockConversation} from "../conversation-lock.js";
 
@@ -310,14 +310,19 @@ export const initSync = (address) => new Promise((resolve, reject) => {
 				const index = conversations.findIndex(item => item.id === convId);
 				let conv = conversations[index], moved;
 
-				try {
-					conv = patch(conv, data);
-				} catch {
-					if (conv === undefined) {
-						showToast(`对话数据 ${convId} 不同步`, "error");
-						return;
+				if (data.$ === '=' && conv) {
+					// 避免替换对象
+					_copyConversationData(conv, data.v);
+				} else {
+					try {
+						conv = patch(conv, data);
+					} catch {
+						if (conv === undefined) {
+							showToast(`对话数据 ${convId} 不同步`, "error");
+							return;
+						}
+						// 有可能失败，因为不一定所有的客户端都拿到了完整的对话对象，可能只有list时的 id time title 三项
 					}
-					// 有可能失败，因为不一定所有的客户端都拿到了完整的对话对象，可能只有list时的 id time title 三项
 				}
 				const diff = data.$ === '=' ? data.v : data;
 

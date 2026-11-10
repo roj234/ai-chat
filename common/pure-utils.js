@@ -103,15 +103,21 @@ export function mpscScheduler(lowWater, highWater) {
 
 export const createAsyncQueue = (concurrency = 6) => {
 	const taskQueue = new Set;
+	const exceptions = [];
 
 	return [async runTask => {
 		while (taskQueue.size >= concurrency) {
 			await Promise.race(taskQueue);
 		}
 
-		const self = runTask().finally(() => taskQueue.delete(self));
-		taskQueue.add(self);
-	}, () => Promise.all(taskQueue)];
+		const p = runTask();
+		const cleanup = () => taskQueue.delete(p);
+		p.then(cleanup, () => {
+			exceptions.push(p);
+			cleanup();
+		});
+		taskQueue.add(p);
+	}, () => Promise.all(exceptions.length ? [...taskQueue, ...exceptions] : taskQueue)];
 }
 
 export const PROMISE_CATCH = () => {};

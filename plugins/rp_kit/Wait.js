@@ -3,11 +3,12 @@ import {submitUserChatMessage} from "/src/api-request.js";
 import {getToolParameters} from "/src/toolset.js";
 import {EVENT_BUS, LOCKED, selectedConversation} from "/src/states.js";
 import {getImmediateMessages, markMessageDirty} from "/src/database.js";
+import {lockConversation, unlockConversation} from "/src/conversation-lock.js";
 
 const TIMEOUT = debugSymbol("TimeoutId");
 
 const finish = async (response, message, conv) => {
-	// 最后一个是检测这条对话是不是已经被删除了
+	// getImmediateMessages 是检测这条对话是不是已经被删除了
 	if (null == response.success && !conv[LOCKED] && getImmediateMessages(conv)?.at(-1) === message) {
 		if (response[TIMEOUT]) {
 			response.content = `timeout: ${response.duration = Date.now() - response.time}ms elapsed`;
@@ -68,6 +69,10 @@ export const Wait = {
 			if (!(TIMEOUT in response)) {
 				reason = " (by=harness restart)";
 			} else {
+				if (response[LOCKED]) {
+					unlockConversation(conv.id);
+					delete response[LOCKED];
+				}
 				clearTimeout(response[TIMEOUT]);
 			}
 
@@ -106,6 +111,8 @@ export const Wait = {
 			});
 		}
 
+		lockConversation(conv.id);
+		response[LOCKED] = true;
 		response[TIMEOUT] = setTimeout(() => finish(response, message, conv), ddl - response.time);
 	},
 	keyFunc(keys, response, frozen, message) {

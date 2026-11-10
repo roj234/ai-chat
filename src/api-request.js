@@ -69,7 +69,7 @@ import SimpleModal from "./components/SimpleModal.jsx";
 import {highlightJsonLike} from "./markdown/highlight.js";
 import {deepEntries, jsonEval} from "unconscious/common/json-schema-utils.js";
 import {applyDelta, jsonFetch, ORIGINAL_ERROR, sseFetch} from "/common/fetch-utils.js";
-import {base64DecodeToUint8Array} from "unconscious/common/Base64.js";
+import {base64DecodeToUint8Array} from "@roj234/shared/base64";
 import {DI_messageContainer, DI_messageVirtualList} from "./hooks.js";
 import {encodeObjects, objectIdentityHash} from "./utils/serialization.js";
 import {SHA256} from "unconscious/common/SHA256.js";
@@ -186,25 +186,38 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 	let markdownRenderer = createMarkdownStream();
 	let updateCount = 0;
-	let lastMessage;
 	let lastDetails;
+	let forceRender;
 	let _waitingFor;
 
 	const roleId = conversation.roleId;
 	const schemaPreprocess = roleId ? s => "```"+roleId+"\n"+s : AS_IS;
 
-	const forceRender = () => render(lastMessage, true);
-	const render = (message, force) => {
-		lastMessage = message;
 
+	const renderNow = (isThinking, obj, container) => {
+		const dist = distanceToBottom();
+		const content = obj.content;
+
+		try {
+			markdownRenderer(isThinking ? content : schemaPreprocess(content), container, isThinking ? DONT_PARSE_HTML_IN_THINKING : null);
+		} catch (e) {
+			console.error(e);
+			showToast("Markdown更新出错\n"+prettyError(e), 'error');
+		}
+
+		if (dist < 30 && !unconscious(lastScrollDirectionIsUp)) DI_messageContainer.vl.scrollTo(Number.MAX_SAFE_INTEGER);
+	};
+	const render = (message, force) => {
 		const isThinking = isReactive(message.think);
-		const textContent = (isThinking ? message.think : message).content;
+		const obj = isThinking ? message.think : message;
 		const container = findStreamingContainer(isThinking);
+
 		if (!container) {
-			if (!textContent) return;
+			if (!obj.content) return;
 			_waitingFor = isThinking;
 			return true;
 		}
+
 		_waitingFor = 0;
 
 		if (!force || config.pausePolicy === PP_UNATTENDED) {
@@ -212,37 +225,30 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			if (details) {
 				if (lastDetails == null) {
 					lastDetails = details;
+					forceRender = () => renderNow(isThinking, obj, container);
 					details.addEventListener("toggle", forceRender, ONCE_EVENT);
 					// 只在展开时解析思考块的markdown
 				}
 				return;
 			}
 
-			if (updateCount) return;
+			if (updateCount++) return;
 
 			requestAnimationFrame(() => {
-				const wasUpdatedAfterCheckpoint = updateCount > 1;
+				const updateManyInOneFrame = updateCount;
 				updateCount = 0;
-				if (wasUpdatedAfterCheckpoint) render(message);
+				if (updateManyInOneFrame !== 1) {
+					renderNow(isThinking, obj, container);
+					if (updateManyInOneFrame < 0) markdownRenderer();
+				}
 			});
-			updateCount++;
 		}
 
 		if (lastDetails) {
 			lastDetails.removeEventListener("toggle", forceRender);
-			lastDetails = null;
+			forceRender = lastDetails = null;
 		}
 
-		const dist = distanceToBottom();
-
-		try {
-			markdownRenderer(isThinking ? textContent : schemaPreprocess(textContent), container, isThinking ? DONT_PARSE_HTML_IN_THINKING : null);
-		} catch (e) {
-			console.error(e);
-			showToast("Markdown更新出错\n"+prettyError(e), 'error');
-		}
-
-		if (dist < 30 && !unconscious(lastScrollDirectionIsUp)) DI_messageContainer.vl.scrollTo(Number.MAX_SAFE_INTEGER);
 	};
 	const renderer = (type, message) => {
 		if (selectedConversation.id !== conversation.id) return;
@@ -254,9 +260,9 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 				if (render(message) && _waitingFor !== flag) break;
 			return;
 			case MARKDOWN_END: {
-				if (lastMessage) {
-					updateCount = 0;
-					render(lastMessage);
+				if (updateCount) {
+					updateCount = -1;
+				} else {
 					markdownRenderer();
 				}
 				if (null === message?.finish_reason) return;
@@ -479,9 +485,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			}
 		};
 
-		if ('tool_calls' !== finishReason || cfg.generateTitle !== true) {
-			mayGenerateTitle();
-		}
+		if (cfg.generateTitle) mayGenerateTitle();
 		if (hasPendingInput()) finishReason = 'userInput';
 
 		// context usage
@@ -612,10 +616,11 @@ export const MARKDOWN_APPEND = 2, MARKDOWN_END = 3;
 export const findStreamingContainer = think => {
 	const loading = DI_messageVirtualList.lastElementChild?.querySelector(".body>.ai-status");
 	if (loading) {
-		const element = loading.previousElementSibling;
+		let element = loading.previousElementSibling;
+		while (element?.matches('.tool-call')) element = element.previousElementSibling;
 		if (element) {
 			if (think) {
-				if (element.matches(".think")) return element.children[1];
+				if (element.matches(".think.shimmer")) return element.children[1];
 			} else {
 				if (element.matches(".md")) return element;
 			}

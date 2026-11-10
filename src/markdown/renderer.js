@@ -84,7 +84,6 @@ export function createMarkdownRenderer(root, options = {}) {
 							<div className={"sticky"} style={"top:var(--bar-height)"}>
 								<div className="code-header">
 									<span className="buttons">
-										<button className="ri-download-2-line ghost" data-action="save" title="下载代码"></button>
 										<button className="ri-file-copy-line ghost" data-action="copy" title="复制代码"></button>
 									</span>
 								</div>
@@ -224,7 +223,10 @@ export function createMarkdownRenderer(root, options = {}) {
 				const owner = node.previousElementSibling.querySelector(".code-header");
 				let span = owner.firstElementChild;
 				if (span.className) owner.prepend(span = <span />);
-				if (filename) span.dataset.name = filename;
+				if (filename) {
+					owner.lastElementChild.prepend(<button className="ri-download-2-line ghost" data-action="save" title="下载代码"></button>);
+					span.dataset.name = filename;
+				}
 				span.innerText = filename || language;
 
 				value = language;

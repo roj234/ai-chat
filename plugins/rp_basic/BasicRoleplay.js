@@ -13,6 +13,7 @@ import {
 } from "/src/states.js";
 import {importConversationData, registerDataImportHandler} from "/src/data-exchange.js";
 import {
+	$cleanup,
 	$computed,
 	$foreach,
 	$state,
@@ -48,8 +49,8 @@ import {LorebookList, PresetList} from "./TagList.jsx";
 import schema from "./schema.json";
 import {compileSchema, validateAndShowError} from "unconscious/common/json-schema-utils.js";
 import {onLoad} from "/src/hooks.js";
-import {openJsonEditor} from "/src/json_editor/JsonEditDialog.js";
-import {base64DecodeToString} from "unconscious/common/Base64.js";
+import {openJsonEditor} from "/src/components/JsonEditor.jsx";
+import {base64DecodeToString} from "@roj234/shared/base64";
 import {LorebookMatcher} from "./LorebookMatcher.js";
 import {createFileSystemAsync, createVirtualFileSystem} from "../agent/index.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
@@ -157,8 +158,7 @@ function createSchemaEditColumn(typeId, editorConstructor, defaultValue = {}) {
 					}
 				})
 			}} title="保存"><Icon_save/></button>,
-			<button className="ri-download-line btn ghost" title="导出"
-					onClick={() => doExport(unconscious(selectedItem))}/>
+			<button className="ri-download-line ghost" title="导出" onClick={() => doExport(unconscious(selectedItem))}/>
 		);
 
 		handle = openWindow({
@@ -240,26 +240,33 @@ function createSchemaEditColumn(typeId, editorConstructor, defaultValue = {}) {
 	const editBtn = <button className={"ri-edit-2-line btn ghost"} onClick={openEditor}
 		disabled={() => !unconscious(selectedItem)} title="编辑"
 		onContextMenu.prevent={e => {
-			const key = typeId + ":" + selectedItem.name;
-
+			const key = typeId+":"+selectedItem.name;
 			let skipNext;
-			const [updateValue, onClose] = openJsonEditor(key, () => {
-				const {name, type, time, _dirty, ...rest} = unconscious(selectedItem);
-				return JSON.stringify(rest, null, 2);
-			}, (obj) => {
-				obj.name = selectedItem.name;
-				obj.type = selectedItem.type;
-				markDirty(obj);
-				selectedItem.value = obj;
-				skipNext = true;
-			});
-			const syncToEditor = () => {
-				if (skipNext) skipNext = false;
-				else updateValue();
-			};
+			openJsonEditor(key, (w) => {
+				const data = $state();
+				const syncToEditor = () => {
+					if (skipNext) {
+						skipNext = false;
+						return;
+					}
 
-			$watch(selectedItem, syncToEditor, false);
-			onClose(() => $unwatch(selectedItem, syncToEditor));
+					const {name, type, time, _dirty, ...rest} = unconscious(selectedItem);
+					data.value = rest;
+				};
+
+				$watch(selectedItem, syncToEditor);
+				$cleanup(w.element, () => $unwatch(selectedItem, syncToEditor))
+
+				const apply = (obj) => {
+					obj.name = selectedItem.name;
+					obj.type = selectedItem.type;
+					markDirty(obj);
+					selectedItem.value = obj;
+					skipNext = true;
+				};
+
+				return [data, apply];
+			});
 		}}>
 		<span className={"tooltip"}>{auxMainlyTouch ? "长按" : "右击"}编辑原始数据</span>
 	</button>;

@@ -22,8 +22,12 @@ import {vfsDownloadMany} from "./downloader.js";
 import {vfsCopyMove} from "../agent/Mounts.js";
 import {createAsyncQueue} from "/common/pure-utils.js";
 import {xhrUpload} from "./xhrUploader.js";
+import {openContextMenu} from "/src/components/Menu.js";
+import {grepCard} from "../agent/GrepCard.jsx";
 
 /* ============================== 工具函数 ============================== */
+const GLOB_META_CHARS = /[\\*?[{]/g;
+const REGEX_META_CHARS = /[.^$+{}[\]|()]/g;
 
 /**
  * 目录项
@@ -91,6 +95,108 @@ const cutPaths = $computed(() => (
 ));
 $watch(cutPaths, () => {});
 
+function openGrepDialog(fs, cwd) {
+	const id = vfsIdentity(fs[FS_SOURCE]);
+	const handle = openWindow({
+		id: "grepDialog fileList " + encodeURI(id),
+		title: `搜索文件内容 (${id})`,
+		icon: <Icon_search/>,
+		width: 500,
+		height: 700,
+		element: (handle) => {
+			const patternEl = <input placeholder="输入要搜索的内容…" spellCheck={false}/>
+			const pathEl = <input placeholder="在目录中…" spellCheck={false}/>
+			const buttonClick = $state();
+			let useRegex = false;
+			let caseSensitive = false;
+			let useGlob = false;
+
+			const grepResult = $asyncState(async () => {
+				let pattern = patternEl.value;
+				if (!pattern) return false;
+
+				if (!useRegex) pattern = pattern.replace(REGEX_META_CHARS, '\\$&');
+				if (!caseSensitive && (!useRegex || !pattern.endsWith(')'))) pattern += "(i)";
+
+				const path = pathEl.value;
+				const content = await callFileSystemFunc(fs, 'grep', {
+					path: useGlob ? "" : path,
+					glob: useGlob ? path : undefined,
+					pattern,
+					maxFiles: 100,
+					maxMatchesPerFile: 50,
+					context: 1
+				});
+				return grepCard(pattern, content, "", true);
+			}, buttonClick);
+
+			handle._sync = buttonClick;
+			handle._pattern = patternEl;
+			handle._path = pathEl;
+
+			return <>
+				<div className="-head">
+					<div className="my-input -comp">
+						<Icon_search/>
+						{patternEl}
+						<div className="-btn">
+							<button title="区分大小写" onClick={({target}) => {
+								caseSensitive = target.classList.toggle('active');
+								$update(buttonClick);
+							}}>Aa
+							</button>
+							<button title="正则表达式" onClick={({target}) => {
+								useRegex = target.classList.toggle('active');
+								$update(buttonClick);
+							}}>.*
+							</button>
+						</div>
+					</div>
+					<div className="my-input -comp -path">
+						<i className="icon ri-folder-line" />
+						{pathEl}
+						<div className="-btn">
+							<button title="Glob 表达式" onClick={({target}) => {
+								useGlob = target.classList.toggle('active');
+								$update(buttonClick);
+							}}>?*
+							</button>
+						</div>
+					</div>
+					<button className="btn primary" onClick={() => $update(buttonClick)}>搜索</button>
+				</div>
+
+				{$computed(() => {
+					if (grepResult.loading) {
+						return <div className="empty">
+							<i className="spinner" style="width:44px;height:44px"/>
+							<p>正在搜索…</p>
+						</div>;
+					} else if (grepResult.error) {
+						return <div className="empty">
+							<Icon_warning/>
+							<p>搜索失败</p>
+							<code>{grepResult.error.message ?? prettyError(grepResult.error)}</code>
+							<button className="btn ghost" onClick={() => $update(buttonClick)}>重试</button>
+						</div>;
+					} else if (!grepResult.value) {
+						return <div className="empty">
+							<Icon_search/>
+							<p>{patternEl.value ? `没有匹配 “${patternEl.value}” 的文件` : "输入内容开始搜索"}</p>
+						</div>;
+					} else {
+						return grepResult;
+					}
+				}, [grepResult])}
+			</>
+		}
+	});
+
+	handle._path.value = unconscious(cwd);
+	handle._pattern.value = "";
+	$update(handle._sync);
+}
+
 /**
  * @param {AiChat.FileSystemInstance} fs
  * @param {import("unconscious").Reactive<string>} cwd
@@ -118,7 +224,7 @@ const Explorer = (fs, cwd) => {
 
 		const entries = await call('list', {
 			path: path || '.',
-			pattern: q ? `**/*${q.replace(/[*?[\]{}\\#%]/g, '')}*` : '*',
+			pattern: q ? `**/*${regexpSearch ? q : q.replace(GLOB_META_CHARS, '\\$&')}*` : '*',
 			json: true,
 			limit: q ? 200 : 5000,
 			showModified: true,
@@ -159,7 +265,6 @@ const Explorer = (fs, cwd) => {
 		}
 		return openTerminal(fs, cwd.value);
 	};
-
 	let terminalBtn = ref();
 	let toastDiv = ref();
 	let uploadDiv = ref();
@@ -427,54 +532,8 @@ const Explorer = (fs, cwd) => {
 	};
 
 	/* ------------------------------ 右键菜单 ------------------------------ */
-	/**
-	 * @typedef {{label: string, icon?: JSX.Element, danger?: boolean, disabled?: boolean, act?: Function} | {sep: true}} CtxItem
-	 */
 
 	let scrollContainer = ref();
-
-	const closeCtx = () => {
-		if (!ctxEl) return;
-		ctxEl.remove();
-		ctxEl = null;
-		document.removeEventListener('mousedown', onDocDown, true);
-		scrollContainer.removeEventListener('scroll', closeCtx, true);
-	};
-
-	/** @param {MouseEvent} ev */
-	function onDocDown(ev) {
-		if (ctxEl && !ctxEl.contains(ev.target)) closeCtx();
-	}
-
-	/**
-	 * @param {number} x
-	 * @param {number} y
-	 * @param {CtxItem[]} items
-	 */
-	function showCtx(x, y, items) {
-		closeCtx();
-		const el = <div className="menu" onClick={ev => {
-			const btn = ev.target.closest('button[data-i]');
-			if (!btn) return;
-			const it = items[+btn.dataset.i];
-			closeCtx();
-			it?.act?.();
-		}}>
-			{items.map((it, i) => it.sep ? <hr/> : (
-				<button data-i={i} className={it.danger ? 'danger2' : null} disabled={it.disabled}>
-					<i className={it.icon} />
-					{it.label}
-				</button>
-			))}
-		</div>;
-		document.body.appendChild(el);
-		const r = el.getBoundingClientRect();
-		el.style.left = Math.min(x, innerWidth - r.width - 8) + 'px';
-		el.style.top = Math.min(y, innerHeight - r.height - 8) + 'px';
-		ctxEl = el;
-		document.addEventListener('mousedown', onDocDown, true);
-		scrollContainer.addEventListener('scroll', closeCtx, true);
-	}
 
 	/**
 	 * @param {MouseEvent} ev
@@ -517,7 +576,7 @@ const Explorer = (fs, cwd) => {
 			},
 		);
 
-		showCtx(ev.clientX, ev.clientY, items);
+		openContextMenu(ev, scrollContainer, items, true);
 	}
 
 	/** 空白处右键 @param {MouseEvent} ev */
@@ -526,16 +585,17 @@ const Explorer = (fs, cwd) => {
 
 		ev.preventDefault();
 		resetSel();
-		showCtx(ev.clientX, ev.clientY, [
+		openContextMenu(ev, scrollContainer, [
 			{label: '刷新', icon: "ri-loop-right-line", act: () => $update(cwd)},
 			{sep: true},
-			{label: '粘贴', icon: "ri-file-copy-line", disabled: !clipboard.value, act: paste},
-			{label: '在此处打开终端', icon: "ri-terminal-line", act: terminal},
+			{label: '粘贴', icon: "ri-clipboard-line", disabled: !clipboard.value, act: paste},
+			{label: '打开终端', icon: "ri-terminal-line", act: terminal},
+			{label: '搜索文件内容', icon: <Icon_search/>, act: () => openGrepDialog(fs, cwd)},
 			{sep: true},
 			{label: '上传文件', icon: "ri-upload-line", act: () => fileInput.click()},
 			{label: '新建文件夹', icon: "ri-folder-line", act: newFolder},
 			{label: '新建文件', icon: "ri-file-line", act: newFile},
-		]);
+		], true);
 	}
 
 	/* ------------------------------ 剪贴板 ------------------------------ */
@@ -763,17 +823,23 @@ const Explorer = (fs, cwd) => {
 			async onConfirm() {
 				dialog.querySelectorAll("button").forEach(b => b.remove());
 
+				let deletedPaths = [];
 				let fail = 0;
-				let all = items.map(it => call('delete', {path: it.path, recursive: true, force: false}).catch(e => {
+				let all = items.map(it => call('delete', {path: it.path, recursive: true, force: false}).then(() => {
+					deletedPaths.push(it.path);
+				}, e => {
 					fail++;
 					toast('删除失败：' + it.name + ' — ' + e.message, 'err');
 				}));
 				await Promise.allSettled(all);
 				if (fail) toast(items.length > 1 ? `已删除 ${items.length} 项` : `已删除 ${items[0].name}`, 'ok');
 				clipboard.value = null;
+
+				deletedPaths.forEach(path => {
+					invalidateDirectoryContents(path);
+					invalidateDirectoryContents(parentOf(path));
+				});
 				$update(cwd);
-				treeKids.clear();
-				bumpTree();
 			}
 		});
 	}
@@ -1115,7 +1181,8 @@ const Explorer = (fs, cwd) => {
 		style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer"
 		onChange={ev => ev.target.checked ? selectAll() : applySel(new Set())}/>;
 
-	const searchInput = <input className="text-input"  placeholder="搜索文件名" spellCheck={false}
+	let regexpSearch = false;
+	const searchInput = <input placeholder="搜索当前目录" spellCheck={false}
 		value={query}
 		onInput={ev => {
 			clearTimeout(searchDebounceTimer);
@@ -1145,7 +1212,7 @@ const Explorer = (fs, cwd) => {
 	}}/>;
 
 	const body = <div className="explorer" onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
-		<div className="sidebar2 col">
+		<div className="-left col">
 			<div className="tree">{$vforeach(treeRows, ({depth, path}) => {
 				const kids = treeKids.get(path.split('/'));
 				const open = treeOpen.has(path);
@@ -1199,7 +1266,16 @@ const Explorer = (fs, cwd) => {
 					{pathInput}
 				</div>
 				<button style="border-right: 1px solid var(--border);" className="ri-loop-right-line icon-btn" title="刷新" onClick={() => $update(cwd)} />
-				<div className="fa-search"><Icon_search/>{searchInput}</div>
+				<div className="my-input">
+					<Icon_search/>
+					{searchInput}
+					<div className="-btn">
+						<button title="Glob 表达式" onClick={({target}) => {
+							regexpSearch = target.classList.toggle('active');
+							searchInput.dispatchEvent(new KeyboardEvent('input'));
+						}}>?*</button>
+					</div>
+				</div>
 			</div>
 
 			<div className="head">
@@ -1215,7 +1291,7 @@ const Explorer = (fs, cwd) => {
 				</div>
 			</div>
 
-			<div ref={scrollContainer} className="list scroll" onClick={e => {
+			<div ref={scrollContainer} className="scroll fileList" onClick={e => {
 				if (!e.target.closest('.row')) resetSel();
 			}} onContextMenu={onBlankMenu}>
 				{$computed(() => {

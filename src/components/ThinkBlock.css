@@ -14,7 +14,7 @@
 
     &::-webkit-details-marker { display: none; }
 
-    .thinking & {
+    .shimmer & {
         position: relative;
         overflow: hidden; /* 必须，防止流光溢出 */
         background: var(--think-shimmer-bg);
@@ -26,14 +26,7 @@
             width: 100%;
             height: 100%;
 
-            background: linear-gradient(
-                    90deg,
-                    transparent 0%,
-                    rgba(255, 255, 255, 0.0) 30%,
-                    var(--think-shimmer) 50%,
-                    rgba(255, 255, 255, 0.0) 70%,
-                    transparent 100%
-            );
+            background: linear-gradient(90deg, transparent 30%, var(--think-shimmer) 50%, transparent 70%);
         }
     }
 
@@ -45,7 +38,7 @@
     [open] & .chevron { transform: rotate(90deg); }
 }
 
-.think.thinking > :first-child::before {
+.think.shimmer > :first-child::before {
     animation: sweep 2s infinite linear;
 }
 

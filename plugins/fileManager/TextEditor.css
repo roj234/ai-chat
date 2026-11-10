@@ -1,0 +1,150 @@
+
+.vje {
+    /*
+    --vje-bg:
+    --vje-muted:
+    --vje-sel:
+    --vje-caret:
+    --vje-err:
+    font-family: monospace;
+    */
+
+    background: var(--vje-bg);
+
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+
+    position: relative;
+    line-height: var(--lh);
+    tab-size: 4;
+    user-select: none;
+    -webkit-user-select: none;
+
+    --left: calc(var(--digits) * 1ch + 2ch);
+
+    .-fade {
+        position: absolute;
+        top: 0; left: 0; right: 8px;
+        height: 12px;
+        background: linear-gradient(to bottom, rgba(13, 17, 23, 0.95), rgba(13, 17, 23, 0));
+        pointer-events: none;
+        z-index: 1;
+    }
+
+    .-gutter {
+        padding-top: var(--p);
+        width: var(--left);
+        pointer-events: none;
+        height: 100%;
+
+        .-lines {
+            white-space: pre;
+            text-align: right;
+            padding-right: 1ch;
+            line-height: var(--lh);
+            color: var(--vje-muted);
+            font-variant-numeric: tabular-nums;
+            will-change: transform;
+        }
+
+        .-hl {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: var(--p);
+            height: var(--lh);
+            background: var(--vje-err);
+            opacity: .75;
+            display: none;
+        }
+    }
+
+    > .-empty {
+        position: absolute;
+        top: 4px;
+        left: calc(var(--left) + 2px);
+        color: var(--vje-muted);
+        pointer-events: none;
+        display: none;
+        font-style: italic;
+    }
+
+    > .-container {
+        position: absolute;
+        inset: 0;
+        left: var(--left);
+        overflow: auto;
+        overflow-anchor: none;
+        padding-top: var(--p);
+        padding-bottom: var(--lh);
+
+        scrollbar-width: thin;
+        /* FIXME 不应该引用 main.css 中的变量 */
+        scrollbar-color: var(--scrollbar-thumb) transparent;
+
+        /** 这些 main.css 里面有了
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { }
+        ::-webkit-scrollbar-corner { }
+        ::-webkit-scrollbar-thumb {
+            background-color: var(--scrollbar-thumb);
+            background-clip: padding-box;
+            border: 2px solid transparent;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover { background-color: var(--scrollbar-thumb-hover); }
+        ::-webkit-scrollbar-thumb:active { background-color: var(--scrollbar-thumb-active); }
+         */
+
+        .-line {
+            height: var(--lh);
+            line-height: var(--lh);
+            white-space: pre;
+            margin-left: var(--p);
+
+            /* 行尾留白：让最长行末尾也能鼠标操作，不至于点到滚动条 */
+            &::after {
+                content: "";
+                display: inline-block;
+                width: 2ch;
+            }
+
+            /* 选区 .-line.-sel 表示整行选择 */
+            &.-sel, .-sel {
+                background: var(--vje-sel);
+            }
+            /* 让选区没有空隙 */
+            & span {
+                display: inline-block;
+                height: var(--lh);
+            }
+
+            /* 长行截断提示 */
+            .-trunc {
+                margin-left: 8px;
+                color: var(--vje-muted);
+                font-style: italic;
+                font-size: 12px;
+            }
+        }
+
+    }
+
+    > .-input {
+        all: unset;
+        position: absolute;
+        height: var(--lh);
+        line-height: var(--lh);
+
+        overflow: hidden;
+        pointer-events: none;
+
+        caret-color: var(--vje-caret);
+        contain: paint;
+    }
+
+    &.-composing > .-input {
+        background: var(--vje-bg);
+    }
+}

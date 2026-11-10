@@ -3,8 +3,8 @@ import {deepEntries} from "unconscious/common/json-schema-utils.js";
 import {showToast} from "../components/Toast.js";
 import {prettyError} from "./utils.js";
 import {SHA256} from "unconscious/common/SHA256.js";
-import {encodeRawMsg} from "unconscious/common/msgpack.js";
-import {base64Encode} from "unconscious/common/Base64.js";
+import {encodeRawMsg} from "@roj234/msgpack";
+import {base64Encode} from "@roj234/shared/base64";
 
 let uploadingHashes = 0;
 let closeToast;

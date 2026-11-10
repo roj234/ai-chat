@@ -8,6 +8,8 @@ import SimpleModal from "./SimpleModal.jsx";
 import {updateConversation} from "../database.js";
 import {BorderSpinner} from "./BorderSpinner.jsx";
 import {CollapseButton} from "./ThinkBlock.jsx";
+import {HighlightBox} from "./TextDiff.jsx";
+import {Icon_PTC} from "./Icons.jsx";
 
 const RESP_SYMBOL = debugSymbol("ToolResponseUpdate");
 const AUTO_EXPAND = debugSymbol("AutoExpandForApproval");
@@ -21,15 +23,11 @@ const formatDuration = ms => {
 
 /**
  *
- * @param {{
- * tool: OpenAI.ToolCall,
- * message: AiChat.AssistantMessage,
- * idx: number
- * }} props
+ * @param {AiChat.ToolPart} props
  * @return {JSX.Element}
  */
 export function ToolCallCard(props) {
-    const { tool, message, idx } = props;
+    const { tool, message, idx, delegated } = props;
 
     let toolResponse = message.tool_responses[idx];
     const name = getToolName(toolResponse, tool);
@@ -136,7 +134,7 @@ export function ToolCallCard(props) {
                     }
                     output.replaceChildren(<div className={"gallery"}>{elements}</div>);
                 } else {
-                    output.innerHTML = highlightJsonLike(tmpContent);
+                    output.replaceChildren(<HighlightBox filename={".json"} start={1} code={tmpContent} />);
                 }
             });
 
@@ -154,8 +152,8 @@ export function ToolCallCard(props) {
     } catch (e) {
         console.error("工具标题渲染失败", e);
     }
-    const base = <details className={"tool-call"} onToggle.once={initializeHtml}>
-        <summary className="tool-header" title={"展开调用详情\n" + name}>{title || name}</summary>
+    const base = <details className={"tool-call"+(delegated?" delegated":"")} onToggle.once={initializeHtml}>
+        <summary className="tool-header" title={"展开调用详情\n" + name}>{delegated && <Icon_PTC/>}<div className="-title">{title || name}</div></summary>
     </details>;
 
     updateCard(base, props);

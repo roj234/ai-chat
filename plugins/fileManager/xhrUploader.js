@@ -1,10 +1,9 @@
-/* ================= 分片上传核心 ================= */
-import {prettyError} from "../../src/utils/utils.js";
-import {abortable, sleep} from "../../common/pure-utils.js";
+import {prettyError} from "/src/utils/utils.js";
+import {abortable, sleep} from "/common/pure-utils.js";
+import {formatSize} from "unconscious/common/Utils.js";
 
-const CHUNK_DEFAULT = 8 << 20;
+const CHUNK_MIN     = 8 << 20;
 const CHUNK_MAX     = 64 << 20;
-const CHUNK_MIN     = 1 << 20;
 const MAX_RETRY     = 5;
 
 /**
@@ -23,13 +22,11 @@ function errText(text, status) {
 	return t;
 }
 
-/** 目标 ~64 片，只在 [4 MiB, 16 MiB] 内上调；小文件单片直传 */
-function pickChunkSize(size) {
-	if (size <= CHUNK_DEFAULT) return size;
-	let c = CHUNK_DEFAULT;
-	while (c < size / 64 && c < CHUNK_MAX) c <<= 1;
-	return c;
-}
+/** 目标 ~100 片自动优化分片大小 */
+const pickChunkSize = size => {
+	const fragmentSize = size / 100;
+	return fragmentSize < CHUNK_MIN ? CHUNK_MIN : fragmentSize > CHUNK_MAX ? CHUNK_MAX : ((fragmentSize+4095) & ~4096);
+};
 
 function getDelay(attempt, retryAfter) {
 	if (retryAfter) return Math.min(retryAfter * 1000 || 0, 60_000);
@@ -103,8 +100,9 @@ export async function xhrUpload(file, url, headers = {}, signal, onProgress) {
 
 		if (st === 412) throw new DOMException('同名文件已存在', 'InvalidStateError');
 
-		if (st === 413 && chunkSize > CHUNK_MIN) {
-			chunkSize = Math.max(CHUNK_MIN, chunkSize >> 1);
+		if (st === 413) {
+			if (chunkSize > CHUNK_MIN) chunkSize >>= 1;
+			else throw new DOMException(`服务器配置错误，不接受 ${formatSize(CHUNK_MIN)}B 的请求`, 'NetworkError');
 			continue;
 		}
 

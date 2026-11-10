@@ -1,13 +1,18 @@
+import {normalizeLineTerminator} from "@roj234/shared/strings";
+import {deepEntries} from "unconscious/common/json-schema-utils.js";
+
 /**
  * 把 \r 去掉
  * @template T
  * @param {T} inp
  * @return {T}
  */
-export const normalizeCRLF = inp => JSON.parse(JSON.stringify(inp, (key, value) => {
-	if (typeof value !== "string") return value;
-	return value.trim().replaceAll('\r\n', '\n').replaceAll('\r', '\n');
-}));
+export const normalizeCRLF = inp => {
+	for (let [value, own, key] of deepEntries(inp)) {
+		if (typeof value === "string")
+		 own[key] = normalizeLineTerminator(value).trim();
+	}
+}
 
 const stripComments = s => s.replaceAll(/{{\/\/[^}]*}}/g, "");
 

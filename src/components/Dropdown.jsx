@@ -38,13 +38,13 @@ export function Dropdown({
 		</div>
 
 		<div className={"dropdown"}>
-			<div className="fa-search" onClick.stop={() => {}}>
+			<div className="my-input" onClick.stop={() => {}}>
 				<Icon_search />
-				<input className="text-input" placeholder="筛选" autoComplete="off"
+				<input placeholder="筛选" autoComplete="off"
 					   value={filterText} onInput={({target}) => {
 					filterText.value = target.value.toLowerCase();
 				}}/>
-				{add && <button className="ri-add-line btn ghost" title="新建" onClick={() => {
+				{add && <button className="ri-add-line ghost" title="新建" onClick={() => {
 					const r = add(unconscious(filterText));
 					if (r !== false) filterText.value = "";
 				}} />}

@@ -4,7 +4,7 @@ import {highlightJsonLike} from "../markdown/highlight.js";
 import {webviewDownloadFile} from "/vendor/jsBridge.js";
 import {auxKeyboardOnly, lastScrollDirectionIsUp} from "../states.js";
 import SimpleModal from "../components/SimpleModal.jsx";
-import {base64Encode} from "unconscious/common/Base64.js";
+import {base64Encode} from "@roj234/shared/base64";
 import {DI_messageContainer} from "../hooks.js";
 import {jsonFetch} from "/common/fetch-utils.js";
 import {throwDOMException} from "/common/pure-utils.js";
@@ -227,7 +227,7 @@ export const downloadFile = (blob, ext) => {
 		a.href = url;
 		a.download = filename;
 		a.click();
-		URL.revokeObjectURL(url);
+		queueMicrotask(() => URL.revokeObjectURL(url));
 	}
 };
 

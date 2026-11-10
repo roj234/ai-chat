@@ -1,50 +1,68 @@
 
-.CodeEditor {
-    --padding: 10px;
-    --font-size: 14px;
-    --line-height: 1.5;
-
-    position: relative;
+.editor.-inline {
     height: 400px;
 
-    /* 统一 textarea 和 pre 的样式 */
-    & > * {
+    position: relative;
+    color: #e6eaf3;
+}
+
+/* 按钮规范 */
+
+.btn.-je {
+    color: var(--muted);
+    &:not(:disabled):hover { color: var(--text); }
+}
+
+/* ========== 骨架屏 ========== */
+.vje-sk {
+    --vje-bg: var(--code-bg);
+    --vje-muted: var(--muted);
+    --sk-fill: color-mix(in srgb, var(--vje-muted) 30%, transparent);
+
+    font-size: 14px;
+    pointer-events: none;
+    contain: paint;
+
+    &::before {
+        content: "";
         position: absolute;
-        margin: 0;
-        inset: 0;
-        padding: var(--padding);
-        font-size: var(--font-size);
-        line-height: var(--line-height);
-        white-space: pre-wrap;
-        word-break: break-word;
-        overflow: auto;
-        border: none;
-        outline: none;
+        left: -150%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent 10%, var(--sk-fill) 50%, transparent 90%);
+        animation: sweep 1.4s linear infinite;
     }
 
-    & textarea, & pre {
-        font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    .-line {
+        display: flex;
+        align-items: center;
+        height: 1.5em;
     }
 
-    & pre::-webkit-scrollbar {
-        visibility: hidden;
-        pointer-events: none;
-    }
+    /* 行号占位 */
+    .-num {
+        flex: 0 0 5ch;
+        display: flex;
+        justify-content: flex-end;
+        padding-right: 1ch;
 
-    & textarea {
-        background: transparent;
-        color: transparent; /* 文字透明 */
-        caret-color: var(--text); /* 光标可见 */
-        resize: none;
-    }
-
-    & .cursor {
-        position: relative;
-        &:before {
-            position: absolute;
+        &::before {
             content: "";
-            border: 1px solid var(--error);
-            height: calc(var(--font-size) * var(--line-height));
+            width: 3ch;
+            height: .5em;
+            border-radius: 2px;
+            background: var(--sk-fill);
+            opacity: .5;
         }
+    }
+
+    /* 代码占位：--w 宽度，--i 缩进层级 */
+    .-code {
+        flex: 0 1 var(--w, 40%);
+        min-width: 2ch;
+        height: .62em;
+        margin-left: calc(var(--i, 0) * 2ch);
+        border-radius: 3px;
+        background: var(--sk-fill);
     }
 }

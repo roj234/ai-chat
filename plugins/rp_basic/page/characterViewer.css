@@ -14,16 +14,9 @@
         gap: 12px;
     }
 
-    .fa-search {
+    .my-input {
         flex: 1;
         min-width: 180px;
-
-        & input {
-            background: var(--card-bg);
-            &:not(:focus) {
-                border-color: var(--border);
-            }
-        }
     }
 
     .cards-wrapper {

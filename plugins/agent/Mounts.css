@@ -41,7 +41,7 @@
 }
 
 .fa-modal {
-    .fa-search { margin: 10px 0; }
+    .my-input { margin: 10px 0; }
 
     /* 筛选标签条 */
     & .tabs {

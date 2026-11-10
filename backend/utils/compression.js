@@ -1,11 +1,12 @@
-import {bakeSchema, decodeMsg, encodeMsg} from "unconscious/common/msgpack.js";
+import {bakeSchema, decodeMsg, encodeMsg} from "@roj234/msgpack";
 import {brotliCompress, brotliDecompressSync, constants} from 'node:zlib';
 import {DB_COMPRESS_LEVEL, DB_COMPRESS_MIN_SIZE} from "../config.js";
 import {compressBase64, compressStr, decompressStr} from "./cmplIdCompression.js";
 
 // 注意，这些schema只能追加，规则和protobuf相同
 const finish_reason = ["finish_reason", null, ["stop", "length", "tool_calls", "error", "interrupt"]];
-const message_schema = [
+const message_schema = [];
+message_schema.push(
 	["role", null, ["system", "user", "assistant"]],
 	"model",
 	["content",
@@ -48,24 +49,44 @@ const message_schema = [
 		]
 	],
 	["tool_responses",
-		["time", "content", "success", "duration"]
+		[
+			"time", "content", "success", "duration",
+			["delegatedCalls", message_schema],
+		],
 	],
 	"label",
-	"parent"
-];
+	"parent",
+	"folded",
+	"foldGroup",
+);
 const conversation_schema = [];
 conversation_schema.push(
 	"activatedModules", "tools", "grantedTools",
-	"bm_leaf", "_0"/* 已删除！ */,
-	"resumeId", "roleId", "contextUsage",
+	"bm_leaf",
+	"resumeParent", "resumeId",
+	"roleId", "contextUsage",
 	// FileSystem
 	["mnt", conversation_schema],
-	"fs_type", "fs_base", "fs_server", "fs_builtin", "fs_events",
+	["fs_type", null, ['db', 'api', 'local', 'config', 'opfs', 'vfs']],
+	"fs_base", "fs_server", "fs_builtin",
+	["fs_events",
+		[
+			"runId",
+			"type",
+			"pid",
+			"explanation",
+			"cwd",
+			"start"
+		]
+	],
 	// subagent
 	"presets", "overrides",
 	"sa_notify", "sa_async",
 	// inject message
 	["pendingMessages", message_schema],
+
+	// 只能追加。。
+	"fs_readonly",
 );
 const log_schema = [
 	"model", "request_id", "provider",

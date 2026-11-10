@@ -9,14 +9,13 @@ import {COMMAND_REGISTRY} from "/src/commands.js";
 import {prettyTime} from "unconscious/common/Utils.js";
 import {DiffHeader, HighlightBox, makeDiff, TextDiff} from "/src/components/TextDiff.jsx";
 import {markMessageDirty} from "/src/database.js";
-import {compileGrepPattern} from "/common/fs-common.js";
-import "./GrepCard.css";
-import {normalizePath} from "unconscious/common/path-utils.js";
+import {normalizePath} from "@roj234/shared/path";
 import {getChangeableFiles} from "./overwrite-monitor.js";
 import {showToast} from "/src/components/Toast.js";
 import {shellPrompt, shellTools} from "./RemoteFSShell.js";
 import {vcsAvailableKey, vcsEnabledKey} from "./VCS.js";
 import {resolvePreset} from "/src/presets.js";
+import {grepCard} from "./GrepCard.jsx";
 
 const DIFF_CACHE = debugSymbol("Diff");
 /**
@@ -121,10 +120,17 @@ const Read = {
 		const highlight = <HighlightBox start={offset} code={content} filename={path} />;
 
 		if (error) {
-			return <div>
-				{errorBlock(error, "注意")}
-				{highlight}
-			</div>
+			let err = '';
+			let lines;
+			let eof;
+			error.split('\n').forEach(line => {
+				if (line === 'EOF') eof = true;
+				else if (line.startsWith("totalLines: ")) lines = parseInt(line.slice(12), 10);
+				else err = line;
+			});
+
+			const title = `总计${lines}行`+(eof?", 已读完":"");
+			highlight.prepend(err ? errorBlock(err, title) : <div className="hunk">{title}</div>);
 		}
 
 		return highlight;
@@ -483,63 +489,7 @@ b.txt
 		if (!content) return false;
 
 		const {path = '', pattern} = getToolParameters(ctx, tc);
-		const regexp = compileGrepPattern(pattern);
-
-		let matchCount = 0;
-
-		const chunks = content.trim().split("\n\n");
-		const parseMatches = l => {
-			if (l === '---') return { type: 'hunk', text: "---" };
-
-			// 兼容 \x1F 或常见冒号分隔
-			let splitIdx = l.indexOf('\x1f');
-			if (splitIdx === -1) splitIdx = l.indexOf('-');
-			else matchCount++;
-			return {
-				line: l.substring(0, splitIdx).trim(),
-				text: l.substring(splitIdx + 1)
-			};
-		};
-
-		const files = chunks.length > 1 || isNaN(parseInt(chunks[0][0])) ? chunks.map(chunk => {
-			const lines = chunk.split('\n');
-			const path = lines[0].trim();
-			let prevMatches = matchCount;
-			const matches = lines.slice(1).map(parseMatches);
-			return { path, matches, matchCount: matchCount - prevMatches };
-		}) : [{
-			path: '',
-			matches: chunks[0].split('\n').map(parseMatches)
-		}];
-
-		function escapeAndHighlight(str) {
-			const div = <div>{str}</div>;
-			return div.innerHTML.replace(regexp, '<mark>$&</mark>');
-		}
-
-		if (!matchCount) return false;
-
-		return <div className={"grep-card"}>
-			{files.map(file => {
-				return <details open>
-					<summary>
-						<span className="chevron ri-play-large-fill" />
-						<span className="path">{(path === '.' ? '' : path + '/') + file.path}</span>
-						<span className="spacer"/>
-						<span className="match-badge">{file.matchCount} 匹配</span>
-					</summary>
-					<pre className={"textDiff"} style={"--lw:7ch"}>
-						{file.matches.map(match => {
-							return match.type === 'hunk' ? <div className={"line hunk"}>{match.text}</div> :
-								<div className={"line"}>
-									<span className={"no"}>{match.line + " "}</span>
-									<span className={"text"} dangerouslySetInnerHTML={escapeAndHighlight(match.text)}/>
-								</div>
-						})}
-					</pre>
-				</details>
-			})}
-		</div>
+		return grepCard(pattern, content, path);
 	}
 };
 //endregion
@@ -775,6 +725,7 @@ registerToolset(
 	"有Shell也启用沙箱.",
 	[RunJS],
 	{
+		default: true,
 		hidden: "manual",
 		depend: ["Files"]
 	}

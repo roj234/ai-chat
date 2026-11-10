@@ -7,7 +7,7 @@ import {parseArgs} from 'node:util';
 import {spawn} from "node:child_process";
 
 import {WebSocketServer} from "@roj234/ws";
-import {ZipReader} from "unconscious/common/zip-io.js";
+import {ZipReader} from "@roj234/jszip/io";
 
 import "./utils/log-hook.js";
 import "./utils/fetch-hook.js";

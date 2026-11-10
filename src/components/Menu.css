@@ -1,0 +1,51 @@
+
+/* 右键菜单 */
+.menu {
+	position:fixed;min-width:186px;padding:5px;border-radius:10px;
+	background:var(--card);border:1px solid var(--border);box-shadow:var(--shadow);animation:pop .12s ease-out;
+	& button{
+		display:flex;align-items:center;gap:9px;width:100%;height:30px;padding:0 9px;border-radius:6px;
+		font-size:12.5px;color:var(--muted);text-align:left;
+		&:not(:disabled) {
+			&:hover{background:var(--chip-hover);color:var(--text)}
+			&.danger2:hover{color:var(--error-text-color);background:var(--error-bg)}
+		}
+		&:disabled{opacity:.4;cursor:not-allowed}
+		& svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+		& i {font-size:16px}
+	}
+	& hr{border:none;border-top:1px solid var(--border);margin:4px 2px}
+}
+
+/* 改成抽屉样式 */
+@media (max-width: 767px) {
+	.menu:not(.-always) {
+		left: 0 !important;
+		right: 0 !important;
+		bottom: 0 !important;
+		top: unset !important;
+		min-width: unset;
+		padding: 20px 0;
+
+		&::before {
+			content: "";
+			position: fixed;
+			inset: 0;
+			z-index: -1;
+			backdrop-filter: blur(3px);
+		}
+
+		&::after {
+			content: "";
+			position: absolute;
+			background: var(--muted);
+			border-radius: 4px;
+			height: 4px;
+			width: 36px;
+			top: 10px;
+			left: calc(50% - 18px);
+		}
+	}
+}
+
+@keyframes pop{from{transform:scale(.97) translateY(6px);opacity:.6}to{transform:none;opacity:1}}

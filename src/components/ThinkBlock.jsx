@@ -1,10 +1,9 @@
-import {$computed, $state, $watch, isReactive} from "unconscious";
+import {$computed, isReactive} from "unconscious";
 import './ThinkBlock.css';
 import {renderMarkdownToElement} from "../markdown/markdown.js";
 import {EditWidget} from "./EditWidget.jsx";
 import {config} from "../states.js";
 import {JsonEditor} from "./JsonEditor.jsx";
-import {inspect} from "@roj234/util-inspect";
 
 /**
  * @param {OpenAI.ReasoningDetail[]} details
@@ -55,18 +54,12 @@ export function ThinkBlock({think, message, edit}) {
 			if (edit) {
 				const arr = [];
 				if (details) {
-					const thinkState = $state();
 					if (details.length === 1 && details[0].type === "reasoning.text" && details[0].format === "unknown") {
 						arr.push(<EditWidget value={details[0].text} onChange={(value) => details[0].text = value}/>);
 					} else {
-						arr.push(<JsonEditor value={inspect(details)} state={thinkState}/>);
-						arr.push(<div className={"args error"}
-									  style:display={() => thinkState.error ? "" : "none"}>{() => thinkState.error}</div>);
-						$watch(thinkState, () => {
-							if (thinkState.obj) {
-								message.reasoning_details = thinkState.obj;
-							}
-						}, false);
+						arr.push(<JsonEditor value={details} onChange={(text, obj, err) => {
+							!err && (message.reasoning_details = obj);
+						}}/>);
 					}
 				} else {
 					if (format != null) {
@@ -90,7 +83,7 @@ export function ThinkBlock({think, message, edit}) {
 
 	const title = think.title;
 	return (
-		<details className={'think'} class:thinking={() => !!think.start}
+		<details className={'think'} class:shimmer={() => !!think.start}
 				 open={config.expandThinkBlock && isReactive(think)}
 				 onToggle.once={renderContentAtFirstOpen}>
 			<summary title={title || '展开思考过程'}>

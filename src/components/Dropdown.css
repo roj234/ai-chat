@@ -28,29 +28,76 @@
 }
 
 /* 搜索 */
-.fa-search {
+.my-input {
     position: relative;
     display: flex;
-    align-items: center;
 
-    & .ghost {
-        position: absolute;
-        right: 4px;
-        padding: 4px;
-        border-radius: 0;
-        border: none;
+    background: var(--bg);
+    border: 1px solid transparent;
+    &.-comp {
+        border: 1px solid var(--border);
+        border-radius: var(--border-radius-sm);
     }
 
+    transition: all 0.15s ease;
+
+    align-items: center;
+
     & .icon {
-        position: absolute;
-        left: 10px;
+        margin-left: 10px;
         width: 18px;
         height: 18px;
         color: var(--muted);
         pointer-events: none;
     }
 
-    & .text-input { padding-left: 32px; }
+    &:focus-within {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px rgba(122,178,255,0.25);
+    }
+
+    & input {
+        width: 100%;
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--text);
+        padding: 4px;
+        font-size: 14px;
+
+        &::placeholder { color: var(--muted); }
+        &.invalid {
+            border-color: var(--error);
+            box-shadow: 0 0 0 2px rgba(255,107,107,0.18);
+        }
+    }
+
+    & > .-btn {
+        display: flex;
+        font-size: 12px;
+        gap: 2px;
+        margin: 0 var(--spacing-xs);
+        flex-shrink: 0;
+    }
+
+    & button {
+        font-family: monospace;
+        color: var(--muted);
+        padding: 2px 3px;
+        border-radius: 3px;
+        border: 1px solid transparent;
+
+        &:not(:disabled):hover {
+            background: var(--chip-bg);
+            color: var(--text);
+        }
+
+        &.active {
+            border-color: var(--chip-active-border);
+            background: var(--chip-active) !important;
+            color: var(--focus) !important;
+        }
+    }
 }
 
 /* 箭头旋转动画 */

@@ -1,4 +1,4 @@
-import {createBase64Encoder} from "unconscious/common/Base64.js";
+import {createBase64Encoder} from "@roj234/shared/base64";
 import {UTF8_TEXT_ENCODER} from "@roj234/shared";
 
 const buffer = new Uint8Array([34,58,44,91,93,123,125]);

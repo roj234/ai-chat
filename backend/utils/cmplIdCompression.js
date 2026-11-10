@@ -1,4 +1,4 @@
-import {base64Encode, createBase64Decoder} from "unconscious/common/Base64.js";
+import {base64Encode, createBase64Decoder} from "@roj234/shared/base64";
 
 const BASE64 = 0;
 const BASE64URL = 1;

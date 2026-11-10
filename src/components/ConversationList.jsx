@@ -1,10 +1,9 @@
 import './ConversationList.css';
-import {$state, $update, $watchWithCleanup, debugSymbol, ONCE_EVENT, unconscious} from 'unconscious';
+import {$update, $watchWithCleanup, debugSymbol, unconscious} from 'unconscious';
 import {VirtualList} from 'unconscious/common/VirtualList.js';
 import {formatDate} from 'unconscious/common/Utils.js';
 import {deleteConversation, setConversationTitle, updateConversation} from "../database.js";
 import {
-	auxMainlyTouch,
 	conversations,
 	LOCKED,
 	resetConversation,
@@ -15,38 +14,10 @@ import {
 } from "../states.js";
 import SimpleModal from "./SimpleModal.jsx";
 import {exportConversation} from "../data-exchange.js";
-import {onLoad} from "../hooks.js";
 import "/plugins/rp_basic/TagList.css";
 import {showToast} from "./Toast.js";
 import {deleteWithDrawback, prettyError} from "../utils/utils.js";
-import {NestedMap} from "unconscious/common/NestedMap.js";
-
-const closeHoverMenu = (e) => {
-	if (hoverMenu.isConnected) {
-		requestAnimationFrame(() => hoverMenu.remove(true));
-		if (e.target.closest('.dropdown') !== hoverMenu)
-			e.stopPropagation();
-	}
-};
-
-/**
- *
- * @type {import("unconscious").Reactive<AiChat.Conversation>}
- */
-const hoverConversation = $state({});
-const hoverMenu = <div className={"dropdown"} style={"position:fixed;z-index:1"}>
-	<div className="list mid" style={"display:block;"}>
-		<label data-action={"edit"}>编辑标题</label>
-		<label data-action={"export"}>导出</label>
-		<label data-action={"pin"}>{() => hoverConversation.meta?.pinned ? "取消置顶" : "置顶"}</label>
-		<label data-action={"multi"}>多选</label>
-		{() => unconscious(hoverConversation) ? <label data-action={"delete"}>删除</label> : null}
-	</div>
-</div>;
-
-onLoad((app) => {
-	app.addEventListener("click", closeHoverMenu, {capture: true});
-});
+import {openContextMenu} from "./Menu.js";
 
 const GROUP_LABELS = ["置顶", "今天", "昨天", "7天内", "30天内"];
 // 分组逻辑：基于时间戳计算相对日期
@@ -110,20 +81,15 @@ const DELETING = debugSymbol("DeletePending");
 
 /**
  * 渲染对话列表，按时间分组，支持选择、编辑标题、删除。
- * @param {Object} props
- * @param {Conversation[]} props.conversations - 对话数组
- * @param {import("unconscious").Reactive<Conversation>} [props.selectedConversation] - 当前激活的对话ID，用于添加active类
  */
-export const ConversationList = (/*{ conversations, selectedConversation, messages }*/) => {
-	let skipNext;
+export const ConversationList = () => {
 	let inSelectionMode = 0;
 
 	const prependMultiselectControl = () => {
 		groupAndConvArr.unshift(<div className={"multiselect-bar"}>
 			<button className={"btn ghost"} onClick={e => {
 				conversations.forEach(item => item[SELECTED] = 0);
-				vl.dom.replaceChildren();
-				vl.render();
+				refreshList();
 			}}>清空
 			</button>
 			<button className={"btn danger"} onClick={e => {
@@ -144,41 +110,20 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 				inSelectionMode = 0;
 				groupAndConvArr.shift();
 				conversations.forEach(item => { delete item[SELECTED]; })
-				vl.dom.replaceChildren();
-				vl.render();
+				refreshList();
 			}}>退出
 			</button>
 		</div>);
 	};
 
+	const menuHandler = ev => {
+		if (inSelectionMode) return;
+		ev.preventDefault();
 
-	const eventHandler = e => {
-		const target = e.target;
-		const owner = target.closest('.chat-item');
-		if (!owner) return;
-
-		/** @type {AiChat.Conversation} */
-		const conv = owner._conv;
-
-		let test = target.closest('label');
-		if (test) {
-			switch (test.dataset.action) {
-				case "multi":
-					inSelectionMode = 1;
-					prependMultiselectControl();
-					vl.dom.replaceChildren();
-					vl.render();
-					return;
-				case "pin":
-					const meta = conv.meta ??= {};
-					if (!meta.pinned) meta.pinned = true;
-					else delete meta.pinned;
-					updateConversation(conv).then(() => {
-						$update(conversations);
-						$update(hoverConversation);
-					})
-					return;
-				case "edit":
+		const conv = (ev.delegateTarget ?? ev.target.closest('.chat-item'))._conv;
+		const pinned = conv.meta?.pinned;
+		openContextMenu(ev, list, [
+			{label: '重命名', icon: "ri-edit-line", act: () => {
 					SimpleModal({
 						type: "input",
 						title: "请输入新标题",
@@ -188,11 +133,21 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 							setConversationTitle(conv, val);
 						}
 					});
-				return;
-				case "export":
-					exportConversation(1, conv);
-				return;
-				case "delete": {
+				}},
+			{label: '导出', icon: "ri-download-line", act: () => exportConversation(1, conv)},
+			{label: pinned ? "取消置顶" : "置顶", icon: pinned ? "ri-pushpin-fill" : "ri-pushpin-line", act: () => {
+					const meta = conv.meta ??= {};
+					if (!meta.pinned) meta.pinned = true;
+					else delete meta.pinned;
+					updateConversation(conv).then(() => $update(conversations));
+				}},
+			{ sep: true },
+			{label: '多选', icon: "ri-checkbox-multiple-line", act: () => {
+					inSelectionMode = 1;
+					prependMultiselectControl();
+					refreshList();
+				}},
+			{label: '删除', icon: "ri-delete-bin-line", danger: true, act: () => {
 					const pos = conversations.indexOf(conv);
 					if (pos < 0) return;
 
@@ -205,7 +160,7 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 						resetConversation();
 					}
 
-					const isKeyboard = e.detail === 0;
+					const isKeyboard = ev.detail === 0;
 					deleteWithDrawback(`${conv.title||'无标题'} (#${conv.id})`, () => {
 						deleteConversation(conv).then(() => {
 							const noUpdate = unconscious(conversations);
@@ -223,55 +178,35 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 						delete conv[DELETING];
 						$update(conversations);
 					}, isKeyboard);
-				}
-				return;
-			}
-		}
+				}},
+		]);
+	}
 
-		const active = list.querySelector(".active");
-		if (active) active.classList.remove('active');
-		owner.classList.add('active');
+	const keyFunc = conv => conv.textContent ?? conv.id+"\0"+conv.title+"\0"+(+conv[LOCKED]);
 
-		switchToConversation(conv);
-		skipNext = 1;
-	};
+	const list = <div className="sidebar-list scroll" role="list"
+	onClick.delegate{".chat-item"}={ev => {switchToConversation(ev.delegateTarget._conv)}}
+	onContextMenu.delegate{".chat-item"}={menuHandler} />;
 
-	const mouseHandler = (e) => {
-		const closest = e.target.closest('.chat-item');
-		if (closest === hoverMenu.closest('.chat-item')) return;
-		closest.addEventListener("mouseleave", closeHoverMenu, ONCE_EVENT);
-		hoverConversation.value = closest._conv;
-
-		hoverMenu.style.left = e.pageX+"px";
-		hoverMenu.style.top = Math.min(innerHeight - 180, e.pageY)+"px";
-		e.target.append(hoverMenu);
-		e.stopPropagation();
-	};
-	const keyFunc = conv => conv.textContent ?? [conv.id, conv.title, conv[LOCKED]];
-
-	const list = <div className="sidebar-list scroll" onClick={eventHandler} role="list" />;
 	const groupAndConvArr = [];
 	const vl = new VirtualList({
 		element: list,
 		itemHeight: 32,
 		gap: 8,
 		data: groupAndConvArr,
-		mapType: NestedMap,
 		keyFunc,
 		onReuse(node, item) {
 			if (item.textContent == null) {
 				node.classList.toggle('spin-before', runningConversations.has(item.id));
+				node.classList.toggle('active', unconscious(selectedConversation) === item);
 			}
 		},
 		renderer(conv) {
 			if (conv.nodeType) return conv;
 
-			const btn = <button className={"edit-btn ri-menu-line"} title={"菜单"} />;
-			btn.addEventListener(auxMainlyTouch ? 'click' : 'mouseover', mouseHandler);
 			const running = runningConversations.has(conv.id);
 
 			const owner = conv.meta?.owner;
-			// 多选删除 删除未使用的文件
 			return <div
 				_conv={conv}
 				className={`chat-item${running?' spin-before' : ''}${owner?' subagent':''}${unconscious(selectedConversation) === conv ? ' active' : ''}`}
@@ -284,26 +219,35 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 				}}/>}
 				{conv[LOCKED] && <span className="ri-lock-line" title={"其它端正在编辑"} />}
 				<span className="chat-title">{(conv.title || '无标题') + (owner?" for #"+owner:"")}</span>
-				{inSelectionMode ? null : btn}
+				{inSelectionMode ? null : <button className={"edit-btn ri-menu-line"} title={"菜单"} onClick.stop={menuHandler} />}
 			</div>;
 		}
 	});
 	list.vl = vl;
 
+	const refreshList = () => {
+		vl.dom.replaceChildren();
+		vl.setItems(groupAndConvArr);
+	};
+
 	$watchWithCleanup(updateConversationListUI, () => {
 		const conv = unconscious(selectedConversation);
 		if (conv) {
-			const newTime = conv.time;
-			const newConv = conversations[0];
-			if (newTime > newConv.time) {
-				let index = conversations.indexOf(conv);
-				if (index >= 0) conversations.splice(index, 1);
+			const time = conv.time;
+			const arr = unconscious(conversations);
+			const latest = arr[0];
+			if (time > latest.time) {
+				let index = arr.indexOf(conv);
+				if (index >= 0) arr.splice(index, 1);
 				conversations.unshift(conv);
+
+				// 以后可以增量更新什么的
+				//const [baseGroups, timeGroups] = groupConversations(groupAndConvArr, conv);
 			}
 		}
 
 		vl.render();
-	});
+	}, false);
 
 	// 这个函数看起来性能很糟糕，但在十万条对话上 120Hz 更新(每调用 ~8ms)，React拿头跟我打
 	$watchWithCleanup(conversations, () => {
@@ -329,14 +273,12 @@ export const ConversationList = (/*{ conversations, selectedConversation, messag
 		vl.setItems(groupAndConvArr);
 	}, false);
 
+	// 这个函数其实完全多余，调用 vl.render 就会自动更新 active
 	$watchWithCleanup(selectedConversation, () => {
-		if (skipNext) {
-			skipNext--;
-			return;
-		}
+		//vl.render(); return;
 
-		const conv = unconscious(selectedConversation);
 		vl.dom.querySelectorAll(".active").forEach(item => item.classList.remove("active"));
+		const conv = unconscious(selectedConversation);
 		if (conv) {
 			const id = vl.findIndex(conv);
 			if (id >= 0) vl.getValue(id).classList.add("active");

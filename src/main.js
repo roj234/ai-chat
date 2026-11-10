@@ -132,7 +132,7 @@ const createApp = () => {
 			 }}
 		>
 			<div ref={messagesPanel} className="panel no-messages">
-				<MessageList messages={messages} />
+				<MessageList messages={messages} navBar={true} />
 			</div>
 		</div>
 	</>);

@@ -36,21 +36,21 @@ export function ToolCallEditor(props) {
 
     const initializeHtml = () => {
         const
-            input = $state(),
-            output = $state(),
-            inputState = $state(),
+            input = $state(formatJson(fn.arguments)),
+            output = $state(message.tool_responses[index()]?.content),
+            argSyntax = $state(),
+            argStruct = $state(),
             toolCallId = $state(props.tool.id);
         const reset = () => {
             toolName.value = fn.name;
             toolCallId.value = props.tool.id;
-            input.value = formatJson(fn.arguments);
-            output.value = formatJson(message.tool_responses[index()]?.content);
+            $update(input);
+            $update(output);
         };
 
         reset();
         $watch(toolName, () => {
-            const def = toolScriptRegistry[unconscious(toolName)];
-            nameError.value = !def;
+            nameError.value = !toolScriptRegistry[unconscious(toolName)];
         });
 
         let saveBtn;
@@ -70,19 +70,18 @@ export function ToolCallEditor(props) {
             </div>
             <div className="tool-body">
                 <div className="args-title">参数</div>
-                <JsonEditor value={input} state={inputState}/>
-                <div className={"args error"} style:display={() => inputState.error ? "" : "none"}>{() => inputState.error}</div>
+                <JsonEditor value={input} onChange={(text, obj, error) => argSyntax.value = error ? {error} : {obj}}/>
+                <div className={"args error"} style:display={() => unconscious(argStruct) ? "" : "none"}>{argStruct}</div>
             </div>
             <div className="tool-body">
                 <div className="args-title">返回值 (可编辑, 可置空)<span className={"spacer"}></span>
-                    <button className={"rerun-btn"}
-                            disabled={() => !inputState.obj} onClick={({target}) => {
+                    <button className={"rerun-btn"} disabled={() => argSyntax.error || unconscious(argStruct)} onClick={({target}) => {
                         const idx = index();
 
                         const oldName = fn.name;
                         const oldArg = fn.arguments;
                         fn.name = unconscious(toolName);
-                        fn.arguments = JSON.stringify(inputState.obj);
+                        fn.arguments = JSON.stringify(argSyntax.obj);
 
                         target.disabled = true;
                         target.innerText = "运行中";
@@ -97,7 +96,7 @@ export function ToolCallEditor(props) {
                         <span className={"tooltip"}>{"以当前参数运行工具\n会覆写返回值"}</span>
                     </button>
                 </div>
-                <JsonEditor value={output}/>
+                <JsonEditor value={output} skipVerify={true} />
             </div>
             <div className="tool-body">
                 <div style={"display:flex;gap:8px"}>
@@ -110,17 +109,12 @@ export function ToolCallEditor(props) {
                             delete message.tool_responses;
                         }
                         $update(updateMessageUI);
-                    }}>
-                        删除
-                    </button>
+                    }}>删除</button>
                     <span className={"spacer"}></span>
-                    <button className={"btn secondary"} onClick={reset}>
-                        重置
-                        <span className={"tooltip"}>恢复上次保存的值</span>
-                    </button>
+                    <button className={"btn secondary"} onClick={reset}>重置</button>
                     <button className={"btn primary"} ref={saveBtn} onClick={({target}) => {
                         fn.name = unconscious(toolName);
-                        fn.arguments = JSON.stringify(inputState.obj);
+                        fn.arguments = JSON.stringify(argSyntax.obj);
 
                         const outputValue = unconscious(output);
                         message.tool_responses[index()] = outputValue ? {
@@ -130,31 +124,34 @@ export function ToolCallEditor(props) {
                         } : { };
 
                         base.open = false;
-                    }}>
-                        保存
-                    </button>
+                    }}>保存</button>
                 </div>
             </div>
         </>);
 
-        $watch([nameError, inputState], () => {
-            const obj = inputState.obj;
+        $watch([toolName, argSyntax], () => {
+            const obj = argSyntax.obj;
             if (obj != null) {
                 if (!isPureObject(obj)) {
-                    inputState.value = {error: "顶层必须是JSON对象"};
+                    argStruct.value = "顶层必须是JSON对象";
                     return;
                 }
 
                 const schema = toolScriptRegistry[unconscious(toolName)]?.parameters;
                 if (schema) {
                     const error = validateAndShowError(obj, schema);
-                    if (error) inputState.value = {error};
+                    if (error) {
+                        argStruct.value = error;
+                        return;
+                    }
                 }
             }
+
+            argStruct.value = "";
         });
 
-        $watch([nameError, inputState, toolCallId], () => {
-            saveBtn.disabled = unconscious(nameError) || inputState.error || !unconscious(toolCallId);
+        $watch([nameError, argSyntax, argStruct, toolCallId], () => {
+            saveBtn.disabled = unconscious(nameError) || argSyntax.error || unconscious(argStruct) || !unconscious(toolCallId);
         });
     };
 

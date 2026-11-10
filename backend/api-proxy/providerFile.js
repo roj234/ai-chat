@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import {createJsonParser} from "unconscious/common/Json.js";
+import {createJsonParser} from "@roj234/stream-json";
 
 /**
  * @param {string} filePath

@@ -1,10 +1,9 @@
 
 /* 核心卡片容器 */
 .grep-card {
-	background: var(--code-bg);
+	background: var(--panel-2);
 	border: 1px solid var(--border);
-	border-radius: 8px;
-	/*font-size: 12px;*/
+	font-size: 12px;
 
 	& details:not(:last-child) {
 		border-bottom: 1px solid var(--border);
@@ -13,21 +12,21 @@
 	& .chevron { transition: transform 0.2s ease; color: var(--muted); }
 	& details[open] .chevron { transform: rotate(90deg); }
 
-	& .path {
+	& .-path {
 		font-family: var(--code-font);
 		text-overflow: ellipsis;
 		white-space: nowrap;
 		overflow: hidden;
-		color: var(--text-on-accent);
+		color: var(--text);
 	}
 
-	& .match-badge {
-		background: var(--ok-bg);
-		color: var(--ok);
-		font-size: 12px;
-		padding: 2px 7px;
-		border-radius: 12px;
+	& .-badge {
+		color: var(--muted);
 		flex-shrink: 0;
+		background: var(--chip-bg);
+		padding: 2px 6px;
+		border-radius: var(--border-radius-lg);
+		user-select: none;
 	}
 
 	& summary {
@@ -35,12 +34,18 @@
 		align-items: center;
 		justify-content: space-between;
 		padding: 8px 14px;
-		background: rgba(33, 38, 45, 0.5);
 		gap: 8px;
+		cursor: pointer;
 
 		&:hover {
-			background: rgba(56, 139, 253, 0.05);
+			background: var(--chip-bg);
 		}
+	}
+
+	& .textDiff {
+		border-top: 1px solid var(--border);
+		background: var(--panel-2);
+		color: var(--text-lighter);
 	}
 
 	& .no {
@@ -49,11 +54,29 @@
 
 	& .text {
 		padding-left: 1ch;
-		color: var(--text-primary);
+	}
+
+	& .line:not(.hunk):hover {
+		background: var(--chip-bg);
+	}
+
+	& .hunk {
+		justify-content: center;
+	}
+
+	& .-omit {
+		font-size: 12px;
+		padding: 2px;
+		background: var(--panel);
+		color: var(--muted);
 	}
 
 	& mark {
 		background-color: rgba(255, 214, 2, 0.18);
-		color: #ffd602;
+		color: var(--warning-accent);
 	}
+}
+
+.tool-call > .args > .grep-card {
+	border-radius: 8px;
 }

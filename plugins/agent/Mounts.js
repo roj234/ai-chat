@@ -21,7 +21,7 @@ import {
 import {CREATE_OPT, resolveDirectory} from "./WebFSUtils.js";
 import {addRemoteFileSystem, BACKEND_SERVER_KVLIST_ID, createRemoteFileSystem} from "./RemoteFSDriver.js";
 import {Icon_search, Icon_warning} from "/src/components/Icons.jsx";
-import {normalizePath} from "unconscious/common/path-utils.js";
+import {normalizePath} from "@roj234/shared/path";
 
 /** @type {Map<string, FileSystemDirectoryHandle>} */
 const localFileSystemCache = new Map;
@@ -419,7 +419,7 @@ async function callFBI(mount) {
 			} else {
 				let entries = await callFileSystemFunc(mount[FS_INSTANCE], "list", {
 					path: pathStack.slice(2).join('/'),
-					showDir: true,
+					showDir: 'only',
 					showModified: true,
 					showHidden: true,
 					json: true,
@@ -428,13 +428,11 @@ async function callFBI(mount) {
 				arr = [];
 
 				for (const [name, type, size, lastModified] of entries) {
-					if (type === "dir") {
-						arr.push({
-							type: "dir",
-							name,
-							lastAccessed: lastModified
-						})
-					}
+					arr.push({
+						type: "dir",
+						name,
+						lastAccessed: lastModified
+					})
 				}
 
 				const intl = new Intl.Collator;
@@ -529,9 +527,9 @@ async function callFBI(mount) {
 					}}>重试
 					</button>
 				</div>}
-				<div className="fa-search">
+				<div className="my-input -comp">
 					<Icon_search />
-					<input type="text" className="text-input" placeholder="筛选" autoComplete="off"
+					<input type="text" placeholder="筛选" autoComplete="off"
 						   value={filterText} onInput={({target}) => {
 						filterText.value = target.value.toLowerCase();
 					}}/>

@@ -205,7 +205,7 @@ export async function registerFsRoutes(router, allowExec) {
 		res.writeHead(status, { 'Content-Type': contentType });
 		res.end(data);
 	};
-	const sendText = (res, text) => sendRaw(res, 200, 'text/plain', text);
+	const sendText = (res, text) => sendRaw(res, 200, 'text/plain;charset=utf-8', text);
 
 	const listFileHandler = async ({
 		path: filePath = '.',
@@ -705,11 +705,11 @@ nlink: ${stats.nlink}`);
 			console.log("[进程] 已停止", child.pid, codeStr);
 
 			if (notify) {
-				safeStat(dir+logName).then(async stat => {
-					let logFile = dir+logName;
+				safeStat(logAbsolutePath).then(async stat => {
+					let logFile = dir+logName; // 这个给AI看
 					let log;
 					if (stat.size === 0) {
-						await fsp.rm(logFile)
+						await fsp.rm(logAbsolutePath)
 							.then(() => logFile = '0B, deleted', () => {});
 					} else {
 						log = await teh.read({ path: logAbsolutePath, offset: -50, maxChars: 4096, noWarn: true }, { fsRoot: '' })

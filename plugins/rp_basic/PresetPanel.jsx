@@ -1,10 +1,9 @@
 import "./PresetPanel.css";
 import {$computed, $state, $update, $watchWithCleanup, debugSymbol, unconscious} from "unconscious";
-import SimpleModal from "/src/components/SimpleModal.jsx";
 import {VirtualList} from "unconscious/common/VirtualList.js";
 import Filter from "unconscious/common/components/Filter.jsx";
-import {highlightJsonLike} from "/src/markdown/highlight.js";
 import {DEFAULT_SYSTEM_PROMPT} from "./prompt.js";
+import {deleteWithDrawback} from "../../src/utils/utils.js";
 
 const EXPANDED = debugSymbol("EXPANDED");
 const SORT = debugSymbol("SORT");
@@ -21,6 +20,9 @@ function handleDelete(virtualList, item, dirtyHandle) {
 	markDirty(dirtyHandle);
 	virtualList.setItems(virtualList.items);
 }
+
+const DELETE_PENDING = debugSymbol("Deleted");
+const getid = (target) => parseInt(target.closest(".summary").firstElementChild.textContent, 10) - 1;
 
 //region 各种虚拟列表
 /**
@@ -70,9 +72,19 @@ function createList(dirtyHandle, config, onUpdate) {
 	const virtualList = new VirtualList({
 		element: list,
 		itemHeight: 49,
-		keyFunc(item, index) {
+		itemKey: true,
+		onReuse(node, item, index) {
+			// 要是什么时候我的编译器能替我写这种代码就好……其实也不是不行？
+			const indexEl = node.firstElementChild.firstElementChild;
+			indexEl.textContent = index + 1;
+			const nameEl = indexEl.nextElementSibling;
+			nameEl.title = nameEl.textContent = item.name;
+			const switchEl = nameEl.nextElementSibling;
+			switchEl.checked = item.enabled;
+
+			node.style.display = item[DELETE_PENDING] ? "none" : "";
+
 			item[SORT] = index + 1;
-			return index;
 		},
 		renderer(item, index) {
 			return <li _key={item}>
@@ -87,9 +99,9 @@ function createList(dirtyHandle, config, onUpdate) {
 					/>
 					<button
 						className="edit-btn"
-						onClick={() => {
+						onClick={({target}) => {
 							item[EXPANDED] ^= true;
-							virtualList.setItem(index, item);
+							virtualList.setItem(getid(target), item);
 						}}
 						title="编辑/展开"
 					>
@@ -97,15 +109,18 @@ function createList(dirtyHandle, config, onUpdate) {
 					</button>
 					<button
 						className="delete-btn"
-						onClick={() => {
-							SimpleModal({
-								title: "确认删除",
-								message: <div dangerouslySetInnerHTML={highlightJsonLike(item)}/>,
-								accent: 'danger',
-								onConfirm() {
-									handleDelete(virtualList, item, dirtyHandle);
-								}
-							})
+						onClick={(e) => {
+							const isKeyboard = e.detail === 0;
+
+							item[DELETE_PENDING] = 1;
+							virtualList.render();
+
+							deleteWithDrawback(item.name || "无标题", () => {
+								handleDelete(virtualList, item, dirtyHandle);
+							}, () => {
+								delete item[DELETE_PENDING];
+								virtualList.render();
+							}, isKeyboard);
 						}}
 						title="删除"
 					>
@@ -274,13 +289,23 @@ function createLorebookList(dirtyHandle) {
 function createTextList(handler, textFieldName) {
 	const dirtyHandle = $state({}, false, handler);
 
+
+
 	const list = <ul />;
 	const virtualList = new VirtualList({
 		element: list,
 		itemHeight: 49,
-		keyFunc(item, index) {
+		itemKey: true,
+		onReuse(node, item, index) {
+			// 要是什么时候我的编译器能替我写这种代码就好……其实也不是不行？
+			const indexEl = node.firstElementChild.firstElementChild;
+			indexEl.textContent = index + 1;
+			const nameEl = indexEl.nextElementSibling;
+			nameEl.title = nameEl.textContent = item.content.slice(0, 50);
+
+			node.style.display = item[DELETE_PENDING] ? "none" : "";
+
 			item[SORT] = index + 1;
-			return index;
 		},
 		renderer(item, index) {
 			return <li>
@@ -299,19 +324,22 @@ function createTextList(handler, textFieldName) {
 					</button>
 					<button
 						className="delete-btn"
-						onClick={() => {
+						onClick={(e) => {
 							const confirm = () => handleDelete(virtualList, item, dirtyHandle);
 
 							const content = item.content;
 							if (!content) {
 								confirm();
 							} else {
-								SimpleModal({
-									title: "确认删除",
-									message: content,
-									accent: 'danger',
-									onConfirm: confirm
-								});
+								const isKeyboard = e.detail === 0;
+
+								item[DELETE_PENDING] = 1;
+								virtualList.render();
+
+								deleteWithDrawback(content.slice(0, 50), confirm, () => {
+									delete item[DELETE_PENDING];
+									virtualList.render();
+								}, isKeyboard);
 							}
 						}}
 						title="删除"
@@ -459,7 +487,7 @@ export function _PresetEditor(preset) {
 						}}>
 					{() => unconscious(showRegexp) ? ' 正则' : ' 提示'}
 				</button>
-				<button className="ri-add-line btn ghost" title={"增加一项"} onClick={() => {
+				<button className="ri-add-line ghost" title={"增加一项"} onClick={() => {
 					const vl = unconscious(showRegexp) ? regexpVL : promptVL;
 					vl.items.push({});
 					vl.scrollToBottom();
@@ -602,7 +630,7 @@ export function _CharacterEditor(char) {
 			<div className="row">
 				{() => {
 					return unconscious(panel) ?
-						<button className="ri-add-line btn ghost" title={"增加一项"}
+						<button className="ri-add-line ghost" title={"增加一项"}
 								onClick={() => {
 									const selectedPanel = unconscious(panel);
 									const vl = vls[selectedPanel];
@@ -650,12 +678,11 @@ export function _LorebookEditor(lorebook) {
 	return (
 		<div className="preset-panel">
 			<div className="row">
-				<button className="ri-add-line btn ghost" title={"在开头增加一项"} onClick={() => {
+				<button className="ri-add-line ghost" title={"在开头增加一项"} onClick={() => {
 					itemVL.items.unshift(lorebookTemplate());
 					itemVL.render();
 				}}>
 				</button>
-				<button className="ri-sidebar-unfold-fill btn ghost" title={"关闭编辑面板"} onClick={close}></button>
 			</div>
 			{itemEL}
 		</div>

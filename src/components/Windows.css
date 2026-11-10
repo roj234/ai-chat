@@ -94,7 +94,7 @@
     background-color: var(--panel-2);
     box-shadow: var(--shadow);
     border: 1px solid var(--border);
-    animation: winOpen 0.18s ease-out forwards;
+    animation: winOpen 0.18s ease-out;
 
     &.closing {
         animation: winClose 0.1s ease-in forwards;

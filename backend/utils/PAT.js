@@ -1,4 +1,4 @@
-import {bakeSchema, decodeRawMsg, encodeRawMsg} from "unconscious/common/msgpack.js";
+import {bakeSchema, decodeRawMsg, encodeRawMsg} from "@roj234/msgpack";
 import {createHmac, timingSafeEqual} from 'node:crypto';
 import {PAT_SERVER_SALT, PAT_VALID_AFTER} from "../config.js";
 import {compressGeneric} from "./compression.js";

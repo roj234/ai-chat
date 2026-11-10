@@ -1,124 +1,95 @@
 import "./JsonEditor.css";
-import {$cleanup, $state, $watchWithCleanup, AS_IS} from "unconscious";
-import {createJsonParser} from "unconscious/common/Json.js";
-import {lightAsync, tokenToLineHtml} from "../markdown/highlight.js";
+import {$async, $cleanup, $state, $watch, unconscious} from "unconscious";
+import {EVENT_BUS} from "../states.js";
+import {inspect} from "@roj234/util-inspect";
+import {focusWindow, getWindow, openWindow} from "./Windows.jsx";
 
-const commonPrefix = (a, b) => {
-	const n = Math.min(a.length, b.length);
-	let i = 0;
-	while (i < n && a[i] === b[i]) i++;
-	return i;
-};
-const commonSuffix = (a, b, prefix) => {
-	const n = Math.min(a.length, b.length) - prefix;
-	let i = 0;
-	while (i < n && a[a.length - 1 - i] === b[b.length - 1 - i]) i++;
-	return i;
-};
+const generateSkeleton = () => {
+	const LINE_COUNT = 400 / 20 + 2;
+	const skeleton = <div className="vje-sk" aria-hidden="true" />;
 
-const findPosition = (root, targetOffset) => {
-	const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-	let currentOffset = 0;
-	let node;
-	while ((node = walker.nextNode())) {
-		const len = node.nodeValue.length;
-		if (currentOffset + len >= targetOffset) {
-			return [ node, targetOffset - currentOffset ];
-		}
-		currentOffset += len;
+	for (let i = 0; i < LINE_COUNT; i++) {
+		skeleton.append(<div className="-line"><span className="-num"></span><i className="-code" style={`--w:${Math.round(Math.random()*20)*5}%;--i:${Math.round(Math.random()*5)}`}></i></div>);
 	}
-	return [ root, root.childNodes.length ];
+
+	return skeleton;
+};
+
+/**
+ * @param value
+ * @param {Function} onChange
+ * @param {boolean} [skipVerify]
+ * @return {JSX.Element}
+ */
+export const JsonEditor = ({value = "", onChange, skipVerify}) => {
+	const isRawString = typeof unconscious(value) === 'string';
+
+	return $async(() =>
+		EVENT_BUS.post(['jsonEditor'], skipVerify).then(([editor]) => {
+			const dom = editor.dom;
+			editor.onChange = onChange;
+
+			const cb = () => {
+				const val = unconscious(value);
+				editor.setValue(isRawString ? val : inspect(val));
+			};
+			$watch(value, cb);
+			$cleanup(dom, [value, cb]);
+			return <div className="editor -inline col">{dom}</div>;
+		}),
+		() => <div className="editor jsonEditor" aria-busy="true">
+			{generateSkeleton()}
+		</div>
+	);
 };
 
 /**
  *
- * @deprecated
- * @param value
- * @param state
- * @return {JSX.Element}
- * @constructor
+ * @param {string} key
+ * @param callback
  */
-export const JsonEditor = ({value = "", state}) => {
-	const currentText = $state(value);
-	let pre;
-	/** @type {HTMLTextAreaElement} */
-	let textarea;
-
-	let lastText = "";
-	let cancelHighlight;
-
-	const scheduleHighlight = () => {
-		cancelHighlight?.();
-		let codeStr = currentText.value = textarea.value;
-		let timer = setTimeout(() => {
-			let errorPos;
-			const parser = createJsonParser(AS_IS, {json5: true});
-			try {
-				parser.write(codeStr);
-				const obj = parser.end();
-				if (state) state.value = { obj };
-			} catch (e) {
-				if (state) state.value = { error: e + " near index " + parser.pos() };
-				errorPos = parser.pos();
-			}
-
-			cancelHighlight = lightAsync(codeStr, "json", (chunks) => {
-				cancelHighlight = null;
-				lastText = codeStr;
-				pre.innerHTML = tokenToLineHtml(chunks).join('\n')+"&nbsp;";
-				if (errorPos != null) {
-					const cursor = <span className='cursor'></span>;
-
-					const range = document.createRange();
-					const pos = findPosition(pre, errorPos);
-					range.setStart(...pos);
-					if (errorPos >= codeStr.length)
-						range.insertNode(new Text("\n"));
-					range.insertNode(cursor);
-				}
-			});
-		}, 100);
-		cancelHighlight = () => clearTimeout(timer);
-	};
-
-	const simpleHighlight = () => {
-		const newText = textarea.value;
-		const oldText = lastText;
-
-		if (newText === oldText) return;
-
-		const prefix = commonPrefix(oldText, newText);
-		const suffix = commonSuffix(oldText, newText, prefix);
-
-		const range = document.createRange();
-		range.setStart(...findPosition(pre, prefix));
-		range.setEnd(...findPosition(pre, oldText.length - suffix));
-		range.deleteContents();
-
-		const insertedText = newText.slice(prefix, newText.length - suffix);
-		if (insertedText) range.insertNode(new Text(insertedText));
-
-		lastText = newText;
-	};
-
-	function update() {
-		simpleHighlight();
-		scheduleHighlight();
+export function openJsonEditor(key, callback) {
+	let w = getWindow(key);
+	if (w) {
+		focusWindow(w);
+		return;
 	}
 
-	const el = <div className="args CodeEditor">
-		<pre ref={pre}></pre>
-		<textarea ref={textarea} spellCheck={false} value={currentText} onInput={update} onKeyDown={event => {
-			if (event.key === "Tab") {
-				event.preventDefault();
-				textarea.setRangeText('\t', textarea.selectionStart, textarea.selectionEnd, 'end');
-			}
-		}} onScroll={() => {
-			pre.scrollLeft = textarea.scrollLeft;
-			pre.scrollTop = textarea.scrollTop;
-		}}></textarea>
-	</div>;
-	$watchWithCleanup(currentText, update);
-	$cleanup(el, () => cancelHighlight?.());
-	return el;
-};
+	const editorState = $state();
+
+	w = openWindow({
+		id: "editor -json "+encodeURI(key),
+		icon: <i className="ri-code-s-slash-line"></i>,
+		title: "JSON编辑 "+key,
+		actions: <>
+			<button className="btn -je" disabled={() => editorState.error} onClick={() => {
+				data.value = inspect(editorState.obj);
+			}}>
+				<i className="ri-magic-line"></i> 格式化
+			</button>
+			<button className="btn -je" disabled={() => editorState.error} onClick={() => {
+				setValue(editorState.obj);
+			}}>
+				<i className="ri-save-line"></i> 保存
+			</button>
+		</>,
+		element: generateSkeleton,
+	});
+	const [data, setValue] = callback(w);
+
+	EVENT_BUS.post(['jsonEditor']).then(([editor]) => {
+		const dom = editor.dom;
+
+		const cb = () => {
+			const v = unconscious(data);
+			editor.setValue(typeof v === 'string' ? v : inspect(v));
+		};
+		$watch(data, cb);
+		$cleanup(dom, [data, cb]);
+		editor.onChange = (text, obj, error) => {
+			editorState.value = error ? {error} : {obj};
+		};
+
+		w.element.parentElement.replaceChildren(...dom);
+	})
+}

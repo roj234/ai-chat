@@ -6,8 +6,8 @@
 import hljs from "/vendor/hljs/core.js";
 import {queueMacrotask} from "unconscious/common/queueMacrotask.js";
 
-/** 超长行（比如压缩后的 JSON）只渲染前 N 个字符，避免一次性把几 MB 文本塞进一个 DOM 节点 */
 const MAX_RENDER_CHARS = 10000;
+const MAX_HIGHLIGHT_CHARS = 256000;
 
 /**
  * @param {HTMLSpanElement} node
@@ -18,10 +18,6 @@ const MAX_RENDER_CHARS = 10000;
  * @return {void}
  */
 export const lineDOM = (node, text, tokens, selFrom, selTo) => {
-	if (text.length > MAX_RENDER_CHARS) {
-		return node.replaceChildren(text.slice(0, MAX_RENDER_CHARS), <span className="vje-trunc">… 这一行共有 {text.length.toLocaleString("en-US")} 个字符，已折叠显示</span>);
-	}
-
 	node.replaceChildren();
 
 	const hasSel = selFrom >= 0 && selTo > selFrom;
@@ -30,11 +26,15 @@ export const lineDOM = (node, text, tokens, selFrom, selTo) => {
 
 	let start = 0;
 	for (let i = 0; i < tokens.length; i += 2) {
-		const end = tokens[i];
+		let end = tokens[i];
 		const cls = tokens[i + 1];
 
+		const overflow = end - start > MAX_RENDER_CHARS;
+		if (overflow) end = start + MAX_RENDER_CHARS;
+
 		if (!hasSel || selTo <= start || selFrom >= end) {
-			node.append(cls ? <span className={cls}>{text.slice(start, end)}</span> : text.slice(start, end));
+			const part = text.slice(start, end);
+			node.append(cls ? <span className={cls}>{part}</span> : part);
 		} else {
 			const a = Math.max(start, selFrom);
 			const b = Math.min(end, selTo);
@@ -42,11 +42,16 @@ export const lineDOM = (node, text, tokens, selFrom, selTo) => {
 			const array = [];
 
 			if (a > start) array.push(text.slice(start, a));
-			array.push(<span className="sel">{text.slice(a, b)}</span>);
+			array.push(<span className="-sel">{text.slice(a, b)}</span>);
 			if (b < end) array.push(text.slice(b, end))
 
 			if (cls) node.append(<span className={cls}>{array}</span>);
 			else node.append(...array);
+		}
+
+		if (overflow) {
+			node.append(<span className="-trunc">… 已折叠剩余 {text.length.toLocaleString("en-US")} 字符</span>);
+			break;
 		}
 
 		start = end;
@@ -57,10 +62,10 @@ export const lineDOM = (node, text, tokens, selFrom, selTo) => {
  * 语言与高亮任务
  * ------------------------------------------------------------------ */
 
-/** 单次高亮的窗口上限，超了就退回纯文本，避免一次解析几十 MB */
-const MAX_WINDOW_CHARS = 400000;
 /** 每个宏任务里最多连续跑多少毫秒。 */
 const SLICE_MS = 5;
+
+export const isSameLanguage = (la, lb) => hljs.getLanguage(la) === hljs.getLanguage(lb);
 
 /**
  * 异步高亮 [from, to) 这段行。
@@ -86,7 +91,7 @@ export const highlightWindow = (lines, from, to, onDone, language) => {
 		parts[i] = t;
 		chars += t.length + 1;
 	}
-	if (chars > MAX_WINDOW_CHARS) return onDone(null);
+	if (chars > MAX_HIGHLIGHT_CHARS) return onDone(null);
 
 	let cancelled = false;
 	const gen = hljs.highlight(parts.join("\n"), {language, ignoreIllegals: true, _returnTokens: true});

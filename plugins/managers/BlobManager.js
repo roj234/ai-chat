@@ -97,21 +97,20 @@ const toggleAll = master => {
 let scrollWin, selectAllBtn;
 
 const container = <>
-	<div className="fa-search">
+	<div className="my-input">
 		<Icon_search />
-		<input className={"text-input"} placeholder={"搜索哈希和名称"} onInput={(e) => {
+		<input placeholder={"搜索哈希和名称"} onInput={(e) => {
 			searchTerm.value = e.target.value;
 			currentPage.value = 1;
 			$update(currentPage);
 		}}/>
-		<label style={"display:flex;align-items:center;gap:4px;white-space:nowrap;cursor:pointer"}>
-			<input type="checkbox" checked={() => unconscious(listAll)} onChange={e => {
-				listAll.value = e.target.checked;
+		<div className="-btn">
+			<button className="ri-admin-line" title="显示所有用户" onClick={e => {
+				listAll.value = e.target.classList.toggle('active');
 				currentPage.value = 1;
 				$update(currentPage);
 			}}/>
-			其他用户
-		</label>
+		</div>
 	</div>
 
 	<div style={"overflow:auto"} ref={scrollWin}>

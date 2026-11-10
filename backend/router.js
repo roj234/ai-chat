@@ -1,7 +1,7 @@
 import {msgpack_schema, msgpack_schema_version} from "../common/wire-compression-schema.js";
 import {constants, createBrotliCompress, createGzip} from "node:zlib";
 import {RESPONSE_COMPRESS_LEVEL, RESPONSE_USE_MSGPACK_SCHEMA} from "./config.js";
-import {decodeMsg, encodeRawMsg} from "unconscious/common/msgpack.js";
+import {decodeMsg, encodeRawMsg} from "@roj234/msgpack";
 
 export class HttpError extends Error {
 	/**
@@ -685,7 +685,7 @@ export class Router {
 				if ((req.headers.accept || '') .includes('application/json')) {
 					ctx.send(err.status || 500, { error: err.code != null ? { ...err, message: msg, __type: 'Error' } : msg });
 				} else {
-					res.writeHead(err.status || 500, { 'Content-Type': 'text/plain', ...err.headers });
+					res.writeHead(err.status || 500, { 'Content-Type': 'text/plain;charset=utf-8', ...err.headers });
 					res.end(msg);
 				}
 			} catch {}

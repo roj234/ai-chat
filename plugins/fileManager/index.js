@@ -1,4 +1,4 @@
-import {EVENT_BUS, selectedConversation} from "/src/states.js";
+import {config, EVENT_BUS, selectedConversation} from "/src/states.js";
 import {unconscious} from "unconscious";
 import {callFileSystemFunc, createFileSystem, getFileSystem} from "../agent/index.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
@@ -8,15 +8,19 @@ import {normalizePath} from "@roj234/shared/path";
 import {onLoad} from "/src/hooks.js";
 import {PROMISE_CATCH} from "/common/pure-utils.js";
 
+EVENT_BUS.on(['getMenu', 'dev'], items => {
+	const set = config.trustHTML;
+	items.push({ icon: set ? "ri-checkbox-line" : "ri-checkbox-blank-line", label: "信任所有 HTML 脚本", danger: !set, act: () => config.trustHTML ^= 1 })
+})
+
 GLOBAL_SETTINGS.push({
 	id: "trustHTML",
 	type: "radio",
+	_tab: "hide",
 	required: true,
-	name: "自动信任HTML",
-	_tab: "customize",
 	choices: {
-		"否": false,
-		"是": true
+		"否": 0,
+		"是": 1
 	}
 })
 
@@ -47,18 +51,20 @@ EVENT_BUS.on('viewUrl', async (path, _, node, fs) => {
 	return (await import("./preview.js")).vfsPreview(fs, decodeURIComponent(url.pathname.slice(1)), node?.textContent);
 });
 
+EVENT_BUS.on('jsonEditor', async (skipVerify) => (await import("./preview.js")).createJson5Editor(skipVerify));
+
 /**
  * @type {AiChat.FunctionTool}
  * @private
  */
-const RevealPath = {
-	name: "RevealPath",
-	description: "打开资源管理器窗口，向用户展示一个文件夹或其中的文件。这是一个打断操作：会打开窗口。",
+const OpenFile = {
+	name: "OpenFile",
+	description: "用默认程序打开文件/文件夹，若提供 file，则在 path 文件夹中高亮它",
 	requireUI: true,
 	parameters: {
 		type: "object",
 		properties: {
-			path: { type: "string", description: "Folder path relative to workspace.", },
+			path: { type: "string", },
 			file: { type: "string", description: "Optional file name to highlight" },
 		},
 		required: ["path"]
@@ -71,9 +77,9 @@ const RevealPath = {
 		await (await import("./preview.js")).vfsPreview(fs, normalizePath(path).join('/'));
 		return 'Opened';
 	}
-}
+};
 
-registerToolset("RevealPath", "让AI给你打开文件夹", [RevealPath], {
+registerToolset("OpenFile", "让AI给你打开文件夹", [OpenFile], {
 	hidden: "manual"
 });
 
@@ -81,7 +87,7 @@ registerToolset("RevealPath", "让AI给你打开文件夹", [RevealPath], {
 onLoad(() => {
 	const pos = document.querySelector("aside.sidebar .ri-wrench-line").parentElement;
 	pos.insertBefore(<button className={"ri-folder-open-line btn ghost"} title="管理文件系统" onClick={() => createFileSystem({
-		fs_label: "管理文件系统",
+		fs_label: "选择要管理的文件系统",
 		_noupdate: true
 	}).then((fs) => {
 		return EVENT_BUS.post(['viewUrl'], '', null, fs);

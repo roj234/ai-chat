@@ -12,6 +12,7 @@ import packageInfo from "./package.json";
 
 import fs from 'node:fs';
 import {globMacroPlugin} from "./common/fs-glob.js";
+import {HLJS_LANGUAGE_FAMILIES, HLJS_LANGUAGE_RE} from "./misc/hljs-language-families.js";
 
 const LOADING_TEMPLATE = fs.readFileSync('./loading.html', 'utf-8').match(/<!--START-->(.+)<!--END-->/s)[1]
     .replaceAll(/[\r\n]|^[ \t]+|<!--.+?-->|\/\*.+?\*\//gm, '')
@@ -100,6 +101,19 @@ export default {
                     if (chunkInfo.name === 'sw') return '[name].js'
                     return 'assets/[name]-[hash].js'
                 },
+                // 手动控制 chunk 拆分
+                manualChunks(id) {
+                    const normalized = id.replaceAll('\\', '/');
+
+                    const match = HLJS_LANGUAGE_RE.exec(normalized);
+                    if (match) {
+                        const i = HLJS_LANGUAGE_FAMILIES.findIndex(s => s.languages.includes(match[1]));
+                        if (i >= 0) return "hljs/"+String(i).padStart(2, "0")+"-"+HLJS_LANGUAGE_FAMILIES[i].id;
+                        return 'hljs/'+match[1];
+                    }
+                },
+
+                experimentalMinChunkSize: 512000,
             },
         }
     }

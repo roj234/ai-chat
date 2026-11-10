@@ -1,5 +1,5 @@
 import {UTF8_TEXT_DECODER, UTF8_TEXT_ENCODER} from "unconscious";
-import {crc32} from "unconscious/common/zip-io.js";
+import {crc32} from "@roj234/jszip/io";
 
 const magic = 0x89504e470d0a1a0an;
 

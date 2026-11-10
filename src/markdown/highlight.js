@@ -176,8 +176,9 @@ export const highlight = (code, language, node, is_finished) => {
 				}
 			}
 
-			if (language && loadLanguage(language)) {
-				lightAsync(code, language, (value) => {
+			let p;
+			if (language && (p = loadLanguage(language))) {
+				p.then(() => lightAsync(code, language, (value) => {
 					if (!needVirtualList) { node.innerHTML = tokenToLineHtml(value).join('\n'); return; }
 					node.style.height = '50lh';
 					node._value = code;
@@ -188,7 +189,7 @@ export const highlight = (code, language, node, is_finished) => {
 
 					// 避免同步布局
 					queueMacrotask(() => virtualList.scrollToBottom());
-				}, () => !node.isConnected);
+				}, () => !node.isConnected));
 			} else {
 				if (virtualList)
 					queueMacrotask(() => virtualList.scrollToBottom());
@@ -275,7 +276,7 @@ export const highlight = (code, language, node, is_finished) => {
 		vl.scrollTo(node.scrollHeight);
 	};
 
-	if (!hljs.getLanguage(language)) {
+	if (!is_finished && !hljs.getLanguage(language)) {
 		if (!node.dataset.processed) {
 			const onload = loadLanguage(language);
 			if (onload) {
@@ -427,8 +428,6 @@ export const loadLanguage = (languageName, simulate) => {
 		languageName = asyncLoader;
 	}
 };
-
-export const isSameLanguage = (la, lb) => hljs.getLanguage(la) === hljs.getLanguage(lb);
 
 //region 程序生成，勿动
 const DEPS = {

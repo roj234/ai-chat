@@ -11,7 +11,7 @@ import {openFileBrowser} from "./Explorer.jsx";
 import {config} from "/src/states.js";
 import "./preview.css";
 import {vfsDownload} from "./downloader.js";
-import {openEditor} from "/plugins/fileManager/Editor.js";
+import {openFileEditor} from "/plugins/fileManager/Editor.js";
 import {HighlightBox} from "../../src/components/TextDiff.jsx";
 
 /**
@@ -105,7 +105,7 @@ function htmlRenderer(fs, s, path) {
 	</>;
 }
 
-export const PREVIEW_TEXT_MAX = 2000000;
+const PREVIEW_TEXT_MAX = 2000000;
 const PREVIEW_NOSW_MAX = 20000000;
 
 const EISDIR = '\0';
@@ -135,7 +135,7 @@ export async function vfsPreview(fs, path, overrideFileName, editable) {
 	let canEdit = data.size < PREVIEW_TEXT_MAX;
 
 	if (canEdit && (loadLanguage(extname, true) || TEXT_EXT.test(extname))) {
-		kind = 'text';
+		kind = extname === 'txt' ? 'text' : 'code';
 		if (editable !== 'yes') {
 			if (extname === 'md') kind = 'markdown';
 			else if (/xhtml|html|htm/i.test(extname)) kind = 'html';
@@ -160,16 +160,18 @@ export async function vfsPreview(fs, path, overrideFileName, editable) {
 		editable = 'no';
 	}
 
+	if (kind === 'code') return openFileEditor(fs, path, editable !== 'no', extname);
+
 	const previewWindow = openWindow({
 		id: "preview "+encodeURI(vfsIdentity(fs[FS_SOURCE])+path),
 		icon: <i className={"ri-file-line"}/>,
 		title: path,
 		actions: <div className="row">
-			{editable !== 'no' && <button className="ri-edit-2-line btn ghost" title="编辑" onClick={() => {
+			{editable !== 'no' && <button className="ri-edit-2-line ghost" title="编辑" onClick={() => {
 				closeWindow(previewWindow);
-				openEditor(fs, path, true, extname);
+				openFileEditor(fs, path, true, extname);
 			}} />}
-			<button className="ri-download-line btn primary" title="下载" onClick={() => {
+			<button className="ri-download-line ghost" title="下载" onClick={() => {
 				vfsDownload(fs, path, overrideFileName || filename).catch(err => {
 					showToast('下载失败：' + (err?.message ?? err), 'error');
 				});
@@ -208,3 +210,5 @@ export async function vfsPreview(fs, path, overrideFileName, editable) {
 
 	return previewWindow;
 }
+
+export {createJson5Editor} from "./Editor.js";
