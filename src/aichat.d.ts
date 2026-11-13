@@ -78,7 +78,7 @@ declare namespace AiChat {
         bm_leaf?: number;
 
         mnt?: Record<string, Mount>;
-        fs_secrets?: Record<string, { value: string, domain: string }>;
+        sb_secureEnv?: Record<string, { value: string, domain: string }>;
 
         /** 覆盖全局配置，高于 config 优先级 */
         presets?: string | string[];
@@ -194,6 +194,7 @@ declare namespace AiChat {
         forceThink: boolean | null
         reasoningTogglePath: string
         reasoningEffortPath: string
+        maxTokensPath: string
 
         modalities: ('image' | 'audio' | 'tool')[]
         additionalBody: Record<string, any>
@@ -236,7 +237,7 @@ declare namespace AiChat {
     }
 
     type TitleModelConfig = {
-        generateTitle: boolean | 'eager'
+        generateTitle: boolean | 'ds'
         titleModel: string
         titlePrompt: string
     }
@@ -262,8 +263,9 @@ declare namespace AiChat {
 
     type AgentFSPreset = {
         fs_autoMount: boolean;
-        fs_env?: Record<string, string>;
-        fs_secrets?: Record<string, { value: string, domain: string }>;
+        sb_env?: Record<string, string>;
+        sb_secureUrl?: string[];
+        sb_secureEnv?: Record<string, { value: string, domain: string }>;
     }
 
     type ManualOverridePreset = {
@@ -464,6 +466,11 @@ declare namespace AiChat {
          */
         renderer?: (context: ToolResponse & Payload, has_successor: boolean, toolCall: OpenAI.ToolCall, message: AssistantMessage) => JSX.Element;
         /**
+         * 工具生成时的流式渲染函数
+         * @param inputBox 输入框
+         */
+        streamRenderer?: (inputBox: HTMLPreElement, message: AssistantMessage) => (json: string) => void;
+        /**
          * 工具调用展开后的【参数】框的渲染函数
          * 覆盖的话请注意不要漏掉了本来可以展示的参数。
          */
@@ -661,6 +668,8 @@ declare namespace AiChat {
 
         interface CustomMessageRole {
             name: string;
+            /** 允许与助手消息合并显示 */
+            combine?: boolean;
 
             /**
              * @param self 当前消息

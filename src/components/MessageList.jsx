@@ -38,6 +38,7 @@ import {
 import {submitUserChatMessage} from "../api-request.js";
 import {
 	copyWithAnimation,
+	deleteWithDrawback,
 	downloadFile,
 	errorBlock,
 	getRandomString,
@@ -632,12 +633,10 @@ const buttonOnLeft = (selectedConversation, messages, ev, overrideAction) => {
 			if (end !== msgs.length) {
 				if (messages.slice(self.index, end).some(m => m.tool_calls)) {
 					SimpleModal({
-						title: `将删除后续所有消息 (共 ${msgs.length - self.index} 条)`,
+						title: `不允许删除带工具调用的中间消息`,
 						message: `这是为了保证【工具调用】状态正确回溯。
-使用【编辑并重发】或【重新生成】选项避免物理删除`,
-						onConfirm() {
-							deleteMessage(self.index, msgs.length);
-						}
+使用【编辑并重发】或【重新生成】选项避免物理删除。
+或使用【删除后续】。`,
 					});
 					return;
 				}
@@ -762,7 +761,7 @@ const buttonOnLeft = (selectedConversation, messages, ev, overrideAction) => {
 			const items = [];
 
 			const editRaw = [
-				{label: '编辑原始数据', icon: "ri-braces-line", act() {
+				{label: '编辑 JSON', icon: "ri-braces-line", act() {
 						buttonOnLeft(selectedConversation, messages, ev, 'edit2');
 					}},
 				{ sep: true },
@@ -775,10 +774,14 @@ const buttonOnLeft = (selectedConversation, messages, ev, overrideAction) => {
 					}},
 					{ sep: true },
 					...editRaw,
-					{label: '撤销最后一步', icon: "ri-arrow-go-back-line", disabled: !isLast, danger: true, act() {
-						buttonOnLeft(selectedConversation, messages, ev, 'undo');
-					}},
 				);
+				if (isComposite) {
+					items.push(
+						{label: '撤销最后一步', icon: "ri-arrow-go-back-line", disabled: !isLast, danger: true, act() {
+							buttonOnLeft(selectedConversation, messages, ev, 'undo');
+						}},
+					);
+				}
 			} else {
 				if (role === 'user' && !isLast) {
 					items.push(
@@ -793,6 +796,13 @@ const buttonOnLeft = (selectedConversation, messages, ev, overrideAction) => {
 
 			items.push({label: '删除', icon: "ri-delete-bin-line", danger: true, act: () => {
 				buttonOnLeft(selectedConversation, messages, ev, 'del');
+			}});
+
+			if (!isLast) items.push({label: '从此处删除', icon: "ri-scissors-line", danger: true, act: (ev) => {
+				const isKeyboard = ev.detail === 0;
+				deleteWithDrawback(`后续 ${msgs.length - self.index} 条消息`, () => {
+					deleteMessage(self.index, msgs.length);
+				}, () => {}, isKeyboard);
 			}});
 
 			openContextMenu(ev, vl.dom, items);
@@ -875,6 +885,7 @@ class MessageListItem {
 		const ref = this;
 		let message = ref.key;
 		let i = ref.index;
+		const end_index = ref.end_index;
 		let lastGroup = 0;
 
 		let chunks = [];
@@ -883,7 +894,7 @@ class MessageListItem {
 		let generationEnded;
 
 		if (message.role === "assistant") {
-			if (config.combineToolCalls && message.tool_calls) {
+			if (end_index > i+1) {
 				const header = {
 					type: "tools_header",
 					start: message.time ?? Date.now(),
@@ -897,7 +908,7 @@ class MessageListItem {
 				let lastCollapseGroup = message.content ? header : {type: "tool_group",};
 				let prevI = i;
 				if (lastCollapseGroup !== header) chunks.push(lastCollapseGroup);
-				let openAll = message[CTC_GROUP_OPEN] ?? messages[this.end_index - 1].finish_reason !== 'stop';
+				let openAll = message[CTC_GROUP_OPEN] ??= messages[end_index - 1].finish_reason != null && messages[end_index - 1].finish_reason !== 'stop';
 
 				for (;;) {
 					lastGroup = chunks.length;
@@ -938,7 +949,7 @@ class MessageListItem {
 						lastMarkerPos = pos;
 					}
 
-					if (++i === messages.length || !message.tool_calls || isEditing(messages[i]) || messages[i].role !== "assistant") {
+					if (++i === end_index) {
 						if (null == lastCollapseGroup.openKey) {
 							chunks.splice(chunks.lastIndexOf(lastCollapseGroup), 1);
 						}
@@ -1084,7 +1095,7 @@ export function MessageList({messages, navBar }) {
 			}}>
 				{roleSelection.map(name => <option selected={msg.role === name} value={name}>{name}</option>)}
 			</select> : <b className={"stroke"}>{roleName(item)}</b>}
-			<span className='time stroke'>{formatDate('Y-m-d H:i:s', msg.time ?? null)}</span>
+			<span className='time stroke'>{msg.time && formatDate('Y-m-d H:i:s', msg.time)}</span>
 			<span className='spacer'></span>
 		</div>;
 	}
@@ -1152,10 +1163,15 @@ export function MessageList({messages, navBar }) {
 			while (pos < lim && oldBlocks[pos].key !== message) pos++;
 			item = pos < lim ? oldBlocks[pos++] : new MessageListItem(message);
 
-			if (config.combineToolCalls) {
+			if (config.combineToolCalls && message.role === 'assistant') {
 				for (; i < arr.length; i++) {
-					if (!message.tool_calls || isEditing(arr[i]) || arr[i].role !== "assistant") break;
-					message = arr[i];
+					const next = arr[i];
+					// 1. 如果不是工具调用也不允许合并就直接停
+					// 2. 下一条消息的combine也必须为真
+					if ((message.role === 'assistant' ? !message.tool_calls : !MessageRoles[message.role]?.combine)
+						|| (next.role !== 'assistant' && !MessageRoles[next.role]?.combine)
+						|| isEditing(next)) break;
+					message = next;
 				}
 			}
 

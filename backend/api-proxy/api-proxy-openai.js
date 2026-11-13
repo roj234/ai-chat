@@ -1,11 +1,11 @@
 import {SSE_PROXY_MODERATION, SSE_REF_CACHE_SIZE} from "../config.js";
-import {applyDelta, sseFetch} from "../../common/fetch-utils.js";
+import {applyDelta, sseFetch} from "/common/fetch-utils.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {Transform} from 'node:stream';
-import {createJsonStream} from "../../common/StreamJsonSerializer.js";
+import {createJsonStream} from "/common/StreamJsonSerializer.js";
 import {deepEntries} from "unconscious/common/json-schema-utils.js";
-import {isLanAddress} from "../../common/isLanAddress.js";
+import {isLanAddress} from "/common/isLanAddress.js";
 import {getProxyAgent} from "../utils/fetch-hook.js";
 import {convertRequest, responsesProxyHandler} from "./api-proxy-responses.js";
 import {apiProxyLog as log, checkToken, processMessageRefs} from "./api-proxy-utils.js";

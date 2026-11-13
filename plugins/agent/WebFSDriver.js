@@ -374,8 +374,9 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			if (writable && config.fs_readonly) throwDOMException("Write-protect is enabled for this VFS", "ReadOnlyError");
 			return (await myResolveHandle(path, READ | REQUIRE_FILE | (writable * (CREATE | CREATE_LEAF | WRITE))))[2]
 		},
-		readRaw: async ({path, stream}) => {
-			const blob = await resolveFile(path);
+		readRaw: async ({path, stream, offset}) => {
+			let blob = await resolveFile(path);
+			if (offset) blob = blob.slice(offset);
 			return stream ? new Response(blob, { headers: { 'content-length': String(blob.size) } }) : blob;
 		},
 		writeRaw: ({path, content}) => fsCommonApi.write(path, content, null, 1).then(() => teh.del(path)),

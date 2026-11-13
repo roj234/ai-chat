@@ -316,7 +316,7 @@ class OverlayDirectoryHandle {
 			}
 		}
 
-		const sorter = new Intl.Collator();
+		const sorter = new Intl.Collator(undefined, {numeric: true});
 		const sorted = [...items.values()];
 		sorted.sort((a, b) => sorter.compare(a[0], b[0]));
 

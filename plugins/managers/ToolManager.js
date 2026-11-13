@@ -124,8 +124,8 @@ function createList() {
 				desc = desc.slice(pos+1);
 			}
 
-			return <li data-name={mod.name}>
-				<div className={"summary"}>
+			const item = <li data-name={mod.name}>
+				<div className="summary">
 					<span className="name" title={mod.name}>{name}</span>
 					{mod.hidden && <small title={"需要人工操作"}>手动</small>}
 					{mod.tools?.length && <small title={mod.tools.join("\n")}>{mod.tools.length} 个工具</small>}
@@ -170,6 +170,10 @@ function createList() {
 				</div>
 				{desc && renderMarkdownToElement(<div className={"md"}/>, desc)}
 			</li>;
+
+			if (mod.menu) item.addEventListener('contextmenu', mod.menu);
+
+			return item;
 		},
 		keyFunc(item) {
 			return item.name + '/' + (isActivated(selectedConversation, item.name) ? 1 : 0);
@@ -208,19 +212,6 @@ async function addOrEditMCPServer(existed, existedIdx) {
 				required: true
 			},
 			{
-				type: "radio",
-				id: "prefix",
-				required: true,
-				name: "命名空间",
-				choices: {
-					"无": null,
-					"前缀": true
-				},
-				title: {
-					"前缀": "在MCP工具名称前添加MCP服务器名称"
-				}
-			},
-			{
 				type: "input",
 				name: "服务器地址",
 				placeholder: "支持 Streamable HTTP 和 SSE 协议",
@@ -230,7 +221,7 @@ async function addOrEditMCPServer(existed, existedIdx) {
 				required: true
 			},
 			{
-				type: "input",
+				type: "secret",
 				name: "API密钥",
 				placeholder: "sk-xxxxxx",
 				id: "key",
@@ -238,19 +229,33 @@ async function addOrEditMCPServer(existed, existedIdx) {
 			{
 				type: "input",
 				name: "简介",
-				placeholder: "Online search",
+				placeholder: "如：Online search",
 				id: "desc"
 			},
 			{
 				type: "radio",
 				id: "hidden",
 				required: true,
-				name: "模型自主激活 (请填写简介)",
+				name: "模型自行激活 (必须填写简介)",
 				choices: {
 					"拒绝": 'manual',
 					"允许": null
 				},
-			}
+			},
+			{
+				type: "radio",
+				id: "prefix",
+				required: true,
+				inline: true,
+				name: "工具命名空间",
+				choices: {
+					"无": null,
+					"前缀": true
+				},
+				title: {
+					"前缀": "在MCP工具名称前添加MCP服务器名称"
+				}
+			},
 		],
 
 		confirmMessage: existed ? "保存" : "添加",
@@ -297,7 +302,7 @@ CUSTOM_CONTROLS.find(el => el.matches(".ri-robot-2-line")).addEventListener("cli
 		id: "skillManager",
 		icon: <i className='ri-tools-line'/>,
 		title: "工具和技能配置",
-		actions: <button className="ri-add-line btn ghost" title={"添加MCP服务器"} onClick={addOrEditMCPServer}/>,
+		actions: <button className="ri-add-line btn ghost" title={"添加MCP服务器"} onClick={() => addOrEditMCPServer()}/>,
 		element: openSkillManager,
 		dock: "right",
 		width: 400

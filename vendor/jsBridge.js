@@ -3,7 +3,7 @@
  * @export
  */
 
-import {isLanAddress} from "../common/isLanAddress.js";
+import {isLanAddress} from "/common/isLanAddress.js";
 
 /**
  *

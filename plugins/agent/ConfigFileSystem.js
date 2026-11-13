@@ -14,7 +14,7 @@ import {NestedMap} from "unconscious/common/NestedMap.js";
 import {createWebFileSystem} from "./WebFSDriver.js";
 import {resolveDirectory} from "./WebFSUtils.js";
 import {$update, unconscious} from "unconscious";
-import {FSE_AccessDenied, FSE_NotFound, throwDOMException} from "../../common/pure-utils.js";
+import {FSE_AccessDenied, FSE_NotFound, throwDOMException} from "/common/pure-utils.js";
 
 const BLACKLIST_CHARS = new RegExp('[| &=?#{}<>:,]', 'g');
 

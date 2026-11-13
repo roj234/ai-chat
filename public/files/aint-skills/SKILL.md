@@ -1,11 +1,11 @@
 ---
 name: 'skills-guide'
-description: 'How to create/modify skills'
+description: 'How to write skills'
 ---
 
 # Skills
 
-A skill is the atomic unit of capability — one folder, one `SKILL.md`, and auxiliary files. The daemon scans `~/.skills/*/SKILL.md` at startup; drop a folder in, restart, and the picker shows it.
+A skill is the atomic unit of capability — one folder, one `SKILL.md`, and auxiliary files. The daemon scans `~/skills/*/SKILL.md` at startup; drop a folder in, restart, and the picker shows it.
 
 ## Adding a new skill
 
@@ -49,6 +49,10 @@ Trades agent-discoverability for zero **context load**.
 - 行内注释
 - 混合使用 List 和 Mapping `- a: b`
 - 所有未显式提到的特性
+
+## 注意
+
+技能文件夹名称不得以 `aint-` 开头，否则会在更新后被删除。
 
 ## Agent 的自我修养
 

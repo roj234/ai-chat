@@ -1,7 +1,7 @@
-import {onLoad} from "../src/hooks.js";
-import {config, EVENT_BUS, onConversationLoaded} from "../src/states.js";
+import {onLoad} from "/src/hooks.js";
+import {config, EVENT_BUS, onConversationLoaded} from "/src/states.js";
 import {LRUCache} from "@roj234/lru-cache";
-import {GLOBAL_SETTINGS} from "../src/settings.js";
+import {GLOBAL_SETTINGS} from "/src/settings.js";
 
 GLOBAL_SETTINGS.push({
 	_tab: "data",

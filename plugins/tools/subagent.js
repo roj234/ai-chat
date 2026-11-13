@@ -15,6 +15,7 @@ import {
 	findConversation,
 	LOCKED,
 	messages,
+	PP_UNATTENDED,
 	runningConversations,
 	selectedConversation,
 	switchToConversation,
@@ -26,14 +27,15 @@ import "./subagent.css";
 import {cloneNamed, prettyError} from "/src/utils/utils.js";
 import {injectMessages} from "/src/inject-message.js";
 import {GLOBAL_SETTINGS} from "/src/settings.js";
-import {createAsyncQueue, FSE_NotAllowed, FSE_NotFound, throwDOMException} from "/common/pure-utils.js";
+import {createAsyncQueue, FSE_NotAllowed, FSE_NotFound, stringCompare, throwDOMException} from "/common/pure-utils.js";
 import schema from "./subagent_schema.json";
 import {markCombinedPresetDirty} from "/src/presets.js";
 import {TemplateFormatter} from "/common/template-formatter.js";
 import {parseJson5} from "@roj234/stream-json";
 import {lockConversation, unlockConversation} from "/src/conversation-lock.js";
 import {Wait} from "../rp_kit/Wait.js";
-import {PP_UNATTENDED} from "../../src/states.js";
+import {AGENT_MESSAGE_ROLE} from "./subagent-role.js";
+import {showToast} from "../../src/components/Toast.js";
 
 compileSchema(schema);
 
@@ -297,7 +299,7 @@ async function createSubagent(par, response, conv, tools) {
 	}
 
 	if (_skills) {
-		const index = agent.mnt?.[".skills"] && (await getSkillCache(agent)).index;
+		const index = agent.mnt?.["skills"] && (await getSkillCache(agent)).index;
 		if (typeof _skills === 'string') _skills = _skills.split(" ");
 
 		const includes = (await Promise.all(_skills.map(path => readFile({
@@ -382,12 +384,6 @@ const subagentLoop = async agent => {
 	let lastMessage = messages.at(-1);
 	let finishReason = lastMessage.finish_reason;
 	let loop_finish_reason;
-
-	// 重试脚本
-	if (agent.sa_pending) {
-		loop_finish_reason = false;
-		agent.sa_notify = lastMessage.id-1;
-	}
 
 	let locked;
 	try {
@@ -479,10 +475,11 @@ export const subagentLoopWrapper = ctx => {
 		injectMessage: {
 			if (redir) {
 				const ping = (result) => injectMessages(findConversation(redir.id), {
-					role: 'user',
-					label: "子智能体",
+					role: AGENT_MESSAGE_ROLE,
 					time: Date.now(),
-					content: `<agent-message from="${agent.id}" role="ping">\n${result}</agent-message>`,
+					from: agent.id,
+					type: "ping",
+					content: result,
 				});
 
 				switch (redir.target) {
@@ -490,11 +487,11 @@ export const subagentLoopWrapper = ctx => {
 						let content = resp.content;
 						if (resp.error) content = "Agent error:\n"+content;
 						let p = appendFile({ path: redir.path, content }, {}, agent);
-						promises.push(p.then(ping));
+						promises.push(p.then(() => ping(resp.error ? content : "")));
 					}
 					break injectMessage;
 					case "script": {
-						agent.sa_pending = true;
+						const closeToast = showToast("正在执行脚本，请勿关闭页面");
 						let p = RunJS.script({
 							path: redir.path,
 							env: {
@@ -509,8 +506,8 @@ export const subagentLoopWrapper = ctx => {
 							throw: true
 						}, {}, findConversation(agent.meta.owner));
 
-						promises.push(p.then(ping, e => {
-							if (e?.name !== RETRY_ERROR) return ping("Script error:\n"+prettyError(e));
+						promises.push(p.then(log => log && ping(log), e => {
+							if (e?.name !== RETRY_ERROR) return ping(e.log+"\n\nScript error:\n"+prettyError(e));
 
 							return injectMessages(agent, {
 								role: 'user',
@@ -518,10 +515,7 @@ export const subagentLoopWrapper = ctx => {
 								time: Date.now(),
 								content: prettyError(e.message),
 							}).then(() => subagentLoopWrapper(ctx))
-						}).finally(() => {
-							delete agent.sa_pending;
-							return updateConversation(agent);
-						}));
+						}).finally(closeToast));
 					}
 					break injectMessage;
 					case "agent": target = findConversation(redir.id); break;
@@ -531,10 +525,11 @@ export const subagentLoopWrapper = ctx => {
 			}
 
 			promises.push(injectMessages(target, {
-				role: 'user',
-				label: "子智能体",
+				role: AGENT_MESSAGE_ROLE,
 				time: Date.now(),
-				content: `<agent-message from="${agent.id}" type="${resp.error?`error`:`done`}">\n${resp.content}\n</agent-message>`,
+				from: agent.id,
+				type: resp.error ? 'error' : 'done',
+				content: resp.content,
 			}));
 		}
 
@@ -545,12 +540,13 @@ export const subagentLoopWrapper = ctx => {
 	return promise;
 };
 
+
 /**
  * @type {AiChat.FunctionTool<*>}
  */
 const CreateAgent = {
 	name: 'CreateAgent',
-	description: "Creates an agent to autonomously execute a task. The call returns immediately with agentId; You will receive message `<agent-message from=\"agentId\" type=\"error | done | reply\">...</agent-message>` asynchronously.",
+	description: "Creates an agent to autonomously execute a task. The call returns immediately with agentId; You will receive message `<agent-message from=\"agentId\" type=\"error | done | reply | ping\">...</agent-message>` asynchronously.",
 	interactive: "secure",
 	parameters: {
 		type: 'object',
@@ -732,7 +728,7 @@ const NotifyAgent = {
 				if (isResume) return "Agent is health, and is idle.";
 			}
 
-			subagentLoopWrapper(par);
+			if (id !== owner) subagentLoopWrapper(par);
 
 			if (isTerminate) return doTerminate(agent, false);
 			if (isResume) return "Agent resumed. (No needed to notify)";
@@ -750,13 +746,17 @@ const NotifyAgent = {
 		let content = par.message;
 		if (!content) throwDOMException("Message cannot be empty", FSE_NotAllowed);
 
-		if (!isDirectlyOwner) content = `<agent-message from="${conv.id}"${id === owner ? ` type="reply"` : ''}>\n${content}\n</agent-message>`;
-
-		await injectMessages(agent, {
+		await injectMessages(agent, isDirectlyOwner ? {
 			role: 'user',
 			time: Date.now(),
 			label,
 			content
+		} : {
+			role: AGENT_MESSAGE_ROLE,
+			time: Date.now(),
+			content,
+			from: conv.id,
+			type: "reply"
 		});
 		return (!state
 			?"Delivered."
@@ -853,13 +853,12 @@ Available agent definitions:
 		}
 
 		await loadDefinition("agents");
-		if (conv.mnt?.[".skills"]) {
-			await loadDefinition("~/.skills/agents");
+		if (conv.mnt?.["skills"]) {
+			await loadDefinition("~/skills/agents");
 		}
 		await finish();
 
-		const intl = new Intl.Collator;
-		sortable.sort((a, b) => intl.compare(a.name, b.name)).forEach(metadata => {
+		sortable.sort((a, b) => stringCompare(a.name, b.name)).forEach(metadata => {
 			prompt += metadata.name+":\n"+metadata.description+"\n\n";
 		});
 
@@ -888,13 +887,11 @@ registerToolset(
 	}
 );
 
-JS_HOST_MODULES["agents"] = agent => {
-	const owner = findConversation(agent.meta?.owner);
-	if (!owner) return {};
+JS_HOST_MODULES["agents"] = owner => {
 	return ({
 		async notifyAgent(id, content) {
 			let target;
-			if (id === agent.meta.owner || id === 0) {
+			if (id === owner.id || id === 0) {
 				target = owner;
 			} else {
 				target = await findOwnAgent({ agentId: id }, owner);
@@ -903,7 +900,7 @@ JS_HOST_MODULES["agents"] = agent => {
 			return injectMessages(target, {
 				role: 'user',
 				time: Date.now(),
-				label: `重定向脚本 (${agent.id})`,
+				label: `智能体脚本`,
 				content
 			});
 		},

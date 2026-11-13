@@ -11,7 +11,7 @@ import {renderMarkdownToElement} from "/src/markdown/markdown.js";
 import {$unwatch, $watch, unconscious} from "unconscious";
 import {models, updateModels} from "/src/presets.js";
 import {showToast} from "/src/components/Toast.js";
-import {resolveDBRelativeURL} from "../src/database.js";
+import {resolveDBRelativeURL} from "/src/database.js";
 
 const EMPTY_WAV = `UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=`;
 const EMPTY_BMP = `Qk06AAAAAAAAADYAAAAoAAAAAQAAAAEAAAABABgAAAAAAAQAAAATCwAAEwsAAAAAAAAAAAAA/wAAAA==`;

@@ -1,6 +1,6 @@
 import {ACL, LIST, READ, WRITE} from "/common/ACL.js";
 import {normalizePath} from "@roj234/shared/path";
-import {FSE_IsDir, FSE_NotFound, throwDOMException} from "../../common/pure-utils.js";
+import {FSE_IsDir, FSE_NotFound, throwDOMException} from "/common/pure-utils.js";
 
 // ────────────────────────────────── FileSystem Helpers ──────────────────────────────────
 

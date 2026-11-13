@@ -43,7 +43,11 @@ export const GLOBAL_SETTINGS = [
 		choices: {
 			"关闭": false,
 			"模型总结": true,
+			"DeepSeek": "ds"
 		},
+		title: {
+			"DeepSeek": <>仅支持官方API，<a className="ri-external-link-line" href="https://api-docs.deepseek.com/zh-cn/guides/conversation_title">详见此处</a></>
+		}
 	},
 	{
 		id: "titleModel",
@@ -212,9 +216,9 @@ export const GLOBAL_SETTINGS = [
 		name: "推理开关",
 		type: "radio",
 		choices: {
-			"可开关": null,
-			"仅开": true,
-			"仅关": false,
+			"存在": null,
+			"仅推理": true,
+			"仅非推理": false,
 		},
 		required: true,
 		inline: true,
@@ -271,6 +275,7 @@ export const GLOBAL_SETTINGS = [
 		name: "推理等级",
 		type: "radio",
 		choices: {
+			"关": "none",
 			"最低": "minimal",
 			"低": "low",
 			"中": "medium",
@@ -382,6 +387,18 @@ export const GLOBAL_SETTINGS = [
 		placeholder: "/reasoning_effort,s",
 		warning: "请输入有效的 JSON Pointer",
 		type: "input"
+	},
+	{
+		_tab: "model2",
+		_group: 'model',
+		id: "maxTokensPath",
+		name: "最大输出参数映射",
+		title: "格式：<JSON Pointer>",
+		pattern: /^[a-z_/]+$/,
+		placeholder: "/max_tokens",
+		warning: "请输入有效的 JSON Pointer",
+		type: "input",
+		default: ""
 	},
 	{
 		_tab: "model2",
@@ -757,7 +774,7 @@ export const GLOBAL_SETTINGS = [
 		}
 	},
 	{
-		id: "fs_secrets",
+		id: "sb_secureEnv",
 		_tab: "tools",
 		name: "RunJS 秘密环境变量",
 		title: "只能在符合正则域名的请求头中使用的隐式环境变量",
@@ -778,7 +795,7 @@ export const GLOBAL_SETTINGS = [
 		load: (obj) => obj && inspect(obj),
 	},
 	{
-		id: "fs_env",
+		id: "sb_env",
 		_tab: "tools",
 		name: "RunJS 公开环境变量",
 		title: "显式注入的环境变量——任何代码都可以读取",
@@ -797,6 +814,30 @@ export const GLOBAL_SETTINGS = [
 			return [data];
 		},
 		load: (obj) => obj && inspect(obj),
+	},
+	{
+		id: "sb_secureUrl",
+		_tab: "tools",
+		name: "RunJS 网址白名单",
+		title: "留空不限制。网址是包含协议的完整前缀（如 wss://），以 ^ 开头使用正则",
+		placeholder: `https://api.openai.com/v1`,
+		required: true,
+		type: "list",
+		pattern(value) {
+			if (value[0] === '^') {
+				try {
+					new RegExp(value);
+				} catch {
+					return "请输入正确的正则表达式";
+				}
+			} else {
+				try {
+					new URL(value);
+				} catch {
+					return "请输入正确的网址";
+				}
+			}
+		},
 	},
 	// logs
 ];
@@ -895,7 +936,7 @@ if (IS_ANDROID_BUILD) {
 	})
 }
 
-export const BODY_PARAMETERS = GLOBAL_SETTINGS.filter(({id = "", _tab}) => (id !== 'antiSlop' && _tab === "sampling" || id === "max_completion_tokens"));
+export const BODY_PARAMETERS = GLOBAL_SETTINGS.filter(({id = "", _tab}) => (id !== 'antiSlop' && _tab === "sampling"));
 BODY_PARAMETERS.forEach(item => item.body_id = item.id);
 
 export const PRIVATE_CONFIG_KEY = `theme
@@ -927,7 +968,7 @@ for (const [k, v] of [
 // 删除过时的配置项
 onLoad(() => {
 	const keys = new Set(Object.keys(unconscious(config)));
-	["name", "think", "_new", "_dirty", "_instanceId"].forEach(name => keys.delete(name));
+	["name", "_new", "_dirty", "_instanceId"].forEach(name => keys.delete(name));
 
 	GLOBAL_SETTINGS.forEach((item) => {
 		const {id, _group, type, choices} = item;

@@ -3,7 +3,7 @@ import {LOG_CACHE, messages} from "../states.js";
 import {getBillingLog} from "../database.js";
 import {LLM_COST_SCALE} from "/backend/sync.js";
 import {Icon_lightning} from "./Icons.jsx";
-import {formatDuration} from "../../common/pure-utils.js";
+import {formatDuration} from "/common/pure-utils.js";
 import {queueMacrotask} from "unconscious/common/queueMacrotask.js";
 
 const formatKM = size => {

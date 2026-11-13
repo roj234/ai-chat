@@ -108,6 +108,7 @@ export const createRemoteFileSystem = (baseUrl, pat, fileBase) =>
 			stream = parameters.stream;
 			signal = parameters.signal;
 			if (parameters.metaOnly) method = "HEAD";
+			if (parameters.offset) headers['Range'] = `bytes=${parameters.offset}-`;
 			if (body) headers['Content-Type'] = 'application/octet-stream';
 			else parameters = null;
 		} else if (parameters) {

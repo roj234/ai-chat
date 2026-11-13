@@ -1,7 +1,7 @@
 import {getToolParameters, parseFrontmatter, registerToolset} from "/src/toolset.js";
 import {debugSymbol} from "unconscious";
 import {fileAccess} from "./Mounts.js";
-import {createAsyncQueue} from "/common/pure-utils.js";
+import {createAsyncQueue, stringCompare} from "/common/pure-utils.js";
 import {EVENT_BUS} from "/src/states.js";
 import {isIDB} from "/src/database.js";
 
@@ -9,7 +9,8 @@ const SKILL_INFO = debugSymbol("Skills");
 const glob = fileAccess("list");
 const readFile = fileAccess("read");
 const writeFile = fileAccess("write");
-const statFile = fileAccess("stat");
+const writeBinary = fileAccess("writeRaw");
+const deleteFile = fileAccess("delete");
 
 
 /**
@@ -52,12 +53,15 @@ const copyFile = (name, toBase, conv) => {
 	return fetch("files/"+name).then((res) => {
 		return res.blob();
 	}).then(blob => {
-		return writeFile({
+		return writeBinary({
 			path: toBase+name,
 			content: blob
 		}, 0, conv);
 	})
 }
+
+const SKILL_VERSION = "1";
+const nothing = {};
 
 export async function getSkillCache(conv) {
 	let skillCache = conv[SKILL_INFO];
@@ -66,18 +70,32 @@ export async function getSkillCache(conv) {
 		let prompt = `<skills>\n`;
 
 		if (conv.activatedModules.has("Files")) {
-			const path = "~/.skills/skills-guide/SKILL.md";
+			const path = "~/skills/.aint-skill-version";
 			try {
-				await statFile( {
-					path
+				const version = await readFile( {
+					path,
+					limit: 1,
+					noTruncate: true,
 				}, 0, conv);
+				if (version !== SKILL_VERSION) throw '';
 			} catch {
-				const fs = conv.mnt['.skills'];
+				const aintSkills = await glob({
+					path: "~/skills",
+					pattern: "aint-*",
+					json: true
+				}, nothing, conv);
+
+				const fs = conv.mnt['skills'];
 				fs.fs_readonly = false;
+
+				await Promise.allSettled(aintSkills.map(data => deleteFile({path: "~/skills/"+data[0]}, nothing, conv)));
+
 				const p = Promise.all([
-					copyFile("skills-guide/SKILL.md", "~/.skills/", conv),
-					copyFile("agents-guide/SKILL.md", "~/.skills/", conv),
-					copyFile("agents-guide/ACL.md", "~/.skills/", conv),
+					copyFile("aint-skills/SKILL.md", "~/skills/", conv),
+					copyFile("aint-agents/SKILL.md", "~/skills/", conv),
+					copyFile("aint-agents/ACL.md", "~/skills/", conv),
+					copyFile("aint-ptc/SKILL.md", "~/skills/", conv),
+					writeFile({ path: "~/skills/.aint-skill-version", content: SKILL_VERSION }, nothing, conv),
 					EVENT_BUS.post(['initSkills'], conv, writeFile)
 				]);
 				p.finally(() => fs.fs_readonly = true);
@@ -88,20 +106,20 @@ export async function getSkillCache(conv) {
 		prompt += `Available skills:\n---\n`;
 
 		const skills = await glob({
-			path: "~/.skills",
-			pattern: "*/SKILL.md", // */**/SKILL.md
+			path: "~/skills",
+			pattern: "*/SKILL.md",
 			json: true
-		}, 0, conv);
+		}, nothing, conv);
 
 		const sortable = [];
 		const [enqueue, finish] = createAsyncQueue();
 		for (const [relPath] of skills) {
-			const path = "~/.skills/"+relPath;
+			const path = "~/skills/"+relPath;
 			await enqueue(async () => {
 				const str = await readFile({
 					path,
 					format: 'frontmatter'
-				}, {}, conv);
+				}, nothing, conv);
 				const [metadata, content, offset] = parseFrontmatter(str);
 				if (!('name' in metadata)) return;
 				if (metadata.xAiChatShellOnly && conv.fs_type !== 'api') return;
@@ -114,8 +132,7 @@ export async function getSkillCache(conv) {
 
 		await finish();
 
-		const intl = new Intl.Collator;
-		sortable.sort((a, b) => intl.compare(a.name, b.name)).forEach(metadata => {
+		sortable.sort((a, b) => stringCompare(a.name, b.name)).forEach(metadata => {
 			prompt += metadata.name+":\n"+metadata.description+"\n\n";
 		});
 
@@ -136,7 +153,7 @@ registerToolset("Skills", "技能", [Skill], {
 	},
 	//depend: ["Files"],
 	onActivated(conv) {
-		(conv.mnt || (conv.mnt = {}))[".skills"] = {
+		(conv.mnt || (conv.mnt = {}))["skills"] = {
 			fs_builtin: true,
 			fs_base: "skills",
 			fs_name: "技能目录",
@@ -146,6 +163,6 @@ registerToolset("Skills", "技能", [Skill], {
 	},
 	onDeactivated(conv) {
 		const mnt = conv.mnt;
-		if (mnt) delete mnt[".skills"];
+		if (mnt) delete mnt["skills"];
 	}
 });

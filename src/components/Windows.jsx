@@ -372,7 +372,7 @@ const mountTaskbar = () => {
 	appendChild(body, container);
 
 	body.addEventListener('click', ({target}) => {
-		if (focusedWindow && !target.closest('.MDI') && !target.closest('.menu')) {
+		if (target.isConnected && focusedWindow && !target.closest('.MDI') && !target.closest('.menu')) {
 			focusedWindow.onFocus?.(false);
 			focusedWindow = null;
 			$update(windowList);

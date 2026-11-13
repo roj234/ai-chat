@@ -102,7 +102,7 @@ export function PendingMessageList({attachments, items, input} = {}) {
 
 				return (
 					<div role="listitem" title={preview}>
-						{fileCount ? <i className="ri-file-line pm-file"/> : null}
+						{fileCount ? <i className="ri-file-3-line pm-file"/> : null}
 						{message.label && <span className="pm-role">{message.label}</span>}
 						<span className="text ellipsis">{preview}</span>
 						{message.defer &&

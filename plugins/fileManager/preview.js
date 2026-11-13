@@ -12,7 +12,8 @@ import {config} from "/src/states.js";
 import "./preview.css";
 import {vfsDownload} from "./downloader.js";
 import {openFileEditor} from "/plugins/fileManager/Editor.js";
-import {HighlightBox} from "../../src/components/TextDiff.jsx";
+import {HighlightBox} from "/src/components/TextDiff.jsx";
+import {resolveVirtualUrl} from "./_vfsVirtualUrl.js";
 
 /**
  * @typedef {{ name: string, path: string, size: number, mtime?: number }} DownloadJob
@@ -29,22 +30,10 @@ const sizeByKind = immutableObjectMap({
 	binary: { width: 300, height: 200, resizable: false, icon: <i className="ri-file-unknow-fill" /> },
 	'too-large': { width: 400, height: 200, resizable: false, icon: <i className="ri-error-warning-fill" /> },
 	markdown: { width: 700, icon: <i className="ri-file-text-fill" /> },
-	text: { icon: <i className="ri-file-code-fill" /> },
+	text: { width: 650, height: 800, icon: <i className="ri-file-code-fill" /> },
 	html: { width: 700, icon: <i className="ri-file-code-fill" /> },
 	image: { icon: <i className="ri-file-image-fill" /> },
 });
-
-/**
- *
- * @param {AiChat.FileSystemInstance} fs
- * @param {string} path
- * @return {?string}
- */
-const resolveVirtualUrl = (fs, path) => {
-	const sw = navigator.serviceWorker?.controller;
-	const mount = fs[FS_SOURCE];
-	if (sw && mount) return "vfs/"+(mount.fs_type+'@'+encodeURIComponent(mount.fs_base)+"@"+encodeURIComponent(mount.fs_server))+"/"+encodeURIComponent(path).replaceAll("%2F", "/");
-}
 
 
 const closeBtn = () =>
@@ -164,7 +153,7 @@ export async function vfsPreview(fs, path, overrideFileName, editable) {
 
 	const previewWindow = openWindow({
 		id: "preview "+encodeURI(vfsIdentity(fs[FS_SOURCE])+path),
-		icon: <i className={"ri-file-line"}/>,
+		icon: <i className={"ri-file-3-line"}/>,
 		title: path,
 		actions: <div className="row">
 			{editable !== 'no' && <button className="ri-edit-2-line ghost" title="编辑" onClick={() => {
@@ -211,4 +200,4 @@ export async function vfsPreview(fs, path, overrideFileName, editable) {
 	return previewWindow;
 }
 
-export {createJson5Editor} from "./Editor.js";
+export {createEditorWidget} from "./Editor.js";

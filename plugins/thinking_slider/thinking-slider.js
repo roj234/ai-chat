@@ -1,7 +1,7 @@
 import './thinking-slider.css';
 import {$cleanup, $computed, $derived, $watchWithCleanup, AS_IS, ref, unconscious} from "unconscious";
 import {DI_settings, onLoad} from "/src/hooks.js";
-import {config, selectedConversation} from "/src/states.js";
+import {config, EVENT_BUS, selectedConversation} from "/src/states.js";
 import {currentCombinedConfig, markCombinedPresetDirty, maxTokensClamped} from "/src/presets.js";
 import {updateConversation} from "/src/database.js";
 import {CUSTOM_CONTROLS} from "/src/customControls.js";
@@ -111,7 +111,8 @@ const ThinkingSlider = ({ options, onChange, onInput, haptics = true, noAnimatio
 			let index = levels.findIndex(level => level.value === value);
 			if (index < 0) index = Math.round(levels.length / 2);
 
-			sliderValue = levels.length <= 1 ? 0.5 : index / (levels.length - 1);
+			if (levels.length <= 1) return sliderValue = 0;
+			sliderValue = index / (levels.length - 1);
 			input.value = index;
 
 			description.textContent = levels[index].description;
@@ -139,7 +140,7 @@ const ThinkingSlider = ({ options, onChange, onInput, haptics = true, noAnimatio
 			budgetValue.textContent = budgetText;
 			input.setAttribute('aria-valuetext', budgetText);
 			const descriptionIndex = sliderValue < .3 ? 0 : sliderValue < .7 ? 1 : 2;
-			description.textContent = BUDGET_DESCRIPTIONS[descriptionIndex];
+			description.textContent = sliderValue === 0 ? defaultLevels[0].description : BUDGET_DESCRIPTIONS[descriptionIndex];
 			_measureBudgetWidth();
 		}
 
@@ -352,8 +353,9 @@ const ThinkingSlider = ({ options, onChange, onInput, haptics = true, noAnimatio
 	return root;
 }
 
-const levels = [
-	{ value: 'minimal', label: '最低', description: '爷不思考了！' },
+const defaultLevels = [
+	{ value: 'none', label: '关', description: '爷不思考了！' },
+	{ value: 'minimal', label: '最低', description: '已思考 0 秒。' },
 	{ value: 'low', label: '低', description: '快速判断，保持轻盈。' },
 	{ value: 'medium', label: '中', description: '拆解问题，让推理多走一步。' },
 	{ value: 'high', label: '高', description: '深入探索，给复杂问题更多空间。' },
@@ -362,31 +364,52 @@ const levels = [
 	{ value: 'ultra', label: '超超超高', description: '你的额度没了。' },
 ]
 
-const state = currentCombinedConfig;
-const isBudget = $computed(() => state.reasoningEffortPath?.endsWith(",i"));
-const token = $derived(state.reasoningBudget);
-const level = $derived(state.reasoningEffort);
-const supportedEfforts = $derived(state.supportedEfforts);
+/**
+ *
+ * @param {import("unconscious").Reactive<AiChat.LocalPreset>} state
+ */
+const createOptions = state => {
+	const isBudget = $computed(() => state.reasoningEffortPath?.endsWith(",i"));
+	const token = $derived(state.reasoningBudget);
+	const level = $derived(state.reasoningEffort);
+	const supportedEfforts = $derived(state.supportedEfforts);
+	const forceThink = $derived(state.forceThink);
 
-const options = $computed(() => {
-	if (unconscious(isBudget)) {
-		return {min: 0, max: unconscious(maxTokensClamped), value: unconscious(token)}
-	} else {
-		const out = [];
-		for (const key of unconscious(supportedEfforts) ?? []) {
-			out.push(levels.find(level => level.value === key) ?? { value: key, label: key, description: key });
+	const options = $computed(() => {
+		if (unconscious(isBudget)) {
+			return {min: 0, max: unconscious(maxTokensClamped), value: unconscious(token)}
+		} else {
+			const out = [];
+			block: {
+				const v = unconscious(forceThink);
+				if (!v) {
+					out.push(defaultLevels[0]);
+					if (v === false) break block;
+				}
+
+				for (const key of unconscious(supportedEfforts) ?? []) {
+					out.push(defaultLevels.find(level => level.value === key) ?? { value: key, label: key, description: key });
+				}
+			}
+			return {levels: out.length ? out : defaultLevels, value: unconscious(level)}
 		}
-		return {levels: out.length ? out : levels, value: unconscious(level)}
-	}
-});
+	});
+
+	return [isBudget, options];
+}
 
 onLoad(() => {
-	const el = <ThinkingSlider options={options} onChange={value => {
+	const [localIsBudget, localOptions] = createOptions(currentCombinedConfig);
+	const [globalIsBudget, globalOptions] = createOptions(config);
+
+	const el = <ThinkingSlider options={localOptions} onChange={value => {
 		if (selectedConversation.presets) {
 			const conv = unconscious(selectedConversation);
+
 			const overrides = conv.overrides ??= {};
-			if (unconscious(isBudget)) overrides.reasoningBudget = value;
+			if (unconscious(localIsBudget)) overrides.reasoningBudget = value;
 			else overrides.reasoningEffort = value;
+
 			markCombinedPresetDirty(conv);
 			updateConversation(conv);
 		} else {
@@ -396,13 +419,19 @@ onLoad(() => {
 		}
 	}} />;
 
+	EVENT_BUS.on(['convNew'], conv => {
+		const overrides = conv.overrides ??= {};
+		if (unconscious(globalIsBudget)) overrides.reasoningBudget = config.reasoningBudget;
+		else overrides.reasoningEffort = config.reasoningEffort;
+	})
+
 	CUSTOM_CONTROLS[0].lastElementChild.append(el);
 	el.addEventListener('click', e => {
 		e.stopPropagation();
 	})
 
-	DI_settings.byId("re").replaceWith(<ThinkingSlider noAnimation={true} options={options} onChange={value => {
-		if (unconscious(isBudget)) config.reasoningBudget = value;
+	DI_settings.byId("re").replaceWith(<ThinkingSlider noAnimation={true} options={globalOptions} onChange={value => {
+		if (unconscious(globalIsBudget)) config.reasoningBudget = value;
 		else config.reasoningEffort = value;
 		DI_settings.sync(false, true);
 	}} />);

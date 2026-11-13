@@ -10,7 +10,7 @@ import {
 	selectedConversation
 } from "../states.js";
 import {submitUserChatMessage} from "../api-request.js";
-import {AttachmentGallery, blobToContentPart} from "./AttachmentGallery.jsx";
+import {AttachmentGallery, blobToAttachment} from "./AttachmentGallery.jsx";
 import {createSendButton} from "./SendButton.jsx";
 import {bind, scrollMessagesToBottom} from "../utils/utils.js";
 import {$derived, $state, $update, $watch, unconscious} from "unconscious";
@@ -29,6 +29,7 @@ export const TEXT_MIMES = "text/plain";
 export const AUDIO_MIMES = "audio/wav,audio/mp3,audio/flac,audio/ogg";
 export const IMAGE_MIMES = "image/png,image/jpeg,image/bmp,image/gif,image/apng,image/webp";
 export const VIDEO_MIMES = "video/mp4,video/avi,video/m4v";
+
 /**
  *
  * @param {string} text
@@ -90,7 +91,7 @@ async function parseUserInput(text, attachments) {
 				try {
 					const blob = await getBlob({hash});
 					flushText();
-					blobToContentPart(blob, 0 === selectedConversation.id, parts);
+					blobToAttachment(blob, 0 === selectedConversation.id, parts);
 					continue;
 				} catch {
 				}
@@ -105,9 +106,12 @@ async function parseUserInput(text, attachments) {
 			const after = text.slice(lastIndex).trim();
 			if (after) parts.push({type: "text", text: await longTextToAttachment(after)});
 
-			attachments.forEach((attachment, index) => {
+			for (let index = 0; index < attachments.length; index++){
+				const attachment = attachments[index];
+				await attachment.loading;
+
 				if (!usedIndices.has(index)) parts.push(attachment);
-			});
+			}
 			return parts;
 		}
 	}
@@ -117,13 +121,7 @@ export const createUserInputComposer = (scroller) => {
 	/** @type {import("unconscious").Reactive<OpenAI.ContentPart[]>} */
 	const attachments = $state([]);
 	const fileInput = <input type="file" multiple onChange={({target}) => {
-
-		const isFileTransferWindow = selectedConversation.id === 0;
-
-		for (const file of target.files) {
-			blobToContentPart(file, isFileTransferWindow, attachments, true);
-		}
-
+		for (const file of target.files) blobToAttachment(file, attachments);
 		target.value = '';
 	}}/>;
 
@@ -140,7 +138,6 @@ export const createUserInputComposer = (scroller) => {
 		const mime = [TEXT_MIMES];
 		if (opt.modalities.includes("audio")) mime.push(AUDIO_MIMES);
 		if (opt.modalities.includes("image")) mime.push(IMAGE_MIMES);
-		if (opt.modalities.includes("video")) mime.push(VIDEO_MIMES);
 		fileInput.accept = mime.join(",");
 	});
 
@@ -167,7 +164,7 @@ export const createUserInputComposer = (scroller) => {
 		sendButton = createSendButton(attachments, submitInput);
 
 	const blobCallback = blob => {
-		if (blob) blobToContentPart(blob, 0 === selectedConversation.id, attachments);
+		if (blob) blobToAttachment(blob, attachments);
 	};
 
 	const debon = $derived(config.temporaryChat);
@@ -223,10 +220,7 @@ export const createUserInputComposer = (scroller) => {
 		dropZone.classList.remove('drag-over');
 		const dt = e.dataTransfer;
 		if (dt?.files.length) {
-			const isFileTransferWindow = selectedConversation.id === 0;
-			for (const file of dt.files) {
-				blobToContentPart(file, isFileTransferWindow, attachments, true);
-			}
+			for (const file of dt.files) blobToAttachment(file, attachments);
 		}
 	});
 
@@ -248,11 +242,7 @@ export const createUserInputComposer = (scroller) => {
 
 		if (files.length) {
 			event.preventDefault();
-
-			const isFileTransferWindow = selectedConversation.id === 0;
-			for (const file of files) {
-				blobToContentPart(file, isFileTransferWindow, attachments, true);
-			}
+			for (const file of files) blobToAttachment(file, attachments);
 		}
 	});
 
@@ -283,10 +273,10 @@ export const createUserInputComposer = (scroller) => {
 			}
 		}
 
+		const content = await parseUserInput(text, attachments);
+
 		inputText.value = '';
 		userInput.style.height = '';
-
-		const content = await parseUserInput(text, attachments);
 		attachments.length = 0;
 
 		// Abort previous if any

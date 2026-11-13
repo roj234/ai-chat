@@ -2,9 +2,15 @@ import {prettyError} from "/src/utils/utils.js";
 import {abortable, sleep} from "/common/pure-utils.js";
 import {formatSize} from "unconscious/common/Utils.js";
 
+export const MAX_RETRY     = 5;
+export function getDelay(attempt, retryAfter) {
+	if (retryAfter) return Math.min(retryAfter * 1000 || 0, 60_000);
+	const base = 400 * 2 ** (attempt - 1);
+	return base * (1 + Math.random() * 0.5);
+}
+
 const CHUNK_MIN     = 8 << 20;
 const CHUNK_MAX     = 64 << 20;
-const MAX_RETRY     = 5;
 
 /**
  * @param {string} text
@@ -25,14 +31,8 @@ function errText(text, status) {
 /** 目标 ~100 片自动优化分片大小 */
 const pickChunkSize = size => {
 	const fragmentSize = size / 100;
-	return fragmentSize < CHUNK_MIN ? CHUNK_MIN : fragmentSize > CHUNK_MAX ? CHUNK_MAX : ((fragmentSize+4095) & ~4096);
+	return fragmentSize < CHUNK_MIN ? CHUNK_MIN : fragmentSize > CHUNK_MAX ? CHUNK_MAX : ((fragmentSize+4095) & ~4095);
 };
-
-function getDelay(attempt, retryAfter) {
-	if (retryAfter) return Math.min(retryAfter * 1000 || 0, 60_000);
-	const base = 400 * 2 ** (attempt - 1);
-	return base * (1 + Math.random() * 0.5);
-}
 
 /**
  * @param {File}   file
@@ -55,7 +55,7 @@ export async function xhrUpload(file, url, headers = {}, signal, onProgress) {
 
 	while (offset < total) {
 		const end  = Math.min(offset + chunkSize, total);
-		const blob = file.slice(offset, end);   // slice 是零拷贝视图
+		const blob = file.slice(offset, end);
 
 		let xhr;
 		try {
@@ -84,7 +84,7 @@ export async function xhrUpload(file, url, headers = {}, signal, onProgress) {
 				xhr.send(blob);
 			});
 		} catch (e) {
-			if (e.name === 'AbortError' || signal.aborted || ++attempt > MAX_RETRY) throw e;
+			if (signal.aborted || ++attempt > MAX_RETRY) throw e;
 			await abortable(sleep(getDelay(attempt)), signal);
 			continue;
 		}
@@ -102,7 +102,7 @@ export async function xhrUpload(file, url, headers = {}, signal, onProgress) {
 
 		if (st === 413) {
 			if (chunkSize > CHUNK_MIN) chunkSize >>= 1;
-			else throw new DOMException(`服务器配置错误，不接受 ${formatSize(CHUNK_MIN)}B 的请求`, 'NetworkError');
+			else throw new DOMException(`服务器配置错误，不接受 ${formatSize(CHUNK_MIN)} 的请求`, 'NetworkError');
 			continue;
 		}
 

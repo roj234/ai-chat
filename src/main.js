@@ -39,10 +39,10 @@ import SimpleModal, {closeTopmostModal} from "./components/SimpleModal.jsx";
 import {createUserInputComposer} from "./components/UserInputComposer.jsx";
 import {onPluginLoaded} from "/plugins/PluginRegistry.js";
 import {DI, DID_TITLE_POSITION, injectCommonDI} from "./hooks.js";
-import {checkUpdate} from "../common/updater.js";
+import {checkUpdate} from "/common/updater.js";
 import {setAllowHTMLTags} from "./markdown/markdown.js";
-import {sseFetch} from "../common/fetch-utils.js";
-import {sleep} from "../common/pure-utils.js";
+import {sseFetch} from "/common/fetch-utils.js";
+import {sleep} from "/common/pure-utils.js";
 import {setBackHandler} from "../vendor/jsBridge.js";
 import {unmaximizeFocusedWindow} from "./components/Windows.jsx";
 

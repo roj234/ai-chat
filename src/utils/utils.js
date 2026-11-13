@@ -139,7 +139,7 @@ export const copyWithAnimation = (data, btn) => {
 
 export const showImageZoomView = (src, title) => {
 	SimpleModal({
-		title: `图像预览 (${title})`,
+		title: `图像预览 ${title ? `(${title})` : ""}`,
 		className: "full",
 		message: <img src={src} alt={title || src} />
 	})

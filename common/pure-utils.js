@@ -224,3 +224,5 @@ export const formatDuration = seconds => {
 	const s = Math.floor(seconds % 60);
 	return `${h > 0 ? h+':' : ''}${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
 };
+
+export const stringCompare = (a, b) => a < b ? -1 : a > b ? 1 : 0;

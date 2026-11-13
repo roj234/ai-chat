@@ -78,15 +78,26 @@ export function ToolCallCard(props) {
 
         // 什么都ondemand，算了，反正【我觉得爽也是一种优秀】
         if (isReactive(tool)) {
-            $watch(tool, () => {
-                highlight(tool.function.arguments, "json", input);
-            });
+            const sr = toolScriptRegistry[name]?.streamRenderer;
+            if (sr) {
+                const update = sr(input, message);
+                $watch(tool, () => {
+                    update(tool.function.arguments || "");
+                });
+            } else {
+                $watch(tool, () => {
+                    highlight(tool.function.arguments, "json", input);
+                });
+            }
             tool[OPENED] = true;
         } else {
             const renderInput =  toolScriptRegistry[name]?.renderInput;
             const renderOutput =  toolScriptRegistry[name]?.renderOutput;
 
             $watch(reactiveResponse, () => {
+                // 处理工具把自己给删了的情况
+                if (message.tool_calls?.[idx] !== tool) return;
+
                 toolResponse = message.tool_responses[idx];
                 duration.value = toolResponse && formatDuration(toolResponse.duration);
                 const isRunning = !!toolResponse?.[TOOL_IS_RUNNING];
@@ -158,6 +169,10 @@ export function ToolCallCard(props) {
 
     updateCard(base, props);
     base[onReuse_Callback] = updateCard;
+
+    if (toolScriptRegistry[name]?.streamRenderer) {
+        base.open = true;
+    }
 
     if (!generating && tool[OPENED]) {
         base.open = true;

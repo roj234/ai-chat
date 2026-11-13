@@ -80,6 +80,7 @@ export const Icon_PTC = () => (
 		viewBox="0 0 24 24"
 		fill="none"
 		stroke="currentColor"
+		className="icon"
 		stroke-width={2}
 	>
 		<path d="M2 3v9a5 5 0 0 0 5 5h11" />

@@ -10,7 +10,9 @@ import {createFileSystemAsync, VirtualDirectory, VirtualFile} from "../agent/ind
 import {FSE_NotFound, throwDOMException} from "/common/pure-utils.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
 import {createWebFileSystem} from "../agent/WebFSDriver.js";
-import {resolvePreset} from "../../src/presets.js";
+import {resolvePreset} from "/src/presets.js";
+
+import {customRoleRegHelper} from "../pluginApi.js";
 
 const ID = "ContextCompression";
 
@@ -230,18 +232,6 @@ MxxVFSRoot.set([".handlers", 1], {
 	},
 });
 
-/*PROMPT_TEMPLATES['[DCP] 让模型主动查上下文'] = `\n{{dcp:hint1}}`;
-PLACEHOLDERS['dcp:hint1'] = (conv) => {
-	if (conv.activatedModules?.has(ID)) {
-		return `
-- All context stays inside \`~/.history/\` (\`mNNN.json\` per message).
-  Read/Grep there to recall exact sources when a summary is insufficient.
-`
-	}
-
-	return '';
-};*/
-
 registerToolset(ID, "主动上下文管理\n使用 /dcp ui 打开配置界面", [Compress, Marker], {
 	hidden: 'manual',
 	systemPrompt: `<context-management>
@@ -288,46 +278,32 @@ Each user message has \`<marker>mNNN</marker>\` at its end — use these IDs:
 - The call itself is removed and replaced by a short \`<context-compressed>\` receipt. It is a record of the system's action, not something you wrote — seeing it is normal and means the call succeeded; it never means the call was lost.
 - Each compressed span becomes a \`<context-summary id="bN">\` block placed where that span used to be.
 - Old ids inside a compressed span are no longer addressable. Use the \`bN\` of the checkpoint instead.
-- All context stays inside \`~/.history/\` (\`mNNN.json\` per message), nothing is physically deleted.
+- All context stays inside \`~/history/\` (\`mNNN.json\` per message), nothing is physically deleted.
 
 It is our responsibility to keep a sharp, high-quality context window.
 </context-management>`,
 	onActivated(conv) {
-		const msgs = unconscious(messages);
-		if (!msgs.some(m => m.role === ID)) {
-			registerSelf(msgs, conv);
-		}
-
-		return [Compress, Marker]
+		registerRole(conv);
+		return [Compress, Marker];
 	},
 	onDeactivated(conv) {
-		const msgs = unconscious(messages)
-		for (let i = 0; i < msgs.length; i++) {
-			if (msgs[i].role === ID) {
-				msgs.splice(i, 1);
-				delete conv.mnt?.['.history'];
-				break;
-			}
-		}
+		unregisterRole(conv);
+		delete conv.mnt?.['history'];
 	}
 })
 
-function registerSelf(messages, conv) {
-	messages.unshift({
-		role: ID,
-		id: -1,
-		hidden: true,
-	});
+const [registerRole_, unregisterRole] = customRoleRegHelper(ID);
+
+function registerRole(conv) {
+	if (!registerRole_(conv)) return;
 
 	const instance = {};
 	createFileSystemAsync(instance, createWebFileSystem(new VirtualDirectory(MxxVFSRoot, [".", "sessions", conv], MxxVFSRoot.getChildren([".handlers", 1]))));
-	(conv.mnt ??= {})['.history'] = instance;
+	(conv.mnt ??= {})['history'] = instance;
 }
 
 onConversationLoaded((conv, path, messages) => {
-	if (conv.activatedModules?.has(ID) && !messages.some(m => m.role === ID)) {
-		registerSelf(messages, conv);
-	}
+	if (conv.activatedModules?.has(ID)) registerRole(conv, messages);
 });
 
 MessageRoles[ID] = {

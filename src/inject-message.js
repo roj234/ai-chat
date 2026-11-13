@@ -20,9 +20,9 @@ function doInsert(msgs, items) {
 		delete item.defer;
 
 		const currLast = msgs.at(-1);
-		if (item.label && currLast.label === item.label && !Array.isArray(currLast.content) && !Array.isArray(item.content)) {
+		/*if (item.label && currLast.label === item.label && !Array.isArray(currLast.content) && !Array.isArray(item.content)) {
 			currLast.content += item.content;
-		} else {
+		} else */{
 			msgs.push(item);
 		}
 	}

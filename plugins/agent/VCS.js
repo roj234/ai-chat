@@ -6,8 +6,8 @@ import {showVCSDialog} from "./VCS_dialog.js";
 import {getImmediateMessages, markMessageDirty, updateConversation} from "/src/database.js";
 import {fileAccess} from "./Mounts.js";
 import {VCS_BASE_BRANCH, VCS_BRANCH, VCS_COMMIT, VCS_DELETE_BRANCH, VCS_REVERT} from "./VCS_shared.js";
-import {getRandomString, prettyError} from "../../src/utils/utils.js";
-import {showToast} from "../../src/components/Toast.js";
+import {getRandomString, prettyError} from "/src/utils/utils.js";
+import {showToast} from "/src/components/Toast.js";
 import {formatDate} from "unconscious/common/Utils.js";
 
 //endregion

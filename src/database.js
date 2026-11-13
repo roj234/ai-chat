@@ -25,6 +25,12 @@ const M_CACHE = debugSymbol("Messages");
 const M_DIFF_SNAPSHOT = DIFF_SNAPSHOT;
 const M_CLEAN = debugSymbol("Clean");
 
+const initializeState = (conversation, _, messages) => {
+	conversation[M_CACHE] = new WeakRef(messages);
+	messages[M_DIFF_SNAPSHOT] = new Map;
+};
+EVENT_BUS.on('convNew', initializeState);
+
 export const DONE = Promise.resolve();
 
 export const databaseError = err => {
@@ -306,8 +312,7 @@ const updateConversation_ = async (conversation, messages, keepTime) => {
 		messages = messages.raw ?? messages;
 
 		if (undefined === excepted) {
-			conversation[M_CACHE] = new WeakRef(messages);
-			messages[M_DIFF_SNAPSHOT] = new Map;
+			initializeState(conversation, 0, messages);
 		} else {
 			if (import.meta.env.DEV) {
 				messages = messages.raw ?? messages;

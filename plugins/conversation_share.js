@@ -1,9 +1,9 @@
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {isIDB} from "/src/database.js";
-import {requestBackend} from "../src/database/remoteDB.js";
+import {requestBackend} from "/src/database/remoteDB.js";
 import {unconscious} from "unconscious";
-import {selectedConversation} from "../src/states.js";
+import {selectedConversation} from "/src/states.js";
 
 if (!isIDB) {
 	COMMAND_REGISTRY['share'] = [

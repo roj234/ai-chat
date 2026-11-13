@@ -62,7 +62,7 @@ function createBranchManager(conv, messages) {
 				if (parent <= 0 || !parentMessage) {
 					showToast(`分支管理器启用失败
 找不到 #${index} 的父节点 #${parentIndex}
-请尝试编辑原始数据`, "error");
+请尝试修改 JSON`, "error");
 					delete m.parent;
 					continue;
 				}
@@ -124,6 +124,10 @@ function createBranchManager(conv, messages) {
 	// 禁用分支管理器
 	const deactivate = () => {
 		delete conv.bm_leaf;
+
+		// 不再真实禁用对象，否则很容易出问题，反正刷新了也会没
+		return;
+
 		delete messages[BRANCH_MANAGER];
 		if (import.meta.env.DEV)
 			delete conv[BRANCH_MANAGER];

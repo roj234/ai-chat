@@ -18,6 +18,7 @@ import {inspect} from "@roj234/util-inspect";
 import {config} from "/src/states.js";
 import {FSE_NotAllowed, FSE_NotFound, FSE_NotSupported, throwDOMException} from "/common/pure-utils.js";
 import {injectMessages} from "/src/inject-message.js";
+import {escapeRegexp} from "@roj234/shared/strings";
 
 /**
  *
@@ -42,8 +43,15 @@ export const JS_HOST_MODULES = {
 			});
 		}
 	}, {
-		get(target, key) {
+		get(target, key, self) {
 			if (Object.hasOwn(target, key)) return target[key];
+			if (key === 'default') return target[key] ??= (name, arg) => {
+				const fn = self[name];
+				if (!fn) throwDOMException("Export not found: tools::"+name, FSE_NotFound);
+				return fn(arg);
+			};
+
+			if (ctx.success != null) throwDOMException("Script already ended", FSE_NotAllowed);
 
 			const definition = toolScriptRegistry[key];
 			const allowed = conv.tools.has(key) || definition?.default;
@@ -52,10 +60,12 @@ export const JS_HOST_MODULES = {
 
 			// FIXME
 			if (key === "Wait") throwDOMException("Wait tool is not supported yet.", FSE_NotSupported);
-			if (key === "RunJS") throwDOMException("Recursion is not allowed.", FSE_NotAllowed);
+			if (key === "RunJS") throwDOMException("Recursion.", FSE_NotAllowed);
 
-			return async (args) => {
+			return target[key] ??= async (args) => {
 				const ptc = (ctx.delegatedCalls ??= { tool_calls: [], tool_responses: [] });
+
+				if (ptc.tool_calls.length >= 100) throwDOMException("Too many calls", FSE_NotAllowed);
 
 				const pos = ptc.tool_calls.push({
 					function: {
@@ -296,7 +306,7 @@ export const RunJS = {
 - Node.js shim modules: \`fs/promises\`, \`path\`, \`url\`, no require() or sync fs methods.
 - Its fs can access all VFSs, and cwd = workspace root.
 - After the module evaluated, the sandbox detaches — MUST await top-level Promises.
-- Permissions: "network" for fetch/Websocket, "eval" for Function, wasm and remote import(), "" = fetch is undefined.
+- Permissions: "eval" for Function, wasm and remote import().
 - For Uint8Array, use \`fs.writeFile(path, data, { transfer: true })\` (or appendFile) to transfer the buffer ownership for better performance. The returned promise resolves to a new Uint8Array with the same content; the original buffer becomes invalid.`,
 	parameters: {
 		type: "object",
@@ -333,7 +343,7 @@ export const RunJS = {
 			permissions: {
 				type: "array",
 				items: {
-					enum: ['network', 'eval']
+					enum: ['eval']
 				}
 			},
 			timeout: {
@@ -398,8 +408,7 @@ export const RunJS = {
 			for (const key in JS_HOST_MODULES) hostModules.set(key, {});
 
 			const handlers = { hostModules };
-			const realPermissions = ['fs'];
-			if (permissions?.includes('network')) realPermissions.push('net');
+			const realPermissions = ['fs', 'net'];
 			if (permissions?.includes('eval')) realPermissions.push('eval');
 
 			worker = createSandbox(handlers,  realPermissions, { hostModules, name: "Aint-"+thread });
@@ -410,6 +419,23 @@ export const RunJS = {
 			obj.worker = worker;
 
 			sandboxInstances.set(thread, obj);
+
+			// 文件系统
+			handlers.rpc = async (method, args, transfer) => {
+				const [func, input, output] = rpcMethods[method];
+				try {
+					let result = await func(input(args), {}, conv);
+					if (output) {
+						const array = args.find(x => x instanceof Uint8Array);
+						if (array) transfer.push(array.buffer);
+						return output(result, args);
+					}
+				} catch (e) {
+					if (typeof e === 'string')
+						throw new Error(e);
+					throw e;
+				}
+			};
 		}
 
 		// 它的存在不直接告知模型 (PTC)
@@ -461,23 +487,6 @@ export const RunJS = {
 			})
 		}
 
-		// 文件 RPC 处理
-		worker.handlers.rpc = async (method, args, transfer) => {
-			const [func, input, output] = rpcMethods[method];
-			try {
-				let result = await func(input(args), response, conv);
-				if (output) {
-					const array = args.find(x => x instanceof Uint8Array);
-					if (array) transfer.push(array.buffer);
-					return output(result, args);
-				}
-			} catch (e) {
-				if (typeof e === 'string')
-					throw new Error(e);
-				throw e;
-			}
-		};
-
 		// 日志写入处理
 		let head = '', tail = '';
 		let totalChars = 0;
@@ -526,33 +535,40 @@ export const RunJS = {
 		try {
 			const reset = !persist;
 			const secrets = {
-				...config.fs_secrets,
-				...conv.fs_secrets,
+				...config.sb_secureEnv,
+				...conv.sb_secureEnv,
 			};
 
 			const secretNames = {};
-			for (const key of Object.keys(secrets)) {
-				secretNames[key] = `$env:${key}$`;
+			for (const key in secrets) secretNames[key] = `$env:${key}$`;
+
+			const patterns = [];
+			for (const value of config.sb_secureUrl) {
+				patterns.push(value[0] === '^' ? value : "^"+escapeRegexp(value));
 			}
 
-			await worker.initialize(reset, secrets);
-			await worker.execute(
+			await worker.initialize(reset, [patterns.length ? new RegExp(patterns.join('|')) : null, secrets]);
+			const v = await worker.execute(
 				path,
 				code,
 				{
-					...config.fs_env,
-					...conv.fs_env,
+					...config.sb_env,
+					...conv.sb_env,
 					...secretNames,
 					...env,
 					SCRIPT_TIMEOUT: timeout
 				},
 				argv
 			);
+			if (v !== undefined) worker.handlers.log(inspect(v));
 
 			// TODO 任务管理器
 			obj.destroyTimeout = setTimeout(stopWorker, 610000);
 		} catch (e) {
-			if (exc) throw e;
+			if (exc) {
+				e.log = getLog();
+				throw e;
+			}
 
 			err = prettyError(e);
 			stopWorker();
@@ -560,7 +576,7 @@ export const RunJS = {
 			clearTimeout(hangTimer);
 			if (logFile) appendToLogFile('', true);
 			if (worker) {
-				hostModules.clear();
+				//hostModules.clear();
 				const handlers = worker.handlers;
 				//delete handlers.rpc;
 				delete handlers.load;
@@ -572,7 +588,7 @@ export const RunJS = {
 			}
 		}
 
-		return (getLog()+err) || '[No console output] (Hint: Have you awaited top-level Promise?)';
+		return (getLog()+err) || (exc ? '' : '[No console output] (Hint: Have you awaited top-level Promise?)');
 	},
 
 	undo(ctx, conv, tc) {

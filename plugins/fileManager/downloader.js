@@ -3,12 +3,13 @@ import {formatSize} from "unconscious/common/Utils.js";
 import {$state} from "unconscious";
 import {showToast} from "/src/components/Toast.js";
 import {callFileSystemFunc} from "../agent/index.js";
-import {downloadFile} from "/src/utils/utils.js";
+import {downloadFile, prettyError} from "/src/utils/utils.js";
 import {ZipWriter} from "@roj234/jszip/io";
-import {createAsyncQueue, formatDuration} from "/common/pure-utils.js";
+import {abortable, createAsyncQueue, formatDuration, sleep} from "/common/pure-utils.js";
+import {getDelay, MAX_RETRY} from "./xhrUploader.js";
 
-/** 单次下载的体积上限：1 GiB */
-const MAX_DOWNLOAD_SIZE = 1024 ** 3;
+/** 单文件体积上限，JS堆貌似只有1GB */
+const MAX_DOWNLOAD_SIZE = 512 << 20;
 /** 超过这个体积就不再压缩，Store 更快也更省内存 */
 const MAX_COMPRESS_SIZE = 32 * 1024 ** 2;
 /** 小块攒到这个体积再 flush */
@@ -16,7 +17,7 @@ const FLUSH_THRESHOLD = 1024 ** 2;
 /** 默认打包名 */
 const DEFAULT_ARCHIVE_NAME = '下载';
 
-const tooLargeError = (size) => new Error(`体积 ${formatSize(size)}，超过单次 1 GB 的下载上限`);
+const tooLargeError = (size) => new Error(`体积 ${formatSize(size)} 超过单文件 ${formatSize(MAX_DOWNLOAD_SIZE)} 的下载上限`);
 
 /**
  * @param {(data: Blob, isLast: boolean) => Promise<void>} send
@@ -141,7 +142,7 @@ const speedMeter = (total, onProgress) => {
  * @return {Promise<void>}
  */
 export const vfsDownloadMany = async (fs, items, archiveName) => {
-	const state = $state("正在列目录");
+	const state = $state("正在读取文件信息");
 
 	const cancel = new AbortController();
 	const signal = cancel.signal;
@@ -150,7 +151,7 @@ export const vfsDownloadMany = async (fs, items, archiveName) => {
 		closeBtn: <button className="dct-undo" onClick={() => {
 			state.value = '正在取消';
 			cancel.abort();
-		}}>取消下载</button>
+		}}>取消</button>
 	});
 	/** @type {DownloadJob[]} */
 	const jobs = [];
@@ -193,29 +194,74 @@ export const vfsDownloadMany = async (fs, items, archiveName) => {
 			const target = await createDownloadTarget(name, totalSize);
 			if (target === undefined) return;
 
-			state.value = "正在下载 (无法获取进度)";
-
 			if (target === null) {
-				let blob = await callFileSystemFunc(fs, 'readRaw', {path, signal});
+				let blob;
+				for (let attempt = 0; attempt < MAX_RETRY; attempt++) {
+					state.value = "正在下载";
+
+					try {
+						blob = await callFileSystemFunc(fs, 'readRaw', {path, signal});
+						break;
+					} catch (e) {
+						if (signal.aborted) throw e;
+
+						const delay = getDelay(attempt);
+						state.value = "下载出错，"+delay+"ms 后重试\n"+prettyError(e);
+						await abortable(sleep(delay), signal);
+					}
+				}
 				blob = new File([blob], name, { type: blob.type });
 				downloadFile(blob);
 			} else {
 				/** @type {Response} */
-				const res = await callFileSystemFunc(fs, 'readRaw', {path, stream: true});
-				const total = parseInt(res.headers.get('content-length'), 10) || 0;
+				let res = await callFileSystemFunc(fs, 'readRaw', {path, stream: true, signal});
 				let received = 0;
 
-				const meter = speedMeter(total, (pct, obj) => {
+				const meter = speedMeter(totalSize, (pct, obj) => {
 					state.value = name+` ${(pct * 100).toFixed(2)}% (${formatSize(obj.speed)}/s, ETA ${formatDuration(obj.eta)})`
 				});
 
 				writer = target;
-				await res.body.pipeThrough(new TransformStream({
-					transform(chunk, controller) {
-						controller.enqueue(chunk);
-						meter(received += chunk.byteLength);
-					},
-				})).pipeTo(target, { signal, preventAbort: true });
+
+				let error;
+				for (let attempt = 0; attempt < MAX_RETRY; attempt++) {
+					state.value = "正在下载";
+
+					const prevProgress = received;
+					try {
+						await res.body.pipeThrough(new TransformStream({
+							transform(chunk, controller) {
+								controller.enqueue(chunk);
+								meter(received += chunk.byteLength);
+							},
+						})).pipeTo(target, { signal, preventAbort: true, preventClose: true });
+						error = null;
+						break;
+					} catch (e) {
+						if (signal.aborted) throw e;
+
+						// 只要下载到了数据，就重置
+						if (received > prevProgress) attempt = 0;
+
+						res = null;
+						for (; attempt < MAX_RETRY; attempt++) {
+							const delay = getDelay(attempt);
+
+							state.value = "下载出错，"+delay+"ms 后重试\n"+prettyError(e);
+							await abortable(sleep(delay), signal);
+
+							try {
+								res = await callFileSystemFunc(fs, 'readRaw', {path, stream: true, offset: received, signal});
+								break;
+							} catch {}
+						}
+
+						if (!res?.ok) throw e;
+						error = e;
+					}
+				}
+
+				if (error != null) throw error;
 			}
 		} else {
 			const filename = (archiveName||DEFAULT_ARCHIVE_NAME)+".zip";
@@ -231,6 +277,10 @@ export const vfsDownloadMany = async (fs, items, archiveName) => {
 
 			const [enqueue, flush] = createAsyncQueue(4);
 
+			const meter = speedMeter(totalSize, (pct, obj) => {
+				state.value = filename+`: ${(pct * 100).toFixed(2)}% (`+downloadCount+"/"+jobs.length+`, ${formatSize(obj.speed)}/s, ETA ${formatDuration(obj.eta)})`
+			});
+
 			/** @type {Promise<void>} */
 			let prevWrite;
 
@@ -239,12 +289,25 @@ export const vfsDownloadMany = async (fs, items, archiveName) => {
 
 				const it = jobs[i];
 				if (it.size > MAX_DOWNLOAD_SIZE) {
-					showToast(`文件 ${it.path} 过大，跳过`, 'error');
+					showToast(`文件 ${it.path} (${formatSize(it.size)}) 超过单文件下载上限`, 'error');
 					continue;
 				}
 
 				await enqueue(async () => {
-					const blob = await callFileSystemFunc(fs, 'readRaw', {path: it.path, signal});
+					// 这里也可以断点续传，但等以后再说
+					let blob;
+					for (let attempt = 0; attempt < MAX_RETRY; attempt++) {
+						try {
+							blob = await callFileSystemFunc(fs, 'readRaw', {path: it.path, signal});
+							break;
+						} catch (e) {
+							if (signal.aborted) throw e;
+
+							const delay = getDelay(attempt);
+							showToast(`文件 ${it.path} 下载失败，`+delay+"ms 后重试\n"+prettyError(e), 'error', delay);
+							await abortable(sleep(delay), signal);
+						}
+					}
 					const doWrite = await zw.add(it.name, new Uint8Array(await blob.arrayBuffer()), {
 						compression: blob.size < MAX_COMPRESS_SIZE ? 8 : 0,
 						lastModified: it.mtime,
@@ -255,9 +318,7 @@ export const vfsDownloadMany = async (fs, items, archiveName) => {
 					prevWrite = doWrite();
 
 					downloadCount++;
-					downloadSize += blob.size;
-
-					state.value = filename+": "+downloadCount+"/"+jobs.length+` 已下载 (${formatSize(downloadSize)}/${formatSize(totalSize)}}, ${formatSize(downloadSize / (Date.now() - startTime) * 1000)}/s)`;
+					meter(downloadSize += blob.size);
 				});
 			}
 			await flush();
@@ -270,6 +331,8 @@ export const vfsDownloadMany = async (fs, items, archiveName) => {
 				downloadFile(blob);
 			}
 		}
+	} catch (e) {
+		if (!signal.aborted) throw e;
 	} finally {
 		close();
 		await writer?.close();

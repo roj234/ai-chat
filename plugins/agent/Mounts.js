@@ -435,7 +435,7 @@ async function callFBI(mount) {
 					})
 				}
 
-				const intl = new Intl.Collator;
+				const intl = new Intl.Collator(undefined, {numeric: true});
 				arr.sort((a, b) => {
 					const nameB = b.name;
 					const nameA = a.name;
@@ -741,6 +741,9 @@ export const getFileSystem = async (path, conv) => {
 
 const destructiveTools = new Set(["write", "patch", "edit", "delete", "append", "mkdir", "writeRaw", "appendRaw", "copy"]);
 const keys = ["path", "cwd"];
+const fileChangedEvent = ['fileChanged'];
+const maybeFolderTools = new Set(["delete", "mkdir", "copy"]);
+
 /**
  * AI工具包装器
  * @param {string} func
@@ -748,7 +751,8 @@ const keys = ["path", "cwd"];
  */
 export const fileAccess = (func) => async (parameters, _, conv) => {
 	// This is Global not per-fs alert
-	if (conv.fs_readonly && destructiveTools.has(func)) throwDOMException("Write-protect is enabled globally", "ReadOnlyError");
+	const isWriting = destructiveTools.has(func);
+	if (conv.fs_readonly && isWriting) throwDOMException("Write-protect is enabled globally", "ReadOnlyError");
 
 	let path, key;
 	for (let i = 0; i < keys.length; i++) {
@@ -759,14 +763,16 @@ export const fileAccess = (func) => async (parameters, _, conv) => {
 
 	let [newPath, fs, mnt] = await getFileSystem(path, conv);
 
-	if (mnt.fs_readonly && destructiveTools.has(func)) throwDOMException("Write-protect is enabled for this VFS", "ReadOnlyError");
+	if (mnt.fs_readonly && isWriting) throwDOMException("Write-protect is enabled for this VFS", "ReadOnlyError");
 
 	if (newPath !== path) {
 		parameters = { ...parameters };
 		parameters[key] = newPath;
 	}
 
-	return callFileSystemFunc(fs, func, parameters);
+	const p = callFileSystemFunc(fs, func, parameters);
+	if (isWriting) p.then(() => EVENT_BUS.post(fileChangedEvent, fs, newPath, maybeFolderTools.has(func) ? undefined : "file"));
+	return p;
 };
 
 /**

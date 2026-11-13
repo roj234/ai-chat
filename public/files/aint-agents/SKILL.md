@@ -1,6 +1,6 @@
 ---
-name: 'agent-guide'
-description: 'How to write sub-agent definitions (frontmatter, mounts, ACL, redirect) and plan multi-agent workflows.'
+name: 'agents-guide'
+description: "How to write sub-agent definitions and plan multi-agent workflows."
 ---
 
 # 子智能体编写指南
@@ -10,7 +10,7 @@ description: 'How to write sub-agent definitions (frontmatter, mounts, ACL, redi
 系统自动扫描以下位置的 `*.md`，frontmatter 含 `name` 字段的才会注册为可用子智能体：
 
 - `./agents`（根文件系统下）
-- `~/.skills/agents`（需激活 Skills 模块）
+- `~/skills/agents`（需激活 Skills 模块）
 
 已注册定义的 `name` 和 `description` 会注入主代理的系统提示，主代理按名引用（`promptType: "name"`）。
 因此这两个位置只应放项目通用/全局通用的子智能体；不具备通用性的定义请放在其他路径，通过文件路径引用
@@ -38,7 +38,7 @@ maxTurns: 500
 # 文件系统配置（见下文） 默认继承
 mounts:
   '/': { fs_type: api, fs_server: "沙箱1" }
-  '.skills': { fs_type: db, fs_base: skills }
+  'skills': { fs_type: db, fs_base: skills }
   # 使用这个（扩展运算符），继承调用方文件系统，而不是覆盖
   '...': true
 
@@ -69,10 +69,9 @@ kind: basic
 
 ### mcpServers
 
-实质上是 Aint 工具模块的名称：可以填内置模块、手动添加的MCP模块或插件注册的模块。例如记忆模块填 `Memory`。
+实质上是工具模块的名称：可以填内置模块、手动添加的MCP模块或插件注册的模块。
 
 - **目前仅支持字符串模块名**。内联对象定义（name/url/key）尚未实现。
-- 不要启用需要用户交互的工具：部分工具静默降级（如 AskUser 自动选第一项），部分直接报错。
 
 ### 类别（kind）
 
@@ -156,7 +155,7 @@ acl: path/to/{{ argv2 | "test.acl" }}
 
 ## 重定向（redirect）
 
-每轮回复结束（即任何 finish_reason 非 `tool_calls` 的消息）时触发，将本轮结果送往指定目标。
+每轮结束后触发，将生成的 content 字段送往指定目标。  
 **设置 redirect 会强制后台运行**：创建调用立即返回，不等待子智能体完成。
 
 ```yaml
@@ -169,7 +168,7 @@ redirect: { target: agent, id: 12 }
 ```
 
 - `id`：file / script 目标在完成（或出错）后接收 `<agent-message role="ping">` 通知的代理 ID。
-  回复本体进入文件/脚本，ping 只是通知（脚本目标的通知内容是脚本的控制台输出）。
+  回复本体进入文件/脚本，ping 只是通知（脚本目标的通知内容是控制台输出或异常，若没有则不发送通知）。
   特殊值 `0` = 创建者（仅 frontmatter 中可用）；其它取值必须是当前会话拥有的代理，否则创建失败。
 - file 目标为**追加写入**；子智能体出错时写入内容带 `Agent error:` 前缀，脚本异常时通知内容带 `Script error:` 前缀。
 
@@ -177,15 +176,17 @@ redirect: { target: agent, id: 12 }
 
 `path` 必须指向**代理启动者**文件系统中的 ESM 模块。脚本在独立的 RunJS 沙箱中运行：
 
-- 60 秒运行超时；无 network / eval 额外权限；文件访问和权限继承主代理的文件系统。
-- 同一子智能体的多次触发复用同一个持久化线程，**模块级变量在触发之间保留**，但线程会因为 10 分钟无触发被终止，因此，只靠模块变量保存状态是不可靠的。
+- 60 秒运行超时；无额外权限；继承主代理的文件系统。
+- 同一子智能体的多次触发在同一个线程上执行，10 分钟空闲超时，只靠变量保存状态是不可靠的。
+- 用文件系统保存状态时，建议用 AGENT_ID 分区，否则会有并发问题。
+- 若 `AGENT_ERROR` 为 true，脚本必须主动通知（哪怕直接抛出），否则会把错误吞掉。
 - `process.env` 环境变量：
 
   | 变量 | 类型 | 含义 |
   |---|---|---|
   | `AGENT_ID` | number | 子智能体 ID |
-  | `AGENT_OWNER` | number | 子智能体创建者 ID |
-  | `AGENT_ERROR` | boolean | 本轮是否以错误结束 |
+  | `AGENT_OWNER` | number | 创建者 ID |
+  | `AGENT_ERROR` | boolean | 本轮是否错误 |
   | `AGENT_RESPONSE` | string | 子智能体的回复内容，或者错误详情 |
 
 - `"agents"` 宿主模块：
@@ -197,13 +198,11 @@ redirect: { target: agent, id: 12 }
   await notifyAgent(1, "example"); // (id, content)
 
   // 把消息发回子智能体自身并再运行一轮，实现 ReAct 循环等高级特性
-  // 注意：retry 总是抛出 name="RetryError" 的特殊 Error
+  // 注意：retry 总是抛出异常，不要捕获它！
   if (retryCount < 10)
     await retry("格式不符合要求，再试一次");
   ```
 
-- 使用文件系统或模块级变量保存重试次数，避免无限循环。
-- 务必在 `AGENT_ERROR` 为 true 时中止循环并通知主代理，否则脚本会把错误吞掉。
 
 # Agent 的自我修养
 

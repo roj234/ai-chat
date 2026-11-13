@@ -268,7 +268,7 @@ function createSchemaEditColumn(typeId, editorConstructor, defaultValue = {}) {
 				return [data, apply];
 			});
 		}}>
-		<span className={"tooltip"}>{auxMainlyTouch ? "长按" : "右击"}编辑原始数据</span>
+		<span className={"tooltip"}>{auxMainlyTouch ? "长按" : "右击"}编辑 JSON</span>
 	</button>;
 
 	return [

@@ -10,8 +10,8 @@ import {
 	PRESET_KVS_ID,
 	presets
 } from "/src/presets.js";
-import {CUSTOM_CONTROLS} from "../src/customControls.js";
-import {showToast} from "../src/components/Toast.js";
+import {CUSTOM_CONTROLS} from "/src/customControls.js";
+import {showToast} from "/src/components/Toast.js";
 
 const getLockedPresetName = () => {
 	const p = selectedConversation.presets;

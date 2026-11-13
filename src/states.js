@@ -45,23 +45,8 @@ export const inputText = $state("");
  * @type {import("unconscious").Reactive<AiChat.Preset>}
  */
 export const config = $store("config", {
-	//endpoint: '',
-	mode: 'chat',
-
-	reasoning: 'high',
 	modalities: [],
-
-	maxToolTurns: 1,
-	sound: false,
-
-	generateTitle: false,
 	allowHTMLTags: ["basic"],
-
-	jsonSupport: 0,
-	max_completion_tokens: 30000,
-	top_p: 1,
-	top_k: 0,
-	min_p: 0,
 }, {persist: true, deep: false});
 
 /**

@@ -3,10 +3,10 @@ import {kvListDel, kvListGet, kvListGetKeys, kvListSet, resolveDBRelativeURL, up
 import {$asyncState, $computed, $state, $update, debugSymbol, unconscious} from "unconscious";
 import {cloneNamed, prettyError} from "./utils/utils.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
-import {jsonFetch} from "../common/fetch-utils.js";
+import {jsonFetch} from "/common/fetch-utils.js";
 import {config, CONFIG_VERSION, EVENT_BUS, LOCKED, selectedConversation} from "./states.js";
 import {showToast} from "./components/Toast.js";
-import {throttledPromiseLast} from "../common/pure-utils.js";
+import {throttledPromiseLast} from "/common/pure-utils.js";
 import {Dropdown} from "./components/Dropdown.jsx";
 import {presetCategories, PROMPT_TEMPLATES} from "./settings.js";
 import SimpleModal from "./components/SimpleModal.jsx";
@@ -212,7 +212,7 @@ export const resolvePreset = async (conv) => {
 	let combined = await conv[MERGED_CONFIG];
 	if (!combined || combined[CONFIG_VERSION] !== globalPreset[CONFIG_VERSION]) {
 		combined = {...globalPreset};
-		conv[MERGED_CONFIG] = (async() => {
+		await (conv[MERGED_CONFIG] = (async() => {
 			if (presets) {
 				if (Array.isArray(presets)) {
 					for (const preset of presets) {
@@ -224,7 +224,7 @@ export const resolvePreset = async (conv) => {
 			}
 			if (overrides) Object.assign(combined, overrides);
 			conv[MERGED_CONFIG] = combined;
-		})();
+		})());
 	}
 	return combined;
 }

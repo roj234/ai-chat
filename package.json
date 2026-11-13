@@ -1,7 +1,7 @@
 {
 	"name": "ai-chat",
 	"private": true,
-	"version": "4.6.0",
+	"version": "4.8.0",
 	"type": "module",
 	"scripts": {
 		"dev": "ie dev",
@@ -14,13 +14,13 @@
 	},
 	"devDependencies": {
 		"unconscious": "^2.0.0",
-		"@roj234/shared": "^1.0.0",
+		"@roj234/shared": "^1.3.0",
 		"@roj234/mdstream": "^1.0.0",
 		"@roj234/logdb": "^1.0.0",
 		"@roj234/lru-cache": "^1.0.0",
 		"@roj234/web-audio-engine": "^1.0.0",
 		"@roj234/util-inspect": "^1.0.0",
-		"@roj234/workerbox": "^1.0.0",
+		"@roj234/workerbox": "^1.2.0",
 		"@roj234/ws": "^1.0.0",
 		"@roj234/qr": "^1.0.0",
 		"@roj234/msgpack": "^2.0.0",

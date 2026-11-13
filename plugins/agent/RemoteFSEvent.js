@@ -4,8 +4,11 @@ import {updateConversation} from "/src/database.js";
 import {createFileSystem} from "./Mounts.js";
 import {sleep} from "/common/pure-utils.js";
 import {injectMessages} from "/src/inject-message.js";
-import {DI, DID_INPUT_BOX_POSITION, onLoad} from "../../src/hooks.js";
+import {DI, DID_INPUT_BOX_POSITION, onLoad} from "/src/hooks.js";
 import {BackgroundProcessList} from "./BackgroundProcessList.jsx";
+import {cloneNamed} from "/src/utils/utils.js";
+import "./RemoteFSEvent.css";
+import {PROCESS_EXIT_ROLE} from "./RemoteFS_ProcessExit.js";
 
 const OWNER = debugSymbol("Owner");
 const FS = debugSymbol("FileSystem");
@@ -175,16 +178,12 @@ export const dispatchProcessExit = (callback, event) => {
 	if (desc === true) return;
 
 	injectMessages(conv, {
-		role: "user",
-		label: "异步进程结束",
-		time: Date.now(),
-		content: event
-			? `<process pid=${callback.pid} exitCode="${event.code}" elapsed="${(event.duration/1000).toFixed(1)}s" logFile="${event.logFile}">${prefixOrNone(event.message, '\n')}${prefixOrNone(event.log, '\n\n### Latest log\n\n')}</process>`
-			: `<system-remainder>PID ${callback.pid} state tracker was stopped.</system-remainder>`
+		role: PROCESS_EXIT_ROLE,
+		time: event?.time || Date.now(),
+		content: event ? cloneNamed(event, ['code', 'logFile', 'log', 'duration']) : null,
+		pid: callback.pid
 	});
 };
-
-const prefixOrNone = (s, prefix) => s ? prefix+s : '';
 
 // 重新拉起轮询
 EVENT_BUS.on('convLoad', conv => {
@@ -201,5 +200,5 @@ EVENT_BUS.on('convLoad', conv => {
 
 onLoad(() => {
 	const el = DI[DID_INPUT_BOX_POSITION];
-	el.parentElement.insertBefore(<BackgroundProcessList />, el.nextElementSibling);
+	el.parentElement.insertBefore(<BackgroundProcessList/>, el.nextElementSibling);
 })

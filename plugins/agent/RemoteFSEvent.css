@@ -1,0 +1,102 @@
+
+/* ==================== 进程退出卡片组件 ==================== */
+.process-exit-card {
+	background-color: var(--card);
+	border: 1px solid var(--border);
+	border-radius: var(--border-radius-sm);
+	overflow: hidden;
+	font-size: 13px;
+
+	/* 卡片头部（折叠态可见部分） */
+	.-header {
+		padding: 6px 16px;
+		display: flex;
+		transition: background-color 0.15s ease;
+
+		&:hover {
+			background-color: var(--panel);
+		}
+
+		.-left {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			min-width: 0; /* 确保内部文字可以 text-overflow */
+			flex: 1;
+
+			.-pid {
+				font-family: var(--code-font);
+				font-size: 12px;
+				padding: 2px 6px;
+				background-color: var(--chip-hover);
+				border-radius: 4px;
+				flex-shrink: 0;
+			}
+		}
+
+		.-right {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			font-size: 12px;
+			flex-shrink: 0;
+			font-family: var(--code-font);
+
+			.-elapsed {
+				display: inline-flex;
+				gap: 2px;
+				color: var(--muted);
+			}
+
+			.-code {
+				padding: 1px 6px;
+				border-radius: 9999px;
+				border: none !important;
+			}
+		}
+
+	}
+
+	/* 折叠箭头图标 */
+	.-chevron {
+		width: 16px;
+		height: 16px;
+		color: var(--muted);
+		transition: transform 0.2s ease;
+	}
+
+	&[open] .-chevron {
+		transform: rotate(180deg);
+	}
+
+	/* ==================== 展开后的详情 ==================== */
+	.-body {
+		padding: 4px 16px 12px 16px;
+		border-top: 1px solid var(--border);
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+
+		.-logs-header {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+		}
+
+		.ghost {
+			display: inline-flex;
+			gap: 2px;
+
+			font-size: 12px;
+			color: var(--muted);
+		}
+
+		.textDiff {
+			border: 1px solid var(--border);
+			border-radius: 6px;
+			max-height: 220px;
+			overflow-y: auto;
+			font-size: 12px;
+		}
+	}
+}

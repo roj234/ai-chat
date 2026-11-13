@@ -1,5 +1,5 @@
 import {parseFrontmatter, registerToolset} from "/src/toolset.js";
-import {createAsyncQueue} from "../../common/pure-utils.js";
+import {createAsyncQueue} from "/common/pure-utils.js";
 import {fileAccess} from "../agent/index.js";
 import {debugSymbol} from "unconscious";
 

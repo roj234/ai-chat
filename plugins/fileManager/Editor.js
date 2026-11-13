@@ -46,7 +46,7 @@ export const openFileEditor = async (fs, path, editable, language) => {
 			dirty.value = false;
 
 			// 触发文件资源管理器窗口重载
-			EVENT_BUS.post(['fileChanged'], fs, path);
+			EVENT_BUS.post(['fileChanged'], fs, path, "file");
 			winToast(toastDiv, '保存成功', 'ok');
 		} catch (err) {
 			winToast(toastDiv, '保存失败: '+prettyError(err), 'error')
@@ -82,6 +82,7 @@ export const openFileEditor = async (fs, path, editable, language) => {
 				act() {
 					const op = async () => {
 						editor.setValue(content = await fetchText());
+						dirty.value = false;
 					};
 
 					if (dirty.value && editor.getValue() !== content) {
@@ -102,12 +103,12 @@ export const openFileEditor = async (fs, path, editable, language) => {
 
 	return openWindow({
 		id: "editor "+encodeURI(vfsIdentity(fs[FS_SOURCE])+path),
-		icon: <i className={"ri-file-line"}/>,
+		icon: <i className={"ri-file-3-line"}/>,
 		title: path,
 		actions: <>
 			<button className="ri-reset-left-line ghost" disabled={() => !editorState.canUndo()} title="撤销" onClick={() => editor.undo()}/>
 			<button className="ri-reset-right-line ghost" disabled={() => !editorState.canRedo()} title="重做" onClick={() => editor.redo()}/>
-			{editable && <button className="ri-save-line ghost" disabled={() => !dirty.value || saving.value} onClick={save}>{() => saving.value ? '保存中…' : ''}</button>}
+			{editable && <button className="ri-save-line ghost" disabled={() => !dirty.value || saving.value} title="保存" onClick={save}>{() => saving.value ? '保存中…' : ''}</button>}
 			<button className="ri-download-line ghost" title="下载" onClick={() => {downloadFile(new File([content], path))}}/>
 		</>,
 		element: () => {
@@ -125,7 +126,7 @@ export const openFileEditor = async (fs, path, editable, language) => {
 	});
 };
 
-export const createJson5Editor = async (skipVerify) => {
+export const createEditorWidget = async (options = {}) => {
 	let content = null;
 	let object = null;
 	let error = "";
@@ -136,7 +137,7 @@ export const createJson5Editor = async (skipVerify) => {
 	const onChange = (string) => {
 		let errPos;
 
-		if (skipVerify) content = string;
+		if (options.noVerify) content = string;
 		else  {
 			const parser = createJsonParser(AS_IS, {json5: true});
 			try {
@@ -172,6 +173,7 @@ export const createJson5Editor = async (skipVerify) => {
 	const editor = TextEditor({
 		autofocus: true,
 		language: 'json5',
+		...options,
 		onStatus: (st) => {status.value = st;},
 		onChange
 	});
@@ -191,7 +193,8 @@ export const createJson5Editor = async (skipVerify) => {
 		setValue(text) {
 			editor.setValue(text);
 			onChange(text);
-		}
+		},
+		editor
 	};
 	return obj;
 };

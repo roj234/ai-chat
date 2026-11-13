@@ -31,7 +31,7 @@ ${content}
 
 		let skills = info.skills;
 		if (skills) {
-			const index = conv.mnt?.[".skills"] && (await getSkillCache(conv)).index;
+			const index = conv.mnt?.["skills"] && (await getSkillCache(conv)).index;
 			if (typeof skills === 'string') skills = skills.split(" ");
 
 			const includes = (await Promise.all(skills.map(path => readFile({

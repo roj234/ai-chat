@@ -12,6 +12,7 @@ export const normalizeCRLF = inp => {
 		if (typeof value === "string")
 		 own[key] = normalizeLineTerminator(value).trim();
 	}
+	return inp;
 }
 
 const stripComments = s => s.replaceAll(/{{\/\/[^}]*}}/g, "");

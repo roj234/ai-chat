@@ -225,7 +225,7 @@ function registerSchemaCodeBlockRenderer(name, renderer) {
  * $watch(() => data.user.name, (val) => console.log("Name updated:", val));
  * update('{"user": {"name": "Alice"', false);
  */
-function createReactiveJSON() {
+export function createReactiveJSON() {
 	/** @type {Map<(string|number)[], import("unconscious").Reactive<any>>} */
 	const registry = new NestedMap();
 	/**

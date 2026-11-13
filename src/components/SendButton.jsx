@@ -52,12 +52,16 @@ export function ContextRing(sendBtn) {
 	const used = $computed(() => selectedConversation.contextUsage, [updateConversationUI, selectedConversation]);
 	$watchWithCleanup([used, max], () => {
 		let pct = unconscious(used) / unconscious(max);
-		tooltipDiv.style.display = isNaN(pct) ? 'none' : '';
+		const b = isFinite(pct);
+
+		tooltipDiv.style.display = !pct ? 'none' : '';
+		usageText.value = (b ? (pct * 100).toFixed(2) + "%\n" : "") + `${unconscious(used)} / ${unconscious(max)}`;
+
+		if (!b) pct = 0;
 		if (pct > 1) pct = 1;
 
 		bar.style.strokeDashoffset = CIRCUMFERENCE * (1 - (pct || 0));
 		bar.style.stroke = getContextStrokeColor(pct);
-		usageText.value = (pct * 100).toFixed(2) + "%\n" + `${unconscious(used)} / ${unconscious(max)}`;
 	});
 	return root;
 }

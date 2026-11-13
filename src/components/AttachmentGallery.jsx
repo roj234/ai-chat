@@ -1,36 +1,44 @@
 import {indexInParent, showImageZoomView} from "../utils/utils.js";
-import {$foreach} from "unconscious";
+import {$foreach, $update} from "unconscious";
 import {showToast} from "./Toast.js";
-import {config} from "../states.js";
 import {readAsString} from "/common/chardet.js";
 import {formatSize} from "unconscious/common/Utils.js";
+import {currentCombinedConfig} from "../presets.js";
+import {compressImage} from "/common/imate.js";
+import {config} from "../states.js";
 
 /**
  * @param {File} file
- * @param {boolean} isFileTransferWindow
  * @param {OpenAI.ContentPart[]} attachments
- * @param {boolean} forceBlob
  */
-export function blobToContentPart(file, isFileTransferWindow, attachments, forceBlob) {
-	if (file.size > 104857600) {
-		showToast("文件 " + file.name + " 过大, 仅允许100MB以内的文件", "error");
+export function blobToAttachment(file, attachments) {
+	if (file.size > 52428800) {
+		showToast("文件超过 50MB", "error");
 		return;
 	}
 
 	if (file.type.startsWith('image')) {
-		if (!isFileTransferWindow && !config.modalities.includes("image")) {
-			showToast("模型不支持图片，无法上传 " + file.name);
+		if (!config.modalities.includes("image")) {
+			showToast("模型不支持图像输入");
 			return;
 		}
-		attachments.push({
+
+		const item = {
+			loading: compressImage(file, currentCombinedConfig).then(blob => {
+				item.image_url.url = blob;
+				delete item.loading;
+				$update(attachments);
+			}),
 			type: "image_url",
 			image_url: {url: file}
-		});
+		};
+		attachments.push(item);
 	} else if (file.type.startsWith('audio')) {
-		if (!isFileTransferWindow && !config.modalities.includes("audio")) {
-			showToast("模型不支持音频，无法上传 " + file.name);
+		if (!config.modalities.includes("audio")) {
+			showToast("模型不支持音频输入");
 			return;
 		}
+
 		attachments.push({
 			type: "input_audio",
 			input_audio: {
@@ -45,24 +53,18 @@ export function blobToContentPart(file, isFileTransferWindow, attachments, force
 				text: file
 			});
 		} else {
-			// 转为UTF-8编码
-			readAsString(file).then(text => {
-				attachments.push({
-					type: "text",
-					text: forceBlob || file.size > 16384 ? new File([text], file.name, {type: file.type}) : text
-				});
-			})
+			const item = {
+				type: "text",
+				text: "",
+				// 转为UTF-8编码
+				loading: readAsString(file).then(text => {
+					item.text = new File([text], file.name, {type: file.type});
+					delete item.loading;
+					$update(attachments);
+				})
+			};
+			attachments.push(item);
 		}
-	} else {
-		if (!isFileTransferWindow) {
-			showToast("未知的文件类型");
-			return;
-		}
-
-		attachments.push({
-			type: "text",
-			text: file
-		});
 	}
 }
 
@@ -79,7 +81,6 @@ export const AttachmentGallery = (attachments) => {
 		const element = e.target.closest('.attachment');
 		const index = indexInParent(element);
 		attachments.splice(index, 1);
-		element.remove();
 	}}>{
 		$foreach(attachments, (att) => {
 			const DeleteBtn = <button className="delete ri-close-line" title="移除"/>;
@@ -125,6 +126,6 @@ export const AttachmentGallery = (attachments) => {
 					);
 				}
 			}
-		})
+		}, att => att.loading ?? att)
 	}</div>;
 }

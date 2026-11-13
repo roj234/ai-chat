@@ -30,7 +30,7 @@ import {
 import {checkPAT} from "./utils/PAT.js";
 import {loadUserData} from "./utils/UserManager.js";
 import {decodeMsg, encodeMsg} from "@roj234/msgpack";
-import {msgpack_schema} from "../common/wire-compression-schema.js";
+import {msgpack_schema} from "/common/wire-compression-schema.js";
 
 /**
  *

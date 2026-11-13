@@ -16,9 +16,9 @@ import {showToast} from "/src/components/Toast.js";
 import {throttled} from "/common/pure-utils.js";
 import {getMessages} from "/src/database.js";
 import {onLoad} from "/src/hooks.js";
-import {duplicateConversation} from "../../src/data-exchange.js";
-import {prettyError} from "../../src/utils/utils.js";
-import SimpleModal from "../../src/components/SimpleModal.jsx";
+import {duplicateConversation} from "/src/data-exchange.js";
+import {prettyError} from "/src/utils/utils.js";
+import SimpleModal from "/src/components/SimpleModal.jsx";
 import {debugSymbol} from "@roj234/shared";
 
 const BOT = debugSymbol("Chatbot");

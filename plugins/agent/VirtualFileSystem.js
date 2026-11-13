@@ -1,5 +1,5 @@
 import {NestedMap, NODE_VALUE} from "unconscious/common/NestedMap.js";
-import {FSE_NotFound, FSE_NotSupported, throwDOMException} from "../../common/pure-utils.js";
+import {FSE_NotFound, FSE_NotSupported, throwDOMException} from "/common/pure-utils.js";
 
 const SOME = {};
 

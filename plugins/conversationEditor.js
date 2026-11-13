@@ -1,4 +1,4 @@
-import {openJsonEditor} from "../src/components/JsonEditor.jsx";
+import {openJsonEditor} from "/src/components/JsonEditor.jsx";
 import {EVENT_BUS, selectedConversation, updateConversationListUI, updateMessageUI} from "/src/states.js";
 import {$cleanup, $state, $unwatch, $update, $watch, unconscious} from "unconscious";
 import {decodeObjects, encodeObjects} from "/src/utils/serialization.js";
@@ -51,7 +51,7 @@ const editJson = async () => {
 
 EVENT_BUS.on(['getMenu', 'dev'], items => {
 	items.push(
-		{ icon: "ri-braces-line", label: "编辑原始数据", disabled: !unconscious(selectedConversation), act: editJson }
+		{ icon: "ri-braces-line", label: "编辑会话 JSON", disabled: !unconscious(selectedConversation), act: editJson }
 	);
 
 })

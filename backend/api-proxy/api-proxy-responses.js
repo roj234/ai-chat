@@ -1,9 +1,9 @@
 import {createHash} from 'node:crypto';
 import {SSE_REF_CACHE_SIZE} from '../config.js';
 import {LRUCache} from '@roj234/lru-cache';
-import {applyDelta, ORIGINAL_ERROR, sseFetch} from '../../common/fetch-utils.js';
+import {applyDelta, ORIGINAL_ERROR, sseFetch} from '/common/fetch-utils.js';
 import {getProxyAgent} from "../utils/fetch-hook.js";
-import {createJsonStream} from "../../common/StreamJsonSerializer.js";
+import {createJsonStream} from "/common/StreamJsonSerializer.js";
 import {encodeRawMsg} from "@roj234/msgpack";
 import {ProxyResumeManager} from "./api-proxy-resume.js";
 

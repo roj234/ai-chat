@@ -1,12 +1,13 @@
 import {config, EVENT_BUS, selectedConversation} from "/src/states.js";
 import {unconscious} from "unconscious";
-import {callFileSystemFunc, createFileSystem, getFileSystem} from "../agent/index.js";
+import {callFileSystemFunc, createFileSystem, FS_SOURCE, getFileSystem} from "../agent/index.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {GLOBAL_SETTINGS} from "/src/settings.js";
 import {prefixTitle, registerToolset} from "/src/toolset.js";
 import {normalizePath} from "@roj234/shared/path";
 import {onLoad} from "/src/hooks.js";
 import {PROMISE_CATCH} from "/common/pure-utils.js";
+import {resolveVirtualUrl} from "./_vfsVirtualUrl.js";
 
 EVENT_BUS.on(['getMenu', 'dev'], items => {
 	const set = config.trustHTML;
@@ -37,7 +38,8 @@ EVENT_BUS.on('resolveUrl', async (path, _, fs) => {
 	}
 
 	const url = new URL(path, 'http://0');
-	return callFileSystemFunc(fs, 'readRaw', { path: decodeURIComponent(url.pathname.slice(1)) }).then(blob => blob.toUrl());
+	const realpath = decodeURIComponent(url.pathname.slice(1));
+	return (fs[FS_SOURCE].fs_type !== 'local' && resolveVirtualUrl(fs, realpath)) || callFileSystemFunc(fs, 'readRaw', { path: realpath }).then(blob => blob.toUrl());
 });
 
 EVENT_BUS.on('viewUrl', async (path, _, node, fs) => {
@@ -51,7 +53,7 @@ EVENT_BUS.on('viewUrl', async (path, _, node, fs) => {
 	return (await import("./preview.js")).vfsPreview(fs, decodeURIComponent(url.pathname.slice(1)), node?.textContent);
 });
 
-EVENT_BUS.on('jsonEditor', async (skipVerify) => (await import("./preview.js")).createJson5Editor(skipVerify));
+EVENT_BUS.on('createEditor', async (options) => (await import("./preview.js")).createEditorWidget(options));
 
 /**
  * @type {AiChat.FunctionTool}

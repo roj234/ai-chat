@@ -21,6 +21,7 @@ import {highlightJsonLike} from "./markdown/highlight.js";
 import {markMessageDirty} from "./database.js";
 import {resolvePreset} from "./presets.js";
 import {ONCE_EVENT} from "@roj234/shared";
+import {stringCompare} from "/common/pure-utils.js";
 
 export const TOOL_NAME = debugSymbol("ToolName");
 export const TOOL_IS_RUNNING = debugSymbol("Running");
@@ -64,6 +65,16 @@ export class ContentPart {
 	}
 	image(image) {
 		this.content.push({type: "image_url", image_url: {url: image}});
+		return this;
+	}
+	audio(audio) {
+		this.content.push({
+			type: "input_audio",
+			input_audio: {
+				data: audio,
+				format: audio.type.slice(audio.type.indexOf('/') + 1)
+			}
+		});
 		return this;
 	}
 }
@@ -227,9 +238,8 @@ export const getAvailableTools = async (conversation) => {
 		}
 	}
 
-	const intl = new Intl.Collator();
 	return [outputTools.sort((a, b) => {
-		return intl.compare(a.function.name, b.function.name);
+		return stringCompare(a.function.name, b.function.name);
 	}), systemPrompt.filter(Boolean).join("\n")];
 };
 

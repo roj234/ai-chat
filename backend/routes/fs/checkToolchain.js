@@ -5,7 +5,7 @@ import path from 'node:path';
 import {promisify} from "node:util";
 import {exec} from "node:child_process";
 import {safeStat} from "@roj234/ie/utils/serveFile.js";
-import {sleep} from "../../../common/pure-utils.js";
+import {sleep} from "/common/pure-utils.js";
 
 const execPromise = promisify(exec);
 

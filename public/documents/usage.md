@@ -108,7 +108,7 @@ allowed-tools: tool_name
 
 AiChat 支持同时进行多个对话，它们在后台独立运行，互不干扰。你可以在侧边栏切换对话，生成过程不会中断。  
 
-系统从 `/agents` 和 `~/.skills/agents` 读取子智能体定义并注入系统提示  
+系统从 `/agents` 和 `~/skills/agents` 读取子智能体定义并注入系统提示  
 这些子智能体必须包含 name 字段才会被注入，否则只能手动输入路径调用
 
 规范详见 [技能指南](../../plugins/tools/skill-description.md)  

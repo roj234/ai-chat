@@ -67,7 +67,7 @@ backend/           可选 Node 后端
 public/
   assets/          构建产物（sandbox 模块等；sandbox/ 已 gitignore）
   documents/       内置文档，docs.html 读取
-  files/           内置技能与记忆模板（运行时复制到 ~/.skills 与 ~/memory）
+  files/           内置技能与记忆模板（运行时复制到 ~/skills 与 ~/memory）
 misc/              launch.sh/bat、安卓配置、Chrome 扩展、PWA 配置、hljs 裁剪与语言分组脚本
 vendor/            构建期处理的静态资源（normalize、remixicon、jsBridge、hljs、chartjs）
 test/              浏览器端测试（test.html 手动运行）

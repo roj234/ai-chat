@@ -1,12 +1,12 @@
 import {callFileSystemFunc, createFileSystem} from "../agent/index.js";
-import {selectedConversation} from "../../src/states.js";
-import {openWindow} from "../../src/components/Windows.jsx";
+import {selectedConversation} from "/src/states.js";
+import {openWindow} from "/src/components/Windows.jsx";
 import {$state, $vforeach, unconscious} from "unconscious";
 import {ansiToHtml} from "@roj234/ansi2html";
 
 import "./Terminal.css";
-import {prettyError} from "../../src/utils/utils.js";
-import {sseFetch} from "../../common/fetch-utils.js";
+import {prettyError} from "/src/utils/utils.js";
+import {sseFetch} from "/common/fetch-utils.js";
 import {normalizePath} from "@roj234/shared/path";
 import {ref} from "@roj234/shared";
 

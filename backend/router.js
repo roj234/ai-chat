@@ -1,4 +1,4 @@
-import {msgpack_schema, msgpack_schema_version} from "../common/wire-compression-schema.js";
+import {msgpack_schema, msgpack_schema_version} from "/common/wire-compression-schema.js";
 import {constants, createBrotliCompress, createGzip} from "node:zlib";
 import {RESPONSE_COMPRESS_LEVEL, RESPONSE_USE_MSGPACK_SCHEMA} from "./config.js";
 import {decodeMsg, encodeRawMsg} from "@roj234/msgpack";

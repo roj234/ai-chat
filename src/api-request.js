@@ -79,7 +79,7 @@ import {SP_CONNECT, SP_GENERATE, SP_PREFILL, SP_RETRY, SP_WAIT} from "./componen
 import {isLlamaCppBackend, PRESET_KVS_ID, resolvePreset} from "./presets.js";
 import {expandFolds} from "./utils/BranchManager.js";
 import {lockConversation, unlockConversation} from "./conversation-lock.js";
-import {abortable, sleep} from "../common/pure-utils.js";
+import {abortable, sleep} from "/common/pure-utils.js";
 import {resolvePlaceholder} from "./utils/placeholder.js";
 
 /**
@@ -119,6 +119,7 @@ export const submitUserChatMessage = async (loop, conv) => {
 };
 
 const RETRY_COUNT = debugSymbol("RetryCount");
+const TITLE = debugSymbol("DeepSeek-Title");
 
 /**
  * @return {number}
@@ -249,6 +250,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			forceRender = lastDetails = null;
 		}
 
+		renderNow(isThinking, obj, container);
 	};
 	const renderer = (type, message) => {
 		if (selectedConversation.id !== conversation.id) return;
@@ -479,13 +481,14 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			await updateConversation(conversation, messages_uc);
 		}
 
-		const mayGenerateTitle = () => {
-			if ('error' !== finishReason && !conversation.title && assistantMessage.content) {
+		if ('error' !== finishReason && !conversation.title) {
+			if (logItem[TITLE]) {
+				setConversationTitle(conversation, logItem[TITLE]);
+				delete logItem[TITLE];
+			} else {
 				generateChatTitle(conversation, messages_uc, cfg);
 			}
-		};
-
-		if (cfg.generateTitle) mayGenerateTitle();
+		}
 		if (hasPendingInput()) finishReason = 'userInput';
 
 		// context usage
@@ -569,13 +572,16 @@ Directly output title in JSON \` { "title": <conversation title> } \`, no explai
 			role: "user",
 			content: "<turn>user\n"+s1+"</turn><turn>assistant\n"+s2+"</turn>"
 		}],
-		max_completion_tokens: 30,
-		//temperature: 0.7,
 		response_format: { type: "json_object" }
 	};
 
-	const [reasoningTogglePath, reasoningEnabledValue, reasoningDisabledValue = 'false'] = (config.reasoningTogglePath||"reasoning/enabled").split(",");
-	if (config.forceThink == null) jsonEval(body, reasoningTogglePath, "set", JSON.parse(reasoningDisabledValue));
+	const maxTokensPath = (config.maxTokensPath||"max_tokens");
+	jsonEval(body, maxTokensPath, "set", 30);
+
+	if (config.forceThink == null) {
+		const [reasoningTogglePath, reasoningEnabledValue, reasoningDisabledValue = 'false'] = (config.reasoningTogglePath||"reasoning/enabled").split(",");
+		jsonEval(body, reasoningTogglePath, "set", JSON.parse(reasoningDisabledValue));
+	}
 
 	setConversationTitle(conversation, '正在生成标题……', true);
 
@@ -1208,10 +1214,23 @@ async function buildCompletionPayload(
 		stream: true
 	};
 
-	for (const {id, body_id, default: _omit} of BODY_PARAMETERS) {
-		const v = config[id];
-		if (v !== undefined && v !== _omit) {
-			body[body_id] = v;
+	for (let i = 0; i < BODY_PARAMETERS.length; i++){
+		const par = BODY_PARAMETERS[i];
+		const v = config[par.id];
+		if (v !== undefined && v !== par.default) {
+			body[par.body_id] = v;
+		}
+	}
+
+	{
+		const maxTokensPath = (config.maxTokensPath||"max_tokens");
+		const v = config.max_completion_tokens;
+		if (v !== 0) jsonEval(body, maxTokensPath, "set", v);
+	}
+
+	{
+		if (config.generateTitle === 'ds' && !conversation.title) {
+			body.title = { enabled: true };
 		}
 	}
 
@@ -1233,14 +1252,14 @@ async function buildCompletionPayload(
 			}
 		}
 
-		const useModelCoT = isThinkingEnabled(config);
 		const [reasoningTogglePath, reasoningEnabledValue = 'true', reasoningDisabledValue = 'false'] = (config.reasoningTogglePath||"reasoning/enabled").split(",");
+		const [reasoningEffortPath, reasoningEffortType] = (config.reasoningEffortPath || "reasoning_effort").split(",");
+		const reasoningEnabled = config.forceThink ?? (reasoningEffortType === 'i' ? config.reasoningBudget > 0 : config.reasoningEffort !== "none");
 
 		if (config.forceThink == null) {
-			jsonEval(body, reasoningTogglePath, "set", JSON.parse(useModelCoT?reasoningEnabledValue:reasoningDisabledValue));
+			jsonEval(body, reasoningTogglePath, "set", JSON.parse(reasoningEnabled?reasoningEnabledValue:reasoningDisabledValue));
 		}
-		if (useModelCoT) {
-			const [reasoningEffortPath, reasoningEffortType] = (config.reasoningEffortPath || "reasoning/effort").split(",");
+		if (reasoningEnabled) {
 			jsonEval(body, reasoningEffortPath, "set", reasoningEffortType === 'i' ? config.reasoningBudget : config.reasoningEffort);
 		}
 	}
@@ -1422,6 +1441,8 @@ async function buildCompletionPayload(
 		body.timings_per_token = true;
 	}
 
+	await EVENT_BUS.post(['makeRequestBody'], conversation, body);
+
 	const replacer = new Map;
 	if (useRefs) await encodeObjects(json_messages, replacer);
 
@@ -1537,6 +1558,9 @@ export const buildSystemPrompt = async (config, conversation, prompt, toolPrompt
  */
 const extractUsageMetrics = (json, log) => {
 	console.log("usage", json);
+
+	const title = json.choices?.[0].delta?.title;
+	if (title) log[TITLE] = title;
 
 	let {provider, usage, timings} = json;
 	if (!usage) usage = json.choices?.[0].usage;

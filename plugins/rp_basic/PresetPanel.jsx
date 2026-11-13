@@ -3,7 +3,7 @@ import {$computed, $state, $update, $watchWithCleanup, debugSymbol, unconscious}
 import {VirtualList} from "unconscious/common/VirtualList.js";
 import Filter from "unconscious/common/components/Filter.jsx";
 import {DEFAULT_SYSTEM_PROMPT} from "./prompt.js";
-import {deleteWithDrawback} from "../../src/utils/utils.js";
+import {deleteWithDrawback} from "/src/utils/utils.js";
 
 const EXPANDED = debugSymbol("EXPANDED");
 const SORT = debugSymbol("SORT");

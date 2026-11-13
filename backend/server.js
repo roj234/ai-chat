@@ -28,7 +28,7 @@ import {createRouter} from './init.js';
 import {createSyncManager, createSyncValidateMiddleware} from "./syncServer.js";
 import {createZipRouter} from "./utils/zipRouter.js";
 import {closeAllConnections} from "./utils/UserManager.js";
-import {isLanAddress} from "../common/isLanAddress.js";
+import {isLanAddress} from "/common/isLanAddress.js";
 
 const shutdownHooks = [];
 globalThis.AiChatAPI.addShutdownHook = (hook) => shutdownHooks.push(hook);

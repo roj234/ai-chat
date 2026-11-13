@@ -3,7 +3,7 @@ import {LRUCache} from "@roj234/lru-cache";
 import fs from "node:fs/promises";
 import {EventEmitter} from "node:events";
 import {apiProxyLog as log} from "./api-proxy-utils.js";
-import {ORIGINAL_ERROR} from "../../common/fetch-utils.js";
+import {ORIGINAL_ERROR} from "/common/fetch-utils.js";
 
 /**
  * @type {Map<string, AiChatBackend.SSEProxyRequest>}

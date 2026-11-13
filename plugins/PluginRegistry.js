@@ -1,5 +1,3 @@
-import {ContentPart, registerToolset} from "/src/toolset.js";
-
 // 预装插件
 // 记住输入框
 import "./persistInputBox.js";
@@ -64,33 +62,12 @@ import {registerMultimediaGeneration} from "./tools/multimedia_generation.js";
 import {registerRemoteControl} from "./remoteControl.js";
 
 // 插件注册表
-import {GLOBAL_SETTINGS} from "/src/settings.js";
-import {config, conversations, EVENT_BUS, messages, selectedConversation} from "/src/states.js";
 import "./PluginRegistry.css";
-import {registerCodeBlockRenderer, renderMarkdownToElement} from "/src/markdown/markdown.js";
-import {registerSchemaMessageRole} from "/common/ReactiveJSON.js";
-import {COMMAND_REGISTRY} from "/src/commands.js";
-import {markMessageDirty} from "/src/database.js";
-import {resolvePreset} from "../src/presets.js";
-import {createTab} from "../src/components/SettingDialog.jsx";
 
-// 插件API
-window.AiChatAPI = {
-	registerTools: registerToolset,
-	registerCodeBlockRenderer,
-	registerSchemaMessageRole,
-	registerCommand(name, desc, callback) {
-		COMMAND_REGISTRY[name] = [callback, desc];
-	},
-	markMessageDirty,
-	ContentPart,
-	config,
-	conversation: selectedConversation,
-	messages,
-	conversations,
-	EVENT_BUS,
-	resolvePreset
-};
+import {GLOBAL_SETTINGS} from "/src/settings.js";
+import {config} from "/src/states.js";
+import {renderMarkdownToElement} from "/src/markdown/markdown.js";
+import {createTab} from "/src/components/SettingDialog.jsx";
 
 /**
  * @type {Array<{
@@ -148,6 +125,10 @@ const plugins = [
 		name: "机器人 (实验性)",
 		description: "开发中",
 		load: () => import("./chatbot/chatbot.js")
+	},
+	{
+		name: "反输出审核",
+		load: () => import("./contentFilter.js")
 	},
 ];
 
@@ -216,3 +197,4 @@ const pluginManager = <div className="plugins">
 
 createTab('_plugins', '插件', 'ri-apps-2-line', [pluginManager]);
 GLOBAL_SETTINGS.push({id: "pluginOrder",});
+

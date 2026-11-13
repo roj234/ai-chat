@@ -1012,6 +1012,7 @@ export const TextEditor = (props) => {
 
 				const lower = key.toLowerCase();
 				switch (lower) {
+					default: return;
 					case "a": return selectAll();
 					case "z": return shift ? redo() : undo();
 					case "y": return redo();

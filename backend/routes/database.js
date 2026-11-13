@@ -14,7 +14,7 @@ import path from "node:path";
 import {LLM_COST_SCALE} from "../sync.js";
 import {getProxyAgent} from "../utils/fetch-hook.js";
 import {exclusiveLock} from "../utils/lock.js";
-import {jsonFetch} from "../../common/fetch-utils.js";
+import {jsonFetch} from "/common/fetch-utils.js";
 
 /**
  * 重新映射向量数据库的key

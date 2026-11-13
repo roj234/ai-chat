@@ -37,7 +37,7 @@ export function ToolCallEditor(props) {
     const initializeHtml = () => {
         const
             input = $state(formatJson(fn.arguments)),
-            output = $state(message.tool_responses[index()]?.content),
+            output = $state(message.tool_responses[index()]?.content || ""),
             argSyntax = $state(),
             argStruct = $state(),
             toolCallId = $state(props.tool.id);
@@ -74,7 +74,7 @@ export function ToolCallEditor(props) {
                 <div className={"args error"} style:display={() => unconscious(argStruct) ? "" : "none"}>{argStruct}</div>
             </div>
             <div className="tool-body">
-                <div className="args-title">返回值 (可编辑, 可置空)<span className={"spacer"}></span>
+                <div className="args-title">返回值<span className={"spacer"}></span>
                     <button className={"rerun-btn"} disabled={() => argSyntax.error || unconscious(argStruct)} onClick={({target}) => {
                         const idx = index();
 
@@ -96,7 +96,7 @@ export function ToolCallEditor(props) {
                         <span className={"tooltip"}>{"以当前参数运行工具\n会覆写返回值"}</span>
                     </button>
                 </div>
-                <JsonEditor value={output} skipVerify={true} />
+                <JsonEditor value={output} skipVerify={true} placeholder={"置空以在保存后手动运行"} />
             </div>
             <div className="tool-body">
                 <div style={"display:flex;gap:8px"}>

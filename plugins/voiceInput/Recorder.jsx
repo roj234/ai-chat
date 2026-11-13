@@ -3,8 +3,8 @@ import "./Recorder.css";
 import {formatSize} from "unconscious/common/Utils.js";
 import {$cleanup, $computed, $state, unconscious} from "unconscious";
 import {AudioPlayer} from "/src/components/AudioPlayer.jsx";
-import {closeWindow, openWindow} from "../../src/components/Windows.jsx";
-import {EVENT_BUS} from "../../src/states.js";
+import {closeWindow, openWindow} from "/src/components/Windows.jsx";
+import {EVENT_BUS} from "/src/states.js";
 
 const Recorder = ({ onSubmit }) => {
 	let statusEl;

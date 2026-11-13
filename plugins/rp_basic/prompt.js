@@ -184,8 +184,20 @@ export const applyPreset = async ({prompts = [], regexps = []}, ctx, input, conv
 	if (activeRegexps.length) {
 		for (let i = 0; i < messages.length; i++){
 			let message = messages[i];
-			if (!message[IS_SYSTEM])
-			message.content = regexpReplace(activeRegexps, messages.length - 1 - i, message.content);
+			if (!message[IS_SYSTEM]) {
+				const depth = messages.length - 1 - i;
+				const content = message.content;
+				if (Array.isArray(content)) {
+					message.content = [...content].map(item => {
+						if (typeof item.text === 'string') {
+							return { type: "text", text: regexpReplace(activeRegexps, depth, item.text) }
+						}
+						return item;
+					});
+				} else {
+					message.content = regexpReplace(activeRegexps, depth, content);
+				}
+			}
 		}
 	}
 

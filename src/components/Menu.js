@@ -45,7 +45,7 @@ export function openContextMenu(ev, scrollContainer, items, forceMenu) {
 		if (!btn) return;
 		const it = items[+btn.dataset.i];
 		try {
-			const p = it?.act?.();
+			const p = it?.act?.(ev);
 			if (p instanceof Promise) {
 				btn.textContent = "处理中……";
 				btn.disabled = true;

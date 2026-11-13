@@ -24,10 +24,10 @@ import {createAsyncQueue} from "/common/pure-utils.js";
 import {xhrUpload} from "./xhrUploader.js";
 import {openContextMenu} from "/src/components/Menu.js";
 import {grepCard} from "../agent/GrepCard.jsx";
+import {escapeRegexp} from "@roj234/shared/strings";
 
 /* ============================== 工具函数 ============================== */
 const GLOB_META_CHARS = /[\\*?[{]/g;
-const REGEX_META_CHARS = /[.^$+{}[\]|()]/g;
 
 /**
  * 目录项
@@ -115,7 +115,7 @@ function openGrepDialog(fs, cwd) {
 				let pattern = patternEl.value;
 				if (!pattern) return false;
 
-				if (!useRegex) pattern = pattern.replace(REGEX_META_CHARS, '\\$&');
+				if (!useRegex) pattern = escapeRegexp(pattern);
 				if (!caseSensitive && (!useRegex || !pattern.endsWith(')'))) pattern += "(i)";
 
 				const path = pathEl.value;
@@ -203,6 +203,8 @@ function openGrepDialog(fs, cwd) {
  * @return {JSX.Element & { navigateTo(string): Promise<void> }}
  */
 const Explorer = (fs, cwd) => {
+	const myId = vfsIdentity(fs[FS_SOURCE]);
+
 	/**
 	 * @param {string} op
 	 * @param {Record<string, any>} [body]
@@ -224,9 +226,10 @@ const Explorer = (fs, cwd) => {
 
 		const entries = await call('list', {
 			path: path || '.',
-			pattern: q ? `**/*${regexpSearch ? q : q.replace(GLOB_META_CHARS, '\\$&')}*` : '*',
+			pattern: q ? `**/*${globSearch ? q : q.replace(GLOB_META_CHARS, '\\$&')}*` : '*',
 			json: true,
 			limit: q ? 200 : 5000,
+			//showDir: q ? false : undefined,
 			showModified: true,
 			showHidden: true,
 		});
@@ -284,9 +287,7 @@ const Explorer = (fs, cwd) => {
 	let dragDepth = 0;
 	let searchDebounceTimer = 0;
 
-	const sorter = new Intl.Collator('zh-CN', {
-		numeric: true
-	})
+	const sorter = new Intl.Collator(undefined, {numeric: true});
 
 	/* ------------------------------ 派生值 ------------------------------ */
 	const sorted = $computed(() => {
@@ -562,7 +563,7 @@ const Explorer = (fs, cwd) => {
 		if (!multi) {
 			items.push(
 				{label: '重命名', icon: "ri-edit-line", act: () => renameEntry(e)},
-				{label: '复制路径', icon: "ri-link", act: () => copyWithAnimation(vfsIdentity(fs[FS_SOURCE]) + targets.at(-1).path)},
+				{label: '复制路径', icon: "ri-link", act: () => copyWithAnimation(myId + targets.at(-1).path)},
 			);
 		}
 
@@ -594,7 +595,7 @@ const Explorer = (fs, cwd) => {
 			{sep: true},
 			{label: '上传文件', icon: "ri-upload-line", act: () => fileInput.click()},
 			{label: '新建文件夹', icon: "ri-folder-line", act: newFolder},
-			{label: '新建文件', icon: "ri-file-line", act: newFile},
+			{label: '新建文件', icon: "ri-file-3-line", act: newFile},
 		], true);
 	}
 
@@ -933,7 +934,7 @@ const Explorer = (fs, cwd) => {
 		let p;
 
 		const kind = fs[FS_SOURCE].fs_type;
-		if (f.size && kind === 'api' || kind === 'db') {
+		if (f.size && (kind === 'api' || kind === 'db')) {
 			const {base, root, headers} = await call('getUrl');
 			p = xhrUpload(f, base+`writeRaw?${root ? "root="+encodeURIComponent(root)+"&" : ''}path=`+encodeURIComponent(target), headers, signal, p => {
 				bar.style.width = (p * 100).toFixed(1) + '%';
@@ -1181,7 +1182,7 @@ const Explorer = (fs, cwd) => {
 		style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer"
 		onChange={ev => ev.target.checked ? selectAll() : applySel(new Set())}/>;
 
-	let regexpSearch = false;
+	let globSearch = false;
 	const searchInput = <input placeholder="搜索当前目录" spellCheck={false}
 		value={query}
 		onInput={ev => {
@@ -1271,7 +1272,7 @@ const Explorer = (fs, cwd) => {
 					{searchInput}
 					<div className="-btn">
 						<button title="Glob 表达式" onClick={({target}) => {
-							regexpSearch = target.classList.toggle('active');
+							globSearch = target.classList.toggle('active');
 							searchInput.dispatchEvent(new KeyboardEvent('input'));
 						}}>?*</button>
 					</div>
@@ -1366,15 +1367,20 @@ const Explorer = (fs, cwd) => {
 
 	/* ------------------------------ 启动 ------------------------------ */
 
-	$cleanup(body, EVENT_BUS.onoff('fileChanged', (fs1, _, path) => {
-		if (fs1 === fs) {
-			const dir = unconscious(cwd);
-			const pathParent = parentOf(path);
-			invalidateDirectoryContents(pathParent);
-			if (dir === path || dir === pathParent) {
-				highlightAfterChange = new Set([...selection].map(e => e.path));
-				$update(cwd);
-			}
+	$cleanup(body, EVENT_BUS.onoff('fileChanged', (fs1, _, path, type) => {
+		const itId = vfsIdentity(fs1[FS_SOURCE]);
+
+		if (itId !== myId) {
+			if (!itId.startsWith(myId)) return;
+			path = itId.slice(myId.length) + path;
+		}
+
+		const dir = unconscious(cwd);
+		const pathParent = parentOf(path);
+		invalidateDirectoryContents(pathParent);
+		if (dir === path || dir === pathParent) {
+			highlightAfterChange = new Set([...selection].map(e => e.path));
+			$update(cwd);
 		}
 	}));
 

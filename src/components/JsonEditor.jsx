@@ -19,13 +19,17 @@ const generateSkeleton = () => {
  * @param value
  * @param {Function} onChange
  * @param {boolean} [skipVerify]
+ * @param {string} [placeholder]
  * @return {JSX.Element}
  */
-export const JsonEditor = ({value = "", onChange, skipVerify}) => {
+export const JsonEditor = ({value = "", onChange, skipVerify, placeholder}) => {
 	const isRawString = typeof unconscious(value) === 'string';
 
 	return $async(() =>
-		EVENT_BUS.post(['jsonEditor'], skipVerify).then(([editor]) => {
+		EVENT_BUS.post(['createEditor'], {
+			noVerify: skipVerify,
+			placeholder,
+		}).then(([editor]) => {
 			const dom = editor.dom;
 			editor.onChange = onChange;
 
@@ -60,7 +64,7 @@ export function openJsonEditor(key, callback) {
 	w = openWindow({
 		id: "editor -json "+encodeURI(key),
 		icon: <i className="ri-code-s-slash-line"></i>,
-		title: "JSON编辑 "+key,
+		title: "JSON 编辑器 #"+key,
 		actions: <>
 			<button className="btn -je" disabled={() => editorState.error} onClick={() => {
 				data.value = inspect(editorState.obj);
@@ -77,7 +81,7 @@ export function openJsonEditor(key, callback) {
 	});
 	const [data, setValue] = callback(w);
 
-	EVENT_BUS.post(['jsonEditor']).then(([editor]) => {
+	EVENT_BUS.post(['createEditor']).then(([editor]) => {
 		const dom = editor.dom;
 
 		const cb = () => {

@@ -27,7 +27,7 @@
             padding: 4px 0;
         }
 
-        & > svg {
+        & svg.icon {
             width: 16px;
             height: 16px;
         }
