@@ -1,4 +1,4 @@
-import {HttpError} from "../../router.js";
+import {HttpError} from "../../app.js";
 import path from "node:path";
 
 /**

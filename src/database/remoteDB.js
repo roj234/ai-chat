@@ -489,7 +489,7 @@ function _FakeBlob(hash,obj) {this.$='BlobH';this.hash=hash;Object.assign(this, 
 _FakeBlob.prototype = {
 	constructor: File,
 	toUrl() {return remoteDBUrl+`blob/`+this.hash;},
-	async blob() {return this[BLOB] || (this[BLOB] = await (await fetch(this.toUrl(), { cache: 'force-cache', integrity: 'sha256-'+this.hash }).catch(() => {throw new Error("附件 "+(this.name||this.hash)+" 丢失或损坏")})).blob());},
+	async blob() {return this[BLOB] ??= await (await fetch(this.toUrl(), { cache: 'force-cache', integrity: 'sha256-'+this.hash }).catch(() => {throw new Error("附件 "+(this.name||this.hash)+" 丢失或损坏")})).blob();},
 	async toDataURL() {return (await this.blob()).toDataURL();},
 	async arrayBuffer() {return (await this.blob()).arrayBuffer();},
 	async bytes() {return (await this.blob()).bytes();},

@@ -188,13 +188,13 @@ export const applyPreset = async ({prompts = [], regexps = []}, ctx, input, conv
 				const depth = messages.length - 1 - i;
 				const content = message.content;
 				if (Array.isArray(content)) {
-					message.content = [...content].map(item => {
+					message.content = content.map(item => {
 						if (typeof item.text === 'string') {
 							return { type: "text", text: regexpReplace(activeRegexps, depth, item.text) }
 						}
 						return item;
 					});
-				} else {
+				} else if (typeof content === 'string') {
 					message.content = regexpReplace(activeRegexps, depth, content);
 				}
 			}

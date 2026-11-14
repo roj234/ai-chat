@@ -19,10 +19,10 @@ import {resolveVirtualUrl} from "./_vfsVirtualUrl.js";
  * @typedef {{ name: string, path: string, size: number, mtime?: number }} DownloadJob
  */
 
-const IMAGE_EXT = /jpg|jpeg|jpe|jfif|png|apng|gif|webp|bmp|svg|ico|avif|heic|heif/;
-const VIDEO_EXT = /flv|mp4|m4v|ogv|mkv|mov|webm|avi|f4v/;
-const AUDIO_EXT = /mp3|wav|ogg|oga|opus|flac|aac|m4a|mid|midi/;
-const TEXT_EXT = /txt|log|rtf/;
+const IMAGE_EXT = /\.?(?:jpg|jpeg|jpe|jfif|png|apng|gif|webp|bmp|svg|ico|avif|heic|heif)$/i;
+const VIDEO_EXT = /\.?(?:flv|mp4|m4v|ogv|mkv|mov|webm|avi|f4v)$/i;
+const AUDIO_EXT = /\.?(?:mp3|wav|ogg|oga|opus|flac|aac|m4a|mid|midi)$/i;
+const TEXT_EXT = /\.?(?:txt|log|rtf)$/i;
 
 const sizeByKind = immutableObjectMap({
 	video: { width: 960, height: 600, icon: <i className="ri-file-video-fill" /> },
@@ -104,7 +104,7 @@ const EISDIR = '\0';
  * @param {AiChat.FileSystemInstance} fs
  * @param {string} path
  * @param {string} [overrideFileName]
- * @param {'auto' | 'yes' | 'no'} [editable]
+ * @param {'a' | 'y' | 'n' | 't'} [editable]
  * @return {Promise<import("/src/components/Windows.jsx").WindowState>}
  */
 export async function vfsPreview(fs, path, overrideFileName, editable) {
@@ -125,10 +125,11 @@ export async function vfsPreview(fs, path, overrideFileName, editable) {
 
 	if (canEdit && (loadLanguage(extname, true) || TEXT_EXT.test(extname))) {
 		kind = extname === 'txt' ? 'text' : 'code';
-		if (editable !== 'yes') {
+		if (editable !== 'y') {
 			if (extname === 'md') kind = 'markdown';
 			else if (/xhtml|html|htm/i.test(extname)) kind = 'html';
 		}
+		if (editable === 't') return kind === 'code' ? 'y' : 'a'; // 不支持预览，事实上就是编辑
 
 		if (directUrl && kind === 'html') {
 			// 直接传原始URL过去就行
@@ -138,25 +139,28 @@ export async function vfsPreview(fs, path, overrideFileName, editable) {
 			data = await readAsString(blob);
 		}
 	} else {
-		if (IMAGE_EXT.test(filename)) kind = 'image';
-		else if (VIDEO_EXT.test(filename)) kind = 'video';
-		else if (AUDIO_EXT.test(filename)) kind = 'audio';
+		if (editable === 't') return 'n'; // 不支持编辑，只能预览
+
+		if (IMAGE_EXT.test(extname)) kind = 'image';
+		else if (VIDEO_EXT.test(extname)) kind = 'video';
+		else if (AUDIO_EXT.test(extname)) kind = 'audio';
+		else if (extname === 'pdf') kind = 'pdf';
 
 		if (directUrl) data.toUrl = () => directUrl;
 		else if (data.size > PREVIEW_NOSW_MAX) kind = 'too-large';
 		else data = await callFileSystemFunc(fs, 'readRaw', {path});
 
-		editable = 'no';
+		editable = 'n';
 	}
 
-	if (kind === 'code') return openFileEditor(fs, path, editable !== 'no', extname);
+	if (kind === 'code') return openFileEditor(fs, path, editable !== 'n', extname);
 
 	const previewWindow = openWindow({
 		id: "preview "+encodeURI(vfsIdentity(fs[FS_SOURCE])+path),
 		icon: <i className={"ri-file-3-line"}/>,
 		title: path,
 		actions: <div className="row">
-			{editable !== 'no' && <button className="ri-edit-2-line ghost" title="编辑" onClick={() => {
+			{editable !== 'n' && <button className="ri-edit-2-line ghost" title="编辑" onClick={() => {
 				closeWindow(previewWindow);
 				openFileEditor(fs, path, true, extname);
 			}} />}
@@ -173,15 +177,17 @@ export async function vfsPreview(fs, path, overrideFileName, editable) {
 					fs,
 					base: path.slice(0, path.lastIndexOf('/')+1),
 				}); break;
+				//case 'pdf': el = <iframe src={data.toUrl()} sandbox={!directUrl ? "" : undefined} width="100%" height="100%" />; break;
 				// 这个支持自动折行，等我的编辑器支持再删
 				case 'text': el = <HighlightBox code={data} filename={filename} />; break;
 				case 'video': el = <video style="width:100%;height:100%" src={data.toUrl()} controls />; break;
 				case 'audio': el = <AudioPlayer src={data.toUrl()} />; break;
 				case 'image': el = <div className="images"><ImagePane variant='' overlay="图像" blob={data}/></div>;break;
-				case 'binary':case 'too-large':el = <div className="md col" style="align-items:center;justify-content:center;height:100%;gap:8px">
+				case 'html': el = htmlRenderer(fs, data, path);break;
+				default:el = <div className="md col" style="align-items:center;justify-content:center;height:100%;gap:8px">
 					<div style="font-size:12px">{formatSize(data.size)} · {formatDate("Y-m-d H:i:s", data.lastModified)}</div>
 					<div style="font-size:14px">{kind === 'binary'
-						? <>这个扩展名还不支持预览<br/>不过你总是可以下载它。</>
+						? <>这个扩展名还不支持预览<br/>不过你可以点右上角下载。</>
 						: <>
 							文件过大，无法在线预览。<br />
 							请到 <b>设置 → 数据</b> 中启用 <code>资源缓存和VFS静态服务</code> 后再打开。
@@ -189,7 +195,6 @@ export async function vfsPreview(fs, path, overrideFileName, editable) {
 					}</div>
 				</div>;
 				break;
-				case 'html': el = htmlRenderer(fs, data, path);break;
 			}
 
 			return el;

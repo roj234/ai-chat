@@ -144,8 +144,9 @@
 
 	.dropMask {
 		display: none;
-		position:fixed;inset:0;z-index:1;place-items:center;
+		position:absolute;inset:0;z-index:1;place-items:center;
 		background:rgba(11,14,20,.72);border:2px dashed var(--accent);
+		pointer-events: none;
 
 		&.on{display:grid}
 		& .box{
@@ -192,7 +193,8 @@
 
 /* toast */
 .win-toasts {
-	position:fixed;left:50%;bottom:44px;transform:translateX(-50%);z-index:1;display:flex;flex-direction:column;gap:8px;
+	position:absolute;left:50%;bottom:44px;transform:translateX(-50%);z-index:1;display:flex;flex-direction:column;gap:8px;
+	align-items: center;
 
 	.toast{
 		background:var(--panel);border:1px solid var(--border);

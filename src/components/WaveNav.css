@@ -8,38 +8,41 @@
 		right: 10px;
 		top: 50%;
 		transform: translateY(-50%);
-		z-index: 1;
 		display: flex;
 		flex-direction: column;
 		align-items: flex-end;
-		padding: 16px 2px;
-		user-select: none;
+		padding: 16px 6px 16px 16px;
 		touch-action: none; /* 极其重要：阻止手机上下滑动手势触发浏览器滚动 */
+
+		/*
+		 * 1. 优化性能，反正mousemove每帧触发，加动画反而不跟手
+		 * 2. 结束时不需要我全部赋值 width: ""
+		 */
+		&:not(.-in) .-bar {
+			transition: width 0.08s ease-out, background-color 0.15s;
+			width: 10px !important;
+		}
 	}
 
 	.-item {
 		height: 18px;
 		display: flex;
 		align-items: center;
-		justify-content: flex-end;
-		position: relative;
 		cursor: pointer;
-		width: 48px;
 
 		/* 线条本体 */
 		.-bar {
 			height: 3px;
-			width: 10px; /* 默认基础宽度 */
-			background: rgba(255, 255, 255, 0.28);
+			width: 10px;
+			background: var(--border-2);
 			border-radius: 99px;
-			transition: width 0.08s ease-out, background-color 0.15s, height 0.15s;
-			will-change: width;
+			transition: background-color 0.15s;
 		}
 
 		&.-current .-bar {
 			background: rgba(96, 165, 250, 0.7);
 		}
-		&.active .-bar {
+		&.-active .-bar {
 			background: #60a5fa;
 			height: 4px;
 			box-shadow: 0 0 10px rgba(96, 165, 250, 0.8);
@@ -49,10 +52,11 @@
 	/* 悬浮展开的单行预览气泡 */
 	.-tooltip {
 		position: fixed;
+		display: block;
 		right: 58px;
-		background: rgba(15, 23, 42, 0.95);
+		background: var(--bg);
 		border: 1px solid rgba(96, 165, 250, 0.4);
-		color: #fff;
+		color: var(--text);
 		padding: 6px 12px;
 		border-radius: 8px;
 		font-size: 13px;
@@ -60,12 +64,12 @@
 		max-width: max(250px, 20vw);
 		overflow: hidden;
 		text-overflow: ellipsis;
+		box-shadow: 0 8px 12px rgba(0,0,0,0.25);
+
 		pointer-events: none;
 		opacity: 0;
 		transform: translateX(10px);
 		transition: opacity 0.15s, transform 0.15s;
-		box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-		z-index: 1;
 
 		&.-show {
 			opacity: 1;
@@ -78,3 +82,11 @@
 	}
 }
 
+@media (max-width: 767px) {
+	.wave-nav {
+		.-nav {
+			right: 6px;
+			padding: 0;
+		}
+	}
+}

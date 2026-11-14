@@ -228,7 +228,7 @@ const Explorer = (fs, cwd) => {
 			path: path || '.',
 			pattern: q ? `**/*${globSearch ? q : q.replace(GLOB_META_CHARS, '\\$&')}*` : '*',
 			json: true,
-			limit: q ? 200 : 5000,
+			limit: q ? 1000 : 10000,
 			//showDir: q ? false : undefined,
 			showModified: true,
 			showHidden: true,
@@ -526,10 +526,13 @@ const Explorer = (fs, cwd) => {
 	};
 
 	/* ------------------------------ 打开 ------------------------------ */
-	/** @param {FileEntry} e */
-	const openEntry = e => {
+	/**
+	 * @param {FileEntry} e
+	 * @param {boolean} [edit]
+	 */
+	const openEntry = (e, edit) => {
 		if (e.type === 'dir') loadDir(e.path);
-		else vfsPreview(fs, e.path, e.name, 'auto')
+		else vfsPreview(fs, e.path, e.name, edit ? 'y' : 'a')
 	};
 
 	/* ------------------------------ 右键菜单 ------------------------------ */
@@ -540,7 +543,7 @@ const Explorer = (fs, cwd) => {
 	 * @param {MouseEvent} ev
 	 * @param {FileEntry} e
 	 */
-	function onRowMenu(ev, e) {
+	async function onRowMenu(ev, e) {
 		ev.preventDefault();
 		ev.stopPropagation();
 
@@ -550,7 +553,10 @@ const Explorer = (fs, cwd) => {
 		const items = [];
 
 		if (!multi) {
-			items.push({label: e.type === 'dir' ? '打开' : '预览', icon: e.type === 'dir' ? "ri-folder-line" : "ri-eye-line", act: () => openEntry(e)},);
+			const isDir = e.type === 'dir';
+			const testResult = isDir ? 'n' : await vfsPreview(fs, e.path, e.name, 't');
+			if (testResult !== 'y') items.push({label: isDir ? '打开' : '预览', icon: isDir ? "ri-folder-line" : "ri-eye-line", act: () => openEntry(e)},);
+			if (testResult !== 'n') items.push({label: '编辑', icon: "ri-edit-2-line", act: () => openEntry(e, true)},);
 		}
 
 		items.push(
@@ -562,7 +568,7 @@ const Explorer = (fs, cwd) => {
 
 		if (!multi) {
 			items.push(
-				{label: '重命名', icon: "ri-edit-line", act: () => renameEntry(e)},
+				{label: '重命名', icon: "ri-input-cursor-move", act: () => renameEntry(e)},
 				{label: '复制路径', icon: "ri-link", act: () => copyWithAnimation(myId + targets.at(-1).path)},
 			);
 		}
@@ -594,8 +600,8 @@ const Explorer = (fs, cwd) => {
 			{label: '搜索文件内容', icon: <Icon_search/>, act: () => openGrepDialog(fs, cwd)},
 			{sep: true},
 			{label: '上传文件', icon: "ri-upload-line", act: () => fileInput.click()},
-			{label: '新建文件夹', icon: "ri-folder-line", act: newFolder},
-			{label: '新建文件', icon: "ri-file-3-line", act: newFile},
+			{label: '新建文件夹', icon: "ri-folder-add-line", act: newFolder},
+			{label: '新建文件', icon: "ri-file-add-line", act: newFile},
 		], true);
 	}
 
@@ -616,9 +622,7 @@ const Explorer = (fs, cwd) => {
 		const resolver = createNameConflictResolver();
 		/** @type {string[]} */
 		const pasted = [];
-		let skipSame = 0;
-		let skipInner = 0;
-		let fail = 0;
+		const fail = [];
 
 		const _cwd = unconscious(cwd);
 
@@ -627,8 +631,11 @@ const Explorer = (fs, cwd) => {
 		for (const it of items) {
 			a:
 			if (srcFS === fs && cut) {
-				if (_cwd === parentOf(it.path)) skipSame++;
-				else if (_cwd === it.path || _cwd.startsWith(it.path + '/')) skipInner++;
+				if (_cwd === parentOf(it.path)) {
+					fail.push(it.name + ' — ' + '目标文件夹和源相同');
+				} else if (_cwd === it.path || _cwd.startsWith(it.path + '/')) {
+					fail.push(it.name + ' — ' + '目标文件夹是源文件夹的子文件夹');
+				}
 				else break a;
 				continue;
 			}
@@ -640,22 +647,16 @@ const Explorer = (fs, cwd) => {
 				invalidateDirectoryContents(it.path);
 				invalidateDirectoryContents(dest);
 			} catch (e) {
-				fail++;
-				toast('粘贴失败：' + it.name + ' — ' + (e.message ?? e), 'err', 5000);
+				fail.push(it.name + ' — ' + (e.message ?? e));
 			}
 		}
 
-		if (!pasted.length) {
-			if (!fail) toast(skipSame ? '目标文件夹和源相同' : '目标文件夹是源文件夹的子文件夹', 'warn');
-			return;
-		}
-
-		if (cut) clipboard.value = null;
-
-		highlightAfterChange = new Set(pasted);
 		$update(cwd);
 
-		if (pasted.length < items.length) toast(`已粘贴 ${pasted.length} / ${items.length} 项`, 'warn');
+		if (fail.length) toast(fail.length === 1 ? `粘贴失败: `+fail[0] : `${fail.length === items.length ? '全部' : `${fail.length} / ${items.length} 项`}粘贴失败:\n`+fail.join('\n'), pasted.length ? 'warn' : 'err');
+		if (!pasted.length) return;
+		if (cut) clipboard.value = null;
+		highlightAfterChange = new Set(pasted);
 	}
 
 	function invalidateDirectoryContents(key) {
@@ -824,23 +825,23 @@ const Explorer = (fs, cwd) => {
 			async onConfirm() {
 				dialog.querySelectorAll("button").forEach(b => b.remove());
 
-				let deletedPaths = [];
-				let fail = 0;
+				const deleted = [];
+				const fail = [];
 				let all = items.map(it => call('delete', {path: it.path, recursive: true, force: false}).then(() => {
-					deletedPaths.push(it.path);
+					deleted.push(it.path);
 				}, e => {
-					fail++;
-					toast('删除失败：' + it.name + ' — ' + e.message, 'err');
+					fail.push(it.name + ' — ' + e.message);
 				}));
 				await Promise.allSettled(all);
-				if (fail) toast(items.length > 1 ? `已删除 ${items.length} 项` : `已删除 ${items[0].name}`, 'ok');
-				clipboard.value = null;
 
-				deletedPaths.forEach(path => {
+				if (fail.length) toast(fail.length === 1 ? `删除失败: `+fail[0] : `${fail.length === items.length ? '全部' : `${fail.length} / ${items.length} 项`}删除失败:\n`+fail.join('\n'), deleted.length ? 'warn' : 'err');
+				$update(cwd);
+				if (!deleted.length) return;
+
+				deleted.forEach(path => {
 					invalidateDirectoryContents(path);
 					invalidateDirectoryContents(parentOf(path));
 				});
-				$update(cwd);
 			}
 		});
 	}

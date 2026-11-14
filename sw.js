@@ -2,6 +2,15 @@
  * Service Worker: Blob LRU 缓存
  */
 import {getContentType} from "@roj234/ie/utils/mimeTypes.js";
+import {
+	SW_ClearVFSCache,
+	SW_GetCacheUsage,
+	SW_GetVFSData,
+	SW_GetVFSInstance,
+	SW_Response,
+	SW_SetCacheCapacity,
+	SW_Uninstall
+} from "./common/sw-protocol.js";
 
 const CACHE_NAME = 'blob-cache-v1';
 const CACHE_NAME_ASSETS = 'assets-cache-v1';
@@ -58,11 +67,30 @@ self.addEventListener('fetch', (event) => {
 let rpcId = 1;
 const rpcTasks = new Map;
 
-const RPC = (type, payload) => new Promise((resolve) => {
+/**
+ *
+ * @param {number} type
+ * @param {any} payload
+ * @param {boolean} [broadcast]
+ * @return {Promise<any>}
+ */
+const RPC = (type, payload, broadcast) => new Promise((resolve) => {
 	const id = rpcId;
-	rpcTasks.set(id, resolve);
 	self.clients.matchAll({ type: 'window' }).then(clients => {
-		for (const c of clients) c.postMessage([id, type, payload]);
+		if (!clients.length) {
+			resolve({ error: "无客户端实例运行" });
+			return;
+		}
+
+		rpcTasks.set(id, resolve);
+		const message = [id, type, payload];
+		if (broadcast) {
+			for (let i = 0; i < clients.length; i++) {
+				clients[i].postMessage(message);
+			}
+		} else {
+			clients[0].postMessage(message);
+		}
 	});
 	rpcId += 2;
 });
@@ -81,24 +109,57 @@ const handleVfsRequest = async (request, event) => {
 	const parts = request.url.slice(vfsScope.length).split('/');
 	const vfsId = parts.shift();
 	const params = vfsId.split('@').map(decodeURIComponent);
+
 	let vfs = vfsData.get(vfsId);
 	if (!vfs) {
 		let timer;
-		vfsData.set(vfsId, vfs = await Promise.race([
-			RPC("GetVFSMeta",{fs_type: params[0], fs_base: params[1], fs_server: params[2]}),
-			new Promise((resolve, reject) => timer = setTimeout(() => resolve({ error: '读取VFS元数据超时' }), 3000))
-		]));
+		vfs = await Promise.race([
+			RPC(SW_GetVFSInstance,{fs_type: params[0], fs_base: params[1], fs_server: params[2]}),
+			new Promise((resolve, reject) => timer = setTimeout(() => resolve({ error: '读取元数据超时' }), 3000))
+		]);
 		clearTimeout(timer);
+		if (vfs.error) return new Response(vfs.error, { status: 503 });
+
+		vfsData.set(vfsId, vfs);
 	}
 
-	if (vfs.error) return new Response(vfs.error, { status: 503 });
+	if (vfs.uri) {
+		let headers = request.headers;
+		const pat = vfs.pat;
+		if (pat) {
+			headers = new Headers(headers);
+			headers.set('Authorization', 'Bearer '+vfs.pat);
+		}
 
-	if (vfs.handle) {
+		const url = new URL(vfs.uri+"readRaw?path="+parts.join('/'));
+
+		const root = params[1];
+		if (root) url.searchParams.set('root', root);
+
+		// real server
+		const upstream = await fetch(url, {headers});
+		return new Response(upstream.body, upstream);
+	} else {
 		const paths = parts.map(decodeURIComponent);
-		// OPFS-like
-		let cur = vfs.handle;
-		for (const p of paths.slice(0, -1)) cur = await cur.getDirectoryHandle(p);
-		const blob = await (await cur.getFileHandle(paths.at(-1))).getFile();
+		/** @type {FileSystemDirectoryHandle} */
+		let handle = vfs.handle;
+		/** @type {Blob} */
+		let blob;
+
+		if (handle) {
+			// FileSystem
+			for (const p of paths.slice(0, -1)) handle = await handle.getDirectoryHandle(p);
+			blob = await (await handle.getFileHandle(paths.at(-1))).getFile();
+		} else {
+			// RPC
+			let timer;
+			const result = await Promise.race([
+				RPC(SW_GetVFSData, [vfs, paths]),
+				new Promise((resolve, reject) => timer = setTimeout(() => resolve({ error: '读取数据超时' }), 3000))
+			]);
+
+			if (result.error) return new Response(result.error, { status: 503 });
+		}
 
 		const m = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get('range'));
 		if (!m) return new Response(blob, {
@@ -139,22 +200,6 @@ const handleVfsRequest = async (request, event) => {
 				'Accept-Ranges': 'bytes'
 			}
 		});
-	} else {
-		let headers = request.headers;
-		const pat = vfs.pat;
-		if (pat) {
-			headers = new Headers(headers);
-			headers.set('Authorization', 'Bearer '+vfs.pat);
-		}
-
-		const url = new URL(vfs.uri+"readRaw?path="+parts.join('/'));
-
-		const root = params[1];
-		if (root) url.searchParams.set('root', root);
-
-		// real server
-		const upstream = await fetch(url, {headers});
-		return new Response(upstream.body, upstream);
 	}
 };
 
@@ -497,29 +542,29 @@ self.addEventListener('message', (event) => {
 	let fn;
 
 	switch (type) {
-		case 'get':
-			fn = readSumSize();
-			break;
-		case 'set':
-			if (typeof value === 'number' && value >= 0) {
-				CACHE_CAPACITY = value;
-				fn = trimCache(value);
-			}
-			break;
-		case 'del':
-			fn = unregisterAndCleanup();
-			break;
-		case 'vfs':
-			vfsData.clear();
-			client.postMessage([ id, 1 ]);
-		return;
-		case 'rpc':
+		case SW_Response:
 			const callback = rpcTasks.get(id);
 			if (callback) {
 				rpcTasks.delete(id);
 				callback(value);
 			}
-			return;
+		return;
+		case SW_GetCacheUsage:
+			fn = readSumSize();
+		break;
+		case SW_SetCacheCapacity:
+			if (typeof value === 'number' && value >= 0) {
+				CACHE_CAPACITY = value;
+				fn = trimCache(value);
+			}
+		break;
+		case SW_Uninstall:
+			fn = unregisterAndCleanup();
+		break;
+		case SW_ClearVFSCache:
+			vfsData.clear();
+			client.postMessage([ id, 1 ]);
+		return;
 	}
 	if (fn) event.waitUntil(fn.then((value) => client.postMessage([ id, value ])));
 });

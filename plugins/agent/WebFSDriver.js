@@ -141,7 +141,7 @@ export const createWebFileSystem = async (rootHandle, config = {}) => {
 		async stat({path, json}) {
 			const [ parent, name, handle, isDir ] = await myResolveHandle(path, READ);
 
-			const file = isDir ? null : await handle.getFile();
+			const file = isDir ? null : await handle.getFile(true);
 			if (json) {
 				const resp = { type: isDir ? 'dir' : 'file' };
 				if (file) {
@@ -271,7 +271,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 
 				if (handle.kind === 'file') {
 					if (showDir === 'only') continue;
-					const file = await handle.getFile();
+					const file = await handle.getFile(true);
 					if (file.lastModified >= modSince) {
 						const item = [displayPath, "file", json ? file.size : formatSize(file.size)];
 						if (showModified || modSince) item.push(json ? file.lastModified : new Date(file.lastModified).toISOString().slice(0, -5)+'Z');
@@ -316,7 +316,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 			const [ parent, name, handle ] = await myResolveHandle(path, WRITE | CREATE | REQUIRE_FILE);
 
 			// 这是一个 hack，浏览器处理几MB的文件时可能会报错无法写，所以先删再写。至于为什么不无条件删除，hmm，为了沙箱恢复方便
-			if (handle && (await handle.getFile()).size > 1048576) try {
+			if (handle && (await handle.getFile(true)).size > 1048576) try {
 				await parent.removeEntry(name);
 			} catch (e) {
 				if (e.name === FILE_TOO_BIG) throw "Failed to write file, it might locked by user.";
@@ -462,7 +462,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 
 					deleted.delete(displayPath);
 					if (handle.kind === 'file') {
-						const file = await handle.getFile();
+						const file = await handle.getFile(true);
 						const item = [h ? "modify" : "add", displayPath];
 						item.push(new Date(file.lastModified).toISOString().slice(0, -5)+'Z');
 						result.push(item);

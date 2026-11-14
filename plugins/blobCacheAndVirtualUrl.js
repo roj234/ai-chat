@@ -4,6 +4,7 @@ import {onLoad} from "/src/hooks.js";
 import {$derived, $state, $watch, unconscious} from "unconscious";
 import {formatSize} from "unconscious/common/Utils.js";
 import {config, EVENT_BUS} from "/src/states.js";
+import {SW_ClearVFSCache, SW_GetCacheUsage, SW_SetCacheCapacity, SW_Uninstall} from "/common/sw-protocol.js";
 
 const SW_URL = './sw.js';
 
@@ -35,7 +36,7 @@ if (swc) {
 		if (!swc.controller) {
 			element.replaceChildren(<button className={"btn primary"} onClick={() => enableBlobCache().then(cb)}>启用</button>);
 		} else {
-			EVENT_BUS.on(['vfsConfig'], vfs => sendMessage('vfs'));
+			EVENT_BUS.on(['vfsConfig'], vfs => RPC(SW_ClearVFSCache));
 
 			const size = $state(0);
 			updateOnIntersected(element, () => getCacheSize().then(size1 => size.value = size1));
@@ -93,11 +94,11 @@ const enableBlobCache = () => (
 
 /**
  * 向 SW 发送消息并等待对应类型的回复
- * @param {'get'|'set'|'del'|'vfs'} type - 请求类型
+ * @param {number} type - 请求类型
  * @param {*} [value] - 附加数据（SET_MAX_SIZE 时需要）
  * @returns {Promise<*>}
  */
-const sendMessage = (type, value) => enableBlobCache().then((reg) => {
+const RPC = (type, value) => enableBlobCache().then((reg) => {
 	return new Promise((resolve, reject) => {
 		const key = id += 2;
 		const timer = setTimeout(() => reject(new Error(`RPC ${type} Timeout`)), 3000);
@@ -110,17 +111,17 @@ const sendMessage = (type, value) => enableBlobCache().then((reg) => {
  * 获取当前 SW 缓存占用（字节）
  * @returns {Promise<number>}
  */
-const getCacheSize = () => sendMessage('get');
+const getCacheSize = () => RPC(SW_GetCacheUsage);
 
 /**
  * 设置最大缓存容量（字节）
  * @param {number} bytes - 最大字节数
  * @returns {Promise<[number, number]>}
  */
-const setMaxCacheSize = bytes => sendMessage('set', bytes);
+const setMaxCacheSize = bytes => RPC(SW_SetCacheCapacity, bytes);
 
 const unregisterCache = async () => {
 	const registration = await swc.getRegistration(SW_URL);
-	if (registration) return sendMessage('del').then(() => registration.unregister());
+	if (registration) return RPC(SW_Uninstall).then(() => registration.unregister());
 }
 

@@ -1,6 +1,7 @@
 import './SimpleModal.css';
 import Filter from "unconscious/common/components/Filter.jsx";
 import {$state} from "unconscious";
+import {smartButtonKeyHandler} from "../utils/utils.js";
 
 /**
  *
@@ -102,11 +103,11 @@ const SimpleModal = ({
 			{filter}
 			{after}
 		</div>
-		<div className="footer">
+		{smartButtonKeyHandler(<div className="footer">
 			<button className={"btn " + accent}
 					onClick={onConfirm ? handleConfirm : handleClose}>{confirmMessage}</button>
 			{onConfirm && !ignoreCancel && <button className="btn ghost" onClick={handleClose}>{cancelMessage}</button>}
-		</div>
+		</div>)}
 	</dialog>;
 
 	modal.addEventListener('cancel', (e) => {

@@ -22,6 +22,7 @@ import {CREATE_OPT, resolveDirectory} from "./WebFSUtils.js";
 import {addRemoteFileSystem, BACKEND_SERVER_KVLIST_ID, createRemoteFileSystem} from "./RemoteFSDriver.js";
 import {Icon_search, Icon_warning} from "/src/components/Icons.jsx";
 import {normalizePath} from "@roj234/shared/path";
+import {SW_GetVFSData, SW_GetVFSInstance, SW_Response} from "/common/sw-protocol.js";
 
 /** @type {Map<string, FileSystemDirectoryHandle>} */
 const localFileSystemCache = new Map;
@@ -162,31 +163,41 @@ const materializeFileSystem = async (mount) => {
 // GetVFSMeta事件监听器
 navigator.serviceWorker?.addEventListener('message', async ({data}) => {
 	const [rpcId, type, payload] = data;
-	if (type !== 'GetVFSMeta') return;
-
-	let packet = { error: `暂不支持 ${JSON.stringify(payload)} 文件系统` };
-
-	const fsType = payload.fs_type;
-	if (fsType === 'api') {
-		packet = await connectRemoteFileSystem(payload);
-		packet.uri += 'fs/';
-	} else if (fsType === 'db') {
-		packet = {
-			uri: remoteDBUrl+'fs/',
-			pat: config.db_pat
+	let packet;
+	if (type === SW_GetVFSInstance) {
+		const fsType = payload.fs_type;
+		if (fsType === 'api') {
+			packet = await connectRemoteFileSystem(payload);
+			packet.uri += 'fs/';
+		} else if (fsType === 'db') {
+			packet = {
+				uri: remoteDBUrl + 'fs/',
+				pat: config.db_pat
+			}
+		} else {
+			const fs_base = payload.fs_base;
+			if (fsType === 'local') {
+				packet = {handle: await connectLocalFileSystem(fs_base)};
+			} else if (fsType === 'opfs') {
+				let baseDir = await navigator.storage.getDirectory();
+				if (fs_base) baseDir = await resolveDirectory(baseDir, fs_base, CREATE_OPT);
+				packet = {handle: baseDir};
+			} else {
+				const data = EVENT_BUS.post(['vfsServe', fsType], payload);
+				if (data) packet = (await data)[0];
+			}
 		}
+	} else if (type === SW_GetVFSData) {
+		const [instance, pathArray] = payload;
+		// 假定之前返回的 packet 里有 fs_type 字段
+		// 请注意：这个 instance 对象是在 serviceWorker 里的
+		const data = EVENT_BUS.post(['vfsGet', instance.fs_type], instance, pathArray);
+		if (data) packet = (await data);
 	} else {
-		const fs_base = payload.fs_base;
-		if (fsType === 'local') {
-			packet = { handle: await connectLocalFileSystem(fs_base) };
-		} else if (fsType === 'opfs') {
-			let baseDir = await navigator.storage.getDirectory();
-			if (fs_base) baseDir = await resolveDirectory(baseDir, fs_base, CREATE_OPT);
-			packet = { handle: baseDir };
-		}
+		return;
 	}
 
-	navigator.serviceWorker.controller.postMessage([rpcId, 'rpc', packet]);
+	navigator.serviceWorker.controller.postMessage([rpcId, SW_Response, packet ?? {error: `暂不支持 ${JSON.stringify(payload)} 文件系统`}]);
 });
 
 /**
@@ -227,8 +238,7 @@ async function callFBI(mount) {
 			};
 		}, false, FOLDER_STORE_NAME),
 		...(!isIDB ? [{name: "典藏", el: <span className={"desc ellipsis"}>技能行于云端，多端同步如一。</span>, type: "db", lastAccessed: 0}] : []),
-		{name: "化卷", el: <span className={"desc ellipsis"}>映射内部数据为虚拟目录。<br/><b
-				style={"color:var(--error)"}>注意数据安全！</b></span>, type: "config", lastAccessed: 0 },
+		{name: "化卷", el: <span className={"desc ellipsis"}>映射软件数据为虚拟目录。<br/><b style={"color:var(--error)"}>注意数据安全！</b></span>, type: "config", lastAccessed: 0 },
 		{name: "暗渊", el: <span className={"desc ellipsis"}>藏于浏览器私库 (OPFS)。<br/>{await navigator.storage.estimate().then(t => "已用："+formatSize(t.usage)+"/"+formatSize(t.quota))}</span>, type: "opfs", lastAccessed: 0},
 	];
 	const pathStack = $state([]);
@@ -277,6 +287,7 @@ async function callFBI(mount) {
 			$update(itemTree);
 			saveItem(item);
 		};
+		const canPin = item => item.type === BACKEND_SERVER_KVLIST_ID || item.type === 'local';
 		/**
 		 *
 		 * @param {FileAbstraction} item
@@ -632,7 +643,7 @@ async function callFBI(mount) {
 							<div className="info">
 								<div className="title">
 									<span>{item.name}</span>{item.el}
-									{(unconscious(itemTree) === rootItems) &&
+									{(unconscious(itemTree) === rootItems) && canPin(item) &&
 										<span className={item.pinned ? "ri-pushpin-fill" : "ri-pushpin-line"}
 											  title={item.pinned ? '取消置顶' : '置顶'}
 											  onClick.stop={e => pinItem(e.target, item)}/>}

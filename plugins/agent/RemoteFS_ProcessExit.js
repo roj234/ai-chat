@@ -57,23 +57,24 @@ MessageRoles[PROCESS_EXIT_ROLE] = {
 					</details>;
 				}
 
+				const hasLog = !!event.log;
 				return <details className="process-exit-card">
 					<summary className="-header">
 						<div className="-left">
 							<span className="-pid">#{item.pid}</span>
-							<span className="ellipsis">{event.message || "Finished successfully."}</span>
+							<span className="ellipsis">{event.message || "进程已退出."}</span>
 						</div>
 						<div className="-right">
 							<span className="-elapsed"><i className="ri-time-line"/>{(event.duration/1000).toFixed(2)}s</span>
 							<span className={"-code "+(event.code === '0x0' ? "ok" : "error")}>{event.code}</span>
-							<svg className="-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-								 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							{hasLog && <svg className="-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+								  stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 								<polyline points="6 9 12 15 18 9"></polyline>
-							</svg>
+							</svg>}
 						</div>
 					</summary>
 
-					<div className="-body">
+					{hasLog && <div className="-body">
 						<div className="-logs-header">
 							<span>最后50行输出</span>
 							<button className="ri-file-3-line ghost" onClick={() => {
@@ -82,7 +83,7 @@ MessageRoles[PROCESS_EXIT_ROLE] = {
 							</button>
 						</div>
 						<HighlightBox filename=".log" code={event.log}/>
-					</div>
+					</div>}
 				</details>
 			}
 		})

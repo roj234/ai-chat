@@ -1,10 +1,18 @@
 {
 	"name": "ai-chat-backend",
 	"private": true,
-	"version": "4.0.0",
+	"version": "4.1.0",
 	"type": "module",
 	"dependencies": {
 		"remove-markdown": "0.6.3",
 		"iconv-lite": "^1.0.0-alpha"
+	},
+	"peerDependencies": {
+		"faiss-node": "^1.0.0",
+		"sharp": "^0.35.5"
+	},
+	"peerDependenciesMeta": {
+		"faiss-node": { "optional": true },
+		"sharp": { "optional": true }
 	}
 }

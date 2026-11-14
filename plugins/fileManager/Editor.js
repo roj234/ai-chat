@@ -1,5 +1,5 @@
 import "./Editor.css";
-import {$state, $update, unconscious} from "unconscious";
+import {$computed, $state, $update, unconscious} from "unconscious";
 import {TextEditor} from "./TextEditor.jsx";
 import {formatSize} from "unconscious/common/Utils.js";
 import {openWindow} from "/src/components/Windows.jsx";
@@ -49,7 +49,7 @@ export const openFileEditor = async (fs, path, editable, language) => {
 			EVENT_BUS.post(['fileChanged'], fs, path, "file");
 			winToast(toastDiv, '保存成功', 'ok');
 		} catch (err) {
-			winToast(toastDiv, '保存失败: '+prettyError(err), 'error')
+			winToast(toastDiv, '保存失败: '+prettyError(err), 'err')
 		} finally {
 			saving.value = false;
 		}
@@ -98,6 +98,18 @@ export const openFileEditor = async (fs, path, editable, language) => {
 			return items;
 		}
 	});
+
+	const saveDisabled = $computed(() => !dirty.value || saving.value);
+	editor.input.addEventListener('keydown', e => {
+		const mod = e.ctrlKey || e.metaKey;
+		const shift = e.shiftKey;
+		const key = e.key;
+		if (mod && !shift && key.toLowerCase() === 's') {
+			e.preventDefault();
+			if (!saveDisabled.value) save();
+		}
+	});
+
 	editorState.value = editor;
 	let toastDiv;
 
@@ -108,7 +120,7 @@ export const openFileEditor = async (fs, path, editable, language) => {
 		actions: <>
 			<button className="ri-reset-left-line ghost" disabled={() => !editorState.canUndo()} title="撤销" onClick={() => editor.undo()}/>
 			<button className="ri-reset-right-line ghost" disabled={() => !editorState.canRedo()} title="重做" onClick={() => editor.redo()}/>
-			{editable && <button className="ri-save-line ghost" disabled={() => !dirty.value || saving.value} title="保存" onClick={save}>{() => saving.value ? '保存中…' : ''}</button>}
+			{editable && <button className="ri-save-line ghost" disabled={saveDisabled} title="保存" onClick={save}>{() => saving.value ? '保存中…' : ''}</button>}
 			<button className="ri-download-line ghost" title="下载" onClick={() => {downloadFile(new File([content], path))}}/>
 		</>,
 		element: () => {

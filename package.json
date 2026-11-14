@@ -1,7 +1,7 @@
 {
 	"name": "ai-chat",
 	"private": true,
-	"version": "4.8.0",
+	"version": "4.8.2",
 	"type": "module",
 	"scripts": {
 		"dev": "ie dev",
@@ -25,6 +25,7 @@
 		"@roj234/qr": "^1.0.0",
 		"@roj234/msgpack": "^2.0.0",
 		"@roj234/stream-json": "^1.0.0",
+		"@roj234/expresso": "^2.0.0",
 
 		"katex": "^0.19.0",
 		"frappe-charts": "^1.6.2",

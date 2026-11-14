@@ -1,4 +1,4 @@
-import {$computed, $foreach} from "unconscious";
+import {$computed, $foreach, $watch} from "unconscious";
 
 import "./WaveNav.css";
 import {PASSIVE_EVENT} from "@roj234/shared";
@@ -6,6 +6,8 @@ import {VirtualList} from "unconscious/common/VirtualList.js";
 import {getTextContent} from "../utils/utils.js";
 import {prettyTime} from "unconscious/common/Utils.js";
 
+const BASE_HEIGHT = 18; // 必须和CSS相同
+const BAR_HEIGHT = 3;
 const BASE_WIDTH = 10;   // 默认短横线宽度(px)
 const MAX_ADD_WIDTH = 34; // 波峰最大额外伸长宽度(px)
 const WAVE_RADIUS = 75;   // 正弦波影响半径(px)
@@ -25,66 +27,91 @@ export const createWaveNav = (blocks, messageList, container) => {
 		return filtered.length > 100 ? filtered.slice(-100) : filtered;
 	}, [blocks]);
 
+	let lastTop, lastActive;
+	let lastClosestIdx = -1;
+	let widths;
+	let scheduled;
+
 	function updateSineWave(pointerY) {
 		let closestIdx = -1;
+		let closestY = -1;
+		let closestElem = null;
 		let minDistance = Infinity;
 
+		const count = waveNav.childElementCount;
+		if (!count) return;
+
+		lastTop ??= waveNav.firstElementChild.getBoundingClientRect().top;
+		if (widths?.length !== count) widths = new Float32Array(count);
+
+		waveNav.classList.add('-in');
 		waveNav.childNodes.forEach((item, idx) => {
-			const rect = item.getBoundingClientRect();
-			const itemCenterY = rect.top + rect.height / 2;
+			const itemCenterY = lastTop + idx * BASE_HEIGHT + (BASE_HEIGHT / 2);
 			const dist = Math.abs(pointerY - itemCenterY);
-			const bar = item.firstElementChild;
 
 			if (dist < minDistance) {
 				minDistance = dist;
 				closestIdx = idx;
+				closestY = itemCenterY;
+				closestElem = item;
 			}
 
 			if (dist < WAVE_RADIUS) {
-				// 使用余弦函数生成平滑的钟形正弦波包络: (cos(x * π) + 1) / 2
 				const ratio = dist / WAVE_RADIUS;
-				const waveFactor = (Math.cos(ratio * Math.PI) + 1) / 2;
-				const width = BASE_WIDTH + MAX_ADD_WIDTH * waveFactor;
-				bar.style.width = `${width.toFixed(1)}px`;
+				// 钟形正弦波包络
+				widths[idx] = (Math.cos(ratio * Math.PI) + 1) / 2;
 			} else {
-				bar.style.width = `${BASE_WIDTH}px`;
+				widths[idx] = 0;
 			}
-			item.classList.remove('active');
 		});
+
+		if (!scheduled) {
+			scheduled = requestAnimationFrame(() => {
+				scheduled = 0;
+				waveNav.childNodes.forEach((item, idx) => {
+					const bar = item.firstElementChild;
+					const width = BASE_WIDTH + MAX_ADD_WIDTH * widths[idx];
+					bar.style.width = `${width.toFixed(1)}px`;
+				})
+			});
+		}
+
+		if (lastClosestIdx === closestIdx) return lastClosestIdx;
+		lastClosestIdx = closestIdx;
+
+		lastActive?.classList.remove('-active');
+		lastActive = closestElem;
 
 		// 显示波峰对应的用户消息单行预览气泡
 		if (closestIdx !== -1 && minDistance < 45) {
-			const activeItem = waveNav.childNodes[closestIdx];
-			activeItem.classList.add('active');
-			const rect = activeItem.getBoundingClientRect();
-
 			const msg = userMessages[closestIdx].key;
-			waveTooltip.replaceChildren(
-				<span className="-ago">{prettyTime(msg.time)}</span>,
-				getTextContent(msg)?.slice(0, 500)
-			);
-			waveTooltip.style.top = `${rect.top + rect.height / 2 - 16}px`;
+			waveTooltip.replaceChildren(<span className="-ago">{prettyTime(msg.time)}</span>, getTextContent(msg)?.slice(0, 500));
+			waveTooltip.style.top = `${closestY - 16}px`;
 			waveTooltip.classList.add('-show');
-			return closestIdx;
+			closestElem.classList.add('-active');
 		} else {
 			waveTooltip.classList.remove('-show');
-			return -1;
 		}
+		return closestIdx;
 	}
 
 	function resetSineWave() {
-		waveNav.childNodes.forEach(item => {
-			item.firstElementChild.style.width = `${BASE_WIDTH}px`;
-			item.classList.remove('active');
-		});
+		waveNav.classList.remove('-in');
 		waveTooltip.classList.remove('-show');
+
+		cancelAnimationFrame(scheduled);
+		lastActive?.classList.remove('-active');
+		lastClosestIdx = -1;
+		lastTop = null;
+		lastActive = null;
+		scheduled = 0;
 	}
 
 	function scrollToUserMsg(idx, item) {
 		if (idx) item = userMessages[idx];
 		messageList.scrollIntoView(
 			item,
-			//{ behavior: 'smooth', block: 'start' }
+			{ behavior: 'smooth', block: 'start' }
 		);
 	}
 
@@ -118,7 +145,7 @@ export const createWaveNav = (blocks, messageList, container) => {
 	})}</div>;
 
 	let lastItem;
-	container.addEventListener('scroll', () => {
+	const onScroll = () => {
 		let currentItem;
 		let currentItemInvisible;
 
@@ -151,8 +178,10 @@ export const createWaveNav = (blocks, messageList, container) => {
 				item.classList.toggle('-current', item._key === currentItem);
 			});
 		}
-	}, PASSIVE_EVENT);
+	};
 
+	$watch(blocks, () => {requestAnimationFrame(onScroll)}, false);
+	container.addEventListener('scroll', onScroll, PASSIVE_EVENT);
 	container.append(<div className="wave-nav">{waveNav}{waveTooltip}</div>);
 }
 

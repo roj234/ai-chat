@@ -38,7 +38,6 @@ import {
 import {submitUserChatMessage} from "../api-request.js";
 import {
 	copyWithAnimation,
-	deleteWithDrawback,
 	downloadFile,
 	errorBlock,
 	getRandomString,
@@ -799,10 +798,15 @@ const buttonOnLeft = (selectedConversation, messages, ev, overrideAction) => {
 			}});
 
 			if (!isLast) items.push({label: '从此处删除', icon: "ri-scissors-line", danger: true, act: (ev) => {
-				const isKeyboard = ev.detail === 0;
-				deleteWithDrawback(`后续 ${msgs.length - self.index} 条消息`, () => {
-					deleteMessage(self.index, msgs.length);
-				}, () => {}, isKeyboard);
+				SimpleModal({
+					title: "删除后续所有消息？",
+					message: `共 ${msgs.length - self.index} 条`,
+					onConfirm() {
+						deleteMessage(self.index, msgs.length);
+					},
+					accent: 'danger',
+					confirmMessage: '删除'
+				})
 			}});
 
 			openContextMenu(ev, vl.dom, items);

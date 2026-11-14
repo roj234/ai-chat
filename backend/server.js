@@ -24,7 +24,7 @@ import {
 import {debugSecret} from "./utils/debugSecret.js";
 import {PROTOCOL_VERSION} from "./sync.js";
 
-import {createRouter} from './init.js';
+import {createApp} from './createApp.js';
 import {createSyncManager, createSyncValidateMiddleware} from "./syncServer.js";
 import {createZipRouter} from "./utils/zipRouter.js";
 import {closeAllConnections} from "./utils/UserManager.js";
@@ -147,7 +147,7 @@ if (!isLanAddress(addr)) {
 	}
 }
 
-const router = await createRouter(DATA_PATH, "api", workspace);
+const router = await createApp(DATA_PATH, "api", workspace);
 
 let frontendVersion = 'bundled';
 if (zipPath) {

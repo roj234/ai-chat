@@ -12,6 +12,8 @@
 }
 
 .toast {
+    position: relative;
+
     max-height: 50vh;
     max-width: max(350px, 33vw);
     display: flex;

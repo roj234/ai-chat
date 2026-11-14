@@ -1,119 +1,158 @@
-import {NestedMap, NODE_VALUE} from "unconscious/common/NestedMap.js";
-import {FSE_NotFound, FSE_NotSupported, throwDOMException} from "/common/pure-utils.js";
+import {EMPTY, NestedMap} from "unconscious/common/NestedMap.js";
+import {FSE_IsDir, FSE_NotAllowed, FSE_NotFound, FSE_NotSupported, throwDOMException} from "/common/pure-utils.js";
+import {decodeObjects, serializeJSON} from "/src/utils/serialization.js";
+import {parseJson5} from "@roj234/stream-json";
 
-const SOME = {};
+const readOnly = () => throwDOMException("Read-only filesystem", FSE_NotAllowed);
+const notFound = name => throwDOMException(`No such file or directory, open ${JSON.stringify(name)}`, FSE_NotFound);
+const sorter = new Intl.Collator(undefined, {numeric: true});
 
-export class VirtualFile {
-	get kind() { return 'file'; }
+export class VHandle {
+	/** @type {NestedMap} */
+	#tree;
+	/** @type {AiChat.VirtualFileHandleHandler | AiChat.VirtualDirectoryHandleHandler | null} */
+	#node;
+	/** @type {string[]} */
+	#path;
 
-	text;
-	constructor(fs, path) {
-		this.fs = fs;
-		this.path = path;
+	/**
+	 * @param {NestedMap} tree
+	 * @param {string[]} parent
+	 * @param [node]
+	 */
+	constructor(tree, parent, node) {
+		this.#tree = tree;
+		this.#path = parent;
+		this.#node = node;
 	}
+	get kind() { return this.#node?.read ? 'file' : 'directory'; }
+	get name() { return this.#path.at(-1); }
 
-	async _text() {
-		let text = this.text;
-		if (text == null) {
-			text = this.text = await this.fs.read(this.path);
+	async *entries() {
+		const keys = this.#path;
+		const data = [];
+
+		const hook = this.#node;
+		if (hook?.entries) {
+			const result = hook.entries(keys);
+			for await (const [k, child] of result) {
+				const path = [...keys, k];
+				const node = new VHandle(this.#tree, path, child);
+				data.push([k, node]);
+			}
+		} else {
+			const children = this.#tree.getChildren(keys);
+			if (!children?.c) return;
+
+			for (const [k, child] of children.c) {
+				const path = [...keys, k];
+				const node = child.v !== EMPTY ? new VHandle(this.#tree, path, child.v) : new VHandle(this.#tree, path);
+				data.push([k || '_', node]);
+			}
 		}
-		return text;
-	}
 
-	async createWritable({ keepExistingData } = SOME) {
-		let text = keepExistingData ? await this._text() : '';
+		for (const node of data.sort((a, b) => sorter.compare(a[0], b[0]))) yield node;
+	}
+	[Symbol.asyncIterator]() { return this.entries(); }
+
+	getFile(metadataOnly) {return this.#node.read(metadataOnly, this.#path);}
+	async createWritable({ keepExistingData } = {}) {
+		const writable = this.#node?.write;
+		if (!writable || this.#node.ro) return readOnly();
+
+		const chunks = keepExistingData ? [await this.getFile()] : [];
 		return {
 			async write(data) {
 				if (data instanceof Blob) data = await data.text();
 				else if (typeof data !== "string") throwDOMException("Binary is not supported yet", FSE_NotSupported);
-				text += data;},
+				chunks.push(data);
+			},
 			seek(pos) {throwDOMException("Seek not implemented", FSE_NotSupported);},
-			close: async () => {
-				await this.fs.write(this.path, text);
-				this.text = text;
+			close: () => this.#node.write(chunks, this.#path)
+		}
+	}
+
+	async #child(name, dir, options) {
+		const keys = [...this.#path, name];
+
+		const hook = this.#node;
+		if (hook?.child) {
+			const result = await hook.child(keys, dir, options?.create, this.#path);
+			if (result) return new VHandle(this.#tree, keys, result);
+		}
+
+		const child = this.#tree.getChildren(keys);
+
+		if (!child) {
+			if (options?.create) readOnly();
+			notFound(name);
+		} else {
+			if (child.c !== null && dir !== false) return new VHandle(this.#tree, keys);
+			if (child.v) {
+				const isFile = child.v.read;
+				if (isFile ? (dir !== true) : (dir !== false))
+					return new VHandle(this.#tree, keys, child.v);
 			}
+			throwDOMException(`"${name}" is a ${dir ? 'file' : 'directory'}`, FSE_IsDir);
 		}
 	}
-	async getFile() {
-		const text = await this._text()
-		const time = Date.now();
-		return new File([text], "unknown");
+	getFileHandle(name, options) { return this.#child(name, false, options); }
+	getDirectoryHandle(name, options) { return this.#child(name, true, options); }
+
+	async removeEntry(name, opt) {
+		const hook = this.#node?.rm;
+		if (!hook) return readOnly(this.#path);
+		return hook(name, opt?.recursive, this.#path);
 	}
+	//async isSameEntry(other) { return other?.#archive === this.#archive && other?.#node === this.#node; }
 }
-export class VirtualDirectory {
-	get kind() { return 'directory'; }
 
-	/**
-	 *
-	 * @param {NestedMap<string, Function>} fs
-	 * @param {string[]} path
-	 * @param children=
-	 */
-	constructor(fs, path = ["."], children) {
-		this.fs = fs;
-		this.path = path;
-		this.children = children || fs.getChildren(path);
+/**
+ * @type {AiChat.VirtualDirectoryHandleHandler}
+ */
+export class SimpleDirectory {
+	#dirs = new Map;
+	#files = new Map;
+
+	add(name, handler) {
+		(handler.read ? this.#files : this.#dirs).set(name, handler);
+		return this;
 	}
-
-	async *entries() {
-		const children = this.children;
-		const hook = children.get(NODE_VALUE);
-		if (hook) {
-			yield * (await (await (hook.handle || hook)).entries(this));
-			return;
-		}
-
-		for (let [name, val] of children) {
-			const joinedKey = [...this.path, name];
-			const hook = val.get(NODE_VALUE);
-
-			yield [name, hook?.read ? new VirtualFile(hook, joinedKey) : new VirtualDirectory(this.fs, joinedKey, val)];
-		}
+	child(name, dir) {
+		return (!dir ? this.#files : this.#dirs).get(name.at(-1));
 	}
-	[Symbol.asyncIterator]() { return this.entries(); }
-
-	async getDirectoryHandle(name, { create } = SOME) {
-		const children = this.children;
-		const entries = children.get(name);
-		let hook;
-		if (entries?.size && !(hook = entries.get(NODE_VALUE))?.read) {
-			return hook?.handle || new VirtualDirectory(this.fs, [...this.path, name], entries);
-		}
-
-		hook = await (children.get(NODE_VALUE)?.dir?.(name, create, this));
-		if (hook) return hook;
-
-		const message = (create?"CreateDir ":"ReadDir " )+JSON.stringify([...this.path, name].join('/'));
-		throwDOMException(message,create ? FSE_NotSupported : FSE_NotFound);
-	}
-
-	async getFileHandle(name, { create } = SOME) {
-		const children = this.children;
-		const handle = children.get(name)?.get(NODE_VALUE);
-		if (handle?.read) {
-			return new VirtualFile(handle, [...this.path, name]);
-		}
-
-		const hook = await (children.get(NODE_VALUE)?.file?.(name, create, this));
-		if (hook) return hook;
-
-		const message = (create?"CreateFile ":"ReadFile " )+JSON.stringify([...this.path, name].join('/'));
-		throwDOMException(message,create ? FSE_NotSupported : FSE_NotFound);
-	}
-
-	async removeEntry(name, options, { recursive } = SOME) {
-		const hook = await (this.children.get(NODE_VALUE)?.del);
-		if (hook) return hook(name, recursive, this);
-
-		const message = ("Delete " )+JSON.stringify([...this.path, name].join('/'));
-		throwDOMException(message, FSE_NotSupported);
+	*entries() {
+		yield * this.#dirs;
+		yield * this.#files;
 	}
 }
 
 /**
- *
- * @type {Record<string, VirtualDirectory>}
+ * @param meta
+ * @param read
+ * @param write
+ * @return {AiChat.VirtualFileHandleHandler}
+ */
+export const JsonFile = ({meta, read, write}) => {
+	return {
+		async read(metadataOnly, path) {
+			const [time, data] = await meta(path);
+			const bag = { lastModified: time ?? Date.now(), size: -1 };
+			if (metadataOnly) return bag;
+			const obj = read ? await read(data, path) : data;
+			return new File(obj === undefined ? [] : [await serializeJSON(obj, 2)], path.at(-1), bag);
+		},
+		ro: !write,
+		async write(data, path) {
+			const text = data.every(s => typeof s === 'string') ? data.join('') : await new Blob(data).text();
+			return write(await decodeObjects(parseJson5(text)), path);
+		},
+	};
+}
+
+/**
+ * @type {Record<string, VHandle>}
  */
 export const NAMED_VFS = {
-	"": new VirtualDirectory(new NestedMap()) // 空文件系统
+	"": new VHandle(new NestedMap(), []) // 空文件系统
 };

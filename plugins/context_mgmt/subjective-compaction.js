@@ -5,14 +5,14 @@ import {showToast} from "/src/components/Toast.js"
 import {$update, unconscious} from "unconscious"
 import {enableBranches, expandFolds} from "/src/utils/BranchManager.js";
 import {getImmediateMessages, getMessages, markMessageDirty,} from "/src/database.js";
-import {serializeJSON} from "/src/utils/serialization.js";
-import {createFileSystemAsync, VirtualDirectory, VirtualFile} from "../agent/index.js";
+import {createFileSystemAsync, VHandle} from "../agent/index.js";
 import {FSE_NotFound, throwDOMException} from "/common/pure-utils.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
-import {createWebFileSystem} from "../agent/WebFSDriver.js";
 import {resolvePreset} from "/src/presets.js";
 
 import {customRoleRegHelper} from "../pluginApi.js";
+import {JsonFile} from "../agent/VirtualFileSystem.js";
+import {createWebFileSystem} from "../agent/WebFSDriver.js";
 
 const ID = "ContextCompression";
 
@@ -196,41 +196,53 @@ const Marker = {
 	title() {return `📌`}
 }
 
-const convMessageHandler = {
-	async read(data) {
-		return serializeJSON(data, 2);
-	},
-}
+/**
+ * @type {AiChat.VirtualFileHandleHandler}
+ */
+const messageItemHandler = JsonFile({
+	meta(path) {
+		const data = path.at(-1);
+		return [data.time, data];
+	}
+})
 
-const MxxVFSRoot = new NestedMap();
-MxxVFSRoot.set([".handlers", 1], {
-	async file(name, create, self) {
-		const conv = self.path.at(-1);
+/**
+ * @type {AiChat.VirtualDirectoryHandleHandler}
+ */
+const messageListHandler = {
+	async child(childPath, dir) {
+		if (dir) return;
+
+		const name = childPath.at(-1);
+		const conv = childPath[0];
 		const path = expandFolds(await getMessages(conv), true);
 		let {idMap} = computeIds(path);
 
 		const i = idMap.get(name.slice(0, -5));
 		if (i == null) throwDOMException(name, FSE_NotFound);
-		return new VirtualFile(convMessageHandler, path[i]);
+
+		childPath[childPath.length - 1] = path[i];
+		return messageItemHandler;
 	},
-	async *entries(self) {
-		const conv = self.path.at(-1);
+	async *entries(arr) {
+		const conv = arr[0];
 		const path = expandFolds(await getMessages(conv), true);
 		let {idMap} = computeIds(path);
 
 		for (const [k, v] of idMap.entries()) {
 			yield [k+".json", {
-				kind: "file",
-				getFile() {
+				read() {
 					return {
 						size: path[v].content.length || -1,
-						lastModified: path[v].time || 0
+						lastModified: path[v].time || Date.now()
 					}
 				}
 			}];
 		}
 	},
-});
+}
+const VFSRoot = new NestedMap();
+
 
 registerToolset(ID, "主动上下文管理\n使用 /dcp ui 打开配置界面", [Compress, Marker], {
 	hidden: 'manual',
@@ -298,7 +310,7 @@ function registerRole(conv) {
 	if (!registerRole_(conv)) return;
 
 	const instance = {};
-	createFileSystemAsync(instance, createWebFileSystem(new VirtualDirectory(MxxVFSRoot, [".", "sessions", conv], MxxVFSRoot.getChildren([".handlers", 1]))));
+	createFileSystemAsync(instance, createWebFileSystem(new VHandle(VFSRoot, [conv], messageListHandler)));
 	(conv.mnt ??= {})['history'] = instance;
 }
 

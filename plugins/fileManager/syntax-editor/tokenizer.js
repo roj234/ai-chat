@@ -6,7 +6,7 @@
 import hljs from "/vendor/hljs/core.js";
 import {queueMacrotask} from "unconscious/common/queueMacrotask.js";
 
-const MAX_RENDER_CHARS = 10000;
+const MAX_RENDER_CHARS = 8000;
 const MAX_HIGHLIGHT_CHARS = 256000;
 
 /**
@@ -29,8 +29,8 @@ export const lineDOM = (node, text, tokens, selFrom, selTo) => {
 		let end = tokens[i];
 		const cls = tokens[i + 1];
 
-		const overflow = end - start > MAX_RENDER_CHARS;
-		if (overflow) end = start + MAX_RENDER_CHARS;
+		const overflow = end > MAX_RENDER_CHARS;
+		if (overflow) end = MAX_RENDER_CHARS;
 
 		if (!hasSel || selTo <= start || selFrom >= end) {
 			const part = text.slice(start, end);

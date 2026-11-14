@@ -2,7 +2,7 @@ import {OpenAI} from "./openai";
 import {PP_AUTO, PP_INTERACTIVE, PP_SUPERVISED, PP_UNATTENDED} from "./states";
 
 declare namespace AiChat {
-    type FSType = 'db' | 'api' | 'local' | 'config' | 'opfs' | 'vfs';
+    type FSType = 'db' | 'api' | 'local' | 'config' | 'opfs' | 'vfs' | 'zip';
 
     type GlobSegment = {
         t: 0,
@@ -32,6 +32,12 @@ declare namespace AiChat {
         cwd?: string;
         /** 启动时间 */
         start?: number;
+        /** 退出说明；true 表示静默退出（不注入消息） */
+        message?: string | true;
+        code?: string;
+        logFile?: string;
+        log?: string;
+        duration?: number;
     }
 
     type Mount = {
@@ -94,9 +100,11 @@ declare namespace AiChat {
         owner: number;
 
         sa_maxTurns?: number;
+        // 已被中止
         sa_terminated?: true;
-        sa_pending?: true;
+        // 重定向目标
         sa_redirect?: Object;
+        // 上次推送的消息ID，去重用
         sa_notify?: number;
     }
 
@@ -534,6 +542,20 @@ declare namespace AiChat {
     class Cancellable<T> {
         done: Promise<T>
         cancel(): void
+    }
+
+    type VirtualHandle = VirtualDirectoryHandleHandler | VirtualFileHandleHandler;
+    type VirtualPathItem = (string | any);
+
+    type VirtualFileHandleHandler = {
+        read(metadataOnly: boolean, path: VirtualPathItem[]): Promise<File>;
+        write(data: (string | Blob)[], path: VirtualPathItem[]): Promise<void>;
+    }
+
+    type VirtualDirectoryHandleHandler = {
+        entries(path: VirtualPathItem[]): AsyncGenerator<[string, VirtualHandle], void, any>;
+        child(childNameAndPath: VirtualPathItem[], dir: boolean, create: boolean, path: Readonly<VirtualPathItem[]>): Promise<VirtualHandle>;
+        rm(name: string, recursive: boolean, path: VirtualPathItem[]): Promise<void>;
     }
 
     namespace DnD {

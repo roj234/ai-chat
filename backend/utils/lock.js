@@ -1,5 +1,5 @@
 import {createHash} from "node:crypto";
-import {HttpError} from "../router.js";
+import {HttpError} from "../app.js";
 
 const locks = new Map;
 

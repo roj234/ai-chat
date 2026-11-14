@@ -7,32 +7,35 @@
 - 构建工具是 `@roj234/ie`（类 Vite，读取 `vite.config.js` / `vite.app.config.js`）。
 - UI 基于 `unconscious`（无 VDOM 响应式框架，JSX + `$state` 等原语）。
 - 纯 ESM，`.js` 使用 JSDoc 提供类型；新增独立组件优先 TypeScript。
+- 这是一个 Monorepo（至少作者这么开发的），`node_modules` 在上级目录，建议项目布局见 `.github/workflows/build.yml`
 
 ## 目录结构
 
 ```
 src/               前端主应用
-  components/      UI 组件（JSX + 同名 css，含 MDI 窗口 Windows.jsx、消息列表、工具卡等）
-  database/        IndexedDB / 远程数据库 / 同步客户端实现
-  markdown/        流式 Markdown 渲染、语法高亮、KaTeX、代码块渲染器
-  utils/           通用工具（EventBus、BranchManager、占位符、序列化、唤醒锁…）
-  doc_viewer/      文档查看页（docs.html，章节表在 documents.js）
-  log_viewer/      请求日志页（log_viewer.html）
-  markdown_editor/ Markdown 实时打印页（markdown.html）
-  json_editor/     JSON 编辑弹窗
-  main.js          主入口
+  components/      UI 组件（JSX + 同名 css）
+  database/        本地/云端数据库和同步服务实现
+  markdown/        流式 Markdown 和语法高亮渲染器
+  utils/           通用工具
+  doc_viewer/      文档查看独立页
+  log_viewer/      请求日志独立页
+
   states.js        全局响应式状态中心 + EVENT_BUS
   settings.js      GLOBAL_SETTINGS 与默认系统/标题提示词
-  database.js      数据库抽象层（按 DB_MODE 选择本地/远程）
-  toolset.js       工具注册/执行、MCP、工具提示词与上下文构建
-  api-request.js   LLM 请求循环、流式 UI 状态、工具调用循环
   commands.js      `/` 斜杠指令注册表
-  presets.js       预设与模型列表
-  data-exchange.js 对话导入/导出/复制
-  conversation-lock.js 会话并发锁
-  anti-slop-sampler.js AntiSlop 采样器
   hooks.js         UI 依赖注入挂载点（DI）
   customControls.js 输入框快捷控件
+
+  conversation-lock.js 会话并发锁
+  database.js      数据库抽象层（按 DB_MODE 选择本地/远程）
+  presets.js       预设与模型列表结构
+
+  main.js          主入口
+  toolset.js       工具注册/执行、MCP、工具提示词构建
+  api-request.js   LLM 请求循环
+  data-exchange.js 对话导入/导出/复制
+  anti-slop-sampler.js AntiSlop 采样器
+
   UserOnboard.js   新手引导（driver.js）
 common/            前后端共享：ACL、MCPClient、ReactiveJSON、fetch/fs/glob、压缩 schema、CSS 引擎…
 media/             音效合成、供应商预设、默认提示词与介绍图
@@ -54,7 +57,6 @@ plugins/           前端插件（按需 import）
   其余根级插件：DM、PresetFastSwitch、remoteControl、configSync、llamaCpp、mermaid、customBackground、session-cache 等
 backend/           可选 Node 后端
   server.js        入口，解析 CLI 参数（-p / --data / --workspace / --static / -c …）
-  server-dev.js    开发期把 /api 请求转给 Router 的中间件
   init.js          路由与数据库装配
   router.js        自研路由
   routes/          messages / kv / database / blob-storage / log / search / vectordb / pairing / terminal / agent
@@ -65,12 +67,12 @@ backend/           可选 Node 后端
   config.default.js 配置模板
   types.d.ts       AiChatBackend.* 类型
 public/
-  assets/          构建产物（sandbox 模块等；sandbox/ 已 gitignore）
-  documents/       内置文档，docs.html 读取
-  files/           内置技能与记忆模板（运行时复制到 ~/skills 与 ~/memory）
+  assets/          打包的沙盒第三方库（docx、pptxgenjs等）
+  documents/       文档
+  files/           内置技能与记忆模板（初始化时复制）
 misc/              launch.sh/bat、安卓配置、Chrome 扩展、PWA 配置、hljs 裁剪与语言分组脚本
-vendor/            构建期处理的静态资源（normalize、remixicon、jsBridge、hljs、chartjs）
-test/              浏览器端测试（test.html 手动运行）
+vendor/            打包的部分第三方库（如被修改的 highlight.js）
+test/              测试（浏览器中手动运行）
 ```
 
 类型定义：`src/aichat.d.ts`（`AiChat.*`）、`src/openai.d.ts`（`OpenAI.*`）、`backend/types.d.ts`（`AiChatBackend.*`）是全局环境类型，新增数据结构时同步更新。
@@ -79,14 +81,11 @@ test/              浏览器端测试（test.html 手动运行）
 
 ```bash
 npm run dev          # ie dev：前端开发服务器（默认 5173）+ /api 中间件，数据目录 ./data
-npm run build        # ie build && node build_server.js → dist/、dist/server.js、dist.zip、dist.brip
-npm run build:client # 仅前端（ie build）
-npm run build:server # 仅后端打包为 dist/server.js
-npm run build:app    # 安卓版 → dist-app/（IS_ANDROID_BUILD=true）
-npm run preview      # 预览构建产物
+npm run build
+npm run preview
 ```
 
-- `postinstall` 会运行 `misc/prune-hljs.mjs` 裁剪 highlight.js。
+- `postinstall` 会运行 `misc/prune-hljs.mjs` 裁剪 `highlight.js`。
 - 后端配置往 `backend/config.default.js` 加，之后覆盖 `backend/config.js`。
 
 ### 构建期注入的全局常量（`define`）
@@ -115,7 +114,7 @@ npm run preview      # 预览构建产物
 |----------|------|
 | 系统提示词 / 设置项 | `src/settings.js`（`GLOBAL_SETTINGS`、`defaultSystemPrompt`） |
 | `/` 指令 | `src/commands.js` 的 `COMMAND_REGISTRY` |
-| 前端工具 | 调用 `registerToolset(name, description, toolDefs, options)`（`src/toolset.js`） |
+| 前端工具 | 调用 `registerToolset(name, description, toolDefs, options)`（`src/toolset.js`），类型定义 `AiChat.FunctionToolImpl` |
 | 技能系统 / AGENTS.md 注入 | `plugins/agent/skills.js`、`plugins/agent/agents-md.js` |
 | 前端插件 | 在 `plugins/<name>/` 新建，并在 `plugins/PluginRegistry.js` import；可用 `window.AiChatAPI` |
 | 后端 API | `backend/init.js` 装配 + `backend/routes/*.js` |
@@ -124,10 +123,9 @@ npm run preview      # 预览构建产物
 
 其他约定：
 
-- 前端工具注册后由 `runTools` 统一执行；每个工具定义必须提供 `script(parameters, msg, conv, ...)`，可配合 `parallel`、`interactive` 等字段。注意工具的审批级别与 `activatedModules`。
-- 前端沙箱模块由 `common/build-sandbox-modules.js` 在构建时用 esbuild 处理；新增模块需加入 `SANDBOX_MODULES`。
+- 新增前端沙箱模块见 `common/build-sandbox-modules.js`。
 - 安卓构建使用 `vendor/jsBridge.js` 提供的原生桥。
-- MDI 多窗口用 `src/components/Windows.jsx`，不要自己写弹窗层。
+- MDI 多窗口用 `src/components/Windows.jsx`。
 
 ## 测试与验证
 

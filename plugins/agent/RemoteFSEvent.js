@@ -180,7 +180,7 @@ export const dispatchProcessExit = (callback, event) => {
 	injectMessages(conv, {
 		role: PROCESS_EXIT_ROLE,
 		time: event?.time || Date.now(),
-		content: event ? cloneNamed(event, ['code', 'logFile', 'log', 'duration']) : null,
+		content: event ? cloneNamed(event, ['code', 'logFile', 'log', 'duration', 'message']) : null,
 		pid: callback.pid
 	});
 };

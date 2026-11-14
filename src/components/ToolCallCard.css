@@ -25,6 +25,7 @@
             flex: 1;
             display: flex;
             padding: 4px 0;
+            gap: 8px;
         }
 
         & svg.icon {

@@ -70,8 +70,8 @@ export function Dropdown({
 				}, null, true), (item) => {
 					const deleteBtn = item[LOCKED] ? null : <i className="ri-delete-bin-line" title="删除"/>;
 					return <li className={item.className} class:selected={unconscious(selection) === item.name} title={item[displayName]}>
-						{item[displayName]}
-						{actions ? <div className="row">{actions(item)}{deleteBtn}</div> : deleteBtn}
+						<span className="ellipsis">{item[displayName]}</span>
+						{actions ? <div className="-btns">{actions(item)}{deleteBtn}</div> : deleteBtn}
 					</li>
 				}, (item) => item.name)}
 			</ul>

@@ -50,7 +50,7 @@ export const customRoleRegHelper = (id) => {
 					id: -1,
 					hidden: true
 				});
-				break;
+				return true;
 			}
 			if (msg.role === id) break;
 		}

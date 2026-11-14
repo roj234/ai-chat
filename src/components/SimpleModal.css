@@ -19,13 +19,13 @@ dialog.modal { padding: 0; }
     box-shadow: 0 4px 12px var(--bg);
 
     &:not(.full) {
-        max-width: min(768px, 100vw);
+        max-width: min(768px, calc(100vw - 32px));
         min-width: min(100vw, max(384px, 20%));
-        max-height: 80vh;
+        max-height: min(90dvh, 768px);
     }
     &.full {
         max-width: 100vw;
-        max-height: 100vh;
+        max-height: 100dvh;
     }
 
     animation: bounceIn 0.3s ease-out;

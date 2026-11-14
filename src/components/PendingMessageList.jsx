@@ -1,5 +1,5 @@
 import {$foreach, $update, unconscious} from "unconscious";
-import {EVENT_BUS, inputText, selectedConversation} from "../states.js";
+import {EVENT_BUS, inputText, MessageRoles, selectedConversation} from "../states.js";
 import {updateConversation} from "../database.js";
 
 import "./PendingMessageList.css";
@@ -34,7 +34,8 @@ function summarize(content) {
 	};
 
 	if (Array.isArray(content)) content.forEach(push);
-	else if (content != null) push(content);
+	else if (typeof content === 'string') push(content);
+	else push(JSON.stringify(content));
 
 	return {text: text.replace(/\s+/g, " ").trim(), fileCount};
 }
@@ -100,10 +101,11 @@ export function PendingMessageList({attachments, items, input} = {}) {
 
 				const preview = text || `${fileCount} 个文件`;
 
+				const label = message.label ?? MessageRoles[message.role]?.name;
 				return (
 					<div role="listitem" title={preview}>
 						{fileCount ? <i className="ri-file-3-line pm-file"/> : null}
-						{message.label && <span className="pm-role">{message.label}</span>}
+						{label && <span className="pm-role">{label}</span>}
 						<span className="text ellipsis">{preview}</span>
 						{message.defer &&
 							<button className="pm-recall" title="下一条发送" tabIndex={0}
@@ -115,7 +117,7 @@ export function PendingMessageList({attachments, items, input} = {}) {
 									}}>
 								<i className="ri-flashlight-fill" />
 							</button>}
-						{message.label == null && <button className="pm-recall" title="放回输入框" tabIndex={0}
+						{message.role === 'user' && label == null && <button className="pm-recall" title="放回输入框" tabIndex={0}
 								 onClick={() => recall(message)}>
 							<i className="ri-corner-right-down-line"/>
 						</button>}

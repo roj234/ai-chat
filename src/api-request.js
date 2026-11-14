@@ -481,11 +481,11 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			await updateConversation(conversation, messages_uc);
 		}
 
-		if ('error' !== finishReason && !conversation.title) {
+		if ('error' !== finishReason && 'interrupt' !== finishReason && !conversation.title) {
 			if (logItem[TITLE]) {
 				setConversationTitle(conversation, logItem[TITLE]);
 				delete logItem[TITLE];
-			} else {
+			} else if (assistantMessage.content || messages_uc.length > 10) {
 				generateChatTitle(conversation, messages_uc, cfg);
 			}
 		}

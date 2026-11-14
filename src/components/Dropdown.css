@@ -167,6 +167,11 @@
         color: var(--text);
     }
 
+    .-btns {
+        display: flex;
+        gap: 0.5rem;
+    }
+
     & i {
         color: var(--muted);
 

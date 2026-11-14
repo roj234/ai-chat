@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 
-import {Router} from "./router.js";
+import {App} from "./app.js";
 import {registerMessageRoutes} from "./routes/messages.js";
 import {registerKVRoutes} from "./routes/kv.js";
 import {registerSearchRoutes} from "./routes/search.js";
@@ -69,11 +69,11 @@ const registerPingHandler = (router, cap) => {
  * @param {string=} workspacePath
  * @return {Promise<AiChatBackend.Router>}
  */
-export async function createRouter(dataPath, apiPath = "api", workspacePath) {
+export async function createApp(dataPath, apiPath = "api", workspacePath) {
 	const workspace = path.resolve(workspacePath || dataPath+"/workspace");
 
 	/** @type {AiChatBackend.Router} */
-	const router = new Router( (ctx) => {
+	const router = new App( (ctx) => {
 		let fsRoot = '';
 
 		const urlPath = ctx.path;
@@ -164,7 +164,7 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 
 	if (workspacePath) {
 		router.push("fs");
-		await registerFsRoutes(router, true);
+		await registerFsRoutes(router, true, dataPath);
 		registerTerminalRoutes(router);
 		router.pop();
 		registerPingHandler(router, 'fs');
@@ -177,7 +177,7 @@ export async function createRouter(dataPath, apiPath = "api", workspacePath) {
 	router.push('v2/:userId');
 
 	router.push("fs");
-	await registerFsRoutes(router, false);
+	await registerFsRoutes(router, false, dataPath);
 	router.pop();
 
 	registerSSEProxy(router, dataPath);

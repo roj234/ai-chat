@@ -7,7 +7,7 @@ import serverPackageInfo from './backend/package.json' with {type: 'json'};
 import clientPackageInfo from './package.json' with {type: 'json'};
 import {configProxy, makeBrotliZip, nodeResolve} from '@roj234/ie/plugins/build-backend-helper.js';
 import {ZipWriter} from "@roj234/jszip/io";
-import fs from "node:fs/promises";
+import fs, {readFile} from "node:fs/promises";
 import {globMacroPlugin} from "./common/fs-glob.js";
 
 const execFilePromise = promisify(execFile);
@@ -26,6 +26,7 @@ const rollupConfig = {
 	input: 'backend/server.js',
 	external: [
 		'bufferutil',
+		...Object.keys(serverPackageInfo.peerDependencies || {}),
 		...Object.keys(serverPackageInfo.dependencies || {}),
 	],
 	plugins: [
@@ -87,6 +88,29 @@ async function buildServer() {
 	});
 	console.log("Server built: ", serverAbsPath);
 }
+
+async function createDocumentZip(algorithm, name) {
+	const zw = ZipWriter();
+	await zw.add("/INFO", JSON.stringify({
+		v: clientPackageInfo.version,
+		b: process.env.BUILD_NUMBER,
+		t: Date.now()
+	}));
+	const filter = (path) => path.startsWith('documents/') ? 8 : false;
+	await makeBrotliZip(zw, path.resolve(__dirname, 'public'), filter);
+
+	const readme = path.resolve(__dirname, 'README.md');
+	const stats = await fs.stat(readme);
+	await zw.add('README.md', await readFile(readme), {
+		lastModified: stats.mtimeMs,
+		compression: 8,
+	});
+
+	const blob = await zw.finish().bytes();
+	await fs.writeFile(path.join(distPath, name), blob);
+}
+
+await createDocumentZip(8, "documents.zip");
 
 await Promise.all([
 	createZip(92, "dist.brip"),

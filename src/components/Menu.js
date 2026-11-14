@@ -1,5 +1,6 @@
 import "./Menu.css";
 import {auxMainlyTouch} from "../states.js";
+import {smartButtonKeyHandler} from "../utils/utils.js";
 
 /**
  * @typedef {{label: string, icon?: JSX.Element, danger?: boolean, disabled?: boolean, act?: Function} | {sep: true}} MenuItem
@@ -62,6 +63,7 @@ export function openContextMenu(ev, scrollContainer, items, forceMenu) {
 			</button>
 		))}
 	</div>;
+	smartButtonKeyHandler(el);
 	document.body.appendChild(el);
 	if (ev.button < 0) el.firstElementChild.focus();
 	const r = el.getBoundingClientRect();

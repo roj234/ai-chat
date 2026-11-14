@@ -48,6 +48,8 @@ const clonePos = (p) => ({line: p.line, ch: p.ch});
  * }} props
  * @return {{
  * element: HTMLElement,
+ * input: HTMLTextAreaElement,
+ *
  * focus: () => void,
  * blur: () => void,
  * refresh: () => void,
@@ -1231,6 +1233,7 @@ export const TextEditor = (props) => {
 
 	const api = {
 		element: el,
+		input: inputEl,
 		focus,
 		blur: () => inputEl.blur(),
 		getValue: () => doc.text(),

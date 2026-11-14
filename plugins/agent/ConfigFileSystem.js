@@ -1,5 +1,5 @@
-import {serializeJSON} from "/src/utils/serialization.js";
 import {
+	getImmediateMessages,
 	getMessages,
 	kvListDel,
 	kvListGet,
@@ -9,32 +9,29 @@ import {
 	updateConversation
 } from "/src/database.js";
 import {conversations, findConversation, LOCKED, selectedConversation} from "/src/states.js";
-import {VirtualDirectory, VirtualFile} from "./VirtualFileSystem.js";
+import {JsonFile, SimpleDirectory, VHandle} from "./VirtualFileSystem.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
 import {createWebFileSystem} from "./WebFSDriver.js";
 import {resolveDirectory} from "./WebFSUtils.js";
 import {$update, unconscious} from "unconscious";
 import {FSE_AccessDenied, FSE_NotFound, throwDOMException} from "/common/pure-utils.js";
 
-const BLACKLIST_CHARS = new RegExp('[| &=?#{}<>:,]', 'g');
+const BLACKLIST_CHARS = /[| &=?#{}<>:,/]/g;
 
-const FAKE_DIR_CONSTANT = { kind: "directory" };
-const FAKE_FILE_CONSTANT = {
-	kind: "file",
-	getFile() {
-		return {
-			size: -1,
-			lastModified: 0
-		}
-	}
-};
+const fakeMetadata = () => ({
+	size: -1,
+	lastModified: Date.now()
+});
+
+const FAKE_DIR_CONSTANT = {};
+const FAKE_FILE_CONSTANT = {read: fakeMetadata};
 
 /**
  * 对路径字符串中的「非法字符」进行 URI 转义
  * @param {string} str - 原始路径字符串
  * @returns {string} 转义后的路径字符串（仅黑名单字符被编码）
  */
-const fileEscape = (str) => str.replaceAll(BLACKLIST_CHARS, encodeURI);
+const fileEscape = (str) => str.replaceAll(BLACKLIST_CHARS, encodeURIComponent);
 
 /** 校验并剥离 .json 后缀 */
 const checkJson = (name) => {
@@ -46,67 +43,93 @@ const CFG_ROOTS = new NestedMap();
 
 const kvsTypes = ["st|char", "st|preset", "st|lorebook", "preset"];
 
-const kvsHandler = {
-	read: async ([type, name]) => serializeJSON(await kvListGet(type, name), 2),
-	write: ([type, name], value) => kvListSet(JSON.parse(value), type, name)
-};
-
-CFG_ROOTS.set([".handlers", 0], {
-	file(name, create, self) {
-		const type = self.path.at(-2);
-		return new VirtualFile(kvsHandler, [type, self.path.at(-1)]);
+const kvsHandler = JsonFile({
+	async meta(path) {
+		const [type, name] = path.at(-2);
+		const kvs = await kvListGet(type, name);
+		return [kvs.time, kvs];
 	},
-	async *entries() {
-		yield ["data.json", FAKE_FILE_CONSTANT];
+	write(value, path) {
+		const [type, name] = path.at(-2);
+		return kvListSet(value, type, name);
 	}
 });
 
 for (const type of kvsTypes) {
+	/**
+	 * @type {AiChat.VirtualDirectoryHandleHandler}
+	 */
 	const handler = {
-		dir(name) {
-			return new VirtualDirectory(CFG_ROOTS, [".", "kvs", type, name], CFG_ROOTS.getChildren([".handlers", 0]));
+		child(pathArray, dir) {
+			if (!dir) return;
+			pathArray[pathArray.length - 1] = [type, decodeURIComponent(pathArray.at(-1))];
+			return new SimpleDirectory().add('data.json', kvsHandler);
 		},
-		/**
-		 *
-		 * @param {string[]} path
-		 * @param {NestedMap<string, Function>} fs
-		 * @returns {Generator<[string, VirtualDirectory | VirtualFile], void, *>}
-		 */
-		async *entries(path, fs) {
+		async *entries() {
 			const keys = await kvListGetKeys(type);
-			for (const {name} of keys) {
-				yield [name, this.dir(name)];
-			}
+			for (const {name} of keys) yield [fileEscape(name), FAKE_DIR_CONSTANT];
 		},
-		del(name) {
-			return kvListDel(type, name);
-		}
+		rm(name) {return kvListDel(type, name);}
 	};
 
-	CFG_ROOTS.set([".", "kvs", fileEscape(type)], handler);
+	CFG_ROOTS.set(["kvs", fileEscape(type)], handler);
 }
 
-const convHandler = {
-	async read(convObj) {
-		await getMessages(convObj);
-		return serializeJSON(convObj, 2);
-	},
-	async write(convObj, data) {
-		const meta = JSON.parse(data);
-		Object.assign(convObj, meta);
-		await updateConversation(convObj);
-		$update(conversations);
-	},
-};
+/**
+ * @type {AiChat.VirtualDirectoryHandleHandler}
+ */
+const messagesHandler = {
+	async child(childPath, dir) {
+		if (dir) return;
 
-/** 为指定对话 id 创建 messages 处理器 */
-const convMessageHandler = {
-	async read([conv, msgs, id]) {
-		if (id < 0) return "<write-only sink>";
-		return serializeJSON(msgs[id], 2);
+		const name = childPath.at(-1);
+		const conv = childPath.at(-3);
+		const msgs = await getMessages(conv);
+
+		if (name === 'insert') {
+			childPath[childPath.length - 1] = -1;
+			return messageHandler;
+		}
+
+		const id =  parseInt(checkJson(name), 10);
+		const index = msgs.findIndex(m => m.id === id);
+		if (index < 0) throwDOMException(`Message #${id}`, FSE_NotFound);
+
+		childPath[childPath.length - 1] = index;
+		return messageHandler;
 	},
-	async write([conv, msgs, index], data) {
-		const obj = JSON.parse(data);
+	async *entries(path) {
+		const conv = path.at(-2);
+		for (const message of await getMessages(conv)) {
+			yield [message.id+".json", FAKE_FILE_CONSTANT];
+		}
+		yield ["insert", FAKE_FILE_CONSTANT];
+	},
+	async rm(name, recursive, path) {
+		const conv = path.at(-2);
+		const id = parseInt(checkJson(name), 10);
+
+		const msgs = await getMessages(conv);
+		const index = msgs.findIndex(m => m.id === id);
+		if (index < 0) throw (`Message ${id} not found`);
+		msgs.splice(index, 1);
+		await updateConversation(conv, msgs, 1);
+	}
+};
+const messageHandler = JsonFile({
+	meta(path) {
+		const conv = path.at(-3);
+		const msgs = getImmediateMessages(conv);
+		const index = path.at(-1);
+
+		const msg = msgs[index];
+		return [msg?.time, msg];
+	},
+	async write(obj, path) {
+		const conv = path.at(-3);
+		const msgs = getImmediateMessages(conv);
+		const index = path.at(-1);
+
 		if (index === -1) {
 			delete obj.id;
 			delete obj.parent;
@@ -120,69 +143,37 @@ const convMessageHandler = {
 		markMessageDirty(obj);
 		await updateConversation(conv, msgs);
 	},
-}
-
-
-CFG_ROOTS.set([".handlers", 1], {
-	async file(name, create, self) {
-		const conv = self.path.at(-2);
-		const msgs = await getMessages(conv);
-
-		if (name === 'insert') {
-			if (create) return new VirtualFile(convMessageHandler, [conv, msgs, -1]);
-			throwDOMException(`This is a write-only sink`, FSE_NotFound);
-		}
-
-		const id =  parseInt(checkJson(name), 10);
-		const index = msgs.findIndex(m => m.id === id);
-		if (index < 0) throwDOMException(`Message #${id}`, FSE_NotFound);
-
-		return new VirtualFile(convMessageHandler, [conv, msgs, index]);
+})
+const metaHandler = JsonFile({
+	meta(path) {
+		const conv = path.at(-2);
+		return [conv.time, conv];
 	},
-	async *entries(self) {
-		const conv = self.path.at(-2);
-		for (const message of await getMessages(conv)) {
-			yield [message.id+".json", FAKE_FILE_CONSTANT];
-		}
-		yield ["insert", FAKE_FILE_CONSTANT];
-	},
-	async del(name, recursive, self) {
-		const conv = self.path.at(-2);
-		const id = parseInt(checkJson(name), 10);
+	async write(data, path) {
+		const conv = path.at(-2);
+		const id = conv.id;
 
-		const msgs = await getMessages(conv);
-		const index = msgs.findIndex(m => m.id === id);
-		if (index < 0) throw (`Message ${id} not found`);
-		msgs.splice(index, 1);
-		await updateConversation(conv, msgs, 1);
-	}
+		for (const key in conv) delete conv[key];
+		Object.assign(conv, data);
+		conv.id = id;
+
+		await updateConversation(conv);
+		$update(conversations);
+	},
 });
-CFG_ROOTS.set([".handlers", 2], {
-	async file(name, create, self) {
-		if (name === "session.json") {
-			const conv = self.path.at(-1);
-			return new VirtualFile(convHandler, conv);
-		}
-	},
-	dir(name, create, self) {
-		if (name === "messages") {
-			const conv = self.path.at(-1);
-			return new VirtualDirectory(CFG_ROOTS, [".", "sessions", conv, name], CFG_ROOTS.getChildren([".handlers", 1]));
-		}
-	},
-	*entries(self) {
-		yield ["session.json", FAKE_FILE_CONSTANT];
-		yield ["messages", this.dir("messages", false, self)];
-	}
-});
+const sessionHandler = new SimpleDirectory().add('messages', messagesHandler).add('session.json', metaHandler);
 
-CFG_ROOTS.set([".", "sessions"], {
-	dir(name, create) {
+CFG_ROOTS.set(["sessions"], {
+	child(childPath, dir) {
+		if (!dir) return;
+
+		const name = childPath.at(-1);
 		const id = parseInt(name, 10);
 		const conv = findConversation(id);
 		if (conv) {
 			if (id === selectedConversation.id || conv[LOCKED]) throw new DOMException("This conversation is opening", "ReadOnlyError");
-			return new VirtualDirectory(CFG_ROOTS, [".", "sessions", conv], CFG_ROOTS.getChildren([".handlers", 2]));
+			childPath[childPath.length - 1] = conv;
+			return sessionHandler;
 		}
 	},
 	*entries() {
@@ -192,7 +183,7 @@ CFG_ROOTS.set([".", "sessions"], {
 	}
 });
 
-const configFS_root = new VirtualDirectory(CFG_ROOTS);
+const configFS_root = new VHandle(CFG_ROOTS, []);
 
 /**
  * 基于应用配置数据库的虚拟文件系统

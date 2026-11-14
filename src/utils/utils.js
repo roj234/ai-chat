@@ -322,3 +322,33 @@ export const connectBestServer = async (urlList, instanceId, requiredCapability)
 		})
 	});
 }
+
+export const smartButtonKeyHandler = (el) => {
+	const buttons = [...el.querySelectorAll('button')];
+	//buttons.forEach((btn, i) => (btn.tabIndex = i === 0 ? 0 : -1));
+
+	const fn = (e) => {
+		const idx = buttons.indexOf(document.activeElement);
+		if (idx === -1) return;
+
+		let next;
+		switch (e.key) {
+			case 'ArrowRight':
+			case 'ArrowDown': next = (idx + 1) % buttons.length; break;
+			case 'ArrowLeft':
+			case 'ArrowUp':   next = (idx - 1 + buttons.length) % buttons.length; break;
+			case 'Home':      next = 0; break;
+			case 'End':       next = buttons.length - 1; break;
+			default: return;
+		}
+
+		e.preventDefault();
+		//buttons[idx].tabIndex = -1;
+		//buttons[next].tabIndex = 0;
+		buttons[next].focus();
+	};
+	el.addEventListener('keydown', fn);
+	//$cleanup(toolbar, () => toolbar.removeEventListener('keydown', fn));
+
+	return el;
+};

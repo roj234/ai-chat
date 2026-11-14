@@ -35,7 +35,7 @@ import {parseJson5} from "@roj234/stream-json";
 import {lockConversation, unlockConversation} from "/src/conversation-lock.js";
 import {Wait} from "../rp_kit/Wait.js";
 import {AGENT_MESSAGE_ROLE} from "./subagent-role.js";
-import {showToast} from "../../src/components/Toast.js";
+import {showToast} from "/src/components/Toast.js";
 
 compileSchema(schema);
 
@@ -150,6 +150,7 @@ async function createSubagent(par, response, conv, tools) {
 	};
 	const messages = [{
 		role: 'user',
+		time: Date.now(),
 		content: par.firstMessage
 	}];
 

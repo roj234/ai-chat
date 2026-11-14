@@ -17,10 +17,12 @@ import {pathFilter} from './fs/paths.js';
 import {mpscScheduler} from "/common/pure-utils.js";
 import {getContentType} from "@roj234/ie/utils/mimeTypes.js";
 import {safeStat, serveFile} from "@roj234/ie/utils/serveFile.js";
-import {HttpError} from "../router.js";
+import {HttpError} from "../app.js";
 import {FS_COMMAND_TIMEOUT, FS_UPDATE_BASH} from "../config.js";
 import {IS_WIN, killProcess} from "./fs/process.js";
 import {ANSI_SEQ} from "@roj234/ansi2html/seq";
+import {isThumbAvailable, ThumbnailManager} from "./fs/thumbnail.js";
+import os from "node:os";
 
 const devNull = () => new Writable({
 	write(chunk, encoding, callback) {
@@ -198,8 +200,9 @@ async function glob(pattern, path_, showHidden, acl, exclude) {
 /**
  * @param {AiChatBackend.Router} router
  * @param {boolean} allowExec
+ * @param {string} dataPath
  */
-export async function registerFsRoutes(router, allowExec) {
+export async function registerFsRoutes(router, allowExec, dataPath) {
 	// 辅助：发送非 JSON 响应（如图片、文本）
 	const sendRaw = (res, status, contentType, data) => {
 		res.writeHead(status, { 'Content-Type': contentType });
@@ -249,13 +252,13 @@ export async function registerFsRoutes(router, allowExec) {
 			if (!stats.isDirectory()) {
 				if (showDir !== 'only' && stats.mtimeMs >= modSince) {
 					const item = [displayPath, "file", json ? stats.size : formatSize(stats.size)];
-					if (showModified || modSince) item.push(json ? stats.mtimeMs : stats.mtime.toISOString().slice(0, -5));
+					if (showModified || modSince) item.push(json ? Math.round(stats.mtimeMs) : stats.mtime.toISOString().slice(0, -5));
 					result.push(item);
 				}
 			} else if (displayPath && (showDir != null ? showDir : !modSince)) {
 				const ignore = acl.denyList(displayPath, true);
 				const arr = [displayPath, ignore === 'skip' ? "dir (descents skipped)" : "dir"];
-				if (showModified) arr.push(0, json ? stats.mtimeMs : stats.mtime.toISOString().slice(0, -5));
+				if (showModified) arr.push(0, json ? Math.round(stats.mtimeMs) : stats.mtime.toISOString().slice(0, -5));
 				result.push(arr);
 			}
 		}
@@ -353,6 +356,38 @@ export async function registerFsRoutes(router, allowExec) {
 			volatile: true
 		}, safePath);
 	});
+
+	const IMAGE_EXT = /\.?(?:jpg|jpeg|jpe|jfif|png|apng|gif|webp|bmp|svg|ico|avif|heic|heif)$/i;
+
+	if (isThumbAvailable) {
+		const threads = Math.max(1, os.availableParallelism());
+		const thumbManager = new ThumbnailManager({
+			dbPath: dataPath+"/thumbs.db",
+			threads
+		});
+		console.log("init Thumbnail manager", threads);
+
+		router.get('/thumb', async (ctx) => {
+			const { path: filePath, size = 300 } = await ctx.readAsObject();
+			const safePath = await pathFilterWithIgnore(ctx, filePath);
+
+			// 也许未来有更多尺寸
+			if (size !== 300) return ctx.send(400);
+
+			if (!IMAGE_EXT.test(safePath)) return ctx.send(400, { error: 'extension may not image' });
+
+			const image = await thumbManager.getThumbnail(safePath);
+
+			const res = ctx.res;
+			res.writeHead(200, {
+				'Content-Type': 'image/webp',
+				'Content-Length': image.length,
+				'Cache-Control': 'public, max-age=31536000, immutable'
+			});
+			res.write(image);
+			res.end();
+		});
+	}
 
 	/**
 	 * @param {AiChatBackend.RouteContext} ctx

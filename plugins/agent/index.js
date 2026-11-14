@@ -1,11 +1,11 @@
 export {fileAccess, createFileSystem, createFileSystemAsync, callFileSystemFunc, getFileSystem, FS_SOURCE, FS_INSTANCE, vfsIdentity} from "./Mounts.js";
 export {getChangeableFiles, FileChangerNames} from "./overwrite-monitor.js";
 
-export {VirtualDirectory, VirtualFile, NAMED_VFS} from "./VirtualFileSystem.js";
+export {VHandle, SimpleDirectory, NAMED_VFS} from "./VirtualFileSystem.js";
 export {RunJS, JS_HOST_MODULES, JS_SANDBOX_MODULES} from "./run_js.js";
 export {getSkillCache} from "./skills.js";
 
-import {VirtualDirectory} from "./VirtualFileSystem.js";
+import {VHandle} from "./VirtualFileSystem.js";
 import {createWebFileSystem} from "./WebFSDriver.js";
 
 /**
@@ -14,4 +14,4 @@ import {createWebFileSystem} from "./WebFSDriver.js";
  * @param {AiChat.Mount} [options]
  * @return {Promise<AiChat.FileSystemInstance>}
  */
-export const createVirtualFileSystem = (map, options) => createWebFileSystem(new VirtualDirectory(map), options);
+export const createVirtualFileSystem = (map, options) => createWebFileSystem(new VHandle(map), options);

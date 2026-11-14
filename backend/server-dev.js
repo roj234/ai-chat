@@ -1,4 +1,4 @@
-import {createRouter} from "./init.js";
+import {createApp} from "./createApp.js";
 import {createSyncManager, createSyncValidateMiddleware} from "./syncServer.js";
 import {WebSocketServer} from "@roj234/ws";
 
@@ -12,7 +12,7 @@ export function serverDevPlugin({prefix = '/api'} = {}) {
 	return {
 		name: 'server-dev',
 		async configureServer(server) {
-			const router = await createRouter("data");
+			const router = await createApp("data");
 			const wss = new WebSocketServer({
 				noServer: true,
 				verifyClient: createSyncValidateMiddleware("data")
