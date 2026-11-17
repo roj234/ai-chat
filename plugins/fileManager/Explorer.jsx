@@ -4,7 +4,7 @@ import "./Explorer.css";
 import {$asyncState, $cleanup, $computed, $foreach, $state, $update, $vforeach, $watch, unconscious} from "unconscious";
 import {auxMainlyTouch, auxSmallScreen, EVENT_BUS, selectedConversation} from "/src/states.js";
 import {callFileSystemFunc, createFileSystem, FS_SOURCE, vfsIdentity} from "../agent/index.js";
-import {vfsPreview} from "./preview.js";
+import {IMAGE_EXT, vfsPreview, vfsPreviewImage} from "./preview.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {ref} from "@roj234/shared";
 import {Icon_search, Icon_warning} from "/src/components/Icons.jsx";
@@ -18,13 +18,15 @@ import {openTerminal} from "./Terminal.jsx";
 import {NestedMap} from "unconscious/common/NestedMap.js";
 import {webviewUploadImage} from "/vendor/jsBridge.js";
 import {openRecorder} from "../voiceInput/Recorder.jsx";
-import {vfsDownloadMany} from "./downloader.js";
+import {vfsDownloadMultiple} from "./downloader.js";
 import {vfsCopyMove} from "../agent/Mounts.js";
 import {createAsyncQueue} from "/common/pure-utils.js";
-import {xhrUpload} from "./xhrUploader.js";
+import {xhrUpload} from "./uploader.js";
 import {openContextMenu} from "/src/components/Menu.js";
 import {grepCard} from "../agent/GrepCard.jsx";
-import {escapeRegexp} from "@roj234/shared/strings";
+import {escapeHtmlText, escapeRegexp} from "@roj234/shared/strings";
+import {parseGlobPattern} from "../../common/fs-glob.js";
+import {mdiToast} from "./MDIToast.js";
 
 /* ============================== 工具函数 ============================== */
 const GLOB_META_CHARS = /[\\*?[{]/g;
@@ -282,8 +284,6 @@ const Explorer = (fs, cwd) => {
 
 	// 纯命令式的临时状态
 	let anchor = null;
-	/** @type {HTMLElement | null} */
-	let ctxEl = null;
 	let dragDepth = 0;
 	let searchDebounceTimer = 0;
 
@@ -328,17 +328,6 @@ const Explorer = (fs, cwd) => {
 		parts.forEach((p, i) => out.push({label: p, target: parts.slice(0, i + 1).join('/'), last: i === parts.length - 1}));
 		return out;
 	});
-
-	/* ------------------------------ 提示 ------------------------------ */
-	/**
-	 * @param {string} msg
-	 * @param {'info'|'ok'|'err'|'warn'} [kind]
-	 * @param {number} [ms]
-	 */
-	const toast = (msg, kind = 'info', ms = 3000) => showToast(<>
-		<span className="ic">{TOAST_ICON[kind] || 'i'}</span>
-		<span>{msg}</span>
-	</>, kind, ms, { dom: toastDiv });
 
 	/* ------------------------------ 列目录 ------------------------------ */
 	/**
@@ -408,12 +397,19 @@ const Explorer = (fs, cwd) => {
 	}
 
 	/* ------------------------------ 目录树 ------------------------------ */
+
+	let isSmall;
+	const ro = new ResizeObserver(ent => {
+		isSmall = ent.at(-1).contentRect.width <= 640;
+	})
+
 	/**
 	 * @param {string} path
 	 * @param {boolean} [force]
 	 * @return {Promise<string[]>}
 	 */
 	async function loadTreeChildren(path, force = false) {
+		if (isSmall) return [];
 		const keys = path.split('/');
 
 		let s;
@@ -532,7 +528,14 @@ const Explorer = (fs, cwd) => {
 	 */
 	const openEntry = (e, edit) => {
 		if (e.type === 'dir') loadDir(e.path);
-		else vfsPreview(fs, e.path, e.name, edit ? 'y' : 'a')
+		else {
+			if (IMAGE_EXT.test(e.name)) {
+				const images = sorted.filter(e => IMAGE_EXT.test(e.name));
+				vfsPreviewImage(images, fs, images.indexOf(e));
+				return;
+			}
+			vfsPreview(fs, e.path, e.name, edit ? 'y' : 'a', e);
+		}
 	};
 
 	/* ------------------------------ 右键菜单 ------------------------------ */
@@ -554,22 +557,51 @@ const Explorer = (fs, cwd) => {
 
 		if (!multi) {
 			const isDir = e.type === 'dir';
-			const testResult = isDir ? 'n' : await vfsPreview(fs, e.path, e.name, 't');
+			const testResult = isDir ? 'n' : await vfsPreview(fs, e.path, e.name, 't', e);
 			if (testResult !== 'y') items.push({label: isDir ? '打开' : '预览', icon: isDir ? "ri-folder-line" : "ri-eye-line", act: () => openEntry(e)},);
 			if (testResult !== 'n') items.push({label: '编辑', icon: "ri-edit-2-line", act: () => openEntry(e, true)},);
 		}
 
 		items.push(
 			{label: '下载', icon: "ri-download-line", act: () => downloadEntries(targets)},
+		);
+
+		if (!multi) {
+			items.push(
+				{label: '复制路径', icon: "ri-link", act: () => copyWithAnimation(myId + targets.at(-1).path)},
+			);
+		}
+
+		items.push(
 			{sep: true},
-			{label: '复制', icon: "ri-file-copy-line", act: () => setClipboard(targets, false)},
 			{label: '剪切', icon: "ri-scissors-line", act: () => setClipboard(targets, true)},
+			{label: '复制', icon: "ri-file-copy-line", act: () => setClipboard(targets, false)},
 		);
 
 		if (!multi) {
 			items.push(
 				{label: '重命名', icon: "ri-input-cursor-move", act: () => renameEntry(e)},
-				{label: '复制路径', icon: "ri-link", act: () => copyWithAnimation(myId + targets.at(-1).path)},
+				{label: '属性', icon: "ri-information-line", act: async () => {
+					const e = targets[0];
+					const stat = await call('stat', { path: e.path, json: true });
+					openWindow({
+						id: "vfsStat "+encodeURI(myId+e.path),
+						title: e.name+" 属性",
+						icon: <i className="ri-information-line" />,
+						width: 360,
+						height: 420,
+						element: <>
+							<dl className="lr-list">
+								<dt>位置</dt>
+								<dd>{e.path}</dd>
+								{...Object.entries(stat).map(([k, v]) => (<>
+									<dt>{k}</dt>
+									<dd>{v}</dd>
+								</>))}
+							</dl>
+						</>
+					})
+				}},
 			);
 		}
 
@@ -592,17 +624,24 @@ const Explorer = (fs, cwd) => {
 
 		ev.preventDefault();
 		resetSel();
-		openContextMenu(ev, scrollContainer, [
+		const items = [
 			{label: '刷新', icon: "ri-loop-right-line", act: () => $update(cwd)},
 			{sep: true},
 			{label: '粘贴', icon: "ri-clipboard-line", disabled: !clipboard.value, act: paste},
-			{label: '打开终端', icon: "ri-terminal-line", act: terminal},
+		];
+		if (terminalAvailable) {
+			items.push(
+				{label: '打开终端', icon: "ri-terminal-line", act: terminal},
+			);
+		}
+		items.push(
 			{label: '搜索文件内容', icon: <Icon_search/>, act: () => openGrepDialog(fs, cwd)},
 			{sep: true},
 			{label: '上传文件', icon: "ri-upload-line", act: () => fileInput.click()},
 			{label: '新建文件夹', icon: "ri-folder-add-line", act: newFolder},
 			{label: '新建文件', icon: "ri-file-add-line", act: newFile},
-		], true);
+		);
+		openContextMenu(ev, scrollContainer, items, true);
 	}
 
 	/* ------------------------------ 剪贴板 ------------------------------ */
@@ -653,7 +692,7 @@ const Explorer = (fs, cwd) => {
 
 		$update(cwd);
 
-		if (fail.length) toast(fail.length === 1 ? `粘贴失败: `+fail[0] : `${fail.length === items.length ? '全部' : `${fail.length} / ${items.length} 项`}粘贴失败:\n`+fail.join('\n'), pasted.length ? 'warn' : 'err');
+		if (fail.length) mdiToast(toastDiv, fail.length === 1 ? `粘贴失败: ` + fail[0] : `${fail.length === items.length ? '全部' : `${fail.length} / ${items.length} 项`}粘贴失败:\n` + fail.join('\n'), pasted.length ? 'warn' : 'err')
 		if (!pasted.length) return;
 		if (cut) clipboard.value = null;
 		highlightAfterChange = new Set(pasted);
@@ -690,7 +729,7 @@ const Explorer = (fs, cwd) => {
 				},
 				(e) => {
 					$update(cwd);
-					toast('创建失败：'+(e.message??e), 'err');
+				mdiToast(toastDiv, '创建失败：' + (e.message ?? e), 'err')
 				}
 			);
 		}, true);
@@ -719,7 +758,7 @@ const Explorer = (fs, cwd) => {
 				},
 				(e) => {
 					$update(cwd);
-					toast('创建失败：'+(e.message??e), 'err');
+				mdiToast(toastDiv, '创建失败：' + (e.message ?? e), 'err')
 				}
 			);
 		}, true);
@@ -744,7 +783,7 @@ const Explorer = (fs, cwd) => {
 				invalidateDirectoryContents(src);
 				invalidateDirectoryContents(dest);
 			}, (e) => {
-				toast('重命名失败：'+(e.message??e), 'err');
+			mdiToast(toastDiv, '重命名失败：' + (e.message ?? e), 'err')
 				$update(cwd);
 			});
 		});
@@ -834,7 +873,7 @@ const Explorer = (fs, cwd) => {
 				}));
 				await Promise.allSettled(all);
 
-				if (fail.length) toast(fail.length === 1 ? `删除失败: `+fail[0] : `${fail.length === items.length ? '全部' : `${fail.length} / ${items.length} 项`}删除失败:\n`+fail.join('\n'), deleted.length ? 'warn' : 'err');
+				if (fail.length) mdiToast(toastDiv, fail.length === 1 ? `删除失败: ` + fail[0] : `${fail.length === items.length ? '全部' : `${fail.length} / ${items.length} 项`}删除失败:\n` + fail.join('\n'), deleted.length ? 'warn' : 'err')
 				$update(cwd);
 				if (!deleted.length) return;
 
@@ -867,13 +906,13 @@ const Explorer = (fs, cwd) => {
 			if (commonPath.endsWith('/'))
 				commonPath = commonPath.slice(0, -1);
 
-			await vfsDownloadMany(
+			await vfsDownloadMultiple(
 				fs,
 				items,
 				baseName(commonPath),
 			);
 		} catch (err) {
-			toast('下载失败：' + (err.message ?? err), 'err');
+		mdiToast(toastDiv, '下载失败：' + (err.message ?? err), 'err')
 		}
 	}
 
@@ -946,9 +985,9 @@ const Explorer = (fs, cwd) => {
 		}
 
 		return p.then(() => {
-			toast('上传成功：' + name, 'ok');
+		mdiToast(toastDiv, '上传成功：' + name, 'ok')
 		}, (err) => {
-			toast('上传失败：' + name + ' — ' + err.message, 'err');
+		mdiToast(toastDiv, '上传失败：' + name + ' — ' + err.message, 'err')
 		}).finally(() => {
 			highlightAfterChange = new Set([...selection].map(e => e.path));
 			highlightAfterChange.add(target);
@@ -1004,6 +1043,13 @@ const Explorer = (fs, cwd) => {
 
 	/** @param {string} key */
 	const arrowOf = key => sortKey.value === key ? (sortDir.value > 0 ? '↑' : '↓') : '';
+
+	const scrollToSelectedItem__ = ev => {
+		ev.preventDefault();
+		setTimeout(() => scrollContainer.querySelector('.sel')?.scrollIntoView({
+			block: "nearest"
+		}));
+	};
 
 	/* ------------------------------ 键盘 ------------------------------ */
 	/**
@@ -1089,28 +1135,42 @@ const Explorer = (fs, cwd) => {
 		if (!sorted.length) return;
 
 		if (ev.key === 'ArrowDown') {
+			let item;
 			if (selectedCount === 1) {
-				selectRow(sorted[sorted.indexOf(firstItem)+1] ?? sorted[0]);
+				item = sorted[sorted.indexOf(firstItem)+1] ?? sorted[0];
 			} else if (selectedCount === 0) {
-				selectRow(sorted[0]);
+				item = sorted[0];
 			} else {
-				let last;
-				selection.value.forEach(i => last = i);
-				selectRow(last);
+				selection.value.forEach(i => item = i);
 			}
+
+			selectRow(item);
+			if (item === sorted[0]) scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
+			scrollToSelectedItem__(ev);
 			return;
 		}
 
 		if (ev.key === 'ArrowUp') {
+			let item;
 			if (selectedCount === 1) {
-				selectRow(sorted.at(sorted.indexOf(firstItem)-1));
+				item = sorted.at(sorted.indexOf(firstItem)-1);
 			} else if (selectedCount === 0) {
-				selectRow(sorted.at(-1));
+				item = sorted.at(-1);
 			} else {
-				selectRow(firstItem);
+				item = firstItem;
 			}
+
+			selectRow(item);
+			if (item === sorted.at(-1)) scrollContainer.scrollTo({ top: 1e9, behavior: 'smooth' })
+			scrollToSelectedItem__(ev);
 		}
 	}
+
+	const re = $computed(() => {
+		const value = unconscious(query);
+		return value && new RegExp((globSearch ? parseGlobPattern(value, true) : escapeRegexp(value)), 'ig');
+	});
+	const highlightMe = txt => escapeHtmlText(txt).replace(re.value, "<mark>$&</mark>");
 
 	/* ------------------------------ 行 / 空状态 ------------------------------ */
 	/**
@@ -1157,8 +1217,7 @@ const Explorer = (fs, cwd) => {
 				}
 			}}>
 				{icon}
-				{e.edit ?? <span className="ellipsis" title={e.name}>{e.name}</span>
-			}
+				{e.edit ?? <span className="ellipsis" title={e.name} dangerouslySetInnerHTML={query.value ? highlightMe(e.name) : escapeHtmlText(e.name)} />}
 		</div>
 		<div className="time">{formatDate('Y-m-d H:i', e.mtime)}</div>
 			<div className={'size'}>{isDir ? '' : formatSize(e.size)}</div>
@@ -1184,7 +1243,7 @@ const Explorer = (fs, cwd) => {
 		onChange={ev => ev.target.checked ? selectAll() : applySel(new Set())}/>;
 
 	let globSearch = false;
-	const searchInput = <input placeholder="搜索当前目录" spellCheck={false}
+	const searchInput = <input placeholder="搜索此目录" spellCheck={false}
 		value={query}
 		onInput={ev => {
 			clearTimeout(searchDebounceTimer);
@@ -1229,29 +1288,31 @@ const Explorer = (fs, cwd) => {
 					<span className="ellipsis">{baseName(path) || '根目录'}</span>
 				</div>;
 			}, ({path}) => path+'\0'+(+treeOpen.has(path))+(+(treeKids.get(path.split('/'))!=null)), { volatileValue: true })}</div>
-			<div className="hab">
-				<div className="row">
-					<div className="dropdown">
-						<button className="ri-upload-line btn ghost" onClick={() => {
-							if (auxMainlyTouch) return;
-							fileInput.click()
-						}}>上传
-						</button>
-						<div className="list mid up">
-							{IS_ANDROID_BUILD && <label className="ri-camera-4-fill" onClick={() => {webviewUploadImage().then(b => uploadFiles([b]))}}>拍摄照片</label>}
-							<label className="ri-mic-fill" role="button" tabIndex={0} onClick={() => {openRecorder().then(b => uploadFiles([b]), () => {})}}>录制语音</label>
-							<label className="ri-attachment-2" role="button" tabIndex={0} onClick={() => fileInput.click()}>选择文件</label>
-						</div>
+			<div className="fab">
+				<div className="dropdown">
+					<button className="ri-upload-line btn ghost" onClick={() => {
+						if (auxMainlyTouch) return;
+						fileInput.click()
+					}}>上传…
+					</button>
+					<div className="list mid up">
+						{IS_ANDROID_BUILD && <label className="ri-camera-4-fill" onClick={() => {webviewUploadImage().then(b => uploadFiles([b]))}}>拍照上传</label>}
+						<label className="ri-mic-fill" role="button" tabIndex={0} onClick={() => {
+							openRecorder().then(b => uploadFiles([b]), () => {})
+						}}>录音上传</label>
+						<label className="ri-attachment-2" role="button" tabIndex={0} onClick={() => fileInput.click()}>选择文件</label>
+						<label ref={terminalBtn} className="ri-terminal-line btn ghost" tabIndex={0} onClick={terminal}>打开终端</label>
 					</div>
-					<button ref={terminalBtn} className="ri-terminal-line btn ghost" onClick={terminal}>终端</button>
 				</div>
 			</div>
 		</div>
 
 		<main className="col">
 			<div className="toolbar">
-				<button className="ri-arrow-left-s-line tbtn" title="后退" disabled={() => unconscious(historyIndex) === 0} onClick={goBack}/>
-				<button className="ri-arrow-right-s-line tbtn" title="前进" disabled={() => unconscious(historyIndex) >= historyStack.length - 1} onClick={goForward}/>
+				<button className="ri-arrow-left-s-line tbtn" title="后退"
+						disabled={() => unconscious(historyIndex) === 0} onClick={goBack}/>
+				<button className="ri-arrow-right-s-line tbtn" title="前进"
+						disabled={() => unconscious(historyIndex) >= historyStack.length - 1} onClick={goForward}/>
 				<button className="ri-arrow-up-line tbtn" title="返回上级" disabled={() => !cwd.value} onClick={goUp}/>
 
 				<div className="crumbs" onDblClick={startPathEdit}>
@@ -1367,6 +1428,9 @@ const Explorer = (fs, cwd) => {
 	</div>;
 
 	/* ------------------------------ 启动 ------------------------------ */
+
+	ro.observe(body);
+	$cleanup(body, () => ro.disconnect());
 
 	$cleanup(body, EVENT_BUS.onoff('fileChanged', (fs1, _, path, type) => {
 		const itId = vfsIdentity(fs1[FS_SOURCE]);

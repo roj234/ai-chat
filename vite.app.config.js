@@ -78,6 +78,7 @@ export default {
     build: {
         modulePreload: { polyfill: false },
         reportCompressedSize: false,
+        chunkSizeWarningLimit: 9999999,
 
         mergeUniqueCss: true,
 
@@ -87,8 +88,6 @@ export default {
         rollupOptions: {
             input: {
                 main: 'index.html',
-                logViewer: 'log_viewer.html',
-                docs: 'docs.html',
                 sw: "sw.js",
             },
 
@@ -113,7 +112,7 @@ export default {
                     }
                 },
 
-                experimentalMinChunkSize: 512000,
+                experimentalMinChunkSize: 5120000,
             },
         }
     }

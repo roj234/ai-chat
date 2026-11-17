@@ -17,8 +17,11 @@ import {auxSmallScreen, EVENT_BUS} from "../states.js";
  * @property {JSX.Element} title
  */
 
-const MINIMIZED = "minimized";
-const MAXIMIZED = 'maximized';
+const MINIMIZED = "-min";
+const MAXIMIZED = '-max';
+const TRANSITION = '-closing';
+const DRAGGING = '-dragging';
+const RESIZING = '-resizing';
 
 /** 当前已打开的窗口：id -> state */
 const windows = new Map();
@@ -80,7 +83,6 @@ function syncFocused(w) {
 	}
 }
 
-const TRANSITION = 'closing';
 /**
  * 关闭窗口。
  * @param {WindowState | string} w
@@ -227,7 +229,7 @@ export const openWindow = ({
 		const baseTop = parseFloat(root.style.top) || 0;
 		const startX = e.clientX, startY = e.clientY;
 
-		classList.add('dragging');
+		classList.add(DRAGGING);
 
 		const onMove = (ev) => {
 			// 保证标题留在视口内
@@ -239,7 +241,7 @@ export const openWindow = ({
 		const onUp = () => {
 			document.removeEventListener('pointermove', onMove);
 			document.removeEventListener('pointerup', onUp);
-			classList.remove('dragging');
+			classList.remove(DRAGGING);
 		};
 		document.addEventListener('pointermove', onMove);
 		document.addEventListener('pointerup', onUp);
@@ -251,7 +253,7 @@ export const openWindow = ({
 		const baseH = root.offsetHeight;
 		const startX = e.clientX, startY = e.clientY;
 
-		root.classList.add('resizing');
+		root.classList.add(RESIZING);
 
 		const onMove = (ev) => {
 			const nw = clamp(baseW + (ev.clientX - startX), MIN_W, innerWidth);
@@ -262,7 +264,7 @@ export const openWindow = ({
 		const onUp = () => {
 			document.removeEventListener('pointermove', onMove);
 			document.removeEventListener('pointerup', onUp);
-			root.classList.remove('resizing');
+			root.classList.remove(RESIZING);
 		};
 		document.addEventListener('pointermove', onMove);
 		document.addEventListener('pointerup', onUp);
@@ -314,7 +316,7 @@ export const openWindow = ({
 				</span>
 			</div>
 			<div className={"win-body "+id}>{element}</div>
-			{resizable && <div className="win-resize" onPointerDown.left={startResize}></div>}
+			{resizable && <div className="-resize" onPointerDown.left={startResize}></div>}
 		</div>
 	);
 

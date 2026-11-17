@@ -21,6 +21,7 @@ import {
 import {LRUCache} from "@roj234/lru-cache";
 import {sleep, throwDOMException} from "/common/pure-utils.js";
 import {showToast} from "../components/Toast.js";
+import {isLanAddress} from "../../common/isLanAddress.js";
 
 let clientId;
 
@@ -280,6 +281,7 @@ export const initialize = async (urlOnly) => {
 		if (!dbUrl.endsWith('/')) dbUrl += '/';
 
 		setRemoteDBUrl(dbUrl);
+		if (isLanAddress(dbUrl)) EVENT_BUS.post(['lea']);
 		if (urlOnly) return;
 	}
 
@@ -489,6 +491,7 @@ function _FakeBlob(hash,obj) {this.$='BlobH';this.hash=hash;Object.assign(this, 
 _FakeBlob.prototype = {
 	constructor: File,
 	toUrl() {return remoteDBUrl+`blob/`+this.hash;},
+	revokeUrl() {},
 	async blob() {return this[BLOB] ??= await (await fetch(this.toUrl(), { cache: 'force-cache', integrity: 'sha256-'+this.hash }).catch(() => {throw new Error("附件 "+(this.name||this.hash)+" 丢失或损坏")})).blob();},
 	async toDataURL() {return (await this.blob()).toDataURL();},
 	async arrayBuffer() {return (await this.blob()).arrayBuffer();},

@@ -209,7 +209,7 @@ export class App {
 					if (type === 'application/vnd.msgpack') {
 						return decodeMsg(buffer, { schema: msgpack_schema });
 					}
-					throw new Error('unknown content-type');
+					throw new HttpError(400, 'unsupported content-type');
 				},
 			};
 

@@ -20,7 +20,7 @@ import {
 	Title,
 	Tooltip
 } from "/vendor/chartjs/chart.js";
-import {throttled} from "chart.js/helpers";
+import {throttled} from "/common/pure-utils.js";
 
 Chart.register(
 	ArcElement,
@@ -49,7 +49,7 @@ const resizeCharts = throttled(() => {
 		chart.resize();
 	}
 });
-window.addEventListener("resize", resizeCharts);
+addEventListener("resize", resizeCharts);
 
 const applyChartDarkMode = (isDark) => {
 	const textColor = isDark ? '#f8f9fa' : '#212529';

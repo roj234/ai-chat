@@ -41,11 +41,11 @@ onLoad(() => {
 		blurredTrack.style.display = '';
 		blurredTrack.style.background = style.background = `url("${url}") `+bgStyle;
 
-		return () => URL.revokeObjectURL(url);
+		return () => blob.revokeUrl();
 	});
 
 	$watch(FONT_BLOB, () => {
-		const blob = FONT_BLOB.value;
+		const blob = unconscious(FONT_BLOB);
 		let url;
 		if (!blob) {
 			document.querySelector("#custFont")?.remove();
@@ -54,9 +54,8 @@ onLoad(() => {
 @font-face {font-family:'CUST';font-display:swap;src:url(${JSON.stringify(url = blob.toUrl())})}
 .panel > ._vl > .msg > .body {font-family:'CUST';}
 </style>`);
+			return () => blob.revokeUrl();
 		}
-
-		return url && (() => URL.revokeObjectURL(url));
 	});
 });
 

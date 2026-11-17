@@ -3,6 +3,12 @@
     width: 100%;
 }
 
+@keyframes hv-fade{
+    from{opacity:0;transform:translateY(4px);}
+    to{opacity:1;transform:none;}
+}
+
+
 .code-block {
     position: relative; /* 为右上角悬浮做绝对定位基准 */
     background: var(--code-bg);
@@ -29,6 +35,59 @@
         border-radius: var(--border-radius-md);
         opacity: 0.6;
         transition: opacity 0.2s ease;
+    }
+
+    &.html-preview {
+        --border:#2b2b2b;
+
+        .-frame {
+            max-height: 80vh;
+        }
+
+        .-frame, .hljs {
+            animation: hv-fade .22s ease;
+        }
+
+        .sticky {
+            position: initial;
+            height: auto;
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap: 6px;
+            padding:6px;
+            border-bottom:1px solid var(--border);
+        }
+
+        .-bar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .-tabs {
+            background: var(--chip-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+
+            & .btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 6px 10px;
+                color:var(--muted);
+                border-radius:0;
+                transition:background .18s ease,color .18s ease;
+
+                &:hover:not(.active){color:#c9c9c9;background:rgba(255,255,255,.04);}
+
+                &.active{
+                    color:#fff;
+                    background:#3a3a3a;
+                }
+            }
+        }
     }
 
     & button {
@@ -98,7 +157,7 @@ q:before, q:after { content: none; }
         background: var(--panel-2);
         border: 1px solid var(--border);
         border-radius: var(--border-radius-lg);
-        overflow: hidden;
+        overflow: auto;
         margin: var(--spacing-lg, 20px) 0;
         width: 100%;
 
@@ -116,6 +175,7 @@ q:before, q:after { content: none; }
         & td {
             color: var(--text);
             padding: 10px 8px;
+            word-break: break-word;
         }
 
         & tbody tr:not(:last-child) td {

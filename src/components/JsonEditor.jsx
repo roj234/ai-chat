@@ -1,10 +1,10 @@
 import "./JsonEditor.css";
 import {$async, $cleanup, $state, $watch, unconscious} from "unconscious";
-import {EVENT_BUS} from "../states.js";
+import {callCreateEditor} from "../utils/preview-bridge.js";
 import {inspect} from "@roj234/util-inspect";
 import {focusWindow, getWindow, openWindow} from "./Windows.jsx";
 
-const generateSkeleton = () => {
+export const generateEditorSkeleton = () => {
 	const LINE_COUNT = 400 / 20 + 2;
 	const skeleton = <div className="vje-sk" aria-hidden="true" />;
 
@@ -26,10 +26,10 @@ export const JsonEditor = ({value = "", onChange, skipVerify, placeholder}) => {
 	const isRawString = typeof unconscious(value) === 'string';
 
 	return $async(() =>
-		EVENT_BUS.post(['createEditor'], {
+		callCreateEditor({
 			noVerify: skipVerify,
 			placeholder,
-		}).then(([editor]) => {
+		}).then((editor) => {
 			const dom = editor.dom;
 			editor.onChange = onChange;
 
@@ -42,7 +42,7 @@ export const JsonEditor = ({value = "", onChange, skipVerify, placeholder}) => {
 			return <div className="editor -inline col">{dom}</div>;
 		}),
 		() => <div className="editor jsonEditor" aria-busy="true">
-			{generateSkeleton()}
+			{generateEditorSkeleton()}
 		</div>
 	);
 };
@@ -77,11 +77,11 @@ export function openJsonEditor(key, callback) {
 				<i className="ri-save-line"></i> 保存
 			</button>
 		</>,
-		element: generateSkeleton,
+		element: generateEditorSkeleton,
 	});
 	const [data, setValue] = callback(w);
 
-	EVENT_BUS.post(['createEditor']).then(([editor]) => {
+	callCreateEditor().then((editor) => {
 		const dom = editor.dom;
 
 		const cb = () => {

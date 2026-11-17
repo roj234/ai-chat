@@ -15,6 +15,7 @@ hljs.registerLanguage('json5', json5);
 
 // 换成白名单
 const fullStreamableLanguages = new Set(["json"/*, "xml"*/]);
+const renderableLanguages = new Set(["html", "svg"]);
 
 const light = (newCode, language) => hljs.highlight(newCode, {
 	language,
@@ -136,6 +137,23 @@ const getOrCreateVL = node => {
 	return vl;
 };
 
+const heightCheckFunc = () => {
+	let last = 0;
+	const report = () => {
+		const h = Math.max(
+			document.documentElement.scrollHeight,
+			document.body.scrollHeight
+		);
+		if (h === last) return;
+		last = h;
+		parent.postMessage({ type: 'aint:height', height: h }, '*');
+	};
+
+	new ResizeObserver(report).observe(document.documentElement);
+	addEventListener('load', report);
+	report();
+};
+
 /**
  * 语法高亮
  * @param {string} code
@@ -178,6 +196,48 @@ export const highlight = (code, language, node, is_finished) => {
 
 			let p;
 			if (language && (p = loadLanguage(language))) {
+				if (renderableLanguages.has(language)) {
+					const codeBlock = node.parentElement;
+					const stickyBar = node.previousElementSibling;
+					const codeHeader = stickyBar.firstElementChild;
+					if (codeHeader.firstElementChild.dataset.name || language !== 'html' || (code.startsWith("<html") || code.startsWith("<!DOCTYPE"))) {
+						codeBlock.classList.add("html-preview");
+
+						codeHeader.className = "-bar";
+						stickyBar.prepend(<div className="-tabs" role="tablist">
+							<button className="btn ri-code-s-slash-line" onClick={e => {
+								const self = e.target;
+								self.nextElementSibling.classList.remove("active");
+								self.classList.add("active");
+								iframe.style.display = "none";
+								node.style.display = "";
+							}}>代码</button>
+							<button className="btn ri-play-circle-line active" onClick={e => {
+								const self = e.target;
+								self.previousElementSibling.classList.remove("active");
+								self.classList.add("active");
+								iframe.style.display = "";
+								node.style.display = "none";
+							}}>预览</button>
+						</div>);
+
+						const iframe = <iframe className="-frame" sandbox="allow-scripts" srcDoc={code+`<script>(${heightCheckFunc})()</script>`+(language === 'html' ? '' : '<style>:root{color-scheme:light dark}</style>')} />;
+
+						const hear = (e) => {
+							if (e.source !== iframe.contentWindow) return;
+							if (e.data?.type !== 'aint:height') return;
+							//removeEventListener('message', hear);
+							iframe.style.height = e.data.height + 'px';
+						};
+
+						addEventListener('message', hear);
+						$cleanup(iframe, () => removeEventListener('message', hear));
+
+						codeBlock.append(iframe);
+						node.style.display = 'none';
+					}
+				}
+
 				p.then(() => lightAsync(code, language, (value) => {
 					if (!needVirtualList) { node.innerHTML = tokenToLineHtml(value).join('\n'); return; }
 					node.style.height = '50lh';
@@ -420,7 +480,7 @@ export const loadLanguage = (languageName, simulate) => {
 			LANGUAGES[languageName] = promise;
 
 			const dep = DEPS[languageName];
-			if (dep) promise = Promise.all([promise, ...dep.map(loadLanguage)]).then(() => languageName);
+			if (dep) promise = Promise.all([promise, ...dep.map(x => loadLanguage(x))]).then(() => languageName);
 
 			LANGUAGES[languageName] = promise;
 			return promise;

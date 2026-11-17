@@ -123,62 +123,62 @@ export const ConversationList = () => {
 		const conv = (ev.delegateTarget ?? ev.target.closest('.chat-item'))._conv;
 		const pinned = conv.meta?.pinned;
 		openContextMenu(ev, list, [
-			{label: '重命名', icon: "ri-edit-line", act: () => {
-					SimpleModal({
-						type: "input",
-						title: "请输入新标题",
-						placeholder: "清除标题, 下次对话后重新生成",
-						value: conv.title,
-						onConfirm(val) {
-							setConversationTitle(conv, val);
-						}
-					});
-				}},
 			{label: '导出', icon: "ri-download-line", act: () => exportConversation(1, conv)},
 			{label: pinned ? "取消置顶" : "置顶", icon: pinned ? "ri-pushpin-fill" : "ri-pushpin-line", act: () => {
-					const meta = conv.meta ??= {};
-					if (!meta.pinned) meta.pinned = true;
-					else delete meta.pinned;
-					updateConversation(conv).then(() => $update(conversations));
-				}},
-			{ sep: true },
-			{label: '多选', icon: "ri-checkbox-multiple-line", act: () => {
-					inSelectionMode = 1;
-					prependMultiselectControl();
-					refreshList();
-				}},
-			{label: '删除', icon: "ri-delete-bin-line", danger: true, act: () => {
-					const pos = conversations.indexOf(conv);
-					if (pos < 0) return;
-
-					conv[DELETING] = true;
-					$update(conversations);
-
-					let isOpened;
-					if (unconscious(selectedConversation) === conv) {
-						isOpened = true;
-						resetConversation();
+				const meta = conv.meta ??= {};
+				if (!meta.pinned) meta.pinned = true;
+				else delete meta.pinned;
+				updateConversation(conv).then(() => $update(conversations));
+			}},
+			{label: '重命名', icon: "ri-edit-line", act: () => {
+				SimpleModal({
+					type: "input",
+					title: "请输入新标题",
+					placeholder: "清除标题, 下次对话后重新生成",
+					value: conv.title,
+					onConfirm(val) {
+						setConversationTitle(conv, val);
 					}
+				});
+			}},
+			{ sep: true },
+			{label: '批量删除', icon: "ri-checkbox-multiple-line", act: () => {
+				inSelectionMode = 1;
+				prependMultiselectControl();
+				refreshList();
+			}},
+			{label: '删除', icon: "ri-delete-bin-line", danger: true, act: () => {
+				const pos = conversations.indexOf(conv);
+				if (pos < 0) return;
 
-					const isKeyboard = ev.detail === 0;
-					deleteWithDrawback(`${conv.title||'无标题'} (#${conv.id})`, () => {
-						deleteConversation(conv).then(() => {
-							const noUpdate = unconscious(conversations);
-							const pos = noUpdate.indexOf(conv);
-							if (pos >= 0) noUpdate.splice(pos, 1);
-						}, err => {
-							showToast("删除失败\n"+prettyError(err), "error");
-							delete conv[DELETING];
-							$update(conversations);
-						});
-					}, () => {
-						if (isOpened && unconscious(selectedConversation) == null)
-							switchToConversation(conv);
+				conv[DELETING] = true;
+				$update(conversations);
 
+				let isOpened;
+				if (unconscious(selectedConversation) === conv) {
+					isOpened = true;
+					resetConversation();
+				}
+
+				const isKeyboard = ev.detail === 0;
+				deleteWithDrawback(`${conv.title||'无标题'} (#${conv.id})`, () => {
+					deleteConversation(conv).then(() => {
+						const noUpdate = unconscious(conversations);
+						const pos = noUpdate.indexOf(conv);
+						if (pos >= 0) noUpdate.splice(pos, 1);
+					}, err => {
+						showToast("删除失败\n"+prettyError(err), "error");
 						delete conv[DELETING];
 						$update(conversations);
-					}, isKeyboard);
-				}},
+					});
+				}, () => {
+					if (isOpened && unconscious(selectedConversation) == null)
+						switchToConversation(conv);
+
+					delete conv[DELETING];
+					$update(conversations);
+				}, isKeyboard);
+			}},
 		]);
 	}
 

@@ -3,7 +3,9 @@ import {
 	auxMainlyTouch,
 	auxSmallScreen,
 	config,
+	CUSTOM_CONTROLS,
 	ensureConversation,
+	EVENT_BUS,
 	inputText,
 	lastScrollDirectionIsUp,
 	messages,
@@ -23,7 +25,6 @@ import {resolvePreset} from "../presets.js";
 import {cannotInsertAfter, injectMessages} from "../inject-message.js";
 import {PendingMessageList} from "./PendingMessageList.jsx";
 import {DI, DID_INPUT_BOX_POSITION} from "../hooks.js";
-import {CUSTOM_CONTROLS} from "../customControls.js";
 
 export const TEXT_MIMES = "text/plain";
 export const AUDIO_MIMES = "audio/wav,audio/mp3,audio/flac,audio/ogg";
@@ -294,6 +295,8 @@ export const createUserInputComposer = (scroller) => {
 			$update(abortCompletion);
 			return;
 		}
+
+		await EVENT_BUS.post(['beforeSend'], conv);
 
 		if (content) {
 			messages.push({role: 'user', content, time: Date.now()});

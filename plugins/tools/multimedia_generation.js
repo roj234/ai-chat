@@ -2,9 +2,9 @@ import {ContentPart, getToolParameters, registerToolset} from "/src/toolset.js";
 import complete from "/media/complete.js";
 import {GLOBAL_SETTINGS} from "/src/settings.js";
 import {config} from "/src/states.js";
-import {AudioPlayer} from "/src/components/AudioPlayer.jsx";
+import {callCreateAudioPlayer} from "/src/utils/preview-bridge.js";
 import {isPureObject} from "unconscious";
-import {getRandomString, loadingBlock} from "/src/utils/utils.js";
+import {BlobImage, getRandomString, loadingBlock} from "/src/utils/utils.js";
 import {jsonFetch} from "/common/fetch-utils.js";
 import "./multimedia_generation.css";
 import {DI_settings, onLoad} from "/src/hooks.js";
@@ -217,7 +217,7 @@ const Draw = {
 		} else if (ctx.images) {
 			return (
 				<div className="generated-image">
-					<img src={ctx.images[0].toUrl()} />
+					<BlobImage src={ctx.images[0]}/>
 					<div className="hint">{getToolParameters(ctx, tc).prompt}</div>
 					<div>{/* padding */}</div>
 				</div>
@@ -290,7 +290,7 @@ const Say = {
 
 	renderer(context, is_frozen) {
 		if (!context.audios) return loadingBlock("音频生成中……");
-		return <AudioPlayer src={context.audios[0].toUrl()} autoplay={!is_frozen} />;
+		return callCreateAudioPlayer(context.audios[0]);
 	},
 };
 

@@ -4,7 +4,7 @@ import {sseFetch} from "/common/fetch-utils.js";
 import "/src/database.js";
 import {requestBackend} from "/src/database/remoteDB.js";
 import {EVENT_BUS} from "/src/states.js";
-import {deleteWithDrawback, downloadFile, showImageZoomView} from "/src/utils/utils.js";
+import {BlobImage, deleteWithDrawback, downloadFile} from "/src/utils/utils.js";
 import {writeJPEG, writePNG} from "/common/imate.js";
 import {base64Encode} from "@roj234/shared/base64";
 import {isIDB, kvListDel, kvListGet, kvListGetKeys} from "/src/database.js";
@@ -197,7 +197,7 @@ EVENT_BUS.on(['kvs', CHAR_TYPE], (name) => {
 	if (idx >= 0) $update(currentPage);
 });
 
-export default function() {
+export const openCharacterViewer = () => {
 	currentPage.value = 1;
 	$update(currentPage);
 
@@ -231,11 +231,9 @@ export default function() {
 				const text = c.creatorNotes || c.description;
 				if (text) renderMarkdownToElement(div, text.slice(0, 1000));
 
-				const src = c.image?.toUrl();
-
 				return <div className="card">
 					<div className="cover">
-						{src ? <img src={src} alt={c.name} loading="lazy" onClick={() => showImageZoomView(src, c.name)} /> : <div className="no-img">&#x1F3AD;</div>}
+						{c.image ? <BlobImage src={c.image} /> : <div className="no-img">&#x1F3AD;</div>}
 						<button className="card-quick-launch" onClick.stop={() => exportForCV_createConversation(c)}>创建对话</button>
 					</div>
 

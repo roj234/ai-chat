@@ -78,7 +78,7 @@ MessageRoles[PROCESS_EXIT_ROLE] = {
 						<div className="-logs-header">
 							<span>最后50行输出</span>
 							<button className="ri-file-3-line ghost" onClick={() => {
-								EVENT_BUS.post(['viewUrl'], event.logFile);
+								EVENT_BUS.post(['viewFile'], event.logFile);
 							}}>打开日志
 							</button>
 						</div>

@@ -2,7 +2,7 @@ import {Mp3Recorder} from './Mp3Recorder.js';
 import "./Recorder.css";
 import {formatSize} from "unconscious/common/Utils.js";
 import {$cleanup, $computed, $state, unconscious} from "unconscious";
-import {AudioPlayer} from "/src/components/AudioPlayer.jsx";
+import {callCreateAudioPlayer} from "/src/utils/preview-bridge.js";
 import {closeWindow, openWindow} from "/src/components/Windows.jsx";
 import {EVENT_BUS} from "/src/states.js";
 
@@ -16,7 +16,7 @@ const Recorder = ({ onSubmit }) => {
 
 	const elm = <div className="voiceInput">
 		<div className="status" ref={statusEl}>点击下方按钮录音</div>
-		<div className="viz">{() => unconscious(recordState) > 1 ? <AudioPlayer src={recordBlob}/> : canvas}</div>
+		<div className="viz">{() => unconscious(recordState) > 1 ? callCreateAudioPlayer(recordBlob) : canvas}</div>
 
 		<div className="btns">
 			<button className="ri-check-line btn primary" style:display={hasRecordData} title={"接受"} onClick={() => onSubmit(recordBlob)}></button>

@@ -420,7 +420,7 @@ totalLines: ${lines.length + delta} (${delta >= 0 ? '+': ''}${delta})`;
 
 		const newLines = [
 			...lines.slice(0, startLine),
-			...newText.split('\n'),
+			...(newText ? newText.split('\n') : []),
 			...lines.slice(endLine)
 		];
 

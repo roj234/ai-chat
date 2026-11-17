@@ -48,7 +48,7 @@
 	& main {flex:1;min-width:400px;background:var(--bg)}
 
 	.crumbs {
-		flex:1;min-width:200px;display:flex;align-items:center;font-size:13px;
+		flex:1;min-width:190px;display:flex;align-items:center;font-size:13px;
 		white-space:nowrap;
 		border-left: 1px solid var(--border);
 
@@ -212,19 +212,20 @@
 @keyframes fade{from{opacity:0}to{opacity:1}}
 @keyframes up{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
 
-@media (min-width:641px) {
+@container mdiwin (min-width:641px) {
 	.explorer {
 		.-left {
 			width:230px;
 			border-right:1px solid var(--border);
 
-			.hab > .row {
+			.fab {
+				display: flex;
 				justify-content: center;
 			}
 		}
 	}
 }
-@media (max-width:640px) {
+@container mdiwin (max-width:640px) {
 	.explorer {
 		.-left {
 			position: absolute;
@@ -233,10 +234,11 @@
 			z-index: 1;
 
 			.tree{display:none}
-			.hab {
+			.fab {
 				display: flex;
 				flex-direction: column;
 				align-items: center;
+				justify-content: center;
 
 				border-radius: 50%;
 				background: var(--accent);
@@ -244,21 +246,13 @@
 				height: 32px;
 
 				&:before {
-					content: "+";
-					font-size: 24px;
+					content: "···";
+					font-size: 32px;
 				}
-				& .row { display: none; }
-				& button {
-					background: var(--accent);
-				}
-
-				&:hover .row {
+				& .dropdown { top: calc(-100%); }
+				& button {display: none;}
+				&:hover .list {
 					display: block;
-					position: relative;
-					transform: translateY(-100%);
-					top: -40px;
-					width: 100px;
-					left: 20px;
 				}
 
 			}

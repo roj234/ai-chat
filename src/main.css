@@ -202,6 +202,11 @@ button {
     transition: var(--transition);
     line-height: 1;
     user-select: none;
+
+    &:focus-visible {
+        outline:2px solid var(--focus);
+        outline-offset:1px;
+    }
 }
 
 button[class^="ri-"] {
@@ -235,6 +240,9 @@ svg.icon {
     height: 100vh;
     display: flex;
     flex-direction: column;
+
+    --font-sans: 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+    font-family: var(--font-sans);
 }
 .hide {
     /*position: relative;*/
@@ -279,6 +287,15 @@ svg.icon {
 /* 注意，模态框 SimpleDialog 用的是 dialog 天生有着最大的 zindex 无法降低 */
 .toasts {z-index: 5;}
 
+/* 左右双栏列表 */
+.lr-list {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 8px 16px;
+    margin: 0;
+    padding: 10px 12px;
+    & dd { margin: 0; }
+}
 
 /* 统一按钮 */
 .btn {
@@ -287,6 +304,10 @@ svg.icon {
     border-radius: var(--border-radius-sm);
     font-size: var(--font-size-sm);
     cursor: pointer;
+}
+.btn:active {
+    transform: scale(0.95);
+    opacity: 0.9;
 }
 
 .btn.primary {
@@ -334,7 +355,7 @@ svg.icon {
 }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { }
-::-webkit-scrollbar-corner { }
+::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb {
     background-color: var(--scrollbar-thumb);
     background-clip: padding-box;
@@ -907,7 +928,14 @@ body._locked {
 .composer.hidden { bottom: -200px; }
 
 @media (max-width: 767px) {
-    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+    }
+    ::-webkit-scrollbar-thumb {
+        background-clip: initial;
+        border-radius: 0;
+    }
 
     .panel {
         width: 100%;

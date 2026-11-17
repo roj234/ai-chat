@@ -115,13 +115,8 @@ export default defineConfig(async ({mode}) => {
             name: 'inject-build-time',
             transformIndexHtml(html) {
                 html = html.replace("{{loading}}", LOADING_TEMPLATE);
-
                 if (process.env.NODE_ENV === 'development') return html;
-
-                return html.replaceAll(/[\r\n]/g, "").replaceAll(/  +/g, " ").replace(
-                    '</head>',
-                    `<script>console.log("build: ${commit} · ${buildTime}")</script></head>`
-                );
+                return html.replaceAll(/[\r\n]/g, "").replaceAll(/  +/g, " ");
             }
         },
     ],
@@ -144,7 +139,7 @@ export default defineConfig(async ({mode}) => {
     build: {
         modulePreload: { polyfill: false },
         reportCompressedSize: !isGitHubActions,
-        //sourcemap: true,
+        chunkSizeWarningLimit: 9999999,
         copyPublicDir: false,
 
         mergeUniqueCss: true,
@@ -153,8 +148,6 @@ export default defineConfig(async ({mode}) => {
         rollupOptions: {
             input: {
                 main: 'index.html',
-                logViewer: 'log_viewer.html',
-                docViewer: 'docs.html',
                 sw: "sw.js",
             },
 
@@ -179,7 +172,7 @@ export default defineConfig(async ({mode}) => {
                     }
                 },
 
-                experimentalMinChunkSize: 512000,
+                experimentalMinChunkSize: 5120000,
             },
         }
     },

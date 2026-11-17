@@ -254,7 +254,7 @@ export function createMarkdownRenderer(root, options = {}) {
 							node.prepend(<i className="ri-external-link-line" />)
 					} else if (!options.external) {
 						node.style.cursor = 'pointer';
-						node.addEventListener('click', () => EVENT_BUS.post(['viewUrl'], (options.base||'')+value, node, options.fs));
+						node.addEventListener('click', () => EVENT_BUS.post(['viewFile'], (options.base||'')+value, node, options.fs));
 						return;
 					}
 				}

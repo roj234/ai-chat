@@ -131,22 +131,24 @@
 			}
 		}
 
-		#loading.exiting {
-			animation: crtShutdown 0.5s cubic-bezier(0.25, 0, 0.55, 1) forwards;
-			pointer-events: none;
+		#loading::after {          /* 闪白层，纯 opacity 动画 */
+			content: ''; position: absolute; inset: 0;
+			background: #fff; opacity: 0;
+			will-change: opacity;
 		}
+		#loading.exiting            {
+            animation: crtShutdown .5s cubic-bezier(.25,0,.55,1) forwards;
+            pointer-events: none;
+        }
+		#loading.exiting::after     { animation: crtFlash    .5s cubic-bezier(.25,0,.55,1) forwards; }
+
 		@keyframes crtShutdown {
-			50% {
-				transform: scaleY(0.015) scaleX(1);
-			}
-			75% {
-				background-color: #fff;
-				filter: brightness(1);
-			}
-			100% {
-				transform: scaleY(0) scaleX(0);
-				filter: brightness(10);
-			}
+			50% { transform: scaleY(.015) scaleX(0.95); }
+			100% { transform: scaleY(0) scaleX(0); }
+		}
+		@keyframes crtFlash {
+			25% { opacity: 0; }
+			75% { opacity: 1; }
 		}
 
 		@media (prefers-reduced-motion: no-preference) {

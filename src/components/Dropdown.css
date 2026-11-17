@@ -85,7 +85,7 @@
         color: var(--muted);
         padding: 2px 3px;
         border-radius: 3px;
-        border: 1px solid transparent;
+        border: 1px solid var(--border);
 
         &:not(:disabled):hover {
             background: var(--chip-bg);

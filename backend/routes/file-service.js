@@ -360,23 +360,40 @@ export async function registerFsRoutes(router, allowExec, dataPath) {
 	const IMAGE_EXT = /\.?(?:jpg|jpeg|jpe|jfif|png|apng|gif|webp|bmp|svg|ico|avif|heic|heif)$/i;
 
 	if (isThumbAvailable) {
-		const threads = Math.max(1, os.availableParallelism());
-		const thumbManager = new ThumbnailManager({
-			dbPath: dataPath+"/thumbs.db",
-			threads
-		});
-		console.log("init Thumbnail manager", threads);
+		const threads = Math.max(1, os.availableParallelism() - 1);
+
+		await fsp.mkdir(dataPath+'/thumbs');
+
+		const map = {
+			64: new ThumbnailManager({
+				dbPath: dataPath+"/thumbs/64.db",
+				threads,
+				size: 64
+			}),
+			256: new ThumbnailManager({
+				dbPath: dataPath+"/thumbs/256.db",
+				threads,
+				size: 256
+			})
+		};
+		map[64].inflight = map[256].inflight;
+		AiChatAPI.addShutdownHook(() => {
+			Object.values(map).forEach(e => e.close());
+		})
+
+		console.log("[Thumbnail] init max_threads=", threads);
 
 		router.get('/thumb', async (ctx) => {
-			const { path: filePath, size = 300 } = await ctx.readAsObject();
+			const filePath = ctx.searchParams.get('path');
+			if (!filePath) return ctx.send(204);
+
+			const size = parseInt(ctx.searchParams.get('size'), 10) || 256;
 			const safePath = await pathFilterWithIgnore(ctx, filePath);
-
-			// 也许未来有更多尺寸
-			if (size !== 300) return ctx.send(400);
-
 			if (!IMAGE_EXT.test(safePath)) return ctx.send(400, { error: 'extension may not image' });
 
-			const image = await thumbManager.getThumbnail(safePath);
+			if (!map[size]) return ctx.send(400);
+
+			const image = await map[size].getThumbnail(safePath);
 
 			const res = ctx.res;
 			res.writeHead(200, {
@@ -742,14 +759,20 @@ nlink: ${stats.nlink}`);
 			if (notify) {
 				safeStat(logAbsolutePath).then(async stat => {
 					let logFile = dir+logName; // 这个给AI看
-					let log;
-					if (stat.size === 0) {
-						await fsp.rm(logAbsolutePath)
-							.then(() => logFile = '0B, deleted', () => {});
-					} else {
+					let log, logLines = 0;
+					if (stat.size) {
 						log = await teh.read({ path: logAbsolutePath, offset: -50, maxChars: 4096, noWarn: true }, { fsRoot: '' })
 							.catch((e) => "InternalError: "+(e.message ?? e));
+
+						const chunks = log.lastIndexOf('\x03');
+						if (chunks < 0) logLines = 99;
+						else {
+							logLines = parseInt(log.slice(log.lastIndexOf(' ')), 10);
+						}
 					}
+
+					if (logLines <= 50 && log.length < 4000)
+						await fsp.rm(logAbsolutePath).then(() => logFile = '0B, deleted', () => {});
 
 					postEvent('process-exit', {
 						pid: child.pid,

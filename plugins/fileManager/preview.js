@@ -1,27 +1,28 @@
 import {loadLanguage} from "/src/markdown/highlight.js";
 import {readAsString} from "/common/chardet.js";
 import {closeWindow, openWindow} from "/src/components/Windows.jsx";
-import {AudioPlayer} from "/src/components/AudioPlayer.jsx";
+import {AudioPlayer} from "./AudioPlayer.jsx";
 import {showToast} from "/src/components/Toast.js";
 import {formatDate, formatSize, immutableObjectMap} from "unconscious/common/Utils.js";
 import {renderMarkdownToElement} from "/src/markdown/markdown.js";
-import {ImagePane} from "/src/components/ImagePane.jsx";
-import {callFileSystemFunc, FS_SOURCE, vfsIdentity} from "../agent/index.js";
+import {callFileSystemFunc, FS_SOURCE, resolveVirtualUrl, vfsIdentity} from "../agent/index.js";
 import {openFileBrowser} from "./Explorer.jsx";
 import {config} from "/src/states.js";
 import "./preview.css";
 import {vfsDownload} from "./downloader.js";
 import {openFileEditor} from "/plugins/fileManager/Editor.js";
 import {HighlightBox} from "/src/components/TextDiff.jsx";
-import {resolveVirtualUrl} from "./_vfsVirtualUrl.js";
+import {createMarkdownViewer} from "./MarkdownViewer.js";
+import {createImageViewer} from "./ImageViewer.jsx";
+import {$state} from "unconscious";
 
 /**
  * @typedef {{ name: string, path: string, size: number, mtime?: number }} DownloadJob
  */
 
-const IMAGE_EXT = /\.?(?:jpg|jpeg|jpe|jfif|png|apng|gif|webp|bmp|svg|ico|avif|heic|heif)$/i;
-const VIDEO_EXT = /\.?(?:flv|mp4|m4v|ogv|mkv|mov|webm|avi|f4v)$/i;
-const AUDIO_EXT = /\.?(?:mp3|wav|ogg|oga|opus|flac|aac|m4a|mid|midi)$/i;
+export const IMAGE_EXT = /\.?(?:jpg|jpeg|jpe|jfif|png|apng|gif|webp|bmp|svg|ico|avif|heic|heif)$/i;
+export const VIDEO_EXT = /\.?(?:flv|mp4|m4v|ogv|mkv|mov|webm|avi|f4v)$/i;
+export const AUDIO_EXT = /\.?(?:mp3|wav|ogg|oga|opus|flac|aac|m4a|mid|midi)$/i;
 const TEXT_EXT = /\.?(?:txt|log|rtf)$/i;
 
 const sizeByKind = immutableObjectMap({
@@ -29,7 +30,7 @@ const sizeByKind = immutableObjectMap({
 	audio: { width: 500, height: 85, resizable: false, icon: <i className="ri-file-music-fill" /> },
 	binary: { width: 300, height: 200, resizable: false, icon: <i className="ri-file-unknow-fill" /> },
 	'too-large': { width: 400, height: 200, resizable: false, icon: <i className="ri-error-warning-fill" /> },
-	markdown: { width: 700, icon: <i className="ri-file-text-fill" /> },
+	md: { width: 700, icon: <i className="ri-file-text-fill" /> },
 	text: { width: 650, height: 800, icon: <i className="ri-file-code-fill" /> },
 	html: { width: 700, icon: <i className="ri-file-code-fill" /> },
 	image: { icon: <i className="ri-file-image-fill" /> },
@@ -105,13 +106,15 @@ const EISDIR = '\0';
  * @param {string} path
  * @param {string} [overrideFileName]
  * @param {'a' | 'y' | 'n' | 't'} [editable]
+ * @param {{ size?: number }} [__knownMetadata]
  * @return {Promise<import("/src/components/Windows.jsx").WindowState>}
  */
-export async function vfsPreview(fs, path, overrideFileName, editable) {
-	let data = !path ? EISDIR : await callFileSystemFunc(fs, 'readRaw', {path, metaOnly: true}).catch((e) => {
-		if ((e.message || e).includes("ISDIR")) return EISDIR;
+export async function vfsPreview(fs, path, overrideFileName, editable, __knownMetadata) {
+	let data = __knownMetadata ?? (!path ? EISDIR : await callFileSystemFunc(fs, 'readRaw', {path, metaOnly: true}).catch((e) => {
+		const msg = e.message || e;
+		if (/is ?dir/i.test(msg)) return EISDIR;
 		throw e;
-	});
+	}));
 	if (data === EISDIR) return openFileBrowser(fs, path);
 
 	// 允许工具调用打断，加配置项
@@ -126,7 +129,7 @@ export async function vfsPreview(fs, path, overrideFileName, editable) {
 	if (canEdit && (loadLanguage(extname, true) || TEXT_EXT.test(extname))) {
 		kind = extname === 'txt' ? 'text' : 'code';
 		if (editable !== 'y') {
-			if (extname === 'md') kind = 'markdown';
+			if (extname === 'md') kind = 'md';
 			else if (/xhtml|html|htm/i.test(extname)) kind = 'html';
 		}
 		if (editable === 't') return kind === 'code' ? 'y' : 'a'; // 不支持预览，事实上就是编辑
@@ -155,34 +158,40 @@ export async function vfsPreview(fs, path, overrideFileName, editable) {
 
 	if (kind === 'code') return openFileEditor(fs, path, editable !== 'n', extname);
 
+	const actionBar = <div className="row">
+		{editable !== 'n' && <button className="ri-edit-2-line ghost" title="编辑" onClick={() => {
+			closeWindow(previewWindow);
+			openFileEditor(fs, path, true, extname);
+		}}/>}
+		<button className="ri-download-line ghost" title="下载" onClick={() => {
+			vfsDownload(fs, path, overrideFileName || filename).catch(err => {
+				showToast('下载失败：' + (err?.message ?? err), 'error');
+			});
+		}}/>
+	</div>;
+
+	if (kind === 'image') return vfsPreviewImage([{path, name: overrideFileName || filename}], fs);
+
 	const previewWindow = openWindow({
-		id: "preview "+encodeURI(vfsIdentity(fs[FS_SOURCE])+path),
+		id: "preview "+encodeURI(vfsIdentity(fs[FS_SOURCE])+path)+(kind === 'md'? " -md": ""),
 		icon: <i className={"ri-file-3-line"}/>,
 		title: path,
-		actions: <div className="row">
-			{editable !== 'n' && <button className="ri-edit-2-line ghost" title="编辑" onClick={() => {
-				closeWindow(previewWindow);
-				openFileEditor(fs, path, true, extname);
-			}} />}
-			<button className="ri-download-line ghost" title="下载" onClick={() => {
-				vfsDownload(fs, path, overrideFileName || filename).catch(err => {
-					showToast('下载失败：' + (err?.message ?? err), 'error');
-				});
-			}} />
-		</div>,
+		actions: actionBar,
 		element: () => {
 			let el;
 			switch (kind) {
-				case 'markdown': el = renderMarkdownToElement(<div className="md" style="margin:16px" />, data, {
-					fs,
-					base: path.slice(0, path.lastIndexOf('/')+1),
-				}); break;
+				case 'md':
+					el = renderMarkdownToElement(<div className="md" style="margin:16px" />, data, {
+						fs,
+						base: path.slice(0, path.lastIndexOf('/')+1),
+					});
+					el = createMarkdownViewer(el, actionBar);
+				break;
 				//case 'pdf': el = <iframe src={data.toUrl()} sandbox={!directUrl ? "" : undefined} width="100%" height="100%" />; break;
 				// 这个支持自动折行，等我的编辑器支持再删
 				case 'text': el = <HighlightBox code={data} filename={filename} />; break;
 				case 'video': el = <video style="width:100%;height:100%" src={data.toUrl()} controls />; break;
-				case 'audio': el = <AudioPlayer src={data.toUrl()} />; break;
-				case 'image': el = <div className="images"><ImagePane variant='' overlay="图像" blob={data}/></div>;break;
+				case 'audio': el = <AudioPlayer src={data} />; break;
 				case 'html': el = htmlRenderer(fs, data, path);break;
 				default:el = <div className="md col" style="align-items:center;justify-content:center;height:100%;gap:8px">
 					<div style="font-size:12px">{formatSize(data.size)} · {formatDate("Y-m-d H:i:s", data.lastModified)}</div>
@@ -205,4 +214,29 @@ export async function vfsPreview(fs, path, overrideFileName, editable) {
 	return previewWindow;
 }
 
+/**
+ *
+ * @param {{ path: string, name: string, url?: Blob | File }[]} images
+ * @param {AiChat.FileSystemInstance} [fs]
+ * @param {number} [forcedIndex]
+ */
+export function vfsPreviewImage(images, fs, forcedIndex) {
+	const title = $state("");
+	const win = openWindow({
+		id: "preview imageView "+(fs ? encodeURI(vfsIdentity(fs[FS_SOURCE])) : ""),
+		title,
+		icon: <i className="ri-image-line" />,
+		maximized: true,
+		element: (state) => {
+			const result = createImageViewer(title);
+			state.setImages = result.setImages;
+			return result;
+		}
+	});
+	win.setImages(fs, images, forcedIndex);
+	return win;
+}
+
 export {createEditorWidget} from "./Editor.js";
+
+export const createAudioPlayerWidget = (blob) => <AudioPlayer src={blob} />;

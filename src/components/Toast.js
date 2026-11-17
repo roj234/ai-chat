@@ -61,7 +61,7 @@ export const showToast = (message, type, timeout = 5000, {onClose, closeBtn, dom
 	const closeToast = (event) => {
 		onClose?.(event);
 		timer?.cancel();
-		el.classList.add("closing");
+		el.classList.add("-closing");
 		setTimeout(() => el.remove(), 600);
 	};
 

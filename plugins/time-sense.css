@@ -1,0 +1,36 @@
+.time-sense {
+    align-self: center;
+
+    .role {
+        height: auto;
+    }
+
+    .body {
+        background: transparent;
+        box-shadow: none;
+        border: none;
+        padding: 0;
+
+        display: flex;
+        justify-content: center;
+    }
+
+    /* 中央时长胶囊 */
+    & .-time {
+        margin: 4px 0;
+        font-size: 14px;
+
+        display: inline-flex;
+        gap: 6px;
+
+        & i { color: var(--accent); }
+    }
+
+    &::after {
+        content: "";
+        width: 100%;
+        height: 1px;
+
+        background: linear-gradient(to left, transparent, var(--muted), transparent);
+    }
+}

@@ -8,7 +8,7 @@ import {callFileSystemFunc, FS_SOURCE, vfsIdentity} from "/plugins/agent/index.j
 import {SHA256} from "unconscious/common/SHA256.js";
 import {downloadFile, prettyError} from "/src/utils/utils.js";
 import {EVENT_BUS} from "/src/states.js";
-import {winToast} from "./win-toast.js";
+import {mdiToast} from "./MDIToast.js";
 import {readAsString} from "/common/chardet.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {createJsonParser} from "@roj234/stream-json";
@@ -47,9 +47,9 @@ export const openFileEditor = async (fs, path, editable, language) => {
 
 			// 触发文件资源管理器窗口重载
 			EVENT_BUS.post(['fileChanged'], fs, path, "file");
-			winToast(toastDiv, '保存成功', 'ok');
+			mdiToast(toastDiv, '保存成功', 'ok');
 		} catch (err) {
-			winToast(toastDiv, '保存失败: '+prettyError(err), 'err')
+			mdiToast(toastDiv, '保存失败: '+prettyError(err), 'err')
 		} finally {
 			saving.value = false;
 		}

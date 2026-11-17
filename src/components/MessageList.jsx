@@ -37,6 +37,7 @@ import {
 } from "../states.js";
 import {submitUserChatMessage} from "../api-request.js";
 import {
+	BlobImage,
 	copyWithAnimation,
 	downloadFile,
 	errorBlock,
@@ -44,9 +45,9 @@ import {
 	getTextContent,
 	onReuse_Callback,
 	prettyError,
-	ReuseDelegator,
-	showImageZoomView
+	ReuseDelegator
 } from "../utils/utils.js";
+import {callCreateAudioPlayer, callPreviewImage} from "../utils/preview-bridge.js";
 import "./MessageList.css";
 import "./TimelineDivider.css";
 import {getToolName, getToolParameters, TOOL_IS_RUNNING, toolScriptRegistry, undoToolCalls} from "../toolset.js";
@@ -55,7 +56,6 @@ import {NestedMap} from "unconscious/common/NestedMap.js";
 import {cloneMessage, enableBranches, switchBranch} from "../utils/BranchManager.js";
 import {PINNED, VirtualList} from "unconscious/common/VirtualList.js";
 import {EditWidget} from "./EditWidget.jsx";
-import {AudioPlayer} from "./AudioPlayer.jsx";
 
 import SimpleModal from "./SimpleModal.jsx";
 import {ToolCallEditor} from "./ToolCallEditor.jsx";
@@ -210,7 +210,7 @@ const chunkRenderer = m => {
 				}
 
 				if (src.size < 0) return createBlobDisplay(src, "ri-file-music-line");
-				return <AudioPlayer src={src} />
+				return callCreateAudioPlayer(src);
 			}
 			case "text": {
 				let text = item.text;
@@ -266,18 +266,13 @@ const chunkRenderer = m => {
 							part.image_url.url = blob;
 						}, IMAGE_MIMES);
 
-						const src = typeof file === "string" ? file : file.toUrl();
-						el.addEventListener("click", () => showImageZoomView(src, file.name));
+						el.addEventListener("click", () => callPreviewImage(file));
 
 						return el;
 					})}</div>
 				}
 
-				return <div className="gallery">{item.images.map(part => {
-					const file = part.image_url.url;
-					const src = typeof file === "string" ? file : file.toUrl();
-					return <img src={src} alt={file.name || '图片'} onClick={() => showImageZoomView(src, file.name)} />;
-				})}</div>;
+				return <div className="gallery">{item.images.map(part => <BlobImage src={part.image_url.url} />)}</div>;
 			case "think":
 				return <ThinkBlock {...item} edit={isEditing(m.key)}/>;
 			case "tool":
@@ -374,7 +369,7 @@ const chunkGather = (message, chunks, index, messages, __isPTC) => {
 		if (typeof content !== 'string' && !EditableMessageRoles.has(role)) {
 			if (!__isPTC) chunks.push({
 				type: "error",
-				title: "未定义的消息类型，无法渲染内容。",
+				title: "不支持的角色",
 				error: message
 			});
 		} else {
@@ -1099,7 +1094,7 @@ export function MessageList({messages, navBar }) {
 			}}>
 				{roleSelection.map(name => <option selected={msg.role === name} value={name}>{name}</option>)}
 			</select> : <b className={"stroke"}>{roleName(item)}</b>}
-			<span className='time stroke'>{msg.time && formatDate('Y-m-d H:i:s', msg.time)}</span>
+			{msg.time && <time className='time stroke' dateTime={new Date(msg.time).toISOString()}>{formatDate('Y-m-d H:i:s', msg.time)}</time>}
 			<span className='spacer'></span>
 		</div>;
 	}

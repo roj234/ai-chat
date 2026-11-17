@@ -311,13 +311,20 @@ export const TextEditor = (props) => {
 	 * 返回 Promise，调用方可以 await 之后再刷新界面。
 	 */
 	const setLanguage = async (id) => {
-		if (isSameLanguage(id, langId) && hlReady) return;
-		if (langId) clearTokens();
+		if (langId) {
+			if (isSameLanguage(id, langId) && hlReady) return;
+			clearTokens();
+		}
 		langId = id;
 		hlReady = false;
 		cancelHl?.();
 		cancelHl = null;
-		await loadLanguage(langId);
+
+		const language = loadLanguage(langId);
+		// 永远不ready
+		if (!language) return;
+		await language;
+
 		hlReady = true;
 		runHighlight();
 	};
@@ -330,6 +337,8 @@ export const TextEditor = (props) => {
 
 		const start = vl._start;
 		const end = vl._end;
+		if (end === 0 && el.isConnected) return requestAnimationFrame(syncGutter);
+
 		const top = scrollEl.scrollTop;
 		const key = start+":"+end+":"+top+":"+errorLine;
 		if (key === gutterKey) return;
@@ -1247,6 +1256,12 @@ export const TextEditor = (props) => {
 		scrollToLine,
 		selectAll,
 		insertText,
+		append(text) {
+			const line = doc.lines.length - 1;
+			const ch = doc.lines[line].text.length;
+			const a = {line,ch};
+			applyChange(a, a, text);
+		},
 		getSelectedText,
 		canUndo: () => history.canUndo,
 		canRedo: () => history.canRedo,

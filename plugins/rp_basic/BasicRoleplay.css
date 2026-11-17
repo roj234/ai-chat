@@ -46,15 +46,6 @@
 		}
 	}
 
-	.meta {
-		display: grid;
-		grid-template-columns: max-content 1fr;
-		gap: 8px 16px;
-		margin: 0;
-		padding: 10px 12px;
-		& dd { margin: 0; }
-	}
-
 	.textDiff {
 		border-radius: 0;
 		border: none;

@@ -1,13 +1,12 @@
 import {config, EVENT_BUS, selectedConversation} from "/src/states.js";
 import {unconscious} from "unconscious";
-import {callFileSystemFunc, createFileSystem, FS_SOURCE, getFileSystem} from "../agent/index.js";
+import {createFileSystem, FS_SOURCE, getFileSystem} from "../agent/index.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
 import {GLOBAL_SETTINGS} from "/src/settings.js";
 import {prefixTitle, registerToolset} from "/src/toolset.js";
 import {normalizePath} from "@roj234/shared/path";
 import {onLoad} from "/src/hooks.js";
 import {PROMISE_CATCH} from "/common/pure-utils.js";
-import {resolveVirtualUrl} from "./_vfsVirtualUrl.js";
 
 EVENT_BUS.on(['getMenu', 'dev'], items => {
 	const set = config.trustHTML;
@@ -26,34 +25,26 @@ GLOBAL_SETTINGS.push({
 })
 
 COMMAND_REGISTRY["upload"] = [
-	() => EVENT_BUS.post(['viewUrl'], ''),
+	() => EVENT_BUS.post(['viewFile'], ''),
 	"在当前对话的工作区创建文件"
 ];
 
-EVENT_BUS.on('resolveUrl', async (path, _, fs) => {
+EVENT_BUS.on('viewFile', async (path, _, node, fs) => {
 	if (fs == null) {
 		const conv = unconscious(selectedConversation);
 		if (!conv) return;
-		[path, fs] = await getFileSystem(path, conv);
+		[path, fs] = await getFileSystem(path, conv, true);
 	}
 
 	const url = new URL(path, 'http://0');
-	const realpath = decodeURIComponent(url.pathname.slice(1));
-	return (fs[FS_SOURCE].fs_type !== 'local' && resolveVirtualUrl(fs, realpath)) || callFileSystemFunc(fs, 'readRaw', { path: realpath }).then(blob => blob.toUrl());
+	const editable = fs[FS_SOURCE].fs_readonly ? 'n' : 'a';
+	return (await import("./preview.js")).vfsPreview(fs, decodeURIComponent(url.pathname.slice(1)), node?.textContent, editable);
 });
-
-EVENT_BUS.on('viewUrl', async (path, _, node, fs) => {
-	if (fs == null) {
-		const conv = unconscious(selectedConversation);
-		if (!conv) return;
-		[path, fs] = await getFileSystem(path, conv);
-	}
-
-	const url = new URL(path, 'http://0');
-	return (await import("./preview.js")).vfsPreview(fs, decodeURIComponent(url.pathname.slice(1)), node?.textContent);
+EVENT_BUS.on('pvi', async (blob, _, name) => {
+	return (await import("./preview.js")).vfsPreviewImage([{url: blob, name}]);
 });
-
-EVENT_BUS.on('createEditor', async (options) => (await import("./preview.js")).createEditorWidget(options));
+EVENT_BUS.on('pva', async (blob) => (await import("./preview.js")).createAudioPlayerWidget(blob));
+EVENT_BUS.on('pve', async (options) => (await import("./preview.js")).createEditorWidget(options));
 
 /**
  * @type {AiChat.FunctionTool}
@@ -76,7 +67,8 @@ const OpenFile = {
 	async script({path, file}, ctx, conv) {
 		let fs;
 		[path, fs] = await getFileSystem(path, conv);
-		await (await import("./preview.js")).vfsPreview(fs, normalizePath(path).join('/'));
+		const editable = fs[FS_SOURCE].fs_readonly ? 'n' : 'a';
+		await (await import("./preview.js")).vfsPreview(fs, normalizePath(path).join('/'), null, editable);
 		return 'Opened';
 	}
 };
@@ -92,6 +84,6 @@ onLoad(() => {
 		fs_label: "选择要管理的文件系统",
 		_noupdate: true
 	}).then((fs) => {
-		return EVENT_BUS.post(['viewUrl'], '', null, fs);
+		return EVENT_BUS.post(['viewFile'], '', null, fs);
 	}, PROMISE_CATCH)} />, pos.lastElementChild);
 });

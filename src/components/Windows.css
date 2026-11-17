@@ -30,7 +30,7 @@
         display: flex;
         align-items: center;
         min-width: 0;
-        max-width: max(15vw, 150px);
+        max-width: max(10vw, 150px);
         padding: 0 8px;
         border-bottom: 1.5px solid transparent;
         color: var(--muted);
@@ -91,33 +91,32 @@
     position: fixed;
     display: flex;
     flex-direction: column;
-    background-color: var(--panel-2);
     box-shadow: var(--shadow);
     border: 1px solid var(--border);
     animation: winOpen 0.18s ease-out;
 
-    &.closing {
+    &.-closing {
         animation: winClose 0.1s ease-in forwards;
         pointer-events: none;
     }
 
-    &.dragging, &.resizing {
+    &.-dragging, &.-resizing {
         transition: none;
     }
 
-    &.maximized {
+    &.-max {
         inset: 0 !important;
         width: 100vw !important;
         height: calc(100vh - var(--taskbar-height)) !important;
 
-        & .win-resize { display: none; }
+        & .-resize { display: none; }
     }
 
-    &.minimized:not(.closing) {
+    &.-min:not(.-closing) {
         display: none;
     }
 
-    &.dragging .win-header { cursor: grabbing; }
+    &.-dragging .win-header { cursor: grabbing; }
 
     /* —— 正文 —— */
     & .win-body {
@@ -126,10 +125,14 @@
         min-height: 0;
         overflow: auto;
         height: 100%;
+        background-color: var(--panel-2);
+
+        container-type: inline-size;
+        container-name: mdiwin;
     }
 
     /* —— 右下角缩放手柄 —— */
-    & .win-resize {
+    & .-resize {
         position: absolute;
         right: 0;
         bottom: 0;

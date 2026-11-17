@@ -1,5 +1,5 @@
 import {showToast} from "../components/Toast.js";
-import {$watch, debugSymbol, unconscious} from "unconscious";
+import {$cleanup, $watch, debugSymbol, unconscious} from "unconscious";
 import {highlightJsonLike} from "../markdown/highlight.js";
 import {webviewDownloadFile} from "/vendor/jsBridge.js";
 import {auxKeyboardOnly, lastScrollDirectionIsUp} from "../states.js";
@@ -10,6 +10,7 @@ import {jsonFetch} from "/common/fetch-utils.js";
 import {throwDOMException} from "/common/pure-utils.js";
 import {SHA256} from "unconscious/common/SHA256.js";
 import {AS_IS} from "@roj234/shared";
+import {callPreviewImage} from "./preview-bridge.js";
 
 export const getRandomString = (length) => {
 	const view = new Uint8Array(length);
@@ -44,20 +45,31 @@ export const errorBlock = (error, title) => {
 export const onReuse_Callback = debugSymbol("onReuse");
 export const ReuseDelegator = (node, item) => node[onReuse_Callback]?.(node, item);
 
-const BLOB_URL = debugSymbol("BLOB_URL");
-const BLOB_DATAURL = debugSymbol("BLOB_DATAURL");
+const BLOB_URL = debugSymbol("ObjectUrl");
+const BLOB_URL_REFCNT = debugSymbol("ObjectUrlRefCnt");
+const BLOB_DATAURL = debugSymbol("DataUrl");
 
 Blob.prototype.toUrl = function() {
-	return this[BLOB_URL] || (this[BLOB_URL] = URL.createObjectURL(this));
+	const blob = this;
+	blob[BLOB_URL_REFCNT] = (blob[BLOB_URL_REFCNT] ?? 0) + 1;
+	return blob[BLOB_URL] ??= URL.createObjectURL(this);
+}
+Blob.prototype.revokeUrl = function() {
+	const blob = this;
+	const url = blob[BLOB_URL];
+	if (url && ! --blob[BLOB_URL_REFCNT]) {
+		URL.revokeObjectURL(url);
+		delete blob[BLOB_URL];
+	}
 }
 Blob.prototype.toDataURL = function() {
 	const self = this;
-	return self[BLOB_DATAURL] || (self[BLOB_DATAURL] = new Promise((resolve, reject) => {
+	return self[BLOB_DATAURL] ??= new Promise((resolve, reject) => {
 		const reader = new FileReader();
 		reader.onload = () => resolve(reader.result);
 		reader.onerror = reject;
 		reader.readAsDataURL(self);
-	}));
+	});
 }
 
 /**
@@ -137,12 +149,17 @@ export const copyWithAnimation = (data, btn) => {
 	}
 };
 
-export const showImageZoomView = (src, title) => {
-	SimpleModal({
-		title: `图像预览 ${title ? `(${title})` : ""}`,
-		className: "full",
-		message: <img src={src} alt={title || src} />
-	})
+/**
+ *
+ * @param {string | File} src
+ * @return {JSX.Element}
+ * @constructor
+ */
+export const BlobImage = ({src}) => {
+	const isBlob = typeof src !== 'string';
+	const dom = <img src={isBlob ? src.toUrl() : src} alt={src.name} loading="lazy" onClick={() => callPreviewImage(src)} />;
+	if (isBlob) $cleanup(dom, () => src.revokeUrl());
+	return dom;
 }
 
 /**
@@ -212,17 +229,16 @@ export const bind = (formElement, variable) => {
 };
 
 /**
- *
- * @param {Blob|File} blob
+ * @param {string|Blob|File} blob
  * @param {string} [ext]
  */
 export const downloadFile = (blob, ext) => {
 	const filename = blob.name || `${APP_NAME}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${ext}`;
 
 	if (IS_ANDROID_BUILD) {
-		webviewDownloadFile(blob instanceof Blob ? blob : blob.toUrl(), filename);
+		webviewDownloadFile(typeof blob === 'string' ? blob : blob instanceof Blob ? blob : blob.toUrl(), filename);
 	} else {
-		const url = blob.toUrl();
+		const url = typeof blob === 'string' ? blob : blob.toUrl();
 		const a = document.createElement('a');
 		a.href = url;
 		a.download = filename;

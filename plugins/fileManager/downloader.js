@@ -6,7 +6,7 @@ import {callFileSystemFunc} from "../agent/index.js";
 import {downloadFile, prettyError} from "/src/utils/utils.js";
 import {ZipWriter} from "@roj234/jszip/io";
 import {abortable, createAsyncQueue, formatDuration, sleep} from "/common/pure-utils.js";
-import {getDelay, MAX_RETRY} from "./xhrUploader.js";
+import {getDelay, MAX_RETRY} from "./uploader.js";
 
 /** 单文件体积上限，JS堆貌似只有1GB */
 const MAX_DOWNLOAD_SIZE = 512 << 20;
@@ -97,7 +97,7 @@ const streamSavingIsSupported = window.showSaveFilePicker;
  * @param {string} name
  * @return {Promise<void>}
  */
-export const vfsDownload = (fs, path, name) => vfsDownloadMany(fs, [{ path, name }], name);
+export const vfsDownload = (fs, path, name) => vfsDownloadMultiple(fs, [{ path, name }], name);
 
 const speedMeter = (total, onProgress) => {
 	const t0 = performance.now();
@@ -141,7 +141,7 @@ const speedMeter = (total, onProgress) => {
  * @param {string} [archiveName] 打包文件名（不含 .zip）
  * @return {Promise<void>}
  */
-export const vfsDownloadMany = async (fs, items, archiveName) => {
+export const vfsDownloadMultiple = async (fs, items, archiveName) => {
 	const state = $state("正在读取文件信息");
 
 	const cancel = new AbortController();

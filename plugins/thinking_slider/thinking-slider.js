@@ -1,10 +1,9 @@
 import './thinking-slider.css';
 import {$cleanup, $computed, $derived, $watchWithCleanup, AS_IS, ref, unconscious} from "unconscious";
 import {DI_settings, onLoad} from "/src/hooks.js";
-import {config, EVENT_BUS, selectedConversation} from "/src/states.js";
+import {config, CUSTOM_CONTROLS, EVENT_BUS, selectedConversation} from "/src/states.js";
 import {currentCombinedConfig, markCombinedPresetDirty, maxTokensClamped} from "/src/presets.js";
 import {updateConversation} from "/src/database.js";
-import {CUSTOM_CONTROLS} from "/src/customControls.js";
 
 const BUDGET_DESCRIPTIONS = [
 	'短路径推理，优先获得可用答案。',

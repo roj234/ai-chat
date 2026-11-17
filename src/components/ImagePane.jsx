@@ -1,7 +1,7 @@
-import {showImageZoomView} from "/src/utils/utils.js";
 import {$state} from "unconscious";
 import {formatSize} from "unconscious/common/Utils.js";
 import "./ImagePane.css";
+import {callPreviewImage} from "../utils/preview-bridge.js";
 
 /**
  * 图像版本比对的单侧面板：显示文件在某一层（base / overlay）中的版本。
@@ -19,9 +19,15 @@ export const ImagePane = ({variant, overlay, blob}) => {
 		</figcaption>
 		<div>
 			<img src={blob.toUrl()} alt={overlay+" 图像"}
-				 onClick={() => showImageZoomView(blob.toUrl(), blob.name)}
-				 onLoad={({target}) => {meta.value = `${target.naturalWidth}×${target.naturalHeight} · ${formatSize(blob.size)}`}}
-				 onError={() => {meta.value = "无法解码";}}/>
+				 onClick={() => callPreviewImage(blob)}
+				 onLoad={({target}) => {
+					 meta.value = `${target.naturalWidth}×${target.naturalHeight} · ${formatSize(blob.size)}`;
+					 blob.revokeUrl();
+				 }}
+				 onError={() => {
+					 meta.value = "无法解码";
+					 blob.revokeUrl();
+				 }}/>
 		</div>
 	</figure>
 };

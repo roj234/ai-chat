@@ -1,4 +1,4 @@
-import {indexInParent, showImageZoomView} from "../utils/utils.js";
+import {BlobImage, indexInParent} from "../utils/utils.js";
 import {$foreach, $update} from "unconscious";
 import {showToast} from "./Toast.js";
 import {readAsString} from "/common/chardet.js";
@@ -88,10 +88,9 @@ export const AttachmentGallery = (attachments) => {
 			switch (att.type) {
 				case "image_url": {
 					const file = att.image_url.url;
-					const src = typeof file === 'string' ? file : file.toUrl();
 					return (
-						<div className="attachment image-part" title={(file.name || '图片附件')+"\n点击放大"} onClick={e => showImageZoomView(src, file.name)}>
-							<img src={src} alt="预览"/>
+						<div className="attachment image-part" title={(file.name || '图片附件')+"\n点击放大"}>
+							<BlobImage src={file} />
 							{DeleteBtn}
 						</div>
 					);

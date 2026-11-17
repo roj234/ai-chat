@@ -403,7 +403,7 @@ declare namespace AiChat {
         openKey: AssistantMessage;
     }
 
-    type ResponseContentPart = (OpenAI.TextPart | GalleryPart | ThinkPart | ToolPart | ToolUIPart | UsagePart | ErrorPart | BranchPart | HTMLPart | ProgressPart | ToolsHeaderPart | ToolGroupPart) & {
+    type ResponseContentPart = (OpenAI.TextPart | OpenAI.AudioPart | GalleryPart | ThinkPart | ToolPart | ToolUIPart | UsagePart | ErrorPart | BranchPart | HTMLPart | ProgressPart | ToolsHeaderPart | ToolGroupPart) & {
         key?: object;
     };
 

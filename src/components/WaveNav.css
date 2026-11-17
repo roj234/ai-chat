@@ -84,9 +84,6 @@
 
 @media (max-width: 767px) {
 	.wave-nav {
-		.-nav {
-			right: 6px;
-			padding: 0;
-		}
+		.-nav { right: 0; }
 	}
 }

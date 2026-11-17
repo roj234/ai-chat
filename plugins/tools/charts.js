@@ -189,7 +189,7 @@ registerToolset("Chart", "Create charts and data visualizations from CSV files."
 			};
 
 			context[OPTIONS] = chartJsOptions;
-			return import('./chart.async.js').then(m => {
+			return import('/common/Chart.js').then(m => {
 				Chart = m.default;
 				const canvas = <canvas />;
 				new Chart(canvas, chartJsOptions);

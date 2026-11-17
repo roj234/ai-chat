@@ -2,7 +2,7 @@ import './ToolCallCard.css';
 import {getToolInteractiveLevel, getToolName, runTools, TOOL_IS_RUNNING, toolScriptRegistry} from "../toolset.js";
 import {LOCKED, messages, selectedConversation} from "../states.js";
 import {$state, $update, $watch, appendChildren, debugSymbol, isReactive, ref, unconscious} from "unconscious";
-import {onReuse_Callback, showImageZoomView} from "../utils/utils.js";
+import {BlobImage, onReuse_Callback} from "../utils/utils.js";
 import {highlight, highlightJsonLike} from "../markdown/highlight.js";
 import SimpleModal from "./SimpleModal.jsx";
 import {updateConversation} from "../database.js";
@@ -136,9 +136,7 @@ export function ToolCallCard(props) {
                         if (part.type === 'text') {
                             elements.push(part.text);
                         } else if (part.type === 'image_url') {
-                            const file = part.image_url.url;
-                            const src = typeof file === "string" ? file : file.toUrl();
-                            elements.push(<img title={file.name} onClick={() => showImageZoomView(src, file.name)} src={src}/>);
+                            elements.push(<BlobImage src={part.image_url.url} />);
                         } else {
                             elements.push(<div dangerouslySetInnerHTML={highlightJsonLike(tmpContent)} />);
                         }

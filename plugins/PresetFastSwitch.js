@@ -1,5 +1,5 @@
 import {$computed, $vforeach, unconscious} from "unconscious";
-import {config, EVENT_BUS, selectedConversation} from "/src/states.js";
+import {config, CUSTOM_CONTROLS, EVENT_BUS, selectedConversation} from "/src/states.js";
 import "./PresetFastSwitch.css";
 import {kvListGet, updateConversation} from "/src/database.js";
 import {
@@ -10,7 +10,6 @@ import {
 	PRESET_KVS_ID,
 	presets
 } from "/src/presets.js";
-import {CUSTOM_CONTROLS} from "/src/customControls.js";
 import {showToast} from "/src/components/Toast.js";
 
 const getLockedPresetName = () => {

@@ -2,7 +2,7 @@
 
 现代化的高性能纯 Web 多用途 AI 前端，基于 [Unconscious](https://github.com/Roj234/unconscious) 响应式框架。
 
-![Social](media/social-preview.webp)
+![Social](public/social-preview.webp)
 <details>
 <summary>展开旧版简介</summary>
 

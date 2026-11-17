@@ -1,19 +1,18 @@
 import "./AudioPlayer.css";
-import {webviewDownloadFile} from "/vendor/jsBridge.js";
 import {formatDuration} from "/common/pure-utils.js";
+import {$cleanup} from "unconscious";
+import {downloadFile} from "/src/utils/utils.js";
 
+const speeds = [1.0, 1.5, 2.0, 0.5];
+
+/**
+ * @deprecated
+ * @param {string | Blob | File} src
+ * @param {boolean} [autoplay]
+ * @return {JSX.Element}
+ * @constructor
+ */
 export const AudioPlayer = ({src, autoplay}) => {
-	let audio, playBtn, timeDisplay, progressBar, speedBtn;
-	const speeds = [1.0, 1.5, 2.0, 0.5];
-	let currentSpeedIndex = 0;
-
-	// 工具函数：格式化时间为 mm:ss
-	let filename = 'media';
-	if (typeof src !== "string") {
-		filename = src.name || 'media';
-		src = src.toUrl();
-	}
-
 	const timeUpdate = () => {
 		// 自动更新时间显示
 		timeDisplay.textContent = `${formatDuration(audio.currentTime)} / ${formatDuration(audio.duration)}`;
@@ -23,14 +22,26 @@ export const AudioPlayer = ({src, autoplay}) => {
 		}
 	};
 
+	const audio = <audio preload="metadata"
+		onLoadedMetadata={timeUpdate} onTimeUpdate={timeUpdate}
+		onEnded={() => playBtn.className = "ri-play-fill"}
+	/>;
+
+	let filename = 'media';
+	if (typeof src !== "string") {
+		filename = src.name || 'media';
+		audio.src = src.toUrl();
+		$cleanup(audio, () => src.revokeUrl());
+	} else {
+		audio.src = src;
+	}
+
+	let playBtn, timeDisplay, progressBar, speedBtn;
+	let currentSpeedIndex = 0;
+
+
 	return (<div className="my-audio-player">
-			<audio ref={audio} src={src} preload="metadata"
-				   onLoadedMetadata={timeUpdate}
-				   onTimeUpdate={timeUpdate}
-				   onEnded={() => {
-					   playBtn.className = "ri-play-fill";
-				   }}
-			></audio>
+			{audio}
 			<button ref={playBtn} className={"ri-play-fill"} onClick={({target}) => {
 				if (audio.paused) {
 					audio.play();
@@ -63,12 +74,7 @@ export const AudioPlayer = ({src, autoplay}) => {
 				}}/>
 			</div>
 
-			<a href={src} className="download-btn ri-download-2-line" title={"下载"} download={filename} onClick={(e) => {
-				if (IS_ANDROID_BUILD && filename !== true) {
-					e.preventDefault();
-					webviewDownloadFile(src, filename);
-				}
-			}}></a>
+			<button className="download-btn ri-download-2-line" title="下载" onClick={() => downloadFile(src, filename)} />
 		</div>
 	);
 };

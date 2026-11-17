@@ -61,6 +61,7 @@ import {Icon_save} from "/src/components/Icons.jsx";
 
 import "./BasicRoleplay.css";
 import {HighlightBox} from "/src/components/TextDiff.jsx";
+import {openCharacterViewer} from "./page/characterViewer.js";
 
 compileSchema(schema);
 
@@ -347,7 +348,7 @@ charBar.prepend(
 		openWindow({
 			id: "charViewer",
 			title: "橘色卡管理器",
-			element: (await import("./page/characterViewer.js")).default()
+			element: openCharacterViewer
 		});
 	}} title="橘色卡管理器">
 		<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor">
@@ -1206,7 +1207,7 @@ const _LorebookPage = item => {
 	const el = <details className="lorebook" onToggle.once={() => {
 		const filename = analyze(content);
 		appendChildren(el, <>
-			<dl className="meta">
+			<dl className="lr-list">
 				{comment && <>
 					<dt>注释</dt>
 					<dd>{comment}</dd>

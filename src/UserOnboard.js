@@ -180,7 +180,7 @@ const steps = [
 		element: settingRow("accessToken"),
 		popover: {
 			title: "API 密钥",
-			description: "只保存在你自己的数据库里，不会上传。<br/>"
+			description: "只保存在你自己的数据库里。<br/>"
 				+ "「用户标识」「对话标识字段」这些一般留空就能用。",
 			nextBtnText: "接着填模型 →",
 			async onNextClick(element, step, {driver}) {
@@ -269,7 +269,7 @@ const steps = [
 		popover: {
 			title: "配置完成",
 			description: "点右上角 ✕ 关闭设置，回到输入框就能开始聊天了。<br/>"
-				+ "<b>想变强？</b>侧边栏底部可以打开文档和统计。",
+				+ "<b>想变强？</b>通用页面底部可以打开文档。",
 			doneBtnText: "开始使用",
 		},
 	},

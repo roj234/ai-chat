@@ -24,7 +24,6 @@ src/               前端主应用
   settings.js      GLOBAL_SETTINGS 与默认系统/标题提示词
   commands.js      `/` 斜杠指令注册表
   hooks.js         UI 依赖注入挂载点（DI）
-  customControls.js 输入框快捷控件
 
   conversation-lock.js 会话并发锁
   database.js      数据库抽象层（按 DB_MODE 选择本地/远程）

@@ -1,3 +1,7 @@
+import "/vendor/normalize.css";
+import "/vendor/remixicon/remixicon.css";
+import "./main.css";
+
 import {$derived, $update, $watch, appendChild, appendChildren, AS_IS, ONCE_EVENT, ref, unconscious} from 'unconscious';
 import {jsHide, prettyError, requestIdleCallback} from "./utils/utils.js";
 import {ConversationList} from "./components/ConversationList.jsx";
@@ -47,6 +51,19 @@ import {setBackHandler} from "../vendor/jsBridge.js";
 import {unmaximizeFocusedWindow} from "./components/Windows.jsx";
 
 const $ = sel => document.getElementById(sel);
+
+const playLoadedAnimation = () => {
+	console.log(performance.now());
+	const loading = $("loading");
+	if (!loading) return;
+
+	if (config.pausePolicy === PP_UNATTENDED) {
+		return loading.remove();
+	}
+	loading.classList.add("exiting");
+	loading.addEventListener("animationend", () => loading.remove());
+	setTimeout(() => loading.remove(), 600);
+};
 
 const createApp = () => {
 	/**
@@ -270,15 +287,7 @@ const createApp = () => {
 				} else {
 					databaseError(err);
 				}
-			}).finally(() => {
-				const loading = $("loading");
-				if (config.pausePolicy === PP_UNATTENDED) {
-					return loading.remove();
-				}
-				loading.classList.add("exiting");
-				loading.addEventListener("animationend", () => loading.remove());
-				setTimeout(() => loading.remove(), 600);
-			});
+			}).finally(playLoadedAnimation);
 
 			let hookGetMessages = AS_IS;
 			let prevId;
@@ -452,6 +461,9 @@ const connectDatabase = async () => {
 // Mount
 addEventListener("load", () => {
 	onPluginLoaded.then(async () => {
+		if (isIDB) playLoadedAnimation();
+		else EVENT_BUS.on('lea', playLoadedAnimation);
+
 		const [app, settings, messageContainer, onLoad_] = createApp();
 
 		const wrapper = $("app");

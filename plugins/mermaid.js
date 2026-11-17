@@ -2,11 +2,7 @@ import {registerCodeBlockRenderer} from "/src/markdown/markdown.js";
 import {getCurrentTheme} from "/src/states.js";
 import {PLACEHOLDERS} from "/src/utils/placeholder.js";
 
-PLACEHOLDERS['mdfmt'] += `
-- Render mermaid:
-   \`\`\`mermaid
-   [content]
-   \`\`\``;
+PLACEHOLDERS['mdfmt'] += `\n- Mermaid diagrams are supported (\`\`\`mermaid).`;
 
 export const registerMermaidRenderer = () => {
 	let mermaid;

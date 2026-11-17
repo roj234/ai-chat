@@ -23,6 +23,10 @@ import "./session-cache.js";
 import "./PresetFastSwitch.js";
 // 思考强度切换
 import "./thinking_slider/thinking-slider.js";
+// LLM调用统计
+import "./log_viewer/index.js";
+// 文档查看器
+import "./document_viewer.js";
 
 // AGENTS.md 支持
 import "./agent/agents-md.js";
@@ -30,7 +34,7 @@ import "./agent/agents-md.js";
 import "./agent/files.js";
 // 技能
 import "./agent/skills.js";
-// 文件预览（包含完整的VFS文件管理、预览、编辑，40-50KB）
+// 文件预览（包含完整的VFS文件管理、预览、编辑，70KB）
 import "./fileManager/index.js";
 
 // 预装工具
@@ -47,13 +51,15 @@ import "./tools/memories.js";
 // 对话建议
 import "./tools/followupSuggestions.js";
 // 图表
-import "./tools/chart.js";
+import "./tools/charts.js";
 // 上下文占用
 import "./tools/context_usage.js";
 // 角色扮演工具
 import "./rp_kit/interactive_simulation.js";
 // 预装管线（？）
 import "./rpg/example/Translator.js";
+// 时间感知
+import "./time-sense.js";
 
 // 内联代码的可选插件
 import {registerConfigSync} from "./configSync.js";
@@ -85,7 +91,7 @@ const plugins = [
 		name: "基础角色扮演",
 		description: "实现角色卡、世界书、预设等数据结构的导入和导出支持，以及请求体的构造，提供基础角色扮演能力",
 		defaultEnabled: true,
-		load: () => import("./rp_basic/BasicRoleplay.js")
+		load: () => import("./rp_basic/BasicRoleplay_i.js")
 	},
 	{
 		name: "Mermaid图表",
@@ -101,7 +107,7 @@ const plugins = [
 	},
 	{
 		name: "本地推理扩展",
-		description: "通过GUI加载和卸载Llama.cpp路由模式的模型",
+		description: "提供GUI加载和卸载Llama.cpp路由模式的模型",
 		load: () => import("./llamaCpp.js")
 	},
 	{
@@ -129,6 +135,12 @@ const plugins = [
 	{
 		name: "反输出审核",
 		load: () => import("./contentFilter.js")
+	},
+	{
+		name: "控制台",
+		load: () => import("./debugger.js"),
+		description: "显示一个交互式JS控制台，可以运行JS代码并查看控制台日志",
+		defaultEnabled: IS_ANDROID_BUILD,
 	},
 ];
 

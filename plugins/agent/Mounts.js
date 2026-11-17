@@ -734,9 +734,10 @@ export const callFileSystemFunc = (fs, func, parameters) => {
  * 根据路径选择文件系统
  * @param {string} path
  * @param {AiChat.Conversation} conv
+ * @param {boolean} [skipCreation]
  * @returns {Promise<[string, AiChat.FileSystemInstance, AiChat.Mount]>}
  */
-export const getFileSystem = async (path, conv) => {
+export const getFileSystem = async (path, conv, skipCreation) => {
 	if (path) {
 		if (path.startsWith("~/")) {
 			let end = path.indexOf('/', 2);
@@ -746,6 +747,7 @@ export const getFileSystem = async (path, conv) => {
 		}
 		if (path[0] === '/') throwDOMException("Absolute path is not allowed, it is confusing when interacting with multiple VFSs", FSE_NotAllowed);
 	}
+	if (skipCreation && !conv.fs_type) throwDOMException("FS not init");
 	const myfs = await createFileSystem(conv);
 	return [path, myfs, conv];
 };

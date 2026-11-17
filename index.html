@@ -7,14 +7,11 @@
     <meta name="description" content="AiChat – Chat/Agent/RP/Game, all in one static frontend.">
     <meta name="keywords" content="AI,chat,agent,roleplay">
     <meta name="referrer" content="no-referrer">
-    <link rel="stylesheet" href="vendor/normalize.css" />
-    <link rel="stylesheet" href="vendor/remixicon/remixicon.css" />
-    <link rel="stylesheet" href="src/main.css" />
     <link rel="preload" as="font" crossorigin href="vendor/remixicon/remixicon.woff2" />
     <link rel="manifest" href="manifest.json" />
     <link rel="icon" href="media/icon.svg" />
-    <script type="module" src="src/main.js" async></script>
     <script>document.querySelector(":root").setAttribute("data-theme", matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')</script>
+    <script type="module" src="src/main.js"></script>
 </head>
 <body class="app" id="app">
 {{loading}}

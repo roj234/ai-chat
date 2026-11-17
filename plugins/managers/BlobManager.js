@@ -1,7 +1,8 @@
 import {$asyncState, $computed, $foreach, $state, $update, $watch, unconscious} from "unconscious";
 import SimpleModal from "/src/components/SimpleModal.jsx";
 import {formatSize, prettyTime} from "unconscious/common/Utils.js";
-import {copyWithAnimation, deleteWithDrawback, showImageZoomView} from "/src/utils/utils.js";
+import {copyWithAnimation, deleteWithDrawback} from "/src/utils/utils.js";
+import {callPreviewImage} from "/src/utils/preview-bridge.js";
 import {requestBackend, u_deleteBlob} from "/src/database/remoteDB.js";
 import {remoteDBUrl} from "/src/database.js";
 import {openWindow} from "/src/components/Windows.jsx";
@@ -130,7 +131,7 @@ const container = <>
 
 				return <tr>
 					<td><input className={"row-check" + (item.name ? " named" : "")} type="checkbox" _value={item} onChange={updateSelected} /></td>
-					<td className={"_pv"}>{isImg ? <img src={url} loading="lazy" referrerpolicy={"no-referrer"} onClick={() => showImageZoomView(url, item.name || item.hash)}/> : '-'}</td>
+					<td className={"_pv"}>{isImg ? <img src={url} loading="lazy" referrerpolicy={"no-referrer"} onClick={() => callPreviewImage(url, item.name || item.hash)}/> : '-'}</td>
 					<td className={"_info"}>
 						<a style={"display:flex;gap:8px"} href={url} rel={"noopener noreferrer"} target={"_blank"} title={"下载"}>
 							<i className={"ri-download-2-line"}></i>

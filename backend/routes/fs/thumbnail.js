@@ -212,10 +212,12 @@ export class ThumbnailManager {
         const row = this.db.prepare('SELECT data FROM thumbs WHERE path = ?').get(path);
         if (row) return Buffer.from(row.data.buffer, row.data.byteOffset, row.data.byteLength);
 
-        if (this.inflight.has(path)) return this.inflight.get(path);
+        const taskId = this.size+'\0'+path;
+
+        if (this.inflight.has(taskId)) return this.inflight.get(taskId);
 
         while (this.inflight.size >= this._threads)
-            await this.inflight.values().next().value;
+            await Promise.race(this.inflight.values());
 
         const p = (async () => {
             try {
@@ -223,11 +225,11 @@ export class ThumbnailManager {
                 this._insert(path, blob);
                 return blob;
             } finally {
-                this.inflight.delete(path);
+                this.inflight.delete(taskId);
             }
         })();
 
-        this.inflight.set(path, p);
+        this.inflight.set(taskId, p);
         return p;
     }
 

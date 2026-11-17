@@ -161,6 +161,17 @@ const safelyRemoveLastMessage = (messages, resp) => {
 };
 
 /**
+ * 切掉类似 :nitro 之类的文本
+ * @param {string} name
+ * @return {string}
+ */
+const cleanModelName = name => {
+	const pos1 = name.indexOf(':');
+	return pos1 < 0 ? name : name.substring(0, pos1);
+}
+
+
+/**
  *
  * @param {AiChat.Conversation} conversation
  * @param {import("unconscious").Reactive<AiChat.Message[]>} messages
@@ -1177,7 +1188,7 @@ async function buildCompletionPayload(
 	let isPrefill;
 	if (assistantMessage) {
 		const lastModel = assistantMessage.model;
-		if (lastModel && lastModel !== config.model && config.pausePolicy > PP_UNATTENDED) {
+		if (lastModel && cleanModelName(lastModel) !== cleanModelName(config.model) && config.pausePolicy > PP_UNATTENDED) {
 			await new Promise((resolve, reject) => {
 				SimpleModal({
 					title: "你是否主动切换了模型？",

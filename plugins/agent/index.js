@@ -7,6 +7,9 @@ export {getSkillCache} from "./skills.js";
 
 import {VHandle} from "./VirtualFileSystem.js";
 import {createWebFileSystem} from "./WebFSDriver.js";
+import {unconscious} from "unconscious";
+import {EVENT_BUS, selectedConversation} from "/src/states.js";
+import {callFileSystemFunc, FS_SOURCE, getFileSystem} from "./Mounts.js";
 
 /**
  *
@@ -15,3 +18,30 @@ import {createWebFileSystem} from "./WebFSDriver.js";
  * @return {Promise<AiChat.FileSystemInstance>}
  */
 export const createVirtualFileSystem = (map, options) => createWebFileSystem(new VHandle(map), options);
+
+export const SW_VFS_TYPES = new Set(['local', 'opfs', 'db', 'api']);
+
+/**
+ *
+ * @param {AiChat.FileSystemInstance} fs
+ * @param {string} path
+ * @return {?string}
+ */
+export const resolveVirtualUrl = (fs, path) => {
+	const sw = navigator.serviceWorker?.controller;
+	const mount = fs[FS_SOURCE];
+	if (sw && mount && SW_VFS_TYPES.has(mount.fs_type)) return "vfs/"+(mount.fs_type+'@'+encodeURIComponent(mount.fs_base||'')+"@"+encodeURIComponent(mount.fs_server||''))+"/"+encodeURIComponent(path).replaceAll("%2F", "/");
+};
+
+EVENT_BUS.on('resolveUrl', async (path, _, fs) => {
+	if (fs == null) {
+		const conv = unconscious(selectedConversation);
+		if (!conv) return;
+		[path, fs] = await getFileSystem(path, conv, true);
+	}
+
+	const url = new URL(path, 'http://0');
+	const realpath = decodeURIComponent(url.pathname.slice(1));
+	const fsType = fs[FS_SOURCE].fs_type;
+	return (fsType !== 'local' && fsType !== 'opfs' && resolveVirtualUrl(fs, realpath)) || callFileSystemFunc(fs, 'readRaw', { path: realpath });
+});

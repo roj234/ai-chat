@@ -59,11 +59,10 @@ export const GLOBAL_SETTINGS = [
 	{
 		name: "© 2025-2026 Roj234, Made with ❤",
 		_order: 99, // 总是最后一个
+		_id: "aux",
 		type: "element",
 		element: <div className={"choice-scroll"}>
-			<a target={"_blank"} href={"https://github.com/roj234/ai-chat"}>项目地址</a>
-			<a target={"_blank"} href={"log_viewer.html"}>统计</a>
-			<a target={"_blank"} href={"docs.html"}>文档</a>
+			<a target="_blank" href={"https://github.com/roj234/ai-chat"}><i className="ri-external-link-line" />项目主页</a>
 		</div>,
 	},
 	//model

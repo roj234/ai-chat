@@ -34,7 +34,7 @@ export function SafeImage({src, title = "", external, fs}) {
 			}
 
 			if (!state.value) {
-				let safe = url.startsWith("blob:") || url.startsWith("data:");
+				let safe = typeof url !== 'string' || url.startsWith("blob:") || url.startsWith("data:");
 				if (!external && !safe && !/^https?:\/\//i.test(url)) {
 					const tmp = EVENT_BUS.post(['resolveUrl'], url, fs);
 					if (tmp instanceof Promise) {
@@ -80,9 +80,16 @@ export function SafeImage({src, title = "", external, fs}) {
 			if (state.value === "loading") {
 				image = <img
 					referrerPolicy="no-referrer"
-					src={url} title={title}
-					onLoad={() => state.value = "loaded"}
-					onError={() => state.value = "error"}
+					alt={title}
+					src={typeof url === 'string' ? url : url.toUrl()} title={title}
+					onLoad={() => {
+						state.value = "loaded";
+						url.revokeUrl?.();
+					}}
+					onError={() => {
+						state.value = "error";
+						url.revokeUrl?.();
+					}}
 				/>
 
 				return loadingBlock("图像加载中……");

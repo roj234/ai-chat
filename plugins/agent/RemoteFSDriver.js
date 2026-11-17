@@ -100,7 +100,7 @@ export const createRemoteFileSystem = (baseUrl, pat, fileBase) =>
 		}
 
 		let method, stream, signal;
-		if (func.endsWith("Raw") && parameters) {
+		if ((func === 'thumb' || func.endsWith("Raw")) && parameters) {
 			// Append extra params as query string
 			const sep = endpoint.includes('?') ? '&' : '?';
 			endpoint += sep + 'path='+encodeURIComponent(parameters.path);
@@ -154,7 +154,7 @@ export const createRemoteFileSystem = (baseUrl, pat, fileBase) =>
 			}
 		}
 
-		if (mime === "application/octet-stream" || func === 'readRaw') return stream ? response : await response.blob();
+		if (mime === "application/octet-stream" || func === 'readRaw' || func === 'thumb') return stream ? response : await response.blob();
 		if (mime.startsWith("image/")) return new ContentPart().image(await response.blob());
 		if (mime.includes("application/json")) return await response.json();
 		return await response.text() || "Success";

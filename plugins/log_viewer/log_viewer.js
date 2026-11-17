@@ -1,11 +1,16 @@
-import {$foreach, $state, ONCE_EVENT} from "unconscious";
-import Chart from "/plugins/tools/chart.async.js";
+import {unconscious} from "unconscious";
+import Chart from "/common/Chart.js";
 import {formatDate} from "unconscious/common/Utils.js";
-import {isIDB, listBillingLogs} from "../database.js";
-import {requestBackend} from "../database/remoteDB.js";
+import {isIDB, listBillingLogs} from "/src/database.js";
+import {requestBackend} from "/src/database/remoteDB.js";
 import {LLM_COST_SCALE} from "/backend/sync.js";
-import {showToast} from "../components/Toast.js";
-import {highlightJsonLike} from "../markdown/highlight.js";
+import {highlightJsonLike} from "/src/markdown/highlight.js";
+import {openWindow} from "/src/components/Windows.jsx";
+import {prettyError} from "/src/utils/utils.js";
+import {VirtualList} from "unconscious/common/VirtualList.js";
+import {EVENT_BUS} from "/src/states.js";
+
+import "./log_viewer.css";
 
 // ============ STATE ============
 let allLogs = [];
@@ -58,21 +63,22 @@ function normalizeCachedLog(log) {
 /**
  * @type {HTMLElement}
  */
-let $tableBody, $tableScroll, $paginationInfo,
-	$paginationBtns, $resultsCount, $refreshIndicator,
-	$toast, $startDate, $endDate, $filterProvider,
+let $presetBtns,
+	$tableBody, $tableScroll, $paginationInfo,
+	$refreshIndicator,
+	$startDate, $endDate, $filterProvider,
 	$filterModel, $filterFinishReason, $autoRefreshBtn,
 	chartCostSubtitle, chartTokenSubtitle, costChart, statAvgDuration,
 	statAvgTTFT, statCachedTokens, statCachedTokensSub, statInputTokens,
 	statInputTokensSub, statOutputTokens, statReasoningTokens, statTotalCost,
 	statTotalCostSub, statTotalRequests, tokenChart;
 
-
 // ============ UTILS ============
 const formatNumber = n => {
 	if (n == null || isNaN(n)) return '—';
-	if (Math.abs(n) >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M';
-	if (Math.abs(n) >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+	if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(2) + 'G';
+	if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M';
+	if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
 	return n.toLocaleString('en-US', { maximumFractionDigits: 0 });
 };
 
@@ -98,27 +104,23 @@ const formatTime = ts => {
 
 function getFinishBadge(reason) {
 	const r = reason.toLowerCase();
-	if (r === 'stop' || r === 'end_turn') return <span className="badge success">stop</span>;
-	if (r === 'length' || r === 'max_tokens') return <span className="badge warning">length</span>;
-	if (r.includes('tool')) return <span className="badge info">{reason}</span>;
-	if (r === 'error' || r === 'content_filter') return <span className="badge error">{reason}</span>;
-	return <span className="badge neutral">{reason}</span>;
-}
-
-function showToast_(msg, isError = false) {
-	showToast(msg, isError ? 'error': '', 2500);
+	if (r === 'stop' || r === 'end_turn') return <span className="badge -s">stop</span>;
+	if (r === 'length' || r === 'max_tokens') return <span className="badge -w">length</span>;
+	if (r.includes('tool')) return <span className="badge -i">{reason}</span>;
+	if (r === 'error' || r === 'content_filter') return <span className="badge -e">{reason}</span>;
+	return <span className="badge">{reason}</span>;
 }
 
 // ============ TIME RANGE ============
 const getTimeRange = () => [+new Date($startDate.value), +new Date($endDate.value)];
 
 const clearActivePresetBtn = () => {
-	document.querySelector('#presetBtns .btn-active')?.classList.remove('btn-active');
+	$presetBtns.querySelector('.btn-active')?.classList.remove('btn-active');
 };
 
 const setPresetRange = range => {
 	clearActivePresetBtn();
-	document.querySelector(`#presetBtns [data-range="${range}"]`)?.classList.add('btn-active');
+	$presetBtns.querySelector(`[data-range="${range}"]`)?.classList.add('btn-active');
 
 	const n = parseInt(range, 10);
 	const type = range[range.length - 1].toLowerCase();
@@ -234,9 +236,9 @@ function updateFilters() {
 	const currentFR = $filterFinishReason.value;
 
 	const mapToOption = p => <option value={p}>{p}</option>;
-	$filterProvider.replaceChildren(<option value="">全部渠道</option>, ...[...providers].sort().map(mapToOption));
-	$filterModel.replaceChildren(<option value="">全部模型</option>, ...[...models].sort().map(mapToOption));
-	$filterFinishReason.replaceChildren(<option value="">全部状态</option>, ...[...finishReasons].sort().map(mapToOption));
+	$filterProvider.replaceChildren(<option value="">渠道</option>, ...[...providers].sort().map(mapToOption));
+	$filterModel.replaceChildren(<option value="">模型</option>, ...[...models].sort().map(mapToOption));
+	$filterFinishReason.replaceChildren(<option value="">状态</option>, ...[...finishReasons].sort().map(mapToOption));
 
 	$filterProvider.value = providers.has(currentProv) ? currentProv : '';
 	$filterModel.value = models.has(currentModel) ? currentModel : '';
@@ -255,7 +257,6 @@ const applyFilters = () => {
 		return true;
 	});
 
-	$resultsCount.textContent = `共 ${filteredLogs.length} 条记录`;
 	updateStats();
 	updateCharts();
 
@@ -299,24 +300,19 @@ function updateStats() {
 	const totalCost = logs.reduce((s, l) => s + (l.cost || 0), 0);
 	const avgDuration = total > 0 ? logs.reduce((s, l) => s + (l.duration || 0), 0) / total : 0;
 	const avgTTFT = total > 0 ? logs.reduce((s, l) => s + (l.latency || 0), 0) / total : 0;
-	const cacheHitRate = (inputTokens + cachedTokens) > 0 ? cachedTokens / (inputTokens + cachedTokens) *
-		100 : 0;
+	const cacheHitRate = (inputTokens + cachedTokens) > 0 ? cachedTokens / (inputTokens + cachedTokens) * 100 : 0;
 
 	statTotalRequests.textContent = formatNumber(total);
 	statInputTokens.textContent = formatNumber(inputTokens);
-	statInputTokensSub.textContent = outputTokens > 0 ?
-		`平均每次 ${formatNumber(Math.round(inputTokens / total))}↑ ${formatNumber(Math.round(outputTokens / total))}↓` : '';
+	statInputTokensSub.textContent = outputTokens > 0 ? `每次 ${formatNumber(Math.round(inputTokens / total))}↑ ${formatNumber(Math.round(outputTokens / total))}↓` : '';
 	statOutputTokens.textContent = formatNumber(outputTokens);
-
 	statReasoningTokens.textContent = `${formatNumber(reasoningTokens)}`;
-
 	statTotalCost.textContent = '¥'+totalCost.toFixed(2);
-	statTotalCostSub.textContent = total > 0 ? `平均每次 ${formatCostTbl(totalCost / total, 'CNY')}` : '';
+	statTotalCostSub.textContent = total > 0 ? `每次 ${formatCostTbl(totalCost / total, 'CNY')}` : '';
 	statAvgDuration.textContent = formatDuration(avgDuration);
 	statAvgTTFT.textContent = formatDuration(avgTTFT);
 	statCachedTokens.textContent = formatNumber(cachedTokens);
-	statCachedTokensSub.textContent =
-		`缓存命中: ${cacheHitRate.toFixed(1)}% | 写入: ${formatNumber(cacheWriteTokens)}`;
+	statCachedTokensSub.textContent = `缓存读: ${cacheHitRate.toFixed(1)}% | 写: ${formatNumber(cacheWriteTokens)}`;
 }
 
 // ============ CHARTS ============
@@ -590,89 +586,54 @@ function updateCharts() {
 	});
 }
 
-let renderStartIndex;
-const renderLogs = $state();
-let foreachTable = $foreach(renderLogs, (log, i) => {
-	const currency = log.currency || 'USD';
-	const totalTok = (log.input_tokens || 0) + (log.output_tokens || 0) + (log.cached_tokens || 0);
-	const cachedInfo = log.cached_tokens ?
-		<span style="color:#3cc8c8" title="缓存命中">{formatNumber(log.cached_tokens)}</span> : '—';
+const vl = new VirtualList({
+	overscan: 1000,
+	renderer(log, i) {
+		const currency = log.currency || 'USD';
+		const totalTok = (log.input_tokens || 0) + (log.output_tokens || 0) + (log.cached_tokens || 0);
+		const cachedInfo = log.cached_tokens ? <span style="color:#3cc8c8" title="缓存命中">{formatNumber(log.cached_tokens)}</span> : '—';
 
-	const makeDetails = () => <tr className="expand-row-detail">
-		<td colSpan="11">
-			<pre dangerouslySetInnerHTML={highlightJsonLike(log)} style={"margin:0"} />
-		</td>
-	</tr>;
+		const makeDetails = () => <div className="expand-row-detail" onClick.stop={() => {}}>
+			<pre dangerouslySetInnerHTML={highlightJsonLike(log)} />
+		</div>;
 
-	const self = <tr onClick={() => toggleRow(log, self, makeDetails)}>
-		<td className="text-secondary mono" style="font-size:12px">{formatTime(log.time)}</td>
-		<td><span style="font-weight:500;color:#c8d0dc">{log.provider || '—'}</span></td>
-		<td className="mono" style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;"
-			title={log.model}>{log.model}</td>
-		<td className="mono" style="text-align:right;color:#8ab4f8">{formatNumber(log.input_tokens)}</td>
-		<td className="mono" style="text-align:right;color:#6ddb9e">{formatNumber(log.output_tokens)}</td>
-		<td className="mono" style="text-align:right;font-weight:600;color:#e8ecf1">{formatNumber(totalTok)}</td>
-		<td className="mono" style="text-align:right;font-size:12px">{cachedInfo}</td>
-		<td className="mono"
-			style="text-align:right;font-weight:600;color:#f0c060">{formatCostTbl(log.cost, currency)}</td>
-		<td className="mono" style="text-align:right;color:#e0a870">{log.duration == null ? "非流" : formatDuration(log.duration)}</td>
-		<td className="mono" style="text-align:right;color:#e890b0">{formatDuration(log.latency)}</td>
-		<td style="text-align:center">{getFinishBadge(log.finish_reason)}</td>
-	</tr>;
-	return self;
+		const self = <div className={"vt-row" + (i & 1 ? ' -d' : '')} onClick={() => toggleRow(log, self, makeDetails)}>
+			<div className="text-secondary mono" style="font-size:12px">{formatTime(log.time)}</div>
+			<div><span style="font-weight:500;color:#c8d0dc">{log.provider || '—'}</span></div>
+			<div className="mono ellipsis" title={log.model}>{log.model}</div>
+			<div className="mono" style="text-align:right;color:#8ab4f8">{formatNumber(log.input_tokens)}</div>
+			<div className="mono" style="text-align:right;color:#6ddb9e">{formatNumber(log.output_tokens)}</div>
+			<div className="mono" style="text-align:right;font-weight:600;color:#e8ecf1">{formatNumber(totalTok)}</div>
+			<div className="mono" style="text-align:right">{cachedInfo}</div>
+			<div className="mono" style="text-align:right;font-weight:600;color:#f0c060">{formatCostTbl(log.cost, currency)}</div>
+			<div className="mono" style="text-align:right;color:#e0a870">{log.duration == null ? "非流" : formatDuration(log.duration)}</div>
+			<div className="mono" style="text-align:right;color:#e890b0">{formatDuration(log.latency)}</div>
+			<div style="text-align:center">{getFinishBadge(log.finish_reason)}</div>
+		</div>;
+		return self;
+	},
 });
 
 // ============ TABLE ============
 function renderTable() {
-	const startIdx = (currentPage - 1) * pageSize;
-	const pageLogs = filteredLogs.slice(startIdx, startIdx + pageSize);
-	const totalPages = Math.max(1, Math.ceil(filteredLogs.length / pageSize));
-
 	if (filteredLogs.length === 0) {
 		$tableBody.replaceChildren(
-			<tr>
-				<td colspan="11">
-					<div class="state-message">
-						<div class="state-icon">📭</div>
-						<div class="state-title">暂无数据</div>
-						<div class="state-desc">所选时间范围内没有匹配的调用日志</div>
-					</div>
-				</td>
-			</tr>
+			<div className="state-message">
+				<div className="state-icon">📭</div>
+				<div className="state-title">暂无数据</div>
+				<div className="state-desc">所选时间范围内没有匹配的调用日志</div>
+			</div>
 		);
+		vl.destroy();
 	} else {
-		renderStartIndex = startIdx;
-		renderLogs.value = pageLogs;
-		$tableBody.replaceChildren(foreachTable);
+		$tableBody.replaceChildren();
+		vl.dom = $tableBody;
+		vl.attach($tableBody.closest('.main-container'));
+		vl.setItems(unconscious(filteredLogs));
 	}
-
-	// Pagination
-	$paginationInfo.textContent = filteredLogs.length > 0 ?
-		`显示 ${startIdx + 1}–${Math.min(startIdx + pageSize, filteredLogs.length)} / 共 ${filteredLogs.length} 条` :
-		'无数据';
-
-	let pagBtnsHtml = [];
-	pagBtnsHtml.push(<button className="page-btn" onClick={goToPage.bind(null, currentPage - 1)}
-							 disabled={currentPage <= 1}>◀</button>);
-	const maxVisible = 5;
-	let pStart = Math.max(1, currentPage - Math.floor(maxVisible / 2));
-	let pEnd = Math.min(totalPages, pStart + maxVisible - 1);
-	if (pEnd - pStart < maxVisible - 1) pStart = Math.max(1, pEnd - maxVisible + 1);
-	if (pStart > 1) pagBtnsHtml.push(<button className="page-btn" onClick={goToPage.bind(null, 1)}>1</button>);
-	if (pStart > 2) pagBtnsHtml.push(<span style="padding:0 4px;color:#6b7385">…</span>);
-	for (let p = pStart; p <= pEnd; p++) {
-		pagBtnsHtml.push(<button className={`page-btn` + (p === currentPage ? ' active' : '')}
-								 onClick={goToPage.bind(null, p)}>{p}</button>);
-	}
-	if (pEnd < totalPages - 1) pagBtnsHtml.push(<span style="padding:0 4px;color:#6b7385">…</span>);
-	if (pEnd < totalPages) pagBtnsHtml.push(<button className="page-btn"
-													onClick={goToPage.bind(null, totalPages)}>{totalPages}</button>);
-	pagBtnsHtml.push(<button className="page-btn" onClick={goToPage.bind(null, currentPage + 1)}
-							 disabled={currentPage >= totalPages}>▶</button>);
-	$paginationBtns.replaceChildren(...pagBtnsHtml);
 
 	// Update sort header
-	document.querySelectorAll('thead th.sortable').forEach(th => {
+	$tableScroll.querySelectorAll(' .vt-head > .sortable').forEach(th => {
 		const field = th.dataset.sort;
 		th.classList.toggle('sorted', field === currentSort.field);
 		const arrow = th.querySelector('.sort-arrow');
@@ -699,23 +660,13 @@ const toggleRow = async (log, row, makeDetails) => {
 			}
 		}
 		const newEl = makeDetails();
-		row.insertAdjacentElement("afterend", newEl);
+		row.insertAdjacentElement("beforeend", newEl);
 		newEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
 	} else {
-		row.nextElementSibling.remove();
+		row.lastElementChild.remove();
 	}
 };
 
-const goToPage = page => {
-	const totalPages = Math.max(1, Math.ceil(filteredLogs.length / pageSize));
-	currentPage = Math.max(1, Math.min(page, totalPages));
-	renderTable();
-	$tableScroll.scrollTop = 0;
-};
-
-document.addEventListener("visibilitychange", ev => {
-	document.visibilityState === 'visible' && refreshData(true);
-});
 
 const refreshData = async (auto) => {
 	$refreshIndicator.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #6b7385;border-top-color:#4d94ff;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:4px;"></span> 加载中...';
@@ -727,165 +678,127 @@ const refreshData = async (auto) => {
 			allLogs = processLogs(logs);
 			updateFilters();
 			applyFilters();
-			showToast_(`成功加载 ${logs.length} 条日志`);
 		}
 		const now = new Date();
-		$refreshIndicator.innerHTML = `更新于 ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+		$refreshIndicator.innerHTML = allLogs.length+` 条记录, 更新于 ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
 	} catch (err) {
 		console.error('获取日志失败:', err);
 		$refreshIndicator.innerHTML = '<span style="color:#e0556a">⚠ 加载失败</span>';
-		showToast_('加载失败: ' + err.message, true);
 		if (allLogs.length === 0) {
-			$tableBody.replaceChildren(<tr>
-				<td colSpan="11">
-					<div className="state-message">
-						<div className="state-icon">⚠️</div>
-						<div className="state-title">加载失败</div>
-						<div className="state-desc">{err.message}</div>
-						<button className="btn btn-sm btn-primary" onClick={refreshData} style="margin-top:8px">🔄
-							重试
-						</button>
-					</div>
-				</td>
-			</tr>);
-			statTotalRequests.textContent =
-			statInputTokens.textContent =
-			statOutputTokens.textContent =
-			statTotalCost.textContent =
-			statAvgDuration.textContent =
-			statAvgTTFT.textContent =
-			statCachedTokens.textContent = '—';
+			$tableBody.replaceChildren(
+				<div className="state-message">
+					<div className="state-icon">⚠️</div>
+					<div className="state-title">加载失败</div>
+					<div className="state-desc">{prettyError(err)}</div>
+					<button className="ri-loop-right-line ghost" onClick={refreshData}>重试</button>
+				</div>
+			);
 		}
 	}
 };
 
 // ============ EVENT LISTENERS ============
 
-const topBar = () => {
-	return (
-		<div className="top-bar">
-			<span className="top-bar-label">时间范围</span>
-			<div className="btn-group" id="presetBtns" onClick.delegate{"button"}={({delegateTarget: btn}) => {
-				const range = btn.dataset.range;
-				if (range) setPresetRange(range);
-			}}>
-				<button className="btn btn-sm" data-range="1h">1小时</button>
-				<button className="btn btn-sm" data-range="24h">24小时</button>
-				<button className="btn btn-sm" data-range="1d">今天</button>
-				<button className="btn btn-sm" data-range="7d">7天</button>
-				<button className="btn btn-sm" data-range="1m">本月</button>
+const createLogViewer = () => {
+	return {
+		onFocus(focused) {
+			if (focused) refreshData(true);
+		},
+		element: <>
+			<div className="top-bar row">
+				<b className="-label">时间范围</b>
+				<div className="btn-group" ref={$presetBtns} onClick.delegate{"button"}={({delegateTarget: btn}) => {
+					const range = btn.dataset.range;
+					if (range) setPresetRange(range);
+				}}>
+					<button className="btn" data-range="1h">1小时</button>
+					<button className="btn" data-range="24h">24小时</button>
+					<button className="btn" data-range="1d">今天</button>
+					<button className="btn" data-range="7d">7天</button>
+					<button className="btn" data-range="1m">本月</button>
+				</div>
+				<div>
+					<input type="datetime-local" className="-date" ref={$startDate} title="开始时间"
+						   onChange={() => {
+							   clearActivePresetBtn();
+							   refreshData();
+						   }}
+					/>
+					<span className="-sep">—</span>
+					<input type="datetime-local" className="-date" ref={$endDate} title="结束时间"
+						   onChange={() => {
+							   clearActivePresetBtn();
+							   refreshData();
+						   }}
+					/>
+				</div>
+				<span className="spacer"/>
+				<span className="refresh-indicator" ref={$refreshIndicator}></span>
+				<button className="btn" onClick={({target}) => {
+					target.disabled = true;
+					(isIDB ? refreshData() : fetchPrices().then(refreshData)).finally(() => {
+						target.disabled = false;
+					})
+				}}><i className="ri-loop-right-line" /> 刷新</button>
 			</div>
-			<input type="datetime-local" className="date-input" ref={$startDate} title="开始时间"
-				   onChange={() => {
-					   clearActivePresetBtn();
-					   refreshData();
-				   }}
-			/>
-			<span className="date-separator">—</span>
-			<input type="datetime-local" className="date-input" ref={$endDate} title="结束时间"
-				   onChange={() => {
-					   clearActivePresetBtn();
-					   refreshData();
-				   }}
-			/>
-			<span className="top-bar-spacer"></span>
-			<span className="refresh-indicator" ref={$refreshIndicator}></span>
-			<button className="btn btn-sm" onClick={({target}) => {
-				target.disabled = true;
-				(isIDB ? refreshData() : fetchPrices().then(refreshData)).finally(() => {
-					target.disabled = false;
-				})
-			}} title="刷新数据">
-				<span>🔄</span> 刷新
-			</button>
-		</div>
-	);
-}
-const statsGrid = () => {
-	return (
-		<div className="stats-grid">
-			<div className="stat-card">
-				<div className="stat-icon stat-icon-blue">📊</div>
-				<div className="stat-label">调用次数</div>
-				<div className="stat-value" ref={statTotalRequests}>—</div>
-				<div className="stat-sub" ref={statInputTokensSub}></div>
-			</div>
-			<div className="stat-card">
-				<div className="stat-icon stat-icon-green">📥</div>
-				<div className="stat-label">输入 Tokens</div>
-				<span className="stat-value" title={"未缓存输入"} ref={statInputTokens}>—</span>/<span title={"缓存输入"} ref={statCachedTokens}>—</span>
-				<div className="stat-sub" ref={statCachedTokensSub}></div>
-			</div>
-			<div className="stat-card">
-				<div className="stat-icon stat-icon-purple">📤</div>
-				<div className="stat-label">输出 Tokens</div>
-				<span className="stat-value" title={"总输出"} ref={statOutputTokens}>—</span>/<span title={"思考"} ref={statReasoningTokens}>—</span>
-			</div>
-			<div className="stat-card">
-				<div className="stat-icon stat-icon-cyan">💰</div>
-				<div className="stat-label">范围内成本</div>
-				<div className="stat-value" ref={statTotalCost}>—</div>
-				<div className="stat-sub" ref={statTotalCostSub}></div>
-			</div>
-			<div className="stat-card">
-				<div className="stat-icon stat-icon-pink">⚡</div>
-				<div className="stat-label">平均延迟 (TTFT)</div>
-				<div className="stat-value" ref={statAvgTTFT}>—</div>
-			</div>
-			<div className="stat-card">
-				<div className="stat-icon stat-icon-orange">⏳</div>
-				<div className="stat-label">平均耗时 (Duration)</div>
-				<div className="stat-value" ref={statAvgDuration}>—</div>
-			</div>
-		</div>
-	);
-}
-const chartCard = () => {
-	return (
-		<div className="charts-row">
-			<div className="chart-card">
-				<div className="chart-header">
-					<div>
-						<div className="chart-title">Token 使用趋势</div>
-						<div className="chart-subtitle" ref={chartTokenSubtitle}>按时间段聚合</div>
+
+			<div className="main-container">
+				<div className="stats-grid">
+					<div className="stat-card">
+						<div className="-label"><div className="-icon -blue ri-bar-chart-box-line" />调用次数</div>
+						<div className="-value" ref={statTotalRequests}>—</div>
+						<div className="-sub" ref={statInputTokensSub}></div>
+					</div>
+					<div className="stat-card">
+						<div className="-label"><div className="-icon -green ri-arrow-up-line" />输入 Tokens</div>
+						<span className="-value" title={"未缓存输入"} ref={statInputTokens}>—</span>/<span
+						title={"缓存输入"} ref={statCachedTokens}>—</span>
+						<div className="-sub" ref={statCachedTokensSub}></div>
+					</div>
+					<div className="stat-card">
+						<div className="-label"><div className="-icon -purple ri-arrow-down-line" />输出 Tokens</div>
+						<span className="-value" title={"总输出"} ref={statOutputTokens}>—</span>/<span
+						title={"思考"} ref={statReasoningTokens}>—</span>
+					</div>
+					<div className="stat-card">
+						<div className="-label"><div className="-icon -cyan ri-money-dollar-circle-line" />成本</div>
+						<div className="-value" ref={statTotalCost}>—</div>
+						<div className="-sub" ref={statTotalCostSub}></div>
+					</div>
+					<div className="stat-card">
+						<div className="-label"><div className="-icon -pink ri-flashlight-fill" />首字延迟</div>
+						<div className="-value" ref={statAvgTTFT}>—</div>
+					</div>
+					<div className="stat-card">
+						<div className="-label"><div className="-icon -orange ri-timer-line" />耗时</div>
+						<div className="-value" ref={statAvgDuration}>—</div>
 					</div>
 				</div>
-				<div className="chart-wrapper">
-					<canvas ref={tokenChart}></canvas>
-				</div>
-			</div>
-			<div className="chart-card">
-				<div className="chart-header">
-					<div>
-						<div className="chart-title">成本 & 调用趋势</div>
-						<div className="chart-subtitle" ref={chartCostSubtitle}>按时间段聚合</div>
+
+				<div className="charts-row">
+					<div className="chart-card">
+						<div className="-header">
+							<div className="-title">Token 使用趋势</div>
+							<div className="-subtitle" ref={chartTokenSubtitle}>按时间段聚合</div>
+						</div>
+						<div className="-wrapper">
+							<canvas ref={tokenChart}></canvas>
+						</div>
+					</div>
+					<div className="chart-card">
+						<div className="-header">
+							<div className="-title">成本 & 调用趋势</div>
+							<div className="-subtitle" ref={chartCostSubtitle}>按时间段聚合</div>
+						</div>
+						<div className="-wrapper">
+							<canvas ref={costChart}></canvas>
+						</div>
 					</div>
 				</div>
-				<div className="chart-wrapper">
-					<canvas ref={costChart}></canvas>
-				</div>
-			</div>
-		</div>
-	);
-}
-const filterRow = () => {
-	return (
-		<div className="filters-row">
-			<span className="filter-label">筛选：</span>
-			<select className="filter-select" ref={$filterProvider} onChange={applyFilters}></select>
-			<select className="filter-select" ref={$filterModel} onChange={applyFilters}></select>
-			<select className="filter-select" ref={$filterFinishReason} onChange={applyFilters}></select>
-			<span className="results-count" ref={$resultsCount}></span>
-		</div>
-	);
-}
-const tableScroll = () => {
-	return (
-		<div className="table-container">
-			<div className="table-scroll" ref={$tableScroll}>
-				<table>
-					<thead>
-					<tr onClick.delegate{"th.sortable"}={({delegateTarget: th}) => {
+
+				<div className="table-container">
+					<div className="vt table-scroll" ref={$tableScroll}>
+						<div className="vt-head" onClick.delegate{".sortable"}={({delegateTarget: th}) => {
 							const field = th.dataset.sort;
 							if (currentSort.field === field) {
 								currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
@@ -894,59 +807,46 @@ const tableScroll = () => {
 								currentSort.direction = 'desc';
 							}
 							applySort();
-						}
-					}>
-						<th className="sortable" data-sort="time" style="min-width:140px">时间 <span
-							className="sort-arrow">▾</span></th>
-						<th data-sort="provider">渠道</th>
-						<th data-sort="model">模型</th>
-						<th className="sortable" data-sort="input_tokens" style="text-align:right">输入 <span
-							className="sort-arrow">▾</span></th>
-						<th className="sortable" data-sort="output_tokens" style="text-align:right">输出 <span
-							className="sort-arrow">▾</span></th>
-						<th className="sortable" data-sort="total_tokens" style="text-align:right">总计 <span
-							className="sort-arrow">▾</span></th>
-						<th style="text-align:right">缓存</th>
-						<th className="sortable" data-sort="cost" style="text-align:right">成本 <span
-							className="sort-arrow">▾</span></th>
-						<th className="sortable" data-sort="duration" style="text-align:right">耗时 <span
-							className="sort-arrow">▾</span></th>
-						<th className="sortable" data-sort="latency" style="text-align:right">延迟 <span
-							className="sort-arrow">▾</span></th>
-						<th data-sort="finish_reason" style={"text-align:center"}>状态</th>
-					</tr>
-					</thead>
-					<tbody ref={$tableBody}>
-					<tr>
-						<td colSpan="11">
+						}}>
+							<div className="sortable" data-sort="time" style="min-width:140px">时间 <span className="sort-arrow">▾</span></div>
+							<div data-sort="provider"><select className="filter-select" ref={$filterProvider} onChange={applyFilters}></select></div>
+							<div data-sort="model"><select className="filter-select" ref={$filterModel} onChange={applyFilters}></select></div>
+							<div className="sortable" data-sort="input_tokens" style="text-align:right">输入 <span className="sort-arrow">▾</span></div>
+							<div className="sortable" data-sort="output_tokens" style="text-align:right">输出 <span className="sort-arrow">▾</span></div>
+							<div className="sortable" data-sort="total_tokens" style="text-align:right">总计 <span className="sort-arrow">▾</span></div>
+							<div style="text-align:right">缓存</div>
+							<div className="sortable" data-sort="cost" style="text-align:right">成本 <span className="sort-arrow">▾</span></div>
+							<div className="sortable" data-sort="duration" style="text-align:right">耗时 <span className="sort-arrow">▾</span></div>
+							<div className="sortable" data-sort="latency" style="text-align:right">延迟 <span className="sort-arrow">▾</span></div>
+							<div data-sort="finish_reason" style={"text-align:center"}><select className="filter-select" ref={$filterFinishReason} onChange={applyFilters}></select></div>
+						</div>
+						<div className="vt-body" ref={$tableBody}>
 							<div className="state-message">
 								<div className="spinner"></div>
 								<div className="state-title">加载中...</div>
 								<div className="state-desc">正在获取调用日志数据</div>
 							</div>
-						</td>
-					</tr>
-					</tbody>
-				</table>
+						</div>
+					</div>
+				</div>
 			</div>
-			<div className="pagination-row">
-				<span className="pagination-info" ref={$paginationInfo}></span>
-				<div className="pagination-btns" ref={$paginationBtns}></div>
-			</div>
-		</div>
-	);
+		</>
+	};
 }
 
-// ============ INIT ============
-addEventListener("load", () => {
-	const app = <div className="main-container">
-		{topBar()}
-		{statsGrid()}
-		{chartCard()}
-		{filterRow()}
-		{tableScroll()}
-	</div>;
+EVENT_BUS.on(['closeWindow', 'llm-log'], e => {
+	allLogs = filteredLogs = [];
+	cachedLogs = cachedLogs.slice(-1000);
+});
 
-	document.body.replaceChildren(app);
+export const openLogViewer = () => {
+	openWindow({
+		id: "llm-log",
+		icon: <i className="ri-bar-chart-box-line" />,
+		title: "LLM调用日志",
+		width: 1100,
+		height: 0.75,
+		element: createLogViewer
+	});
 	setPresetRange('24h');
-}, ONCE_EVENT);
+}

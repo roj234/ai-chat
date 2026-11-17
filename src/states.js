@@ -219,3 +219,8 @@ export const CONFIG_VERSION = debugSymbol("ConfigVersion");
 export const PP_UNATTENDED = 0, PP_AUTO = 1, PP_SUPERVISED = 2, PP_INTERACTIVE = 3;
 
 export const VID_DATABASE_PROMISE = -2, VID_ASSISTANT_GENERATING = -3;
+
+/**
+ * @type {JSX.Element[]}
+ */
+export const CUSTOM_CONTROLS = [];

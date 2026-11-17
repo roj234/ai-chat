@@ -7,24 +7,20 @@ import {renderMarkdownToElement} from "/src/markdown/markdown.js";
 
 import "./ToolManager.css";
 import "../rp_basic/PresetPanel.css";
-import {ensureConversation, selectedConversation} from "/src/states.js";
+import {CUSTOM_CONTROLS, ensureConversation, selectedConversation} from "/src/states.js";
 import {onLoad} from "/src/hooks.js";
 import {showToast} from "/src/components/Toast.js";
 import {prettyError} from "/src/utils/utils.js";
 import {getKV, setKV} from "/src/database.js";
 import {MCPClient} from "/common/MCPClient.js";
 import {getWindow, openWindow} from "/src/components/Windows.jsx";
-import {CUSTOM_CONTROLS} from "/src/customControls.js";
+import {currentCombinedConfig} from "/src/presets.js";
 import {PLACEHOLDERS} from "/src/utils/placeholder.js";
 
 const mcps = $state([]);
 let registeredMcps;
 
-PLACEHOLDERS["mdfmt"] = `- Use "language:filename" to specify both language and filename in Code Fence.
-  Example:
-  \`\`\`python:main.py
-  print("hello")
-  \`\`\``;
+PLACEHOLDERS["mdfmt"] = `- Code fences: add \`:filename\` (e.g. \`\`\`html:index.html) to make a code block previewable/downloadable; omit it for plain snippets.`;
 
 const refreshTools = $computed(() => !selectedConversation.ready);
 const currentTools = $computed(() => {
@@ -280,31 +276,39 @@ async function addOrEditMCPServer(existed, existedIdx) {
 	});
 }
 
-CUSTOM_CONTROLS.find(el => el.matches(".ri-robot-2-line")).addEventListener("click", async (e) => {
-	e.preventDefault();
-	await ensureConversation();
+CUSTOM_CONTROLS.push(
+	<button className="ri-robot-2-line chip"
+		style:display={() => currentCombinedConfig.modalities?.includes("tool") ? "" : "none"}
+		class:active={() => selectedConversation.activatedModules?.size}
+		onClick={async (e) => {
+			e.preventDefault();
+			await ensureConversation();
 
-	const conv = unconscious(selectedConversation);
-	const open = getWindow("skillManager");
+			const conv = unconscious(selectedConversation);
+			const open = getWindow("skillManager");
 
-	const ms = conv.activatedModules;
-	if (!ms || (!open && !ms.size)) {
-		conv.tools = new Set;
-		conv.activatedModules = new Set;
-		await toolScriptRegistry['Use'].script({modules: [...defaultGroups]}, {}, conv);
-		$update(selectedConversation);
-		$update(refreshTools);
-	}
+			const ms = conv.activatedModules;
+			if (!ms || (!open && !ms.size)) {
+				conv.tools = new Set;
+				conv.activatedModules = new Set;
+				await toolScriptRegistry['Use'].script({modules: [...defaultGroups]}, {}, conv);
+				$update(selectedConversation);
+				$update(refreshTools);
+			}
 
-	if (open) return;
+			if (open) return;
 
-	openWindow({
-		id: "skillManager",
-		icon: <i className='ri-tools-line'/>,
-		title: "工具和技能配置",
-		actions: <button className="ri-add-line btn ghost" title={"添加MCP服务器"} onClick={() => addOrEditMCPServer()}/>,
-		element: openSkillManager,
-		dock: "right",
-		width: 400
-	})
-});
+			openWindow({
+				id: "skillManager",
+				icon: <i className='ri-tools-line'/>,
+				title: "工具和技能配置",
+				actions: <button className="ri-add-line btn ghost" title={"添加MCP服务器"} onClick={() => addOrEditMCPServer()}/>,
+				element: openSkillManager,
+				dock: "right",
+				width: 400
+			})
+		}}
+	>
+		<div className="tooltip">工具</div>
+	</button>
+);
