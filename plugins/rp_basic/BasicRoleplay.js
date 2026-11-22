@@ -341,6 +341,7 @@ const [charBar, characterList, currentCharacter, openCharacterEditor] = createSc
 const [lorebookBar, lorebookList, currentLorebook] = createSchemaEditColumn("st|lorebook", _LorebookEditor);
 
 export const exportForCV_openCharacterEditor = openCharacterEditor;
+export const exportForCV_characterList = characterList;
 
 //region 从角色卡新建对话
 charBar.prepend(
@@ -391,16 +392,13 @@ export async function exportForCV_createConversation(char) {
 
 	if (config.temporaryChat) {
 		conv.temporary = true;
+		conv.id = "temporary-"+conv.time;
 		conv.title += ' (临时)';
 	}
 
 	await importConversationData(conv, messages, true);
 	await loadRPConversation(conv, messages, true);
 	await switchToConversation(conv);
-
-	if (config.temporaryChat) {
-		conv.id = "temporary-"+conv.time;
-	}
 
 	showToast("已创建 " + char.name + " 的新对话", "ok");
 }

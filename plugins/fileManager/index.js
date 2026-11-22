@@ -22,6 +22,17 @@ GLOBAL_SETTINGS.push({
 		"否": 0,
 		"是": 1
 	}
+});
+GLOBAL_SETTINGS.push({
+	id: "imageThumb",
+	name: "文件管理器显示缩略图",
+	type: "radio",
+	_tab: "customize",
+	required: true,
+	choices: {
+		"是": 1,
+		"否": 0,
+	}
 })
 
 COMMAND_REGISTRY["upload"] = [

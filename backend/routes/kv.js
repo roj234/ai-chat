@@ -6,6 +6,7 @@ import {
 	deserializeRow
 } from "../utils/compression.js";
 import {patch} from "unconscious/common/deepEqual.js";
+import {ALLOW_META} from "../sync.js";
 
 /**
  * @param {Record<string, function(body: any, ctx: Partial<AiChatBackend.RouteContext>): any>} batcher
@@ -70,7 +71,10 @@ export function registerKVRoutes(batcher) {
 		delete diff.meta;
 
 		const metaBytes = meta == null ? null : await compressGeneric(meta);
-		if (metaBytes?.length > 255) return { error: '"meta" too big, exceeds 255B limit' }
+		if (metaBytes) {
+			if (!ALLOW_META.has(type)) return { error: '对象 '+type+' 不支持 "meta"' };
+			if (metaBytes.length > 255) return { error: '"meta" 大于 255 字节' }
+		}
 
 		if (updateBigBlob) {
 			db.prepare('REPLACE INTO kvs (type, name, meta, data) VALUES (?, ?, ?, ?)').run(type, name, metaBytes, await compressKVS(diff, type));

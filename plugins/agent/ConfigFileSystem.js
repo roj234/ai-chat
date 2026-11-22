@@ -41,7 +41,7 @@ const checkJson = (name) => {
 
 const CFG_ROOTS = new NestedMap();
 
-const kvsTypes = ["st|char", "st|preset", "st|lorebook", "preset"];
+const kvsTypes = ["st|char", "st|preset", "st|lorebook", "preset", "assistant"];
 
 const kvsHandler = JsonFile({
 	async meta(path) {

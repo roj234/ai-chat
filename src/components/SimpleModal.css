@@ -42,7 +42,6 @@ dialog.modal { padding: 0; }
         align-items: center;
         background-color: var(--bg);
         border-bottom: 1px solid var(--border);
-        font-size: 1.2em;
     }
 
     & > .body {

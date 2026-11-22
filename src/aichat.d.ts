@@ -115,7 +115,7 @@ declare namespace AiChat {
         role: string | OpenAI.Role;
         id: number;
         time: number;
-        error?: string;
+        error?: string | { type: string };
         // 插件注册hook用的消息可以选择隐藏自身不渲染
         hidden?: boolean;
         // 父消息的偏移量，分支对话用
@@ -211,7 +211,8 @@ declare namespace AiChat {
         useRefs: boolean
 
         imageLongLimit: number,
-        imageSizeLimit: number
+        imageSizeLimit: number,
+        imageAllowWebp: boolean
 
         userId: string,
         userIdField: string,

@@ -208,11 +208,14 @@ async function createSubagent(par, response, conv, tools) {
 			redirect, mounts, skills,
 			mcpServers,
 			kind = 'basic',
-			acl, ignore
+			acl, ignore,
+			messages: prefixMessages
 		} = info;
 
 		const error = validateAndShowError(info, schema.$defs.AgentDefinition);
 		if (error) throw "Agent definition format error:\n"+error;
+
+		if (prefixMessages) messages.unshift(...prefixMessages);
 
 		if (model !== 'inherit') agent.presets = model;
 

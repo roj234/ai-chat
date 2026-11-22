@@ -8,14 +8,14 @@ import {base64Encode} from "@roj234/shared/base64";
 
 let uploadingHashes = 0;
 let closeToast;
-const beforeUpload = (n) => {
-	if (!uploadingHashes++)
-		closeToast = showToast("文件上传中\n请勿关闭网页", '', -1);
+const beforeUpload = (val, n) => {
+	uploadingHashes++;
+	if (!val.hash && !closeToast) closeToast = showToast("文件上传中\n请勿关闭网页", '', -1);
 	return n;
 };
 const afterUpload = (hash) => {
 	if (!--uploadingHashes) {
-		closeToast();
+		closeToast?.();
 	}
 };
 
@@ -97,7 +97,7 @@ export const encodeObjects = (input, replacer, zipWriter) => {
 						return zipWriter.add("blobs/" + blobIndex, new Uint8Array(ab));
 					}));
 				} else {
-					const p = beforeUpload(uploadBlob(val)).then(hash => {
+					const p = beforeUpload(val, uploadBlob(val)).then(hash => {
 						const cloudData = {
 							$: "BlobH",
 							hash,

@@ -16,13 +16,17 @@ onLoad(() => {
 	getKV("chat-background", BG_BLOB);
 	getKV("chat-font", FONT_BLOB);
 
-	blurredTrack = <div className="blurred-track" />;
+	blurredTrack = <div className="blurred-track"/>;
 	document.querySelector(".panel").prepend(blurredTrack);
 
 	$watch([BG_BLOB, BG_FIT], () => {
 		const blob = unconscious(BG_BLOB);
 		const style = document.body.style;
-		if (!blob) { style.background = ''; blurredTrack.style.display = 'none'; return; }
+		if (!blob) {
+			style.background = '';
+			blurredTrack.style.display = 'none';
+			return;
+		}
 		let url = blob.toUrl();
 
 		const pos = auxSmallScreen ? 'center top' : 'center center';
@@ -31,15 +35,25 @@ onLoad(() => {
 
 		switch (fit) {
 			default:
-			case 'cover': bgStyle = `${pos} / cover no-repeat`; break;
-			case 'contain': bgStyle = `${pos} / contain no-repeat`; break;
-			case 'stretch': bgStyle = `${pos} / 100% 100% no-repeat`; break;
-			case 'tile': bgStyle = `repeat`; break;
-			case 'center': bgStyle = `${pos} / auto no-repeat`; break;
+			case 'cover':
+				bgStyle = `${pos} / cover no-repeat`;
+				break;
+			case 'contain':
+				bgStyle = `${pos} / contain no-repeat`;
+				break;
+			case 'stretch':
+				bgStyle = `${pos} / 100% 100% no-repeat`;
+				break;
+			case 'tile':
+				bgStyle = `repeat`;
+				break;
+			case 'center':
+				bgStyle = `${pos} / auto no-repeat`;
+				break;
 		}
 
 		blurredTrack.style.display = '';
-		blurredTrack.style.background = style.background = `url("${url}") `+bgStyle;
+		blurredTrack.style.background = style.background = `url("${url}") ` + bgStyle;
 
 		return () => blob.revokeUrl();
 	});
@@ -60,15 +74,15 @@ onLoad(() => {
 });
 
 const MyControl = ({accept, state, id}) => <div className="choice-scroll radio row">
-	<label className="btn chip" class:active={() => !!unconscious(state)}>
-		设置
+	<label className="btn chip" class:active={state}>
+		{() => unconscious(state) ? "更换" : "上传"}
 		<input type={"file"} accept={accept} style={"display:none"}
 			   onChange={({target}) => {
 				   const file = target.files[0];
 				   setKV(id, state.value = file);
 			   }}/>
 	</label>
-	<button className={"btn danger"} style="border-radius:0" onClick={() => {
+	<button className="btn danger" disabled={() => !unconscious(state)} style="border-radius:0" onClick={() => {
 		setKV(id, state.value = undefined);
 	}}>清除
 	</button>
@@ -79,7 +93,7 @@ GLOBAL_SETTINGS.push({
 	type: "element",
 	_tab: "customize",
 	name: "聊天背景",
-	element: <MyControl accept="image/*" state={BG_BLOB} id="chat-background" />
+	element: <MyControl accept="image/*" state={BG_BLOB} id="chat-background"/>
 }, {
 	type: "radio",
 	required: true,
@@ -97,5 +111,5 @@ GLOBAL_SETTINGS.push({
 	type: "element",
 	_tab: "customize",
 	name: "聊天字体",
-	element: <MyControl accept=".ttf,.otf,.fnt,.woff,.woff2" state={FONT_BLOB} id="chat-font" />
+	element: <MyControl accept=".ttf,.otf,.fnt,.woff,.woff2" state={FONT_BLOB} id="chat-font"/>
 });

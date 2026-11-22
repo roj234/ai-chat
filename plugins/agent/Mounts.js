@@ -65,12 +65,8 @@ const MODIFIABLE_ROLE = immutableObjectMap({
  */
 const connectRemoteFileSystem = async mount => {
 	let obj = await kvListGet(BACKEND_SERVER_KVLIST_ID, mount.fs_server);
-	const {servers, pat, instanceId} = obj;
-	const [uri, currentInstanceId] = await connectBestServer(servers, instanceId, 'fs');
-	if (currentInstanceId !== instanceId) {
-		obj.instanceId = currentInstanceId;
-		await kvListSet(obj, BACKEND_SERVER_KVLIST_ID);
-	}
+	const {servers, pat} = obj;
+	const uri = await connectBestServer(servers, 'fs');
 	return {pat, uri};
 };
 

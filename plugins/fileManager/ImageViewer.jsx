@@ -8,6 +8,7 @@ import {vfsDownloadMultiple} from "./downloader.js";
 import {callFileSystemFunc, FS_SOURCE, resolveVirtualUrl, vfsIdentity} from "../agent/index.js";
 import {downloadFile, prettyError} from "/src/utils/utils.js";
 import {formatSize} from "unconscious/common/Utils.js";
+import {config} from "/src/states.js";
 
 const ITEM_STATE = debugSymbol('ImageLocation');
 const DEFAULT_STATE = [0, 0, null, 0];
@@ -417,40 +418,19 @@ export const createImageViewer = (title) => {
 		horizontal: true,
 		itemHeight: 86,
 		gap: 8,
-		renderer: (item, i) => <button className={"-thumb"+(index === i ? ' active' : '')} data-index={i}>{
-			supportThumb ? ThumbImage(item) : item.name}</button>,
+		renderer: (item, i) => <button className={"-thumb"+(index === i ? ' active' : '')} data-index={i}>
+			{supportThumb ? createThumbImage(fs, item) : item.name}
+		</button>,
 		element: _thumbsEl,
 	});
-
-	const ThumbImage = (item) => {
-		const state = $state();
-		const blobCallback = blob => {
-			const value = <img src={blob.toUrl()} alt={item.name} loading='lazy' />;
-			if (value) $cleanup(dom, () => blob.revokeUrl());
-			state.value = value;
-			item.thumb = blob;
-		};
-
-		const cached = item.thumb;
-		if (cached) {
-			blobCallback(cached);
-		} else {
-			state.value = <span className="spinner" />;
-			callFileSystemFunc(fs, 'thumb', {path: item.path}).then(blobCallback, () => {
-				state.value = item.name;
-			});
-		}
-
-		return state;
-	}
 
 	const setImages = (newFs, newImages, forcedIndex) => {
 		loading = false;
 
 		const newIndex = forcedIndex ?? ((!fs || vfsIdentity(fs[FS_SOURCE]) !== vfsIdentity(newFs[FS_SOURCE])) ? -1 : newImages.indexOf(images[index]));
 
-		supportThumb = false;
-		const callback = () => {
+		const callback = (ok) => {
+			supportThumb = ok;
 			images = newImages;
 			fs = newFs;
 			dom.classList.toggle('-single', newImages.length <= 1);
@@ -459,13 +439,9 @@ export const createImageViewer = (title) => {
 
 			return go(Math.max(newIndex, 0));
 		};
-		if (!newFs) return callback();
+		if (!newFs) return callback(false);
 
-		return callFileSystemFunc(newFs, 'thumb', {path:""})
-			.then(res => {
-				supportThumb = res.size === 0;
-			}, () => {})
-			.then(callback);
+		return checkThumbAbility(newFs).then(callback);
 	};
 
 	const ro = new ResizeObserver(onResize);
@@ -480,4 +456,36 @@ export const createImageViewer = (title) => {
 		},
 		setImages
 	};
+}
+
+const THUMB = debugSymbol("ThumbAvail");
+export const checkThumbAbility = async fs => config.imageThumb && (fs[THUMB] ??= await callFileSystemFunc(fs, 'thumb', {path:""}).then(res => res.size === 0, () => false));
+
+/**
+ *
+ * @param {AiChat.FileSystemInstance} fs
+ * @param {FileEntry} item
+ * @param {number} [sizeClass]
+ */
+export const createThumbImage = (fs, item, sizeClass) => {
+	const state = $state();
+	const key = '_thumb'+(sizeClass||'');
+	const blobCallback = blob => {
+		const value = <img src={blob.toUrl()} alt={item.name} loading='lazy' />;
+		$cleanup(value, () => blob.revokeUrl());
+		state.value = value;
+		item[key] = blob;
+	};
+
+	const cached = item[key];
+	if (cached) {
+		blobCallback(cached);
+	} else {
+		state.value = <span className="spinner" />;
+		callFileSystemFunc(fs, 'thumb', {path: item.path, size: sizeClass}).then(blobCallback, () => {
+			state.value = item.name;
+		});
+	}
+
+	return state;
 }

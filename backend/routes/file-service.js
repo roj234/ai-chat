@@ -362,7 +362,7 @@ export async function registerFsRoutes(router, allowExec, dataPath) {
 	if (isThumbAvailable) {
 		const threads = Math.max(1, os.availableParallelism() - 1);
 
-		await fsp.mkdir(dataPath+'/thumbs');
+		await fsp.mkdir(dataPath+'/thumbs', { recursive: true });
 
 		const map = {
 			64: new ThumbnailManager({
@@ -377,7 +377,7 @@ export async function registerFsRoutes(router, allowExec, dataPath) {
 			})
 		};
 		map[64].inflight = map[256].inflight;
-		AiChatAPI.addShutdownHook(() => {
+		globalThis.AiChatAPI.addShutdownHook(() => {
 			Object.values(map).forEach(e => e.close());
 		})
 
@@ -565,7 +565,7 @@ nlink: ${stats.nlink}`);
 	/** @type {Map<number, {child: import('node:child_process').ChildProcess, logFile: string, cwd: string, timer: ReturnType<typeof setTimeout>, message?: string, killing?: boolean}>} */
 	const processes = new Map();
 
-	globalThis.AiChatAPI.addShutdownHook?.(() => Promise.all([...processes.values()].map(info => killProcess(info.child, 0))));
+	globalThis.AiChatAPI.addShutdownHook(() => Promise.all([...processes.values()].map(info => killProcess(info.child, 0))));
 
 	// 事件总线
 	let events = [];

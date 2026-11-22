@@ -1,5 +1,5 @@
 import {spawn, spawnSync} from 'node:child_process';
-import {writeFile} from 'node:fs/promises';
+import fsp, {writeFile} from 'node:fs/promises';
 import {DatabaseSync} from "node:sqlite";
 import {cachePreparedSql} from "../../utils/sqliteUtils.js";
 
@@ -31,9 +31,8 @@ function detectFfmpeg() {
     }
 }
 
-const hasFfmpeg = detectFfmpeg();
-
-export const thumbBackend = sharp ? 'sharp' : hasFfmpeg ? 'ffmpeg' : null;
+let hasFfmpeg;
+const thumbBackend = sharp ? 'sharp' : hasFfmpeg = detectFfmpeg() ? 'ffmpeg' : null;
 export const isThumbAvailable = thumbBackend !== null;
 
 /**
@@ -209,8 +208,13 @@ export class ThumbnailManager {
      * @return {Promise<Buffer>}
      */
     async getThumbnail(path) {
-        const row = this.db.prepare('SELECT data FROM thumbs WHERE path = ?').get(path);
-        if (row) return Buffer.from(row.data.buffer, row.data.byteOffset, row.data.byteLength);
+        const row = this.db.prepare('SELECT createdAt, data FROM thumbs WHERE path = ?').get(path);
+        if (row) {
+            const stat = await fsp.stat(path);
+            if (row.createdAt >= Math.floor(stat.mtimeMs)) {
+                return Buffer.from(row.data.buffer, row.data.byteOffset, row.data.byteLength);
+            }
+        }
 
         const taskId = this.size+'\0'+path;
 

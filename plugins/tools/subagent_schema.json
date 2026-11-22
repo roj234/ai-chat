@@ -25,6 +25,18 @@
         "skills": {
           "$ref": "#/$defs/CommaListOrArray"
         },
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
         "model": {
           "type": "string"
         },

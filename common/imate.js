@@ -412,7 +412,7 @@ export const compressImage = async (blob, cfg) => {
 
 	for (; ;) {
 		let result = await canvas.convertToBlob({
-			type: 'image/jpeg',
+			type: cfg.imageAllowWebp ? 'image/webp' : 'image/jpeg',
 			quality
 		});
 

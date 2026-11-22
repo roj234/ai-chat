@@ -143,6 +143,7 @@ declare namespace OpenAI {
     }
     type AssistantMessage = BaseMessage & {
         role: 'assistant';
+        refusal?: string;
         reasoning?: string; // OpenAI
         reasoning_content?: string; // Llama.cpp
         reasoning_details?: OpenAI.ReasoningDetail[]; // OpenRouter

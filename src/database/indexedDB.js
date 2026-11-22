@@ -1,9 +1,11 @@
 import {getTextContent} from "../utils/utils.js";
 import {IndexedDBAccess} from "../utils/dbAccess.js";
-import {LLM_COST_SCALE} from "/backend/sync.js";
 import {EVENT_BUS} from "../states.js";
+import {debugSymbol} from "@roj234/shared";
+import {rep} from "unconscious/common/deepEqual.js";
+import {ALLOW_META} from "/backend/sync.js";
 
-const [transaction, deleteDatabase] = IndexedDBAccess('AiChat', 9, (event) => {
+const [transaction, deleteDatabase] = IndexedDBAccess('AiChat', 11, (event) => {
 	const db = event.target.result;
 	const tx = event.target.transaction;
 
@@ -17,25 +19,27 @@ const [transaction, deleteDatabase] = IndexedDBAccess('AiChat', 9, (event) => {
 
 		db.createObjectStore('kv');
 		db.createObjectStore("kvs", { keyPath: ['type', 'name'] });
+		db.createObjectStore("kvsMeta", { keyPath: ['type', 'name'] });
 
-		// 计费日志, 插入顺序就是时间顺序
-		db.createObjectStore('logs', { keyPath: 'id' });
-	} else if (oldVersion === 8) {
-		const request = tx.objectStore('logs').openCursor();
-		request.onsuccess = (e) => {
-			const cursor = e.target.result;
-			if (cursor) {
-				const record = cursor.value;
-				if (typeof record.cost === 'number') {
-					record.cost = Math.round(record.cost * LLM_COST_SCALE);
-					cursor.update(record);
-				}
-				cursor.continue();
-			}
+		// 计费日志：id 为消息 id；time 索引用于日志页按时间范围分页
+		db.createObjectStore('logs', { keyPath: 'id' }).createIndex('time', 'time');
+		return;
+	}
+
+	if (oldVersion < 9) { alert("数据库版本太老，请先用旧版更新到 V9！"); throw "error"; }
+	if (oldVersion < 10) tx.objectStore('logs').createIndex('time', 'time');
+	if (oldVersion < 11) {
+		const metaStore = db.createObjectStore("kvsMeta", { keyPath: ['type', 'name'] });
+
+		tx.objectStore('kvs').openCursor().onsuccess = ({target}) => {
+			const cursor = target.result;
+			if (!cursor) return;
+
+			const {type, name, meta} = cursor.value;
+			if (ALLOW_META.has(type)) metaStore.put({type, name, meta});
+
+			cursor.continue();
 		};
-	} else {
-		alert("不支持的数据库版本，请手动更新");
-		throw "error";
 	}
 });
 
@@ -165,16 +169,9 @@ export const searchMessages = keyword => {
 /**
  * 读取KV存储
  * @param {string} key
- * @param {import("unconscious").Reactive<any>=} callback
  * @returns {Promise<any>}
  */
-export const getKV = (key, callback) => {
-	let promise = transaction(tx => tx.objectStore('kv').get(key), false, 'kv');
-	if (callback) promise.then(v => {
-		if (v != null) callback.value = v;
-	});
-	return promise;
-}
+export const getKV = (key) => transaction(tx => tx.objectStore('kv').get(key), false, 'kv');
 
 /**
  * 创建、更新或删除KV存储
@@ -191,51 +188,82 @@ export const setKV = (key, value) => transaction(tx => {
  * @param {string} type
  * @returns {Promise<(Object & AiChat.IDBKVList)[]>}
  */
-export const kvListGetValues = type => transaction(tx => tx.objectStore('kvs').getAll(type === '*' ? null : IDBKeyRange.bound([type], [type, '\uffff'])), false, 'kvs');
+export const kvListGetValues = type => transaction(tx => tx.objectStore('kvs')
+	.getAll(type === '*' ? null : IDBKeyRange.bound([type], [type, '\uffff'])), false, 'kvs');
 
 /**
  * @param {string} type
- * @param {import("unconscious").Reactive<AiChat.IDBKVList[]>=} callback
  * @returns {Promise<AiChat.IDBKVList[]>}
  */
-export const kvListGetKeys = (type, callback) => transaction((tx, resolve) => {
-	const results = [];
+export const kvListGetKeys = (type) => ALLOW_META.has(type)
+	? transaction(tx => tx.objectStore('kvsMeta')
+		.getAll(IDBKeyRange.bound([type], [type, '\uffff'])), false, 'kvsMeta')
+		.then(rows => {
+			rows.forEach(s => {delete s.type});
+			return rows;
+		})
+	: transaction((tx, resolve) => {
+		const results = [];
 
-	tx.objectStore('kvs').openCursor(IDBKeyRange.bound([type], [type, '\uffff'])).onsuccess = (event) => {
-		const cursor = event.target.result;
-		if (cursor) {
-			const [type, name] = cursor.key;
-			results.push({
-				//type,
-				name
-			});
-			cursor.continue();
-		} else {
-			if (callback) callback.value = results;
-			resolve(results);
-		}
-	};
-}, false, 'kvs');
+		tx.objectStore('kvs').openKeyCursor(IDBKeyRange.bound([type], [type, '\uffff'])).onsuccess = (event) => {
+			const cursor = event.target.result;
+			if (cursor) {
+				const [_, name] = cursor.key;
+				results.push({name});
+				cursor.continue();
+			} else {
+				resolve(results);
+			}
+		};
+	}, false, 'kvs');
+
+const DB_NAME = debugSymbol("Name");
 
 /**
  * @param {string} type
  * @param {string} name
  * @returns {Promise<Object & AiChat.IDBKVList>}
  */
-export const kvListGet = (type, name) => transaction(tx => tx.objectStore('kvs').get([type, name]), false, 'kvs');
-
+export const kvListGet = (type, name) => transaction(tx => tx.objectStore('kvs').get([type, name]), false, 'kvs').then(item => {
+	item[DB_NAME] = item.name;
+	return item;
+});
 
 /**
  * @param {Object & AiChat.IDBKVList} value
  * @param {string=} type
- * @param {string=} name
+ * @param {string=} [name]
  * @returns {Promise<void>}
  */
 export const kvListSet = (value, type, name) => {
-	if (type) value.type = type;
+	value.type = type;
+
 	if (name) value.name = name;
-	return transaction(tx => tx.objectStore('kvs').put(value), true, 'kvs')
-		.then(() => EVENT_BUS.post(['kvs', type, 'set'], name, value.meta));
+	else name = value.name;
+
+	const oldName = value[DB_NAME];
+	value[DB_NAME] = name;
+
+	const meta = value.meta;
+
+	const allowMeta = ALLOW_META.has(type);
+	if (meta) {
+		if (!allowMeta) return Promise.reject('对象 '+type+' 不支持 "meta"');
+		//if (encodeMsg(meta).length > 255) throwDOMException('"meta" 大于 255 字节');
+	}
+
+	return transaction(tx => {
+		const kvsStore = tx.objectStore('kvs');
+		const kvsMetaStore = tx.objectStore('kvsMeta');
+		if (oldName !== undefined && oldName !== name) {
+			const key = [type, oldName];
+			if (allowMeta) kvsMetaStore.delete(key);
+			kvsStore.delete(key);
+			EVENT_BUS.post(['kvs', type, 'del'], name);
+		}
+		if (allowMeta) kvsMetaStore.put({type, name, meta});
+		return kvsStore.put(value);
+	}, true, 'kvs', 'kvsMeta').then(() => EVENT_BUS.post(['kvs', type, 'set'], name, rep(meta)));
 };
 
 /**
@@ -243,20 +271,66 @@ export const kvListSet = (value, type, name) => {
  * @param {string} name
  * @returns {Promise<void>}
  */
-export const kvListDel = (type, name) => transaction(tx => tx.objectStore('kvs').delete([type, name]), true, 'kvs')
-	.then(() => EVENT_BUS.post(['kvs', type, 'del'], name));
+export const kvListDel = (type, name) => transaction(tx => {
+	const key = [type, name];
+	if (ALLOW_META.has(type)) tx.objectStore('kvsMeta').delete(key);
+	return tx.objectStore('kvs').delete(key);
+}, true, 'kvs', 'kvsMeta');
 
 /**
  * @param {AiChat.BillingLog} log
  * @return {Promise<void>}
  */
-export const appendBillingLog = log => transaction(tx => tx.objectStore('logs').add(log), true, 'logs');
+export const appendBillingLog = log => {
+	if (log.id <= 0) return Promise.resolve();
+
+	log.time ||= Date.now();
+
+	return transaction((tx, resolve) => {
+		const store = tx.objectStore('logs');
+		const count = store.count();
+
+		count.onsuccess = ((e) => {
+			if (e.target.result < 15000) return;
+			let remaining = 5000;
+
+			const cursor = store.index('time').openCursor();
+			cursor.onsuccess = ({target}) => {
+				const current = target.result;
+				if (!current || --remaining <= 0) return;
+
+				current.delete();
+				current.continue();
+			};
+		});
+
+		return store.put(log);
+	}, true, 'logs');
+};
+
 /**
  * @param {number} messageId
  * @returns {Promise<AiChat.BillingLog>}
  */
 export const getBillingLog = messageId => transaction(tx => tx.objectStore('logs').get(messageId), false, 'logs');
 
-export const listBillingLogs = (startTime, endTime) => {
-	throw new Error("Not implemented");
-}
+/**
+ * @param {number=} startTime
+ * @param {number=} endTime
+ * @returns {Promise<AiChat.BillingLog[]>}
+ */
+export const listBillingLogs = (startTime = 0, endTime = Date.now()) =>
+	transaction((tx, resolve) => {
+		const rows = [];
+		const request = tx.objectStore('logs')
+			.index('time')
+			.openCursor(IDBKeyRange.bound(startTime, endTime), 'prev');
+
+		request.onsuccess = ({target}) => {
+			const cursor = target.result;
+			if (!cursor) { resolve(rows); return; }
+
+			rows.push(cursor.value);
+			cursor.continue();
+		};
+	}, false, 'logs');

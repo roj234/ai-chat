@@ -21,7 +21,9 @@ const sleep = () => new Promise(resolve => setTimeout(resolve));
  * @return {Promise<AiChat.Conversation>}
  */
 export const importConversationData = async (conv, messages_, batch) => {
-	delete conv.id;
+	if (!conv.temporary) delete conv.id;
+	else conversations.unshift(conv);
+
 	if (!Number.isFinite(conv.time)) conv.time = Date.now();
 	if (typeof conv.title !== "string") conv.title = "";
 
@@ -101,7 +103,7 @@ const loadBackupZip = async file => {
 				}
 				size += text.length;
 
-				const jsonl = parseJSONLine(await file.text());
+				const jsonl = parseJSONLine(text);
 				let conv, msg;
 				await decodeObjects(jsonl, zipFile);
 				if (jsonl.length > 1) {

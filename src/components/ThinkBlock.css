@@ -58,6 +58,13 @@
         border-radius: var(--border-radius-md);
         font-size: 12px;
     }
+
+    .-edit {
+        padding-top: 4px;
+        padding-left:8px;
+        margin-left:10px;
+        border-left: 2px solid var(--ok);
+    }
 }
 
 details > .ri-collapse-vertical-line {

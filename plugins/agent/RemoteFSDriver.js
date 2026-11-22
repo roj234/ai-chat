@@ -44,9 +44,8 @@ export const addRemoteFileSystem = (prevData = { servers: [''] }) => new Promise
 		onConfirm: async ({name, servers, pat}) => {
 			if (servers.length < 1) return false;
 
-			let _, instanceId;
 			try {
-				[_, instanceId] = await connectBestServer(servers, '', 'fs');
+				await connectBestServer(servers, 'fs');
 			} catch (e) {
 				connect.value = prettyError(e);
 				return false;
@@ -56,7 +55,6 @@ export const addRemoteFileSystem = (prevData = { servers: [''] }) => new Promise
 				type: BACKEND_SERVER_KVLIST_ID,
 				name: name || servers[0],
 				servers,
-				instanceId,
 				pat,
 				lastAccessed: Date.now()
 			};
@@ -103,12 +101,16 @@ export const createRemoteFileSystem = (baseUrl, pat, fileBase) =>
 		if ((func === 'thumb' || func.endsWith("Raw")) && parameters) {
 			// Append extra params as query string
 			const sep = endpoint.includes('?') ? '&' : '?';
-			endpoint += sep + 'path='+encodeURIComponent(parameters.path);
-			body = parameters.content;
-			stream = parameters.stream;
-			signal = parameters.signal;
-			if (parameters.metaOnly) method = "HEAD";
-			if (parameters.offset) headers['Range'] = `bytes=${parameters.offset}-`;
+
+			const {content, stream: s1, signal: s2, metaOnly, offset, ...rest} = parameters;
+			body = content;
+			stream = s1;
+			if (metaOnly) method = "HEAD";
+			if (offset) headers['Range'] = `bytes=${parameters.offset}-`;
+			signal = s2;
+
+			endpoint += sep + new URLSearchParams(Object.entries(rest));
+
 			if (body) headers['Content-Type'] = 'application/octet-stream';
 			else parameters = null;
 		} else if (parameters) {

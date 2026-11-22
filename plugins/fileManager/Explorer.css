@@ -42,7 +42,7 @@
 			align-items: center;
 			justify-content: center;
 		}
- 	}
+	}
 
 	/* ---------- 主区 ---------- */
 	& main {flex:1;min-width:400px;background:var(--bg)}
@@ -106,6 +106,7 @@
 
 		.fileList {
 			flex:1;position:relative;
+			user-select:none;
 
 			.row{
 				user-select: none;
@@ -117,11 +118,21 @@
 
 				& .chk{display:grid;place-items:center;height:100%}
 				& .chk input{width:16px;height:16px;accent-color:var(--accent);cursor:pointer;margin:0}
-				& .name{display:flex;align-items:center;gap:5px}
+				& .name{
+					display:flex;align-items:center;gap:5px;
+					margin-right: auto;
+				}
 				& .size, & .time{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;text-align:right}
 			}
 
 			.ico{
+				display: flex;
+
+				& img {
+					width: 24px;
+					height: 24px;
+				}
+
 				font-size: 18px;
 				color: var(--amber);
 			}
@@ -131,11 +142,17 @@
 			display:flex;align-items:center;gap:14px;height:30px;flex:none;padding:0 14px;
 			border-top:1px solid var(--border);font-size:12px;color:var(--muted);
 		}
-	}
 
-	/* 预览 */
-	.dot{width:6px;height:6px;border-radius:50%;background:var(--muted)}
-	.dot.dirty{background:var(--warning-accent);box-shadow:0 0 8px var(--warning-accent)}
+		/* ---------- 框选 ---------- */
+		.-selection {
+			position: absolute;
+			left: 0;
+			top: 0;
+			border: 1px solid var(--accent);
+			background: color-mix(in srgb, var(--accent) 14%, transparent);
+			pointer-events: none;
+		}
+	}
 
 	/* 上传面板 */
 	.uploads{
@@ -143,12 +160,11 @@
 	}
 
 	.dropMask {
-		display: none;
+		display: grid;
 		position:absolute;inset:0;z-index:1;place-items:center;
-		background:rgba(11,14,20,.72);border:2px dashed var(--accent);
 		pointer-events: none;
+		background:rgba(11,14,20,.72);border:2px dashed var(--accent);
 
-		&.on{display:grid}
 		& .box{
 			padding:26px 40px;border-radius:16px;background:var(--panel);
 			text-align:center;box-shadow:var(--shadow);
@@ -156,12 +172,23 @@
 		& .box b{display:block;font-size:15px;margin-bottom:5px}
 		& .box span{font-size:12px;color:var(--muted);}
 	}
+
+	.ta-hint {
+		display: grid;
+		position:absolute;inset:0;z-index:1;place-items:center;
+		pointer-events: none;
+
+		.ellipsis {
+			padding: 0 8px;
+			background: var(--chip-bg);
+		}
+	}
 }
 
 .fileList {
 	.empty {
 		display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
-		height:100%;min-height:260px;color:var(--muted);text-align:center;padding:24px;
+		height:100%;color:var(--muted);text-align:center;
 
 		& svg{width:44px;height:44px;stroke:var(--muted);fill:none;stroke-width:1.4}
 		& i { font-size: 48px; line-height: 1; }

@@ -15,7 +15,6 @@ import {proxyHandler, registerSSEProxyRoutes} from "./api-proxy/api-proxy-openai
 import {
 	ALLOW_USER_NAMES,
 	FS_SERVICE_PAT,
-	INSTANCE_ID,
 	INTERACTIVE_LOGIN,
 	MAX_UPLOAD_SIZE,
 	RESTRICT_USER_CREATION,
@@ -56,7 +55,6 @@ const registerPingHandler = (router, cap) => {
 		hash.update(args.nonce + 'AiChat');
 		ctx.send(200, {
 			pong: hash.digest('hex'),
-			id: INSTANCE_ID,
 			cap
 		});
 	});

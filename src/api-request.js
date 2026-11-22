@@ -26,15 +26,7 @@ import {
 	updateMessageUI,
 	VID_ASSISTANT_GENERATING
 } from "./states.js";
-import {
-	getAvailableTools,
-	parseFrontmatter,
-	runTools,
-	TC_ERROR,
-	TC_NEED_INTERACTION,
-	TC_SCHEMA_ERROR,
-	toolScriptRegistry
-} from "./toolset.js";
+import {getAvailableTools, runTools, TC_ERROR, TC_NEED_INTERACTION, TC_SCHEMA_ERROR} from "./toolset.js";
 import {
 	$stampLock,
 	$state,
@@ -399,7 +391,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 				}
 			} else {
 				if (resumeId) {
-					assistantMessage.error = '连接意外中止\n尝试点击输入框的【继续】按钮';
+					assistantMessage.error = { type: 'disconnect' };
 					if (isDisplaying()) $update(updateMessageUI);
 				}
 			}
@@ -812,7 +804,7 @@ async function sendCompletionRequest(
 
 	// Request
 	try {
-		let resumable;
+		let resumable, refuseText = '';
 
 		await sseFetch(url, {
 			...data,
@@ -921,6 +913,8 @@ async function sendCompletionRequest(
 				if (delta.images) genImages.push(...delta.images);
 				text = delta.content;
 				reasoning_text = delta.reasoning;
+				const refusal = delta.refusal;
+				if (refusal) refuseText += refusal;
 
 				const reasoningDetails = delta.reasoning_details;
 				if (reasoningDetails) {
@@ -1077,9 +1071,16 @@ async function sendCompletionRequest(
 			}
 		});
 
+		if (finishReason === 'content_filter' || refuseText) {
+			assistantMessage.error = {
+				type: 'refusal',
+				message: refuseText
+			};
+		}
+
 		if (!finishReason) {
 			finishReason = 'error';
-			assistantMessage.error = conversation.resumeId ? ALLOW_RESUME : "连接意外终止";
+			assistantMessage.error = conversation.resumeId ? ALLOW_RESUME : { type: "early_stop" };
 		}
 	} catch (err) {
 		if (err.name === 'AbortError') err = ac.signal.reason;
@@ -1103,10 +1104,13 @@ async function sendCompletionRequest(
 				let noRetry;
 				if (err.status) {
 					noRetry = NO_RETRY_STATUS.has(err.status);
-					err = `API错误 (${err.status})\n${err.message}`;
+					err = {
+						type: 'request_error',
+						status: err.status,
+						message: err.message
+					};
 				} else {
 					noRetry = isContentfulMessage(assistantMessage);
-					err = prettyError(err);
 				}
 				assistantMessage.error = err;
 
@@ -1318,6 +1322,7 @@ async function buildCompletionPayload(
 
 	const conversationHash = (await objectIdentityHash([
 		conversation.activatedModules,
+		conversation.tools,
 		messages[0].role ?? 'user'
 		// 以后有什么对话预处理器也填写进来
 	])).slice(0, 10);
@@ -1502,8 +1507,6 @@ async function buildCompletionPayload(
 	};
 }
 
-const isThinkingEnabled = (config) => (typeof config.forceThink === "boolean" ? config.forceThink : config.think);
-
 /**
  *
  * @param {AiChat.Preset} config
@@ -1515,18 +1518,7 @@ const isThinkingEnabled = (config) => (typeof config.forceThink === "boolean" ? 
 export const buildSystemPrompt = async (config, conversation, prompt, toolPrompt) => {
 	let body = {};
 
-	if (prompt.startsWith("---\n")) {
-		const [meta, content] = parseFrontmatter(prompt);
-
-		// 初始化时处理
-		const tools = meta.tools;
-		if (!conversation.activatedModules && tools) {
-			const Use = toolScriptRegistry['Use'];
-			Use.script({modules: tools.split(" ")}, {}, conversation);
-		}
-
-		prompt = content;
-	}
+	if (prompt === 'nil') return ['', body];
 
 	/**
 	 * @param {string} prompt

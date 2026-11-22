@@ -414,6 +414,13 @@ const chunkGather = (message, chunks, index, messages, __isPTC) => {
 	if (!error) {
 		if (finish_reason === 'interrupt') error = "你中断了生成";
 		if (finish_reason === 'length') error = "达到最大输出长度";
+	} else {
+		switch (error.type) {
+			case 'disconnect': error = '网络波动，试试点输入框的【继续】'; break;
+			case 'refusal': error = '输出被拒绝\n'+error.message; break;
+			case 'early_stop': error = 'API错误\n连接在收到 finish_reason 前被服务端断开'; break;
+			case 'request_error': error = `API错误 (${error.status})\n`+error.message; break;
+		}
 	}
 	if (error) {
 		chunks.push({ type: "error", error, key: message });
@@ -689,8 +696,6 @@ const buttonOnLeft = (selectedConversation, messages, ev, overrideAction) => {
 		}
 		break;
 		case "save": {
-			if (message.think && !message.think.content && !message.think.format) delete message.think;
-
 			markMessageDirty(message);
 			selectedConversation[CURRENT_EDITING] = null;
 			self[PINNED] = false;
@@ -1094,7 +1099,7 @@ export function MessageList({messages, navBar }) {
 			}}>
 				{roleSelection.map(name => <option selected={msg.role === name} value={name}>{name}</option>)}
 			</select> : <b className={"stroke"}>{roleName(item)}</b>}
-			{msg.time && <time className='time stroke' dateTime={new Date(msg.time).toISOString()}>{formatDate('Y-m-d H:i:s', msg.time)}</time>}
+			<span className='time stroke'>{msg.time && formatDate('Y-m-d H:i:s', msg.time)}</span>
 			<span className='spacer'></span>
 		</div>;
 	}

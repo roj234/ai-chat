@@ -1,0 +1,137 @@
+
+.assistant-profile {
+	max-height: 310px;
+	padding-right: 4px;
+
+	& > ._vl {
+		display: grid;
+		gap: 8px;
+
+		&:empty:before {
+			font-size: 14px;
+			content: "还没有创建过助手。";
+		}
+	}
+
+	.-item {
+		display:flex;
+		align-items:center;
+		gap:14px;
+		background:#1b1b1b;
+		border:1px solid var(--border);
+		border-radius:12px;
+		overflow: hidden;
+
+		.-avatar{
+			overflow: hidden;
+			width:52px;height:52px;
+			flex:none;
+			display:grid;
+			place-items:center;
+			border-radius:14px;
+			background:radial-gradient(circle at 30% 20%,#24303a 0%,#101314 75%);
+			border-right:1px solid #2c3438;
+
+			font-size: 30px;
+			& svg{width:30px;height:30px;}
+		}
+
+		.-name {
+			margin-bottom:5px;
+			font-size:15px;
+			font-weight:600;
+		}
+		.-desc {
+			font-size:13px;
+			color:var(--muted);
+		}
+		> button {
+			margin-right: 14px;
+		}
+		&:not(:hover):not(:focus-within) > button {
+			display: none;
+		}
+	}
+}
+
+/* 新对话空状态的助手选择器（挂载在 .composer > .logo 里） ---------------- */
+.assistant-picker {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+
+	&.empty {
+		.-row, .-desc {
+			display: none;
+		}
+	}
+
+	> .-label {
+		display: flex;
+		align-items: center;
+		gap: 16px;
+
+		letter-spacing: 0.04em;
+		user-select: none;
+	}
+
+	> .-row {
+		& > ._vl {
+			display: flex;
+			gap: 8px;
+		}
+
+		overflow-x: scroll;
+		max-width: 100%;
+		padding: 4px;
+	}
+}
+
+.assistant-chip {
+	flex: none;
+	width: 72px;
+
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+
+	gap: 6px;
+	border-radius: var(--border-radius-lg);
+
+	> .-avatar {
+		width: 44px;
+		height: 44px;
+		display: grid;
+		place-items: center;
+		overflow: hidden;
+		border-radius: 50%;
+		border: 1px solid var(--border);
+		background: var(--panel-2);
+		font-size: 18px;
+		font-weight: 600;
+
+		& img, & svg {
+			width: 100%;
+			height: 100%;
+			object-fit: cover;
+		}
+	}
+
+	> .-name {
+		max-width: 100%;
+		font-size: 12px;
+		color: var(--muted);
+	}
+
+	&:hover, &:focus-visible {
+		background: var(--chip-bg);
+
+		> .-avatar {
+			border-color: var(--chip-active-border);
+		}
+
+		> .-name {
+			color: var(--text);
+		}
+	}
+}

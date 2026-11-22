@@ -35,26 +35,10 @@
 		}
 	}
 
-	.target-select, .input {
-		background: var(--bg);
-		border: 1px solid var(--border);
-		padding: 4px;
-		min-width: 80px;
-		border-radius: 6px;
-		font-size: 13px;
-		outline: none;
-		cursor: pointer;
-		transition: all 0.15s;
-
-		&:hover {
-			border-color: var(--chip-active-border);
-			background: var(--panel);
-		}
-	}
-
-	.input {
+	.my-select {
 		padding: 4px 10px;
 		display: flex;
+		align-items: center;
 		gap: 8px;
 	}
 

@@ -16,6 +16,7 @@ import {MCPClient} from "/common/MCPClient.js";
 import {getWindow, openWindow} from "/src/components/Windows.jsx";
 import {currentCombinedConfig} from "/src/presets.js";
 import {PLACEHOLDERS} from "/src/utils/placeholder.js";
+import {AS_IS} from "@roj234/shared";
 
 const mcps = $state([]);
 let registeredMcps;
@@ -263,6 +264,8 @@ async function addOrEditMCPServer(existed, existedIdx) {
 			} catch (e) {
 				showToast("连接失败:\n" + prettyError(e), 'error');
 				return false;
+			} finally {
+				client.disconnect().catch(AS_IS);
 			}
 
 			const obj = unconscious(state);

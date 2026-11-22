@@ -82,7 +82,12 @@ async function applyPreset(name, target) {
 		const keys = catData.keys;
 		for (let i = 0; i < keys.length; i++) {
 			const key = keys[i];
-			target[key] = data[key] ?? catData.values[i].default;
+
+			if (key === 'systemPrompt') {
+				target[key] = target[key] ? target[key]+'\n\n'+data[key] : data[key];
+			} else {
+				target[key] = data[key] ?? catData.values[i].default;
+			}
 		}
 	}
 }
@@ -212,7 +217,7 @@ export const resolvePreset = async (conv) => {
 	let combined = await conv[MERGED_CONFIG];
 	if (!combined || combined[CONFIG_VERSION] !== globalPreset[CONFIG_VERSION]) {
 		combined = {...globalPreset};
-		await (conv[MERGED_CONFIG] = (async() => {
+		const p = (async() => {
 			if (presets) {
 				if (Array.isArray(presets)) {
 					for (const preset of presets) {
@@ -223,8 +228,12 @@ export const resolvePreset = async (conv) => {
 				}
 			}
 			if (overrides) Object.assign(combined, overrides);
-			conv[MERGED_CONFIG] = combined;
-		})());
+			return conv[MERGED_CONFIG] = combined;
+		})();
+
+		if (conv[MERGED_CONFIG] !== combined) {
+			return conv[MERGED_CONFIG] = p;
+		}
 	}
 	return combined;
 }

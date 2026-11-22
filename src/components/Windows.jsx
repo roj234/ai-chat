@@ -301,6 +301,9 @@ export const openWindow = ({
 		top = clamp((ih - height) / 2 + offset, 0, ih - 120);
 	}
 
+	const pos = id.lastIndexOf(':');
+	const className = pos > 0 ? id.slice(0, pos) : id;
+
 	const root = (
 		<div className="window"
 			 style={`left:${left}px;top:${top}px;width:${width}px;height:${height}px;`}
@@ -315,7 +318,7 @@ export const openWindow = ({
 					<button className="ri-close-line" title="关闭" onClick={() => closeWindow(state)}></button>
 				</span>
 			</div>
-			<div className={"win-body "+id}>{element}</div>
+			<div className={"win-body "+className}>{element}</div>
 			{resizable && <div className="-resize" onPointerDown.left={startResize}></div>}
 		</div>
 	);

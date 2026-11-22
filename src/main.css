@@ -225,6 +225,28 @@ svg.icon {
     height: 1em;
 }
 
+select, .my-select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    min-width: 80px;
+    border-radius: var(--border-radius-sm);
+    outline: 2px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+
+    &:hover {
+        border-color: var(--chip-active-border);
+        background: var(--panel);
+    }
+
+    &:focus-visible {
+        border-color: var(--border);
+        background: var(--panel);
+        outline:2px solid var(--focus);
+        outline-offset:1px;
+    }
+}
+
 /* 省电模式 */
 .no-motion {
     & *:not(.timer),
@@ -305,7 +327,7 @@ svg.icon {
     font-size: var(--font-size-sm);
     cursor: pointer;
 }
-.btn:active {
+.btn:not(:disabled):active {
     transform: scale(0.95);
     opacity: 0.9;
 }
@@ -417,10 +439,10 @@ body._locked {
             display: flex;
             justify-content: center;
             align-items: center;
-            & > span {
+            padding-bottom: 24px;
+            & .-model {
                 font-size: 36px;
             }
-            padding-bottom: 24px;
         }
     }
 

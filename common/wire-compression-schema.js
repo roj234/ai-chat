@@ -1,6 +1,6 @@
 import {bakeSchema} from "@roj234/msgpack";
 
-export const msgpack_schema_version = "15";
+export const msgpack_schema_version = "16";
 export const msgpack_schema = [];
 msgpack_schema.push(
 	// generic
@@ -8,7 +8,13 @@ msgpack_schema.push(
 	"type", "name", "parent",
 	["$", msgpack_schema, ["BlobH", "Map", "Set", "=", "-", "s", "["]],
 	"hash", "size", "lastModified",
-	"error",
+	["error",
+		[
+			"type",
+			"message",
+			"status"
+		]
+	],
 	"status",
 
 	// conversation

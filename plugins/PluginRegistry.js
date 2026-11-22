@@ -34,8 +34,10 @@ import "./agent/agents-md.js";
 import "./agent/files.js";
 // 技能
 import "./agent/skills.js";
-// 文件预览（包含完整的VFS文件管理、预览、编辑，70KB）
+// 文件预览（异步模块，包含完整的VFS文件管理、预览、编辑，70KB）
 import "./fileManager/index.js";
+// 助手预设
+import "./assistant-profile.js";
 
 // 预装工具
 // JSON编辑

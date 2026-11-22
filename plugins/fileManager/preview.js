@@ -173,7 +173,7 @@ export async function vfsPreview(fs, path, overrideFileName, editable, __knownMe
 	if (kind === 'image') return vfsPreviewImage([{path, name: overrideFileName || filename}], fs);
 
 	const previewWindow = openWindow({
-		id: "preview "+encodeURI(vfsIdentity(fs[FS_SOURCE])+path)+(kind === 'md'? " -md": ""),
+		id: "preview "+(kind === 'md'? "-md ": "")+encodeURI(vfsIdentity(fs[FS_SOURCE])+path),
 		icon: <i className={"ri-file-3-line"}/>,
 		title: path,
 		actions: actionBar,

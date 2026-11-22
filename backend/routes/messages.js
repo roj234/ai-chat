@@ -52,7 +52,7 @@ export function registerMessageRoutes(batcher) {
 		} = diff;
 
 		const metaBytes = meta == null || typeof meta !== 'object' || !Object.keys(meta).length ? null : await compressGeneric(meta);
-		if (metaBytes?.length > 255) return { error: '"meta" too big, exceeds 255B limit' }
+		if (metaBytes?.length > 255) return { error: '"meta" 大于 255 字节' }
 
 		if (Number.isFinite(id)) {
 			if (updateBigBlob) {

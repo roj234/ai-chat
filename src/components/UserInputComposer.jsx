@@ -170,9 +170,9 @@ export const createUserInputComposer = (scroller) => {
 
 	const debon = $derived(config.temporaryChat);
 	const element = (<div className="composer" class:hidden={() => auxSmallScreen && unconscious(lastScrollDirectionIsUp)}>
-		<div className="logo col hide-human">
+		<div className="logo col">
 			{() => unconscious(debon) ? <div className="row"><i className="ri-eye-off-line" />临时<span className="tooltip">新对话的数据不会保存，并将在刷新后丢失</span></div> : null}
-			<span style={{
+			<span className="-model" style={{
 				display: "flex",
 				alignItems: "flex-end",
 			}}>
@@ -190,7 +190,7 @@ export const createUserInputComposer = (scroller) => {
 			{userInput}
 			{AttachmentGallery(attachments)}
 			<div className="controls">
-				<div className="row hide-human">{CUSTOM_CONTROLS}</div>
+				<div className="row">{CUSTOM_CONTROLS}</div>
 				<div className="spacer" />
 				<div className="row">
 					<div className="dropdown">

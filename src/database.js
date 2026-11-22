@@ -9,7 +9,7 @@ import {
 	updateConversationListUI,
 	VID_DATABASE_PROMISE
 } from "./states.js";
-import {deepEqual, delta} from "unconscious/common/deepEqual.js";
+import {deepEqual, delta, patch} from "unconscious/common/deepEqual.js";
 import {cloneNamed, prettyError} from "./utils/utils.js";
 import * as idb from "./database/indexedDB.js";
 import * as remote from "./database/remoteDB.js";
@@ -38,6 +38,17 @@ export const databaseError = err => {
 		showToast("数据库错误!\n"+prettyError(err)+"\n建议导出(备份)当前对话", 'error');
 };
 
+export const serialLock = (obj, callback) => {
+	// 串行化
+	let promise = obj[PENDING_UPDATE] || DONE;
+	promise = promise.then(callback);
+	promise.finally(() => {
+		if (obj[PENDING_UPDATE] === promise)
+			delete obj[PENDING_UPDATE];
+	});
+	return obj[PENDING_UPDATE] = promise;
+};
+
 export let remoteDBUrl = '';
 export const setRemoteDBUrl = url => remoteDBUrl = url;
 
@@ -62,27 +73,12 @@ export const {
 	searchMessages,
 
 	/**
-	 * 读取KV存储
-	 * @param {string} key
-	 * @param {import("unconscious").Reactive<any>=} callback
-	 * @returns {Promise<any>}
-	 */
-	getKV,
-
-	/**
 	 * 获取KV列表中的一项
 	 * @param {string} type
 	 * @param {string} name
 	 * @returns {Promise<Object & AiChat.IDBKVList>}
 	 */
 	kvListGet,
-	/**
-	 * 读取KV列表的keys
-	 * @param {string} type
-	 * @param {import("unconscious").Reactive<AiChat.IDBKVList[]>=} callback
-	 * @returns {Promise<AiChat.IDBKVList[]>}
-	 */
-	kvListGetKeys,
 	/**
 	 * 读取KV列表的所有项
 	 * @param {string | '*'} type
@@ -253,14 +249,8 @@ export const updateConversation = async (conversation, messages, keepTime) => {
 	}
 	if (conversation[LOCKED]) return;
 
-	// 串行化
-	let promise = conversation[PENDING_UPDATE] || DONE;
-	promise = promise.then(() => updateConversation_(conversation, unconscious(messages), keepTime)).catch(databaseError);
-	promise.finally(() => {
-		if (conversation[PENDING_UPDATE] === promise)
-			delete conversation[PENDING_UPDATE];
-	});
-	return conversation[PENDING_UPDATE] = promise;
+	const msgs = unconscious(messages);
+	return serialLock(conversation, () => updateConversation_(conversation, msgs, keepTime).catch(databaseError))
 };
 /**
  * @param {AiChat.Conversation} conversation
@@ -406,6 +396,7 @@ const updateConversation_ = async (conversation, messages, keepTime) => {
 	let convDiff;
 	if (changed && (convDiff = isIDB ? (!deepEqual(conversation[DIFF_SNAPSHOT], conversation, DIFF_IGNORE_KEYS) && conversation) : delta(conversation[DIFF_SNAPSHOT], conversation, DIFF_IGNORE_KEYS))) {
 		convDiff.id = conversation.id;
+		delete convDiff.ready;
 		changed(convDiff);
 	}
 
@@ -425,12 +416,56 @@ export const deleteConversation = conversation => {
 };
 
 /**
+ * 读取KV存储，并可选地保持 reactive 变量同步
+ * @param {string} key
+ * @param {import("unconscious").Reactive<any>=} val
+ * @returns {Promise<any>}
+ */
+export const getKV = (key, val) => {
+	let promise = db.getKV(key);
+	if (val) promise.then(results => {
+		EVENT_BUS.on(['kv', key], (value) => {val.value = value;});
+		if (results != null) val.value = results;
+	});
+	return promise;
+};
+
+/**
  * 创建、更新或删除KV存储
  * @param {string} key
  * @param {Object & Partial<AiChat.IDBKVList>} value
  * @returns {Promise<void>}
  */
 export const setKV = (key, value) => db.setKV(key, value).then(() => EVENT_BUS.post(['kv', key], value));
+
+/**
+ * 读取KV列表的keys，并可选地保持 reactive 列表同步
+ * @param {string} type
+ * @param {import("unconscious").Reactive<AiChat.IDBKVList[]>=} list
+ * @returns {Promise<AiChat.IDBKVList[]>}
+ */
+export const kvListGetKeys = (type, list) => {
+	let promise = db.kvListGetKeys(type);
+	if (list) promise.then(results => {
+		EVENT_BUS.on(['kvs', type], (name, path, meta) => {
+			const raw = unconscious(list);
+			const idx = raw.findIndex(item => item.name === name);
+			if (path[2] === 'del') {
+				if (idx < 0) return;
+				raw.splice(idx, 1);
+			} else if (idx < 0) {
+				raw.push(patch({}, {name, meta}));
+			} else {
+				raw[idx].meta = patch(raw[idx].meta, meta);
+			}
+			$update(list);
+		});
+		list.value = results;
+	});
+	return promise;
+};
+
+
 /**
  * 删除KV列表一项
  * @param {string} type

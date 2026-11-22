@@ -41,6 +41,7 @@
         --border:#2b2b2b;
 
         .-frame {
+            min-height: 500px;
             max-height: 80vh;
         }
 

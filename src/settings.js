@@ -435,7 +435,7 @@ export const GLOBAL_SETTINGS = [
 		_tab: 'prompt',
 		_group: 'prompt',
 		name: "系统提示词",
-		title: "留空使用默认提示词。不影响子智能体会话。",
+		title: "替换默认系统提示词，修改导致缓存立即失效。不影响子智能体。\n建议通过下方的下拉菜单保存模板，并通过 {{:名称}} 引用",
 		type: "textbox",
 		placeholder: defaultSystemPrompt
 	},
@@ -758,6 +758,7 @@ export const GLOBAL_SETTINGS = [
 		title: "手动批准加 ! 前缀；批准所有直接用 *",
 		placeholder: "!Delete CreateAgent",
 		type: "list",
+		half: true,
 		required: true,
 		pattern(value) {
 			value = value.trim();
@@ -843,7 +844,7 @@ export const GLOBAL_SETTINGS = [
 
 export const PROMPT_TEMPLATES = {
 	"默认": "",
-	"禁用 (完全无系统提示)": "---\n---"
+	"禁用 (完全无系统提示)": "nil"
 };
 
 // 数据库
@@ -967,7 +968,7 @@ for (const [k, v] of [
 // 删除过时的配置项
 onLoad(() => {
 	const keys = new Set(Object.keys(unconscious(config)));
-	["name", "_new", "_dirty", "_instanceId"].forEach(name => keys.delete(name));
+	["name", "_new", "_dirty"].forEach(name => keys.delete(name));
 
 	GLOBAL_SETTINGS.forEach((item) => {
 		const {id, _group, type, choices} = item;

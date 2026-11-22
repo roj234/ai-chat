@@ -7,10 +7,14 @@ import {EVENT_BUS} from "/src/states.js";
 import {BlobImage, deleteWithDrawback, downloadFile} from "/src/utils/utils.js";
 import {writeJPEG, writePNG} from "/common/imate.js";
 import {base64Encode} from "@roj234/shared/base64";
-import {isIDB, kvListDel, kvListGet, kvListGetKeys} from "/src/database.js";
+import {isIDB, kvListDel, kvListGet} from "/src/database.js";
 import "./characterViewer.css";
 import {openWindow} from "/src/components/Windows.jsx";
-import {exportForCV_createConversation, exportForCV_openCharacterEditor} from "../BasicRoleplay.js";
+import {
+	exportForCV_characterList,
+	exportForCV_createConversation,
+	exportForCV_openCharacterEditor
+} from "../BasicRoleplay.js";
 import {Icon_search} from "/src/components/Icons.jsx";
 import {decodeObjects} from "/src/utils/serialization.js";
 
@@ -34,7 +38,7 @@ const cards = $asyncState(async page => {
 		}
 	}
 
-	let data = await Promise.all(characters.map(item => kvListGet(CHAR_TYPE, item.name)));
+	let data = await Promise.all(exportForCV_characterList.map(item => kvListGet(CHAR_TYPE, item.name)));
 
 	if (term) {
 		term = term.toLowerCase();
@@ -189,11 +193,8 @@ function confirmDelete(name, e) {
 	}, () => {}, isKeyboard);
 }
 
-const characters = $state([]);
-await kvListGetKeys(CHAR_TYPE, characters);
-
 EVENT_BUS.on(['kvs', CHAR_TYPE], (name) => {
-	const idx = unconscious(characters).findIndex(item => item.name === name);
+	const idx = unconscious(exportForCV_characterList).findIndex(item => item.name === name);
 	if (idx >= 0) $update(currentPage);
 });
 

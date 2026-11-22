@@ -121,6 +121,10 @@
         --tc-bg: rgba(129, 140, 248, 0.08);
     }
 
+    &.editing .text-input {
+        margin: 4px 0;
+    }
+
     & .audit-box {
         display: flex;
         gap: 8px;

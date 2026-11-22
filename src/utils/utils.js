@@ -287,11 +287,10 @@ export const scrollMessagesToBottom = (force) => {
 /**
  *
  * @param {string[]} urlList
- * @param {string} [instanceId]
  * @param {string} [requiredCapability]
  * @return {Promise<[string, string]>}
  */
-export const connectBestServer = async (urlList, instanceId, requiredCapability) => {
+export const connectBestServer = async (urlList, requiredCapability) => {
 	const nonce = crypto.randomUUID();
 	const exceptResult = new SHA256().update(nonce+"AiChat").toString();
 
@@ -311,8 +310,6 @@ export const connectBestServer = async (urlList, instanceId, requiredCapability)
 		throwDOMException('响应非法');
 	};
 
-	let lastId = instanceId;
-	let bestServer;
 	let count = urlList.length;
 
 	return new Promise((res, rej) => {
@@ -320,20 +317,12 @@ export const connectBestServer = async (urlList, instanceId, requiredCapability)
 			if (!server.endsWith('/')) server += '/';
 
 			testServer(server).then((id) => {
-				if (id === lastId) {
-					timeout.abort();
-					clearTimeout(timer);
-					res([server, id]);
-				} else if (!bestServer) {
-					bestServer = [server, id];
-				}
-
-				if (!--count) res(bestServer);
+				timeout.abort();
+				clearTimeout(timer);
+				res(server);
+				count--;
 			}, (e) => {
-				if (!--count) {
-					if (bestServer) res(bestServer);
-					else rej(e);
-				}
+				if (!--count) rej(e);
 			});
 		})
 	});

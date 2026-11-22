@@ -21,7 +21,7 @@ const getLockedPresetName = () => {
 const currentPreset = $computed(() => getLockedPresetName() ?? ((config._dirty||'') + (config.name || config.model)));
 const main = <div className={"pretty-select preset-switch up"} style={"width: auto; max-width: min(200px, 30vw)"}>
 	<div className="input" tabIndex={0} role="button" title={"模型选单"} onClick.stop={() => main.classList.toggle("open")}>
-		<span className={"ri-lock-line"} title={"锁定此对话的模型"}
+		<span className={"ri-lock-line"} title={"锁定此对话的模型"} tabIndex={0}
 			style:display={() => unconscious(selectedConversation) ? '' : 'none'}
 			class:locked={() => selectedConversation.presets}
 			onClick.stop={e => {

@@ -35,17 +35,18 @@ export function ToolCallEditor(props) {
     const nameError = $state();
 
     const initializeHtml = () => {
+        const initContent = message.tool_responses[index()]?.content || "";
         const
             input = $state(formatJson(fn.arguments)),
-            output = $state(message.tool_responses[index()]?.content || ""),
+            output = $state(initContent),
             argSyntax = $state(),
             argStruct = $state(),
             toolCallId = $state(props.tool.id);
         const reset = () => {
             toolName.value = fn.name;
             toolCallId.value = props.tool.id;
+            output.value = initContent;
             $update(input);
-            $update(output);
         };
 
         reset();
@@ -85,11 +86,12 @@ export function ToolCallEditor(props) {
 
                         target.disabled = true;
                         target.innerText = "运行中";
-                        runTools(message, unconscious(selectedConversation), idx, true).then(reset).finally(() => {
+                        runTools(message, unconscious(selectedConversation), idx, true).finally(() => {
                             target.disabled = false;
                             target.innerText = "运行";
                             fn.name = oldName;
                             fn.arguments = oldArg;
+                            output.value = message.tool_responses[idx]?.content || "";
                         });
                     }}>
                         运行
@@ -157,9 +159,8 @@ export function ToolCallEditor(props) {
 
     const base = <details className={"tool-call editing"} onClick.once={initializeHtml}>
         <summary className="tool-header">
-            <div className="args-title">编辑工具</div>
             <div className={"input-warp"}>
-                <input className={"text-input"} class:invalid={nameError} value={toolName} list={"DL-tools"}
+                <input className={"text-input"} class:invalid={nameError} placeholder="工具名称" value={toolName} list={"DL-tools"}
                        onInput={({target}) => toolName.value = target.value}/>
             </div>
         </summary>

@@ -28,7 +28,7 @@ export function Dropdown({
 	const filterText = $state("");
 	let options;
 	const main = <div className={"pretty-select "+dir}>
-		<div className="input" onClick.stop={() => {
+		<div className="input" tabIndex={0} onClick.stop={() => {
 			if (main.classList.toggle("open")) {
 				filterText.value = "";
 			}
@@ -69,7 +69,7 @@ export function Dropdown({
 					return filter ? arr.filter(({name}) => name.toLowerCase().includes(filter)) : arr;
 				}, null, true), (item) => {
 					const deleteBtn = item[LOCKED] ? null : <i className="ri-delete-bin-line" title="删除"/>;
-					return <li className={item.className} class:selected={unconscious(selection) === item.name} title={item[displayName]}>
+					return <li className={item.className} tabIndex={0} class:selected={unconscious(selection) === item.name} title={item[displayName]}>
 						<span className="ellipsis">{item[displayName]}</span>
 						{actions ? <div className="-btns">{actions(item)}{deleteBtn}</div> : deleteBtn}
 					</li>

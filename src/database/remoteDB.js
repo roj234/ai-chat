@@ -16,6 +16,7 @@ import {
 	IdempotencyKeyForReplay,
 	remoteDBUrl,
 	resolveDBRelativeURL,
+	serialLock,
 	setRemoteDBUrl
 } from "../database.js";
 import {LRUCache} from "@roj234/lru-cache";
@@ -274,7 +275,7 @@ export const initialize = async (urlOnly) => {
 		const servers = config.db_servers;
 		let dbUrl;
 		if (servers.length > 1) {
-			[dbUrl, config._instanceId] = await connectBestServer(servers, config._instanceId, 'db');
+			dbUrl = await connectBestServer(servers, 'db');
 		} else {
 			dbUrl = servers[0];
 		}
@@ -309,57 +310,16 @@ export const listConversations = batched("conversations");
 
 export const searchMessages = keyword => requestBackend(`search?keyword=${encodeURIComponent(keyword)}`);
 
-const u_getKV = batched("kv", true);
+export const getKV = batched("kv", true);
 const u_setKV = batched("kv/set");
 const u_deleteKV = batched("kv/delete");
 
-/**
- *
- * @param {string} key
- * @param {import("unconscious").Reactive<*>=} val
- * @returns {Promise<*>}
- */
-export const getKV = (key, val) => {
-	let promise = u_getKV(key);
-	if (val) promise.then(results => {
-		EVENT_BUS.on(['kv', key], (value) => {val.value = value;});
-		if (results != null) val.value = results;
-	});
-	return promise;
-};
 export const setKV = (key, value) => value === undefined ? u_deleteKV(key) : u_setKV([key, value]);
 
 // values这个接口主要是给备份(导出)用的
 export const kvListGetValues = batched("kvs/values", true);
 
-const u_getKVListKeys = batched("kvs");
-
-/**
- *
- * @param {string} type
- * @param {import("unconscious").Reactive<AiChat.IDBKVList[]>=} val
- * @returns {Promise<AiChat.IDBKVList[]>}
- */
-export const kvListGetKeys = (type, val) => {
-	let promise = u_getKVListKeys(type);
-	if (val) promise.then(results => {
-		EVENT_BUS.on(['kvs', type], (name, path, meta) => {
-			const raw = unconscious(val);
-			const idx = raw.findIndex(item => item.name === name);
-			if (path[2] === 'del') {
-				if (idx < 0) return;
-				raw.splice(idx, 1);
-			} else if (idx < 0) {
-				raw.push(patch({}, {name, meta}));
-			} else {
-				raw[idx].meta = patch(raw[idx].meta, meta);
-			}
-			$update(val);
-		});
-		val.value = results;
-	});
-	return promise;
-};
+export const kvListGetKeys = batched("kvs", true);
 
 const u_getKVList = batched("kvs/value", true);
 const u_upsertKVList = batched("kvs/upsert");
@@ -396,13 +356,15 @@ export const kvListGet = async (type, name) => {
 
 const KVLIST_IGNORE_KEYS = new Set(["name", "type"]);
 
+export const kvListSet = (value, type, name) => serialLock(value, () => doKvListSet(value, type, name));
+
 /**
  * @param {Object} value
  * @param {string} type
- * @param {string=} name
+ * @param {string=} [name]
  * @return {Promise<void>}
  */
-export const kvListSet = async (value, type, name) => {
+const doKvListSet = async (value, type, name) => {
 	if (name) value.name = name;
 	else name = value.name;
 
@@ -415,34 +377,32 @@ export const kvListSet = async (value, type, name) => {
 		const prevName = prev.name;
 		if (prevName !== name) {
 			kvsCache.delete(type+":"+prevName);
-			p1 = kvListDel(type, prevName);
+			p1 = kvListDel(type, prevName).then(() => EVENT_BUS.post(['kvs', type, 'del'], prevName));
 			prev.name = name;
 			diff = rep(value);
 		} else {
 			diff = delta(prev, value, KVLIST_IGNORE_KEYS);
 			if (!diff) return;
 		}
-
-		value[DIFF_SNAPSHOT] = patch(prev, structuredClone(diff));
 	} else {
 		diff = rep(value);
-		value[DIFF_SNAPSHOT] = structuredClone(value);
 	}
 
 	const p2 = u_upsertKVList({
 		type,
 		name,
 		...diff
+	}).then(() => {
+		value[DIFF_SNAPSHOT] = prev ? patch(prev, structuredClone(diff)) : structuredClone(value);
+		EVENT_BUS.post(['kvs', type, 'set'], name, rep(value.meta));
+		kvsCache.set(cacheKey, value);
+	}, (e) => {
+		if (e === 'data integrity error') {
+			delete value[DIFF_SNAPSHOT];
+		}
+		throw e;
 	});
-	return (p1 ? Promise.all([p1, p2]) : p2).then(
-		() => {
-			EVENT_BUS.post(['kvs', type, 'set'], name, rep(value.meta));
-			kvsCache.set(cacheKey, value);
-		},
-		(e) => {
-			value[DIFF_SNAPSHOT] = prev;
-			throw e;
-		});
+	return (p1 ? Promise.all([p1, p2]) : p2);
 };
 
 export const kvListDel = (type, name) => u_deleteKVList([type, name]);

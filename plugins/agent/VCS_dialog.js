@@ -175,7 +175,7 @@ const createVCSDialog = (conv, state) => {
 		<div className="vcs-header">
 			<div className="row">
 				文件系统:
-				<select className="target-select" value={selectedFileSystem} onChange={e => {
+				<select value={selectedFileSystem} onChange={e => {
 					selectedFileSystem.value = e.target.value;
 				}}>
 					{$foreach(fileSystems, item => <option value={item}>{item}</option>)}
@@ -191,7 +191,7 @@ const createVCSDialog = (conv, state) => {
 							<div className="row">
 								<span>活跃覆盖层:<span className="tooltip down">注意：切换将改变LLM操作的VFS</span></span>
 								<div className="pretty-select down">
-									<button className="input" onClick={({target}) => {
+									<button className="my-select" onClick={({target}) => {
 										target.closest(".pretty-select").classList.toggle("open");
 									}}>
 										<Icon_branch/>

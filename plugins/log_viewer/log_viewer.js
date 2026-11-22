@@ -118,7 +118,7 @@ const clearActivePresetBtn = () => {
 	$presetBtns.querySelector('.btn-active')?.classList.remove('btn-active');
 };
 
-const setPresetRange = range => {
+const setPresetRange = (range, __skipUpdate) => {
 	clearActivePresetBtn();
 	$presetBtns.querySelector(`[data-range="${range}"]`)?.classList.add('btn-active');
 
@@ -156,7 +156,7 @@ const setPresetRange = range => {
 	$startDate.value = formatDate("Y-m-dTH:i", start);
 	$endDate.value = formatDate("Y-m-dTH:i", end);
 
-	refreshData();
+	if (!__skipUpdate) refreshData();
 };
 
 // ============ API CALL ============
@@ -174,7 +174,7 @@ const realFetchLogs = async (start, end, callback) => {
 		logs.forEach(normalizeCachedLog)
 		callback(logs);
 
-		if (logs.length < BATCH_LIMIT) break;
+		if (isIDB || logs.length < BATCH_LIMIT) break;
 
 		const last = logs.at(-1);
 		cursor = last.id;
@@ -672,7 +672,7 @@ const refreshData = async (auto) => {
 	$refreshIndicator.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #6b7385;border-top-color:#4d94ff;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:4px;"></span> 加载中...';
 	try {
 		const logs = await fetchLogs();
-		if (auto === true && logs.at(-1) === allLogs.at(-1)) {
+		if (auto === true && logs.length && logs.at(-1) === allLogs.at(-1)) {
 
 		} else {
 			allLogs = processLogs(logs);
@@ -700,7 +700,7 @@ const refreshData = async (auto) => {
 // ============ EVENT LISTENERS ============
 
 const createLogViewer = () => {
-	return {
+	const state = {
 		onFocus(focused) {
 			if (focused) refreshData(true);
 		},
@@ -832,6 +832,8 @@ const createLogViewer = () => {
 			</div>
 		</>
 	};
+	setPresetRange('24h', true);
+	return state;
 }
 
 EVENT_BUS.on(['closeWindow', 'llm-log'], e => {
@@ -848,5 +850,4 @@ export const openLogViewer = () => {
 		height: 0.75,
 		element: createLogViewer
 	});
-	setPresetRange('24h');
 }

@@ -1,5 +1,5 @@
 import "./JsonEditor.css";
-import {$async, $cleanup, $state, $watch, unconscious} from "unconscious";
+import {$async, $cleanup, $state, $watch, isReactive, unconscious} from "unconscious";
 import {callCreateEditor} from "../utils/preview-bridge.js";
 import {inspect} from "@roj234/util-inspect";
 import {focusWindow, getWindow, openWindow} from "./Windows.jsx";
@@ -30,14 +30,19 @@ export const JsonEditor = ({value = "", onChange, skipVerify, placeholder}) => {
 			noVerify: skipVerify,
 			placeholder,
 		}).then((editor) => {
-			const dom = editor.dom;
+			let lastVal;
+			if (isReactive(value)) onChange ??= text => value.value = lastVal = text;
 			editor.onChange = onChange;
 
 			const cb = () => {
 				const val = unconscious(value);
-				editor.setValue(isRawString ? val : inspect(val));
+				const str = isRawString ? val : inspect(val);
+				if (str === lastVal) return;
+				editor.setValue(str);
 			};
 			$watch(value, cb);
+
+			const dom = editor.dom;
 			$cleanup(dom, [value, cb]);
 			return <div className="editor -inline col">{dom}</div>;
 		}),

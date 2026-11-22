@@ -29,9 +29,9 @@ EVENT_BUS.on('beforeSend', (conv) => {
 	if (conv?.activatedModules?.has(ID)) {
 		const messages = getImmediateMessages(conv);
 
-		const lastMessage = messages.findLast(s => s.time);
+		const lastMessage = messages.at(-1);
 		const now = Date.now();
-		if (lastMessage && now - lastMessage.time > STEP) {
+		if (lastMessage && lastMessage.time && lastMessage.role === 'assistant' && lastMessage.finish_reason === 'stop' && now - lastMessage.time > STEP) {
 			messages.push({
 				role: TIME_SENSE_ROLE,
 				time: now,

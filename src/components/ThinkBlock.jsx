@@ -1,8 +1,8 @@
-import {$computed, isReactive} from "unconscious";
+import {$computed, $update, isReactive} from "unconscious";
 import './ThinkBlock.css';
 import {renderMarkdownToElement} from "../markdown/markdown.js";
 import {EditWidget} from "./EditWidget.jsx";
-import {config} from "../states.js";
+import {config, updateMessageUI} from "../states.js";
 import {JsonEditor} from "./JsonEditor.jsx";
 
 /**
@@ -47,7 +47,7 @@ export function ThinkBlock({think, message, edit}) {
 		if (!isReactive(think)) {
 			let {content, format} = think;
 			const details = message.reasoning_details;
-			if (!content) {
+			if (null == content) {
 				if (!details) return;
 				content = extractReasoningTextFromDetails(details);
 			}
@@ -63,17 +63,22 @@ export function ThinkBlock({think, message, edit}) {
 					}
 				} else {
 					if (format != null) {
-						arr.push(<div style={"font-size:14px"}>思维链格式&nbsp;&nbsp;<select onChange={({target}) => {
-							think.format = target.selectedOptions[0].value;
+						arr.push(<div style={"font-size:14px"}>格式&nbsp;&nbsp;<select onChange={({target}) => {
+							const fmt = target.selectedOptions[0].value;
+							if (!fmt) {
+								delete message.think;
+								$update(updateMessageUI);
+								return;
+							}
+							think.format = fmt;
 						}}>
-							{Object.entries(reasoningFormatNames).map(([k, v]) => <option value={k}
-																						  selected={format === k}>{v}</option>)}
-							<option value={""}>[选我、清空再保存以删除思考]</option>
+							{Object.entries(reasoningFormatNames).map(([k, v]) => <option value={k} selected={format === k}>{v}</option>)}
+							<option value="">[删除思考块]</option>
 						</select></div>);
 					}
 					arr.push(<EditWidget value={content} onChange={(value) => think.content = value}/>);
 				}
-				container.replaceWith(<div style="background:var(--panel-2)">{arr}</div>);
+				container.replaceWith(<div className="row -edit">{arr}</div>);
 			} else {
 				container.replaceChildren();
 				renderMarkdownToElement(container, content, DONT_PARSE_HTML_IN_THINKING);

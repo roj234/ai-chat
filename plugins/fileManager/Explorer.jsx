@@ -6,7 +6,7 @@ import {auxMainlyTouch, auxSmallScreen, EVENT_BUS, selectedConversation} from "/
 import {callFileSystemFunc, createFileSystem, FS_SOURCE, vfsIdentity} from "../agent/index.js";
 import {IMAGE_EXT, vfsPreview, vfsPreviewImage} from "./preview.js";
 import SimpleModal from "/src/components/SimpleModal.jsx";
-import {ref} from "@roj234/shared";
+import {ONCE_EVENT, ref} from "@roj234/shared";
 import {Icon_search, Icon_warning} from "/src/components/Icons.jsx";
 import {formatDate, formatSize} from "unconscious/common/Utils.js";
 import {normalizePath} from "@roj234/shared/path";
@@ -27,6 +27,7 @@ import {grepCard} from "../agent/GrepCard.jsx";
 import {escapeHtmlText, escapeRegexp} from "@roj234/shared/strings";
 import {parseGlobPattern} from "../../common/fs-glob.js";
 import {mdiToast} from "./MDIToast.js";
+import {checkThumbAbility, createThumbImage} from "./ImageViewer.jsx";
 
 /* ============================== 工具函数 ============================== */
 const GLOB_META_CHARS = /[\\*?[{]/g;
@@ -56,9 +57,6 @@ const extOf = n => {
 /* ============================== 图标 ============================== */
 
 const iconFolder2 = () => <div className="icon ri-folder-fill" style="background:linear-gradient(135deg,#4f8cff,#a371f7);background-clip:text;-webkit-text-fill-color:transparent;-webkit-background-clip:text;" />;
-
-/** toast 左侧的小圆点字符 */
-const TOAST_ICON = {ok: '✓', err: '×', warn: '!', info: 'i'};
 
 /* ============================== 入口 ============================== */
 
@@ -521,6 +519,163 @@ const Explorer = (fs, cwd) => {
 		return unconscious(sorted).filter(e => sel.has(e));
 	};
 
+	/* ------------------------------ 框选 ------------------------------ */
+	/**
+	 * @typedef {{startX: number, startY: number, x: number, y: number, el: HTMLElement, moved: boolean, _th: number, _fr: number, _to: number, _t: number}} MultiSelection
+	 */
+	/**
+	 * @type {MultiSelection | null}
+	 */
+	let multiSelecting = null;
+	let lastClickTarget, lastClickCount, clickTimer;
+
+	/** @param {PointerEvent} ev */
+	function onListPointerDown(ev) {
+		if (multiSelecting || ev.button !== 0 || ev.pointerType !== 'mouse') return;
+		const target = ev.target;
+		if (!target.matches('.row') && target !== scrollContainer) return;
+
+		const box = scrollContainer.getBoundingClientRect();
+		// 点在滚动条上时不开始框选
+		if (ev.clientX - box.left >= scrollContainer.clientWidth) return;
+		if (ev.clientY - box.top >= scrollContainer.clientHeight) return;
+
+		const toX = cx => cx - box.left + scrollContainer.scrollLeft;
+		const toY = cy => cy - box.top + scrollContainer.scrollTop;
+
+		clearTimeout(clickTimer);
+		multiSelecting = {
+			startX: toX(ev.clientX),
+			startY: toY(ev.clientY),
+			moved: false,
+			ctrlKey: ev.ctrlKey || ev.metaKey,
+			shiftKey: ev.shiftKey,
+			target,
+			detail: lastClickTarget === target ? lastClickCount + 1 : 1,
+			_th: 0,
+			_fr: 0,
+			_to: -1,
+			el: <div className="-selection"/>
+		};
+
+		const EDGE      = 24;
+		const MAX_SPEED = 60;
+		const ACCEL     = 80;
+
+		const autoScrollHandler = (ts) => {
+			const dt = multiSelecting._t ? Math.min((ts - multiSelecting._t) / 16.667, 3) : 1;
+			multiSelecting._t = ts;
+
+			const box = scrollContainer.getBoundingClientRect();
+
+			// 拖到上下边缘附近时自动滚动
+			const over = multiSelecting.y < box.top + EDGE ? multiSelecting.y - (box.top + EDGE)
+				: multiSelecting.y > box.bottom - EDGE ? multiSelecting.y - (box.bottom - EDGE) : 0;
+
+			if (over) {
+				const d = Math.abs(over);
+				// d=0 → 0；d 越大越快；d→∞ 时收敛到 MAX_SPEED
+				const speed = MAX_SPEED * (1 - Math.exp(-d / ACCEL));
+				scrollContainer.scrollTop += Math.sign(over) * speed * dt;
+			}
+
+			updateFileSelection(box, multiSelecting);
+			multiSelecting._th = requestAnimationFrame(autoScrollHandler);
+		};
+		autoScrollHandler();
+
+		scrollContainer.setPointerCapture(ev.pointerId);
+		scrollContainer.addEventListener('pointermove', onListPointerMove);
+		scrollContainer.addEventListener('pointerup', onListPointerUp, ONCE_EVENT);
+	}
+
+
+	/** @param {PointerEvent} ev */
+	function onListPointerMove(ev) {
+		multiSelecting.x = ev.clientX;
+		multiSelecting.y = ev.clientY;
+	}
+
+	/** @param {PointerEvent} ev */
+	function onListPointerUp(ev) {
+		const m = multiSelecting;
+		if (!m) return;
+		multiSelecting = null;
+
+		scrollContainer.removeEventListener('pointermove', onListPointerMove);
+		cancelAnimationFrame(m._th);
+
+		if (m.moved) {
+			m.x = ev.clientX;
+			m.y = ev.clientY;
+			updateFileSelection(scrollContainer.getBoundingClientRect(), m);
+			m.el.remove();
+			//anchor = selection.value.entries().next().value;
+		} else {
+			const target = m.target;
+
+			lastClickTarget = target;
+			lastClickCount = m.detail;
+			clickTimer = setTimeout(() => lastClickCount = 0, 500);
+
+			if (!target.closest('.row')) resetSel();
+			else target.dispatchEvent(new MouseEvent('click', m));
+		}
+	}
+
+	/**
+	 * @param {DOMRect} box
+	 * @param {MultiSelection} m
+	 */
+	function updateFileSelection(box, m) {
+		m.moved ||= Math.abs(m.x - m.startX) > 5 || Math.abs(m.y - m.startY) > 5;
+		if (!m.moved) return;
+
+		if (!m.el.isConnected) {
+			resetSel();
+			scrollContainer.append(m.el);
+		}
+
+		const vl = /** @type {VirtualList} */scrollContainer.firstElementChild.list;
+
+		const toX = cx => cx - box.left + scrollContainer.scrollLeft;
+		const toY = cy => cy - box.top + scrollContainer.scrollTop;
+
+		const left = Math.max(Math.min(m.startX, toX(m.x)), 0);
+		const right = Math.min(Math.max(m.startX, toX(m.x)), scrollContainer.clientWidth);
+		const top = Math.max(Math.min(m.startY, toY(m.y)), 0);
+		const bottom = Math.min(Math.max(m.startY, toY(m.y)), Math.max(vl._height + vl.itemHeight, scrollContainer.clientHeight));
+
+		const style = m.el.style;
+		style.transform = `translate(${left}px, ${top}px)`;
+		style.width = right - left + 'px';
+		style.height = bottom - top + 'px';
+
+		const list = unconscious(sorted);
+
+		const height = vl.itemHeight;
+
+		const from = Math.max(0, Math.floor(top / height));
+		const to = Math.min(list.length - 1, Math.ceil(bottom / height) - 1);
+
+		const sel = unconscious(selection);
+		const prevFrom = m._fr;
+		const prevTo = m._to;
+
+		if (from === prevFrom && to === prevTo) return;
+
+		for (let i = prevFrom, end = Math.min(prevTo, from - 1); i <= end; i++) sel.delete(list[i]);
+		for (let i = Math.max(prevFrom, to + 1), end = prevTo; i <= end; i++) sel.delete(list[i]);
+
+		for (let i = from, end = Math.min(to, prevFrom - 1); i <= end; i++) sel.add(list[i]);
+		for (let i = Math.max(from, prevTo + 1), end = to; i <= end; i++) sel.add(list[i]);
+
+		m._fr = from;
+		m._to = to;
+
+		applySel(sel);
+	}
+
 	/* ------------------------------ 打开 ------------------------------ */
 	/**
 	 * @param {FileEntry} e
@@ -729,7 +884,7 @@ const Explorer = (fs, cwd) => {
 				},
 				(e) => {
 					$update(cwd);
-				mdiToast(toastDiv, '创建失败：' + (e.message ?? e), 'err')
+					mdiToast(toastDiv, '创建失败：' + (e.message ?? e), 'err')
 				}
 			);
 		}, true);
@@ -758,7 +913,7 @@ const Explorer = (fs, cwd) => {
 				},
 				(e) => {
 					$update(cwd);
-				mdiToast(toastDiv, '创建失败：' + (e.message ?? e), 'err')
+					mdiToast(toastDiv, '创建失败：' + (e.message ?? e), 'err')
 				}
 			);
 		}, true);
@@ -783,7 +938,7 @@ const Explorer = (fs, cwd) => {
 				invalidateDirectoryContents(src);
 				invalidateDirectoryContents(dest);
 			}, (e) => {
-			mdiToast(toastDiv, '重命名失败：' + (e.message ?? e), 'err')
+				mdiToast(toastDiv, '重命名失败：' + (e.message ?? e), 'err')
 				$update(cwd);
 			});
 		});
@@ -912,7 +1067,7 @@ const Explorer = (fs, cwd) => {
 				baseName(commonPath),
 			);
 		} catch (err) {
-		mdiToast(toastDiv, '下载失败：' + (err.message ?? err), 'err')
+			mdiToast(toastDiv, '下载失败：' + (err.message ?? err), 'err')
 		}
 	}
 
@@ -985,9 +1140,9 @@ const Explorer = (fs, cwd) => {
 		}
 
 		return p.then(() => {
-		mdiToast(toastDiv, '上传成功：' + name, 'ok')
+			mdiToast(toastDiv, '上传成功：' + name, 'ok')
 		}, (err) => {
-		mdiToast(toastDiv, '上传失败：' + name + ' — ' + err.message, 'err')
+			mdiToast(toastDiv, '上传失败：' + name + ' — ' + err.message, 'err')
 		}).finally(() => {
 			highlightAfterChange = new Set([...selection].map(e => e.path));
 			highlightAfterChange.add(target);
@@ -1044,26 +1199,80 @@ const Explorer = (fs, cwd) => {
 	/** @param {string} key */
 	const arrowOf = key => sortKey.value === key ? (sortDir.value > 0 ? '↑' : '↓') : '';
 
-	const scrollToSelectedItem__ = ev => {
+	const scrollToSelectedItem = (ev, idx) => {
 		ev.preventDefault();
-		setTimeout(() => scrollContainer.querySelector('.sel')?.scrollIntoView({
-			block: "nearest"
-		}));
+		scrollContainer.firstElementChild.list.scrollIntoView(idx < 0 ? sorted.length + idx : idx, {
+			block: 'nearest',
+			behavior: 'smooth'
+		});
 	};
+
+	/* ------------------------------ 键入跳转 ------------------------------ */
+	const TYPEAHEAD_GAP = 800;
+
+	let taPrefix = '';
+	let taPrevTime = 0;
+	let taPrevHit;
+
+	const taHint = <div className="ta-hint"><span className="ellipsis"/></div>;
+	let taHintTimer;
+
+	/** @param {string} text */
+	function showTypeHint(text) {
+		taHint.firstElementChild.textContent = text;
+		clearTimeout(taHintTimer);
+		if (text) {
+			body.append(taHint);
+			taHintTimer = setTimeout(() => taHint.remove(), TYPEAHEAD_GAP);
+		} else {
+			taHint.remove();
+		}
+	}
+
+	/**
+	 * 按前缀跳转到第一个名字匹配的条目
+	 * @param {string} ch
+	 */
+	function typeahead(ch) {
+		const list = unconscious(sorted);
+		if (!list.length) return;
+
+		const now = performance.now();
+		if (now - taPrevTime > TYPEAHEAD_GAP) taPrefix = '';
+
+		let re = new RegExp('^'+escapeRegexp(taPrefix += ch), 'i');
+		let hit = list.findIndex(e => re.test(e.name));
+
+		const prev = taPrevHit;
+		taPrevHit = hit;
+
+		if (hit < 0) {
+			showTypeHint('');
+			if (prev >= 0) mdiToast(toastDiv, `没有以 “${taPrefix}” 开头的项目`, 'warn', 1000);
+			return;
+		}
+
+		taPrevTime = now;
+
+		showTypeHint(taPrefix);
+		selectRow(list[hit]);
+		scrollContainer.firstElementChild.list.scrollIntoView(hit, { block: 'nearest' });
+	}
 
 	/* ------------------------------ 键盘 ------------------------------ */
 	/**
 	 * @param {KeyboardEvent} ev
 	 */
 	function onGlobalKey(ev) {
-		if (document.elementFromPoint(0,0).matches('dialog.modal')) return;
+		if (ev.isComposing || document.elementFromPoint(0,0).matches('dialog.modal')) return;
 
 		const tag = (ev.target.tagName || '').toLowerCase();
 		const typing = (tag === 'input' && ev.target.type !== 'checkbox') || tag === 'textarea' || ev.target.isContentEditable;
-		const meta = ev.ctrlKey || ev.metaKey;
-		const key = ev.key.toLowerCase();
+		const ctrlKey = ev.ctrlKey || ev.metaKey;
+		const origKey = ev.key;
+		const key = origKey.toLowerCase();
 
-		if (meta) {
+		if (ctrlKey) {
 			if (key === 'l') {
 				ev.preventDefault();
 				startPathEdit();
@@ -1083,12 +1292,12 @@ const Explorer = (fs, cwd) => {
 
 		if (typing) return;
 
-		if (ev.key === 'Backspace') {
+		if (origKey === 'Backspace') {
 			ev.preventDefault();
 			goUp();
 			return;
 		}
-		if (ev.key === '/') {
+		if (origKey === '/') {
 			ev.preventDefault();
 			searchInput.focus();
 			return;
@@ -1096,18 +1305,18 @@ const Explorer = (fs, cwd) => {
 
 		const firstItem = selection.value.keys().next().value;
 		const selectedCount = selection.value.size;
-		if (ev.key === 'F2' && selectedCount === 1) {
+		if (origKey === 'F2' && selectedCount === 1) {
 			ev.preventDefault();
 			renameEntry(firstItem);
 			return;
 		}
-		if (ev.key === 'Delete' && selectedCount) {
+		if (origKey === 'Delete' && selectedCount) {
 			ev.preventDefault();
 			deleteEntries(getSelectedItems());
 			return;
 		}
 
-		if (meta) {
+		if (ctrlKey) {
 			if (key === 'a') {
 				ev.preventDefault();
 				selectAll();
@@ -1127,42 +1336,50 @@ const Explorer = (fs, cwd) => {
 			}
 		}
 
-		if (ev.key === 'Enter' && selectedCount === 1) {
+		if (origKey === 'Enter' && selectedCount === 1) {
 			const e = entries.value.find(x => x === firstItem);
 			if (e) openEntry(e);
 		}
 
 		if (!sorted.length) return;
 
-		if (ev.key === 'ArrowDown') {
+		if (!ctrlKey && !ev.altKey && key.length === 1) {
+			ev.preventDefault();
+			typeahead(key);
+			return;
+		}
+
+		if (origKey === 'ArrowDown') {
+			let idx = 0;
 			let item;
 			if (selectedCount === 1) {
-				item = sorted[sorted.indexOf(firstItem)+1] ?? sorted[0];
+				item = sorted[idx = sorted.indexOf(firstItem)+1] ?? sorted[idx = 0];
 			} else if (selectedCount === 0) {
 				item = sorted[0];
 			} else {
 				selection.value.forEach(i => item = i);
+				idx = sorted.indexOf(item);
 			}
 
 			selectRow(item);
-			if (item === sorted[0]) scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
-			scrollToSelectedItem__(ev);
+			scrollToSelectedItem(ev, idx);
 			return;
 		}
 
-		if (ev.key === 'ArrowUp') {
+		if (origKey === 'ArrowUp') {
+			let idx;
 			let item;
 			if (selectedCount === 1) {
-				item = sorted.at(sorted.indexOf(firstItem)-1);
+				item = sorted.at(idx = sorted.indexOf(firstItem)-1);
 			} else if (selectedCount === 0) {
-				item = sorted.at(-1);
+				item = sorted.at(idx = -1);
 			} else {
 				item = firstItem;
+				idx = sorted.indexOf(item);
 			}
 
 			selectRow(item);
-			if (item === sorted.at(-1)) scrollContainer.scrollTo({ top: 1e9, behavior: 'smooth' })
-			scrollToSelectedItem__(ev);
+			scrollToSelectedItem(ev, idx);
 		}
 	}
 
@@ -1171,6 +1388,9 @@ const Explorer = (fs, cwd) => {
 		return value && new RegExp((globSearch ? parseGlobPattern(value, true) : escapeRegexp(value)), 'ig');
 	});
 	const highlightMe = txt => escapeHtmlText(txt).replace(re.value, "<mark>$&</mark>");
+
+	let showThumb;
+	checkThumbAbility(fs).then(a => showThumb = a);
 
 	/* ------------------------------ 行 / 空状态 ------------------------------ */
 	/**
@@ -1184,8 +1404,12 @@ const Explorer = (fs, cwd) => {
 		if (isDir) {
 			icon = <span className="ico ri-folder-fill" />;
 		} else {
-			const iconClass = iconClassOf(extOf(e.name));
-			icon = <span className={"ico "+iconClass} style={`color:${iconColorOf(iconClass)}`} />
+			if (showThumb && IMAGE_EXT.test(e.name)) {
+				icon = <span className="ico">{createThumbImage(fs, e/*, 64*/)}</span>;
+			} else {
+				const iconClass = iconClassOf(extOf(e.name));
+				icon = <span className={"ico "+iconClass} style={`color:${iconColorOf(iconClass)}`} />;
+			}
 		}
 
 		return <div className="row"
@@ -1193,12 +1417,12 @@ const Explorer = (fs, cwd) => {
 					class:cut={() => cutPaths.has(e.path)}
 					onClick={ev => {
 						if (ev.target.nodeName === "INPUT") return;
-						selectRow(e, {toggle: ev.ctrlKey || ev.metaKey, range: ev.shiftKey});
-					}}
-					onDblClick={ev => {
-						if (ev.target.closest('.chk')) return;
-						openEntry(e);
-						clearTimeout(e.timer);
+						if (ev.detail === 1) {
+							selectRow(e, {toggle: ev.ctrlKey || ev.metaKey, range: ev.shiftKey});
+						} else {
+							openEntry(e);
+							clearTimeout(e.timer);
+						}
 					}}
 					onContextMenu={ev => onRowMenu(ev, e)}>
 			<div className="chk">
@@ -1206,20 +1430,20 @@ const Explorer = (fs, cwd) => {
 					   checked={() => selection.has(e)}
 					   onChange={() => toggleSel(e)}/>
 			</div>
-			<div className="name" onClick={ev => {
-				if (!auxMainlyTouch && !e.edit && selection.has(e) && selection.size === 1) {
-					clearTimeout(e.timer);
-					e.timer = setTimeout(() => {
-						if (selection.has(e) && selection.size === 1) {
-							renameEntry(e);
-						}
-					}, 500);
-				}
-			}}>
+			<div className="name">
 				{icon}
-				{e.edit ?? <span className="ellipsis" title={e.name} dangerouslySetInnerHTML={query.value ? highlightMe(e.name) : escapeHtmlText(e.name)} />}
-		</div>
-		<div className="time">{formatDate('Y-m-d H:i', e.mtime)}</div>
+				{e.edit ?? <span className="ellipsis" title={e.name} onClick={ev => {
+					if (!auxMainlyTouch && !e.edit && selection.has(e) && selection.size === 1) {
+						clearTimeout(e.timer);
+						e.timer = setTimeout(() => {
+							if (selection.has(e) && selection.size === 1) {
+								renameEntry(e);
+							}
+						}, 500);
+					}
+				}} dangerouslySetInnerHTML={query.value ? highlightMe(e.name) : escapeHtmlText(e.name)} />}
+			</div>
+			<div className="time">{formatDate('Y-m-d H:i', e.mtime)}</div>
 			<div className={'size'}>{isDir ? '' : formatSize(e.size)}</div>
 		</div>;
 	}
@@ -1315,11 +1539,11 @@ const Explorer = (fs, cwd) => {
 						disabled={() => unconscious(historyIndex) >= historyStack.length - 1} onClick={goForward}/>
 				<button className="ri-arrow-up-line tbtn" title="返回上级" disabled={() => !cwd.value} onClick={goUp}/>
 
-				<div className="crumbs" onDblClick={startPathEdit}>
+				<div className="crumbs" onClick={startPathEdit}>
 				<span style:display={() => editingPath.value ? 'none' : 'contents'}>
 					{$foreach(crumbNodes, c => {
 						const btn = <button className={'crumb' + (c.last ? ' last' : '')} title={c.target || '/'}
-											onClick={() => {
+											onClick.stop={() => {
 												if (c.target !== cwd.value) loadDir(c.target);
 											}}>{c.label}</button>;
 						if (c.last) setTimeout(() => btn.scrollIntoView({inline: 'end', block: 'nearest'}), 0);
@@ -1354,9 +1578,7 @@ const Explorer = (fs, cwd) => {
 				</div>
 			</div>
 
-			<div ref={scrollContainer} className="scroll fileList" onClick={e => {
-				if (!e.target.closest('.row')) resetSel();
-			}} onContextMenu={onBlankMenu}>
+			<div ref={scrollContainer} className="scroll fileList" onPointerDown={onListPointerDown} onContextMenu={onBlankMenu}>
 				{$computed(() => {
 					if (entries.loading) {
 						return <div className="empty">
@@ -1416,12 +1638,12 @@ const Explorer = (fs, cwd) => {
 			</div>
 		</main>
 
-		<div className="dropMask" class:on={dropActive}>
+		{() => unconscious(dropActive) ? <div className="dropMask">
 			<div className="box">
 				<b>释放以上传</b>
 				<span>{() => cwd.value || '/'}</span>
 			</div>
-		</div>
+		</div> : null}
 
 		<div className="uploads" ref={uploadDiv} />
 		<div className="win-toasts" ref={toastDiv} />

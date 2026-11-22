@@ -7,7 +7,7 @@ import {PLACEHOLDERS, setPlaceholder} from "/src/utils/placeholder.js";
 const readFile = fileAccess("read");
 
 PLACEHOLDERS["#AGENTS.md"] = async (conv) => {
-	if (!conv.activatedModules?.has("Files")) return '';//'Workspace: disabled, click "智能体" button to enable.';
+	if (!conv.fs_type) return '';//'Workspace: disabled, click "智能体" button to enable.';
 
 	let text = '';
 

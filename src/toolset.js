@@ -456,7 +456,7 @@ export const addMCPServer = (mcpBaseUrl, mcpName, mcpDescription = "External too
 				}
 			});
 		} else {
-			toolArrayPromise = client.listTools().then(({tools: toolArray}) => toolArray.map(({
+			toolArrayPromise = client.listTools().then(({tools: toolArray}) => toolset[mcpToolGroup].tools = toolArray.map(({
 				name, description, inputSchema,
 				title, annotations, execution
 			}) => {
@@ -508,7 +508,6 @@ export const addMCPServer = (mcpBaseUrl, mcpName, mcpDescription = "External too
 		async systemPrompt(conv) {
 			if (!client.isOpen) {
 				const newTools = await connectServer();
-				toolset[mcpToolGroup].tools = newTools;
 				delete conv[NSLOOKUP];
 
 				const tools = conv.tools;
