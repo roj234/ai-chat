@@ -1,5 +1,4 @@
 import path from 'node:path';
-import fs from 'node:fs/promises';
 
 import {App} from "./app.js";
 import {registerMessageRoutes} from "./routes/messages.js";
@@ -14,9 +13,11 @@ import {proxyHandler, registerSSEProxyRoutes} from "./api-proxy/api-proxy-openai
 
 import {
 	ALLOW_USER_NAMES,
+	FS_ALLOW_EXEC,
 	FS_SERVICE_PAT,
 	INTERACTIVE_LOGIN,
 	MAX_UPLOAD_SIZE,
+	PLUGINS,
 	RESTRICT_USER_CREATION,
 	WEBSOCKET_SYNC_BASE,
 	WEBSOCKET_SYNC_ENABLE
@@ -31,6 +32,7 @@ import {registerPairingRoutes} from "./routes/pairing.js";
 import "./pluginApi.js";
 import {createHash} from "node:crypto";
 import {registerTerminalRoutes} from "./routes/fs/terminal.js";
+import {pathToFileURL} from "url";
 
 /**
  * @param router {AiChatBackend.Router}
@@ -71,20 +73,20 @@ export async function createApp(dataPath, apiPath = "api", workspacePath) {
 	const workspace = path.resolve(workspacePath || dataPath+"/workspace");
 
 	/** @type {AiChatBackend.Router} */
-	const router = new App( (ctx) => {
+	const router = new App((ctx) => {
 		let fsRoot = '';
 
 		const urlPath = ctx.path;
 		const method = ctx.req.method;
 		const {userId} = ctx.params;
 		if (userId != null) {
-			if (RESTRICT_USER_CREATION ? !ALLOW_USER_NAMES.test(userId) : /[\s\\/:*?<>|]/.test(userId)) {
+			if (RESTRICT_USER_CREATION ? !ALLOW_USER_NAMES.test(userId) : /[\s\\/:*?<>|.]/.test(userId)) {
 				ctx.send(403, { error: "userId is not allowed" });
 				return true;
 			}
 
 			if (/\/sse\/v1\//.test(urlPath)) return;
-			if (method === 'POST' && /\/(login|ping)$/.test(urlPath)) return;
+			if (method === 'POST' && /\/(login)$/.test(urlPath)) return;
 
 			ignorePAT:
 			if (INTERACTIVE_LOGIN) {
@@ -114,11 +116,9 @@ export async function createApp(dataPath, apiPath = "api", workspacePath) {
 			fsRoot = workspace;
 
 			if (workspacePath) {
-				if (method === 'POST' && /\/(ping)$/.test(urlPath)) return;
-
 				const pat = (ctx.req.headers.authorization || '').slice("Bearer ".length);
 				if (pat !== FS_SERVICE_PAT) {
-					if (typeof FS_SERVICE_PAT === 'object' && pat in FS_SERVICE_PAT) {
+					if (typeof FS_SERVICE_PAT === 'object' && Object.hasOwn(FS_SERVICE_PAT, pat)) {
 						const {base, shell, terminal} = FS_SERVICE_PAT[pat];
 						if (base) fsRoot = path.resolve(fsRoot, base);
 						if (!shell) ctx.fsNoShell = true;
@@ -148,24 +148,25 @@ export async function createApp(dataPath, apiPath = "api", workspacePath) {
 
 	router.push(apiPath);
 
-	for await (const entry of fs.glob("plugins/*/index.js", { cwd: import.meta.dirname, withFileTypes: true })) {
-		if (entry.isFile()) {
-			try {
-				await (await import("file://"+path.join(entry.parentPath, entry.name))).default(router, workspace);
-				console.info("Loaded plugin "+path.basename(entry.parentPath));
-			} catch (e) {
-				console.error("Failed to load plugin "+path.basename(entry.parentPath));
-				console.error(e);
-			}
+	for (const name of PLUGINS) {
+		try {
+			const main = path.resolve(import.meta.dirname, 'plugins', name, 'main.js');
+			await (await import(pathToFileURL(main))).default(router, workspace);
+			console.info("[插件] "+name+" 加载成功");
+		} catch (e) {
+			console.error("[插件] "+name+" 加载失败");
+			console.error(e);
 		}
 	}
 
 	if (workspacePath) {
 		router.push("fs");
-		await registerFsRoutes(router, true, dataPath);
-		registerTerminalRoutes(router);
+		await registerFsRoutes(router, FS_ALLOW_EXEC, dataPath);
+		if (FS_ALLOW_EXEC) registerTerminalRoutes(router);
 		router.pop();
-		registerPingHandler(router, 'fs');
+		const caps = ['fs'];
+		if (FS_ALLOW_EXEC) caps.push('sh');
+		registerPingHandler(router, caps);
 		router.pop();
 		return router;
 	}
@@ -263,7 +264,7 @@ export async function createApp(dataPath, apiPath = "api", workspacePath) {
 		if (out) ctx.send(200, out);
 	});
 
-	registerPingHandler(router, 'db,fs');
+	registerPingHandler(router, ['db','fs']);
 
 	if (INTERACTIVE_LOGIN) {
 		registerPairingRoutes(router, dataPath);

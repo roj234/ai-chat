@@ -122,7 +122,7 @@ const KNOWN_KEYS = ['messages', 'max_completion_tokens', 'max_tokens', 'logprobs
  * @param {OpenAI.Message[]} messages messages after blob-reference expansion.
  * @returns {Object}
  */
-export function convertRequest(body, messages) {
+export function convertResponsesRequest(body, messages) {
 	if ('n' in body && body.n !== 1) throw bad('n > 1 is not supported');
 
 	let instructions;

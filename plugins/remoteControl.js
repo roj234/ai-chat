@@ -279,7 +279,7 @@ export const registerRemoteControl = () => {
 	GLOBAL_SETTINGS.push({
 		id: "remoteControl",
 		//_tab: "tools",
-		name: "远程操作",
+		name: "远程控制",
 		type: "radio",
 		required: true,
 		choices: {

@@ -71,10 +71,29 @@ await new Promise(r => setTimeout(r, 1000))
 notify("操作成功");
 ```
 
+## 等待通知
+
+> 打破循环
+
+```js
+import {Wait} from 'tools';
+
+// 注意：PTC中的Wait工具只接收 duration 一个参数，且支持小数。
+// 省略或设置为 nullish 将查询当前是否有通知，不等待。
+// 设置为 0 将无限期等待，直到收到通知
+const result = await Wait({ duration: 0.5 });
+if (result.success) {
+    console.log(`等待 ${result.duration}ms 后收到通知`);
+} else {
+    // 未收到通知
+}
+```
+
 ## 使用和限制
 
 沙箱内置 `node:fs/promises` shim，包括 `glob` 和 `exclude` 支持，文件操作应通过它完成。
 
+- 沙箱的 `fetch` 是客户端发出的，可能和工作区不在同一网络
 - 工具返回值通常为原始字符串，需要解析。
 - 不支持需要交互的工具（如 `AskUser`）
 - 无法等待 Harness 层的异步任务（如 `CreateAgent` 会立即返回ID）

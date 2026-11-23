@@ -153,6 +153,7 @@ FROM blob_refs r JOIN blobs b ON b.hash = r.hash
 WHERE r.user = ? AND r.hash = ?`).get(userId, Buffer.from(hash, 'base64url'));
 
 		if (!info) return ctx.send(404);
+		info.name ||= hash;
 		await serveFile(ctx, info, getFilePath(hash));
 	});
 
@@ -175,7 +176,7 @@ WHERE r.user = ? AND r.hash = ?`).get(userId, Buffer.from(hash, 'base64url'));
 		}
 
 		const expectedLength = parseInt(ctx.req.headers["content-length"]);
-		if (expectedLength >= MAX_UPLOAD_SIZE) {
+		if (expectedLength > MAX_UPLOAD_SIZE) {
 			ctx.send(413, { error: { type: "FILE_TOO_BIG", details: `${expectedLength} > ${MAX_UPLOAD_SIZE}` } });
 			ctx.req.destroy();
 			return;
@@ -191,8 +192,8 @@ WHERE r.user = ? AND r.hash = ?`).get(userId, Buffer.from(hash, 'base64url'));
 				hasher.update(chunk);
 				fileSize += chunk.length;
 
-				if (fileSize >= MAX_UPLOAD_SIZE) {
-					ctx.send(413, { error: { type: "FILE_TOO_BIG", details: `${expectedLength} > ${MAX_UPLOAD_SIZE}` } });
+				if (fileSize > MAX_UPLOAD_SIZE) {
+					ctx.send(413, { error: { type: "FILE_TOO_BIG", details: `${fileSize} > ${MAX_UPLOAD_SIZE}` } });
 					ctx.req.destroy();
 				}
 			});
@@ -215,7 +216,7 @@ WHERE r.user = ? AND r.hash = ?`).get(userId, Buffer.from(hash, 'base64url'));
 			});
 
 			const now = Date.now();
-			const time = Math.max(0, Math.min(parseInt(ctx.searchParams.get("time")) || now, now));
+			const time = Math.max(0, Math.min(parseInt(ctx.req.headers['x-mtime'], 10) || now, now));
 			const name = ctx.searchParams.get("name") || '';
 
 			blobDB.prepare(`INSERT OR IGNORE INTO blobs (hash, size, type) VALUES (?, ?, ?)`).run(hashBuf, fileSize, contentType || '');

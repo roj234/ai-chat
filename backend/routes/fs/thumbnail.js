@@ -1,39 +1,34 @@
-import {spawn, spawnSync} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import fsp, {writeFile} from 'node:fs/promises';
 import {DatabaseSync} from "node:sqlite";
 import {cachePreparedSql} from "../../utils/sqliteUtils.js";
+import {execCommand} from "./checkToolchain.js";
 
 const PAGE_SIZE = 4096;
 const WEBP_QUALITY = 50;
 
 let sharp = null;
-try {
-    const mod = await import('sharp');
-    const fn = mod?.default ?? mod;
-    if (typeof fn === 'function') {
-        void fn.versions;
-        sharp = fn;
-    }
-} catch {
-    sharp = null;
-}
+/** @type {Set<string>} */
+const thumbBackend = new Set;
 
-function detectFfmpeg() {
+export const isThumbAvailable = async () => {
     try {
-        const r = spawnSync('ffmpeg', ['-version'], {
-            timeout: 3000,
-            windowsHide: true,
-            stdio: 'ignore',
-        });
-        return !r.error && r.status === 0;
-    } catch {
-        return false;
-    }
-}
+        const mod = await import('sharp');
+        const fn = mod?.default ?? mod;
+        if (typeof fn === 'function') {
+            void fn.versions;
+            sharp = fn;
+            thumbBackend.add('sharp');
+        }
+    } catch {}
 
-let hasFfmpeg;
-const thumbBackend = sharp ? 'sharp' : hasFfmpeg = detectFfmpeg() ? 'ffmpeg' : null;
-export const isThumbAvailable = thumbBackend !== null;
+    const res = await execCommand('ffmpeg -version');
+    if (res.success && res.output.startsWith("ffmpeg version")) {
+        thumbBackend.add('ffmpeg');
+    }
+
+    return thumbBackend.size > 0;
+};
 
 /**
  *
@@ -52,34 +47,6 @@ async function viaSharp(input, size) {
         })
         .webp({ quality: WEBP_QUALITY, effort: 3 })
         .toBuffer();
-}
-
-/**
- *
- * @param {string[]} args
- * @param {Buffer} input
- * @return {Promise<Buffer>}
- */
-function runFfmpeg(args, input) {
-    return new Promise((resolve, reject) => {
-        const p = spawn('ffmpeg', args, { windowsHide: true });
-        const chunks = [];
-        let stderr = '';
-
-        p.stdout.on('data', (c) => chunks.push(c));
-        p.stderr.on('data', (c) => {
-            stderr += c;
-        });
-        p.on('error', reject);
-        p.on('close', (code) => {
-            if (code === 0) resolve(Buffer.concat(chunks));
-            else reject(new Error(`ffmpeg exited ${code}: ${stderr.trim()}`));
-        });
-
-        // 有 Buffer 输入就灌进 stdin；否则立刻关闭，避免管道挂起
-        if (input) p.stdin.end(input);
-        else p.stdin.end();
-    });
 }
 
 /**
@@ -111,7 +78,25 @@ async function viaFfmpeg(input, size) {
         'pipe:1',
     );
 
-    return runFfmpeg(args, fromBuffer ? input : undefined);
+    return new Promise((resolve, reject) => {
+        const p = spawn('ffmpeg', args, {windowsHide: true});
+        const chunks = [];
+        let stderr = '';
+
+        p.stdout.on('data', (c) => chunks.push(c));
+        p.stderr.on('data', (c) => {
+            stderr += c;
+        });
+        p.on('error', reject);
+        p.on('close', (code) => {
+            if (code === 0) resolve(Buffer.concat(chunks));
+            else reject(new Error(`ffmpeg exited ${code}: ${stderr.trim()}`));
+        });
+
+        // 有 Buffer 输入就灌进 stdin；否则立刻关闭，避免管道挂起
+        if (fromBuffer ? input : undefined) p.stdin.end(fromBuffer ? input : undefined);
+        else p.stdin.end();
+    });
 }
 
 /* ------------------------------------------------------------------ */
@@ -128,21 +113,18 @@ export async function generateThumb(
     size,
     output,
 ) {
-    if (!isThumbAvailable) throw new Error('generateThumb: 没有可用的后端用于生成缩略图');
-
     const px = Math.max(1, Math.floor(size));
 
     let buf;
-    if (thumbBackend === 'sharp') {
+    if (thumbBackend.has('sharp')) {
         try {
             buf = await viaSharp(input, px);
-        } catch (err) {
-            // sharp 处理失败（如不支持的格式），有 ffmpeg 就降级
-            if (!hasFfmpeg) throw err;
-            buf = await viaFfmpeg(input, px);
-        }
-    } else {
+        } catch {}
+    }
+    if (thumbBackend.has('ffmpeg')) {
         buf = await viaFfmpeg(input, px);
+    } else {
+        throw new DOMException('没有可用的后端');
     }
 
     if (output) {

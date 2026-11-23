@@ -1,6 +1,7 @@
 import {prettyError} from "/src/utils/utils.js";
 import {abortable, sleep} from "/common/pure-utils.js";
 import {formatSize} from "unconscious/common/Utils.js";
+import {config} from "../../src/states.js";
 
 export const MAX_RETRY     = 5;
 export function getDelay(attempt, retryAfter) {
@@ -64,6 +65,8 @@ export async function xhrUpload(file, url, headers = {}, signal, onProgress) {
 				xhr.open('POST', url);
 				xhr.setRequestHeader('Content-Type', 'application/octet-stream');
 				xhr.setRequestHeader('Content-Range', `bytes ${offset}-${end - 1}/${total}`);
+				if (config.pv_keepMTime && file.lastModified && end === total) xhr.setRequestHeader('X-MTime', String(file.lastModified));
+
 				if (offset === 0) xhr.setRequestHeader('If-None-Match', '*');
 				for (const k in headers) xhr.setRequestHeader(k, headers[k]);
 

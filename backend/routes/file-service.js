@@ -18,7 +18,7 @@ import {mpscScheduler} from "/common/pure-utils.js";
 import {getContentType} from "@roj234/ie/utils/mimeTypes.js";
 import {safeStat, serveFile} from "@roj234/ie/utils/serveFile.js";
 import {HttpError} from "../app.js";
-import {FS_COMMAND_TIMEOUT, FS_UPDATE_BASH} from "../config.js";
+import {ENABLE_THUMBNAIL, FS_COMMAND_TIMEOUT, FS_UPDATE_BASH} from "../config.js";
 import {IS_WIN, killProcess} from "./fs/process.js";
 import {ANSI_SEQ} from "@roj234/ansi2html/seq";
 import {isThumbAvailable, ThumbnailManager} from "./fs/thumbnail.js";
@@ -36,7 +36,7 @@ async function pathFilterWithIgnore(ctx, relPath, isDir) {
 	const targetPath = pathFilter(relPath, ctx);
 
 	const root = ctx.fsRoot;
-	const processedRelPath = targetPath.slice(root.length+1).replaceAll(path.sep, '/');
+	const processedRelPath = targetPath.slice(root.length).replaceAll(path.sep, '/');
 	const acl = await getACL(root, targetPath);
 	if (acl.denyList(processedRelPath, isDir)) throw new HttpError(403, 'This path is readonly');
 
@@ -359,24 +359,24 @@ export async function registerFsRoutes(router, allowExec, dataPath) {
 
 	const IMAGE_EXT = /\.?(?:jpg|jpeg|jpe|jfif|png|apng|gif|webp|bmp|svg|ico|avif|heic|heif)$/i;
 
-	if (isThumbAvailable) {
-		const threads = Math.max(1, os.availableParallelism() - 1);
+	if (ENABLE_THUMBNAIL && await isThumbAvailable()) {
+		const threads = typeof ENABLE_THUMBNAIL === 'number' ? ENABLE_THUMBNAIL : Math.max(1, os.availableParallelism() - 1);
 
 		await fsp.mkdir(dataPath+'/thumbs', { recursive: true });
 
 		const map = {
-			64: new ThumbnailManager({
+			/*64: new ThumbnailManager({
 				dbPath: dataPath+"/thumbs/64.db",
 				threads,
 				size: 64
-			}),
+			}),*/
 			256: new ThumbnailManager({
 				dbPath: dataPath+"/thumbs/256.db",
 				threads,
 				size: 256
 			})
 		};
-		map[64].inflight = map[256].inflight;
+		//map[64].inflight = map[256].inflight;
 		globalThis.AiChatAPI.addShutdownHook(() => {
 			Object.values(map).forEach(e => e.close());
 		})
@@ -460,9 +460,13 @@ export async function registerFsRoutes(router, allowExec, dataPath) {
 					await fd.truncate(totalSize).catch(() => {});
 				}
 
+				const isOverwrite = start + length === totalSize;
+
 				const out = fd.createWriteStream(isAppend ? {
 					start: start ?? stat.size,
 				} : undefined);
+
+				const opt = { end: false };
 
 				// 不回滚，没有临时文件：能上传说明客户端知道文件内容。
 				try {
@@ -472,7 +476,7 @@ export async function registerFsRoutes(router, allowExec, dataPath) {
 							if (length < 0) return cb(new HttpError(400, 'body exceeds content-range'));
 							cb(null, chunk);
 						},
-					}), out) : pipeline(ctx.req, out));
+					}), out, opt) : pipeline(ctx.req, out, opt));
 				} catch (e) {
 					if (isAppend && start == null) {
 						// 除了单纯追加（不指定offset的）场景。
@@ -482,6 +486,9 @@ export async function registerFsRoutes(router, allowExec, dataPath) {
 				}
 
 				if (length) throw new HttpError(400, `short body: want ${length} more bytes`);
+
+				const mtime = parseInt(ctx.req.headers['x-mtime'], 10) / 1000 || 0;
+				if (isOverwrite && mtime > 0) await fd.utimes(mtime, mtime);
 			} finally {
 				await fd.close();
 			}
@@ -548,7 +555,7 @@ nlink: ${stats.nlink}`);
 	router.post('/delete', async (ctx) => {
 		const { path: filePath, recursive = true, force = false } = await ctx.readAsObject();
 		const safePath = await pathFilterWithIgnore(ctx, filePath, true);
-		if (safePath === ctx.fsRoot) return ctx.send(403, { error: 'Cannot delete root' });
+		if (safePath.length < ctx.fsRoot.length) return ctx.send(403, { error: 'Cannot delete root' });
 
 		await fsp.rm(safePath, { recursive, force }).catch(e => {
 			if (e.code === 'ERR_FS_EISDIR' && !recursive)
@@ -607,6 +614,8 @@ nlink: ${stats.nlink}`);
 
 		let id = events.at(-1)?.id;
 		if ((id == null || id < since) && (runId === RUN_ID)) {
+			if (waiters.size > 64) return ctx.send(503, { error: 'too many concurrent waits' });
+
 			await new Promise(resolve => {
 				const timer = setTimeout(done, deadline - Date.now());
 				function done() {
@@ -759,7 +768,7 @@ nlink: ${stats.nlink}`);
 			if (notify) {
 				safeStat(logAbsolutePath).then(async stat => {
 					let logFile = dir+logName; // 这个给AI看
-					let log, logLines = 0;
+					let log = '', logLines = 0;
 					if (stat.size) {
 						log = await teh.read({ path: logAbsolutePath, offset: -50, maxChars: 4096, noWarn: true }, { fsRoot: '' })
 							.catch((e) => "InternalError: "+(e.message ?? e));
@@ -772,7 +781,7 @@ nlink: ${stats.nlink}`);
 					}
 
 					if (logLines <= 50 && log.length < 4000)
-						await fsp.rm(logAbsolutePath).then(() => logFile = '0B, deleted', () => {});
+						await fsp.rm(logAbsolutePath).then(() => logFile = '', () => {});
 
 					postEvent('process-exit', {
 						pid: child.pid,
@@ -1024,7 +1033,7 @@ logPath: ${logFile}`
 			let { code, text, duration } = await done;
 			reallyDone = true;
 
-			if (globalThis.AIChatArgs.hideUser) text = text.replaceAll(new RegExp("\\b"+process.env.USERNAME+"\\b", "g"), "user");
+			if (globalThis.AiChatAPI.hideUser) text = text.replaceAll(new RegExp("\\b"+process.env.USERNAME+"\\b", "g"), "user");
 			sendText(ctx.res, `${typeof code === 'number'?'Exit code '+code:code} (wall time ${(duration/1000).toFixed(1)}s)\n${text}`);
 		});
 	}

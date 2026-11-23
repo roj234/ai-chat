@@ -13,7 +13,6 @@ import {globMacroPlugin} from "./common/fs-glob.js";
 const execFilePromise = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distPath = path.resolve(__dirname, 'dist');
-const serverAbsPath = path.resolve(__dirname, 'dist/server.js');
 let commitNumber = 'unknown';
 
 try {
@@ -66,7 +65,7 @@ async function createZip(algorithm, name) {
 		t: Date.now()
 	}));
 	const filter = (path) => {
-		if (path === 'server.js') return;
+		if (path === 'server.js' || path.startsWith("plugins/")) return;
 		if (path.startsWith('dist.')) return;
 		if (path.endsWith(".woff2") || path.endsWith(".webp") || path.endsWith(".png")) return 0;
 		return algorithm;
@@ -81,16 +80,42 @@ async function createZip(algorithm, name) {
 
 async function buildServer() {
 	const bundle = await rollup(rollupConfig);
+	const out = path.resolve(__dirname, 'dist/server.js');
 	await bundle.write({
-		file: serverAbsPath,
+		file: out,
 		format: 'esm',
-		//compact: true,
 	});
-	console.log("Server built: ", serverAbsPath);
+	console.log("Server built: ", out);
+}
+
+async function buildServerPlugins() {
+	for await (const entry of fs.glob("plugins/*/main.js", { cwd: path.resolve(__dirname, 'backend'), withFileTypes: true })) {
+		if (entry.isFile()) {
+			const rollupConfig = {
+				input: path.resolve(entry.parentPath, entry.name),
+				external: [
+
+				],
+				plugins: [
+					nodeResolve({basePath: entry.parentPath}),
+				],
+			};
+
+			const name = path.basename(entry.parentPath);
+			const bundle = await rollup(rollupConfig);
+			const out = path.resolve(__dirname, `dist/plugins/${name}/main.js`);
+			await bundle.write({
+				file: out,
+				format: 'esm',
+			});
+			console.log("Plugin built: ", out);
+		}
+	}
 }
 
 await Promise.all([
 	createZip(92, "dist.brip"),
 	createZip(8, "dist.zip"),
-	buildServer()
+	buildServer(),
+	buildServerPlugins()
 ])

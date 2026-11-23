@@ -10,7 +10,7 @@ msgpack_schema.push(
 	"hash", "size", "lastModified",
 	["error",
 		[
-			"type",
+			"name",
 			"message",
 			"status"
 		]

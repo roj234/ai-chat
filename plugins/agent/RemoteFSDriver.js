@@ -3,6 +3,7 @@ import {connectBestServer, prettyError} from "/src/utils/utils.js";
 import {kvListSet} from "/src/database.js";
 import {ContentPart} from "/src/toolset.js";
 import {$computed, $state, unconscious} from "unconscious";
+import {FSE_NotFound, throwDOMException} from "/common/pure-utils.js";
 
 export const BACKEND_SERVER_KVLIST_ID = "fs_backend_uri";
 
@@ -10,7 +11,6 @@ export const addRemoteFileSystem = (prevData = { servers: [''] }) => new Promise
 	const connect = $state();
 	SimpleModal({
 		title: "🐳 缚印 (专用文件服务)",
-		message: <><a href="./docs.html#documents/build.md:部署" target="_blank">说明</a></>,
 		after: $computed(() => unconscious(connect) ? <div className={"input-warning"}>{connect}</div> : null),
 		type: "filter",
 		value: [
@@ -45,7 +45,7 @@ export const addRemoteFileSystem = (prevData = { servers: [''] }) => new Promise
 			if (servers.length < 1) return false;
 
 			try {
-				await connectBestServer(servers, 'fs');
+				await connectBestServer(servers, pat, 'fs');
 			} catch (e) {
 				connect.value = prettyError(e);
 				return false;
@@ -70,9 +70,10 @@ export const addRemoteFileSystem = (prevData = { servers: [''] }) => new Promise
  * @param {string} baseUrl
  * @param {string} pat
  * @param {string=} fileBase
+ * @param {Set<String>} cap
  * @return {Promise<AiChat.FileSystemInstance>}
  */
-export const createRemoteFileSystem = (baseUrl, pat, fileBase) =>
+export const createRemoteFileSystem = (baseUrl, pat, fileBase, cap) =>
 	/**
 	 * @param {string} func
 	 * @param {Record<string, string>} parameters
@@ -134,6 +135,16 @@ export const createRemoteFileSystem = (baseUrl, pat, fileBase) =>
 		const mime = response.headers.get("content-type") || "";
 		const status = response.status;
 
+		if (method === 'HEAD') {
+			await response.body?.cancel();
+			if (status === 404) throwDOMException("文件不存在", FSE_NotFound);
+			return {
+				lastModified: Date.parse(response.headers.get('last-modified')),
+				// 反向代理比如 nginx 启用 gzip 会把这个抹了
+				size: parseInt(response.headers.get('content-length')) || 0,
+			}
+		}
+
 		if (!response.ok) {
 			if (status === 502)
 				throw "FileService dead";
@@ -145,15 +156,6 @@ export const createRemoteFileSystem = (baseUrl, pat, fileBase) =>
 				throw (await response.json()).error;
 			}
 			throw (await response.text());
-		}
-
-		if (method === 'HEAD') {
-			await response.body?.cancel();
-			return {
-				lastModified: Date.parse(response.headers.get('last-modified')),
-				// 反向代理比如 nginx 启用 gzip 会把这个抹了
-				size: parseInt(response.headers.get('content-length')) || 0,
-			}
 		}
 
 		if (mime === "application/octet-stream" || func === 'readRaw' || func === 'thumb') return stream ? response : await response.blob();

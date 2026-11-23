@@ -64,7 +64,7 @@ function normalizeCachedLog(log) {
  * @type {HTMLElement}
  */
 let $presetBtns,
-	$tableBody, $tableScroll, $paginationInfo,
+	$tableBody, $tableScroll, $tableHead,
 	$refreshIndicator,
 	$startDate, $endDate, $filterProvider,
 	$filterModel, $filterFinishReason, $autoRefreshBtn,
@@ -587,7 +587,7 @@ function updateCharts() {
 }
 
 const vl = new VirtualList({
-	overscan: 1000,
+	overscan: 1500,
 	renderer(log, i) {
 		const currency = log.currency || 'USD';
 		const totalTok = (log.input_tokens || 0) + (log.output_tokens || 0) + (log.cached_tokens || 0);
@@ -617,6 +617,7 @@ const vl = new VirtualList({
 // ============ TABLE ============
 function renderTable() {
 	if (filteredLogs.length === 0) {
+		$tableBody.style = "";
 		$tableBody.replaceChildren(
 			<div className="state-message">
 				<div className="state-icon">📭</div>
@@ -633,7 +634,7 @@ function renderTable() {
 	}
 
 	// Update sort header
-	$tableScroll.querySelectorAll(' .vt-head > .sortable').forEach(th => {
+	$tableScroll.querySelectorAll('.vt-head .sortable').forEach(th => {
 		const field = th.dataset.sort;
 		th.classList.toggle('sorted', field === currentSort.field);
 		const arrow = th.querySelector('.sort-arrow');
@@ -702,7 +703,13 @@ const refreshData = async (auto) => {
 const createLogViewer = () => {
 	const state = {
 		onFocus(focused) {
-			if (focused) refreshData(true);
+			if (focused) {
+				const btn = $presetBtns.querySelector('.btn-active');
+				if (btn) {
+					setPresetRange(btn.dataset.range);
+					refreshData(true);
+				}
+			}
 		},
 		element: <>
 			<div className="top-bar row">
@@ -798,7 +805,7 @@ const createLogViewer = () => {
 
 				<div className="table-container">
 					<div className="vt table-scroll" ref={$tableScroll}>
-						<div className="vt-head" onClick.delegate{".sortable"}={({delegateTarget: th}) => {
+						<div className="vt-head" ref={$tableHead} onClick.delegate{".sortable"}={({delegateTarget: th}) => {
 							const field = th.dataset.sort;
 							if (currentSort.field === field) {
 								currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
@@ -808,19 +815,23 @@ const createLogViewer = () => {
 							}
 							applySort();
 						}}>
-							<div className="sortable" data-sort="time" style="min-width:140px">时间 <span className="sort-arrow">▾</span></div>
-							<div data-sort="provider"><select className="filter-select" ref={$filterProvider} onChange={applyFilters}></select></div>
-							<div data-sort="model"><select className="filter-select" ref={$filterModel} onChange={applyFilters}></select></div>
-							<div className="sortable" data-sort="input_tokens" style="text-align:right">输入 <span className="sort-arrow">▾</span></div>
-							<div className="sortable" data-sort="output_tokens" style="text-align:right">输出 <span className="sort-arrow">▾</span></div>
-							<div className="sortable" data-sort="total_tokens" style="text-align:right">总计 <span className="sort-arrow">▾</span></div>
-							<div style="text-align:right">缓存</div>
-							<div className="sortable" data-sort="cost" style="text-align:right">成本 <span className="sort-arrow">▾</span></div>
-							<div className="sortable" data-sort="duration" style="text-align:right">耗时 <span className="sort-arrow">▾</span></div>
-							<div className="sortable" data-sort="latency" style="text-align:right">延迟 <span className="sort-arrow">▾</span></div>
-							<div data-sort="finish_reason" style={"text-align:center"}><select className="filter-select" ref={$filterFinishReason} onChange={applyFilters}></select></div>
+							<div className="vt-head-row">
+								<div className="sortable" data-sort="time" style="min-width:140px">时间 <span className="sort-arrow">▾</span></div>
+								<div data-sort="provider"><select className="filter-select" ref={$filterProvider} onChange={applyFilters}></select></div>
+								<div data-sort="model"><select className="filter-select" ref={$filterModel} onChange={applyFilters}></select></div>
+								<div className="sortable" data-sort="input_tokens" style="text-align:right">输入 <span className="sort-arrow">▾</span></div>
+								<div className="sortable" data-sort="output_tokens" style="text-align:right">输出 <span className="sort-arrow">▾</span></div>
+								<div className="sortable" data-sort="total_tokens" style="text-align:right">总计 <span className="sort-arrow">▾</span></div>
+								<div style="text-align:right">缓存</div>
+								<div className="sortable" data-sort="cost" style="text-align:right">成本 <span className="sort-arrow">▾</span></div>
+								<div className="sortable" data-sort="duration" style="text-align:right">耗时 <span className="sort-arrow">▾</span></div>
+								<div className="sortable" data-sort="latency" style="text-align:right">延迟 <span className="sort-arrow">▾</span></div>
+								<div data-sort="finish_reason" style={"text-align:center"}><select className="filter-select" ref={$filterFinishReason} onChange={applyFilters}></select></div>
+							</div>
 						</div>
-						<div className="vt-body" ref={$tableBody}>
+						<div className="vt-body" ref={$tableBody} onScroll.passive={e => {
+							$tableHead.scrollLeft = $tableBody.scrollLeft;
+						}}>
 							<div className="state-message">
 								<div className="spinner"></div>
 								<div className="state-title">加载中...</div>

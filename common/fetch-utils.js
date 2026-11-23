@@ -23,7 +23,7 @@ async function responseErrorHandler(res) {
 		}
 	}
 	if (typeof obj !== 'string') obj = JSON.stringify(obj);
-	throw {status: res.status, message: obj, [ORIGINAL_ERROR]: init};
+	throw { name: "network_error", status: res.status, message: obj, [ORIGINAL_ERROR]: init};
 }
 
 /**
@@ -108,9 +108,9 @@ export const sseFetch = (url, {key = "", json = true, ...data} = {}, onChunk) =>
 			buf = lines.pop() || '';
 
 			for (const line of lines) {
-				if (line.startsWith('event: ')) event = line.slice(7);
-				else if (line.startsWith('data: ')) {
-					const data = line.slice(6);
+				if (line.startsWith('event:')) event = line.slice(6).trim();
+				else if (line.startsWith('data:')) {
+					const data = line.slice(5).trim();
 					if (data === '[DONE]') return;
 					if (!data) continue;
 
@@ -126,13 +126,9 @@ export const sseFetch = (url, {key = "", json = true, ...data} = {}, onChunk) =>
 							error = e instanceof Error ? e.message : e;
 					}
 
-					if (error) throw { status: 'SSE Chunk', message: typeof error === 'string' ? error : JSON.stringify(error) };
+					if (error) throw { name: "stream_error",  message: typeof error === 'string' ? error : JSON.stringify(error) };
 					event = undefined;
-				}/* else {
-					if (line && !'event: '.startsWith(line) && !'data: '.startsWith(line)) {
-						throw new Error("Illegal SSE response");
-					}
-				}*/
+				}
 			}
 		}
 	} finally {

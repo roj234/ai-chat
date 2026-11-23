@@ -71,8 +71,10 @@ export const fileLock = async (ctx, absPath) => {
 
 	let resolved;
 	locks.set(absPath, new Promise(resolve => {
-		resolved = resolve;
-		locks.delete(absPath);
+		resolved = () => {
+			resolve();
+			locks.delete(absPath);
+		}
 	}));
 	return resolved;
 }

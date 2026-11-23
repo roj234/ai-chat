@@ -851,7 +851,7 @@ body._locked {
 .bar {
     position: absolute;
     left: 0;
-    right: 0;
+    right: 8px;
 
     display: flex;
     z-index: 1;

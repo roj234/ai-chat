@@ -60,10 +60,16 @@ export const resolvePlaceholder = async (id, cfg, conversation, src) => {
 				const preset = await kvListGet(PRESET_KVS_ID, id);
 				return preset.systemPrompt;
 			} else {
+				let arg;
+				let pos = id.indexOf(':');
+				if (pos > 0) {
+					arg = id.slice(pos+1);
+					id = id.slice(0, pos);
+				}
 				let val = conversation[TEMPORARY_PLACEHOLDER]?.[id] ?? PLACEHOLDERS[id];
 				if (val != null) {
 					if (typeof val === "function")
-						val = await val(conversation);
+						val = await val(conversation, arg);
 					return val;
 				} else if (id[0] !== '#') {
 					if (src) throw new DOMException("未知提示词变量: {{"+id+"}}");

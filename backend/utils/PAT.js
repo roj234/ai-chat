@@ -29,11 +29,12 @@ bakeSchema(pat_schema);
  */
 export const checkPAT = (authorization, ctx) => {
 	if (authorization.length < 20 || authorization.length > 384) return false;
-	const userSalt = ctx.db.prepare("SELECT value from kv WHERE key = 'salt'").get();
-	if (!userSalt) return false;
 
 	let pat;
 	try {
+		const userSalt = ctx.db.prepare("SELECT value from kv WHERE key = 'salt'").get();
+		if (!userSalt) return false;
+
 		const buffer = Buffer.from(authorization, 'base64url');
 		let endOffset;
 		[

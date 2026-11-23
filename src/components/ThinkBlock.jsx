@@ -9,7 +9,7 @@ import {JsonEditor} from "./JsonEditor.jsx";
  * @param {OpenAI.ReasoningDetail[]} details
  * @returns {string}
  */
-const extractReasoningTextFromDetails = details => {
+export const extractReasoningTextFromDetails = details => {
 	let str = "";
 
 	for (const item of details) {

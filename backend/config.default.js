@@ -7,7 +7,7 @@
  */
 
 // ==========================================
-// 0. 专用文件访问服务
+// 1. 专用文件访问服务
 // ==========================================
 
 /**
@@ -19,10 +19,15 @@
 export const FS_SERVICE_PAT = '';
 
 /**
+ * 文件访问服务是否允许执行命令
+ */
+export const FS_ALLOW_EXEC = true;
+
+/**
  * 在 windows 上，且没有 bash 时，自动下载并安装 busybox-w32-unicode
  * @type {boolean}
  */
-export const FS_UPDATE_BASH = true;
+export const FS_UPDATE_BASH = FS_ALLOW_EXEC;
 
 /**
  * 命令自动转异步避免阻塞模型的超时，单位是秒
@@ -31,7 +36,112 @@ export const FS_UPDATE_BASH = true;
 export const FS_COMMAND_TIMEOUT = 20;
 
 // ==========================================
-// 1. 语义搜索与向量化 (Semantic Search)
+// 2. 实时同步与用户
+// ==========================================
+
+/**
+ * 服务器API直连地址 (用于输入用户名)
+ * @example https://nas.lan/aichat/api/
+ */
+export const SERVER_BASE_ADDR = ``;
+
+/** 是否开启 WebSocket 状态同步 */
+export const WEBSOCKET_SYNC_ENABLE = true;
+
+/**
+ * 动态生成 WebSocket 连接地址
+ * @param {AiChatBackend.RouteContext} ctx - 路由上下文
+ * @returns {string} 完整的 WebSocket WS/WSS URL
+ */
+export const WEBSOCKET_SYNC_BASE = (ctx) => {
+	// 默认用@返回相对数据库API的地址。
+	// 你也可以返回绝对URL如 ws://${ctx.req.headers.host}/api
+	// 或相对于网页的URL（谨慎使用，不兼容安卓）
+	return `@sync`;
+};
+
+/** 是否开启用户名称限制 */
+export const RESTRICT_USER_CREATION = false;
+
+/** 用户名称限制正则 通常来说，你可以直接在用竖线分隔没有特殊符号的用户名 */
+export const ALLOW_USER_NAMES = /^(?:admin|user)$/;
+
+/** 管理员用户正则 */
+export const ADMIN_USER_NAMES = /^(?:admin)$/;
+
+/** 要求交互式登录（在控制台接受）并下发PAT */
+export const INTERACTIVE_LOGIN = false;
+
+/** 只接受在这个时间后签发的PAT */
+export const PAT_VALID_AFTER = new Date("2026-01-01").getTime() / 1000;
+
+/** Blob 存储最大大小 */
+export const MAX_UPLOAD_SIZE = 52428800;
+
+// ==========================================
+// 3. 安全设置
+// ==========================================
+
+/** 实例 ID（用来确定同一台服务器），如果是空字符串，下次服务器启动时会随机生成 */
+export const INSTANCE_ID = '';
+
+/** 服务器盐值，修改以作废所有PAT，如果是空字符串，下次服务器启动时会随机生成 */
+export const PAT_SERVER_SALT = '';
+
+/**
+ * 启用缩略图支持（重启生效）
+ * 设置为数字可以覆盖并行任务数
+ * @type {boolean | number}
+ */
+export const ENABLE_THUMBNAIL = true;
+
+/**
+ * 从 plugins 文件夹中加载插件。
+ * 不存在或加载失败会警告而不是中止进程。
+ * @type {string[]}
+ */
+export const PLUGINS = ['characterViewer', 'weather'];
+
+/** 允许任意源的客户端访问（发送 ACAO: *）。*/
+export const NO_CORS = RESTRICT_USER_CREATION || INTERACTIVE_LOGIN || FS_SERVICE_PAT;
+
+// ==========================================
+// 4. 数据库设置
+// ==========================================
+
+/**
+ * 启用简易聊天室
+ */
+export const ENABLE_CHATROOM = true;
+
+/**
+ * 同时打开的SQLite数据库数量
+ */
+export const MAX_OPEN_DATABASES = 30;
+
+/**
+ * 启动时执行的额外 SQLite 语句
+ * 默认开启 WAL 模式以提升并发写入性能
+ */
+export const STARTUP_SQL = `
+    PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = NORMAL;
+`;
+
+/** 是否使用 Msgpack 替代 JSON 序列化响应（体积更小，速度更快） */
+export const RESPONSE_USE_MSGPACK_SCHEMA = true;
+
+/** 响应的 Brotli 压缩级别 (0-11) */
+export const RESPONSE_COMPRESS_LEVEL = 6;
+
+/** 触发压缩的阈值（字节）：超过此大小的数据库字段将压缩 */
+export const DB_COMPRESS_MIN_SIZE = 1024;
+
+/** 数据库的压缩级别 (0-11) */
+export const DB_COMPRESS_LEVEL = 7;
+
+// ==========================================
+// 5. 语义搜索与向量嵌入
 // ==========================================
 
 /** 是否启用语义搜索功能（需要向量数据库支持） */
@@ -65,83 +175,11 @@ export const SEMANTIC_SEARCH_CHUNK_MODE = {
 };
 
 // ==========================================
-// 2. 实时同步与用户管理
+// 6. SSE 代理与转发
 // ==========================================
 
 /**
- * 服务器API直连地址 (用于输入用户名)
- * @example https://nas.lan/aichat/api/
- */
-export const SERVER_BASE_ADDR = ``;
-
-/** 是否开启 WebSocket 状态同步 */
-export const WEBSOCKET_SYNC_ENABLE = true;
-
-/**
- * 动态生成 WebSocket 连接地址
- * @param {AiChatBackend.RouteContext} ctx - 路由上下文
- * @returns {string} 完整的 WebSocket WS/WSS URL
- */
-export const WEBSOCKET_SYNC_BASE = (ctx) => {
-	// 默认用@返回相对数据库API的地址。
-	// 你也可以返回绝对URL如 ws://${ctx.req.headers.host}/api
-	// 或相对于网页的URL（谨慎使用，不兼容安卓）
-	return `@sync`;
-};
-
-/** 实例 ID（用来确定同一台服务器），如果是空字符串，下次服务器启动时会随机生成 */
-export const INSTANCE_ID = '';
-
-/** 是否开启用户名称限制 */
-export const RESTRICT_USER_CREATION = false;
-
-/** 用户名称限制正则 通常来说，你可以直接在用竖线分隔没有特殊符号的用户名 */
-export const ALLOW_USER_NAMES = /^(?:admin|user)$/;
-
-/** 管理员用户正则 */
-export const ADMIN_USER_NAMES = /^(?:admin)$/;
-
-/** 要求交互式登录（在控制台接受）并下发PAT */
-export const INTERACTIVE_LOGIN = false;
-
-/** 服务器盐值，修改以作废所有PAT，如果是空字符串，下次服务器启动时会随机生成 */
-export const PAT_SERVER_SALT = '';
-
-/** 只接受在这个时间后签发的PAT */
-export const PAT_VALID_AFTER = new Date("2026-01-01").getTime() / 1000;
-
-/** Blob 存储最大大小 */
-export const MAX_UPLOAD_SIZE = 52428800;
-
-// ==========================================
-// 3. 安全与数据库设置
-// ==========================================
-
-/**
- * 同时打开的SQLite数据库数量
- */
-export const MAX_OPEN_DATABASES = 30;
-
-/**
- * 启动时执行的额外 SQLite 语句
- * 默认开启 WAL 模式以提升并发写入性能
- */
-export const STARTUP_SQL = `
-    PRAGMA journal_mode = WAL;
-    PRAGMA synchronous = NORMAL;
-`;
-
-/**
- * 启用简易聊天室
- */
-export const ENABLE_CHATROOM = true;
-
-// ==========================================
-// 4. SSE 后端代理与转发 (SSE Proxy)
-// ==========================================
-
-/**
- * SSE 后端代理路由表
+ * SSE 后端代理路由
  *
  * 匹配逻辑：
  * 1. 匹配 Header 中的 Authorization (Bearer 后面的 Key)。
@@ -160,21 +198,14 @@ export const SSE_PROXY_BACKEND = {
 			"User-Agent": "opencode/1.2.3"
 		},
 		trace: true // 是否记录该通道的日志 (需开启 SSE_PROXY_TRACE)
-	},
-
-	default: {
-		url: '',
-		authorization: 'xxx'
 	}
 };
 
 /**
- * 可以async
+ * 用途极广。功能详见文档。
  * @type {AiChatBackend.ModerationHandler}
  */
-export const SSE_PROXY_MODERATION = (target, ctx) => {
-
-}
+export const SSE_PROXY_MODERATION = (target, ctx) => {};
 
 /**
  * 断线重连缓存大小。
@@ -199,7 +230,7 @@ export const SSE_REF_CACHE_SIZE = 1000;
 export const SSE_REF_TTL = 0;
 
 // ==========================================
-// 5. 计费与价格映射 (Billing)
+// 7. 计费与价格映射
 // ==========================================
 
 function isLiangWenFeng() {
@@ -263,21 +294,3 @@ export const LOG_HOOK = (log) => {
 	}
 };
 
-// ==========================================
-// 6. 数据压缩与序列化 (Optimization)
-//  - 修改这些选项不会影响之前的数据
-//  - 设置压缩级别为 0 来禁用 br
-//  - 禁用了 br 也有关不掉的 gzip
-// ==========================================
-
-/** 触发压缩的阈值（字节）：超过此大小的数据库字段将进行 brotli 压缩 */
-export const DB_COMPRESS_MIN_SIZE = 1024;
-
-/** 数据库的 Brotli 压缩级别 (0-11) */
-export const DB_COMPRESS_LEVEL = 7;
-
-/** 是否使用 Msgpack 替代 JSON 序列化响应（体积更小，速度更快） */
-export const RESPONSE_USE_MSGPACK_SCHEMA = true;
-
-/** 响应的 Brotli 压缩级别 (0-11) */
-export const RESPONSE_COMPRESS_LEVEL = 6;

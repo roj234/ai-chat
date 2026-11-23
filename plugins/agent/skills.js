@@ -4,6 +4,7 @@ import {fileAccess} from "./Mounts.js";
 import {createAsyncQueue, stringCompare} from "/common/pure-utils.js";
 import {EVENT_BUS} from "/src/states.js";
 import {isIDB} from "/src/database.js";
+import {PLACEHOLDERS} from "/src/utils/placeholder.js";
 
 const SKILL_INFO = debugSymbol("Skills");
 const glob = fileAccess("list");
@@ -12,6 +13,23 @@ const writeFile = fileAccess("write");
 const writeBinary = fileAccess("writeRaw");
 const deleteFile = fileAccess("delete");
 
+PLACEHOLDERS['skill'] = async (conv, name) => {
+	const cache = (await getSkillCache(conv)).index;
+	const arr = cache[name];
+	if (!arr) throw `找不到技能 ${name}. 如果它是刚写的，请刷新页面。`;
+
+	let [path, offset, str] = arr;
+
+	if (null == str) {
+		arr[2] = str = await readFile({
+			path,
+			offset,
+			noTruncate: true
+		}, {}, conv);
+	}
+
+	return str;
+}
 
 /**
  * @type {AiChat.FunctionTool}
@@ -30,16 +48,18 @@ Skills provide specialized capabilities and domain knowledge.`,
 	},
 	async script({name}, a, conv) {
 		const cache = (await getSkillCache(conv)).index;
-		const [path, offset] = cache[name] || [];
-		if (!path) {
-			throw 'Skill not found.\nNote: To avoid cache miss, new skills are not loaded automatically, create a new session or reload current session to flush skills.'
-		}
+		const arr = cache[name];
+		if (!arr) throw `Skill ${name} not found.
+Note: To avoid cache miss, new skills are not loaded automatically, create a new session or reload current session to flush skills.`
+		let [path, offset, str] = arr;
 
-		const str = await readFile({
-			path,
-			offset,
-			noTruncate: true
-		}, {}, conv);
+		if (null == str) {
+			arr[2] = str = await readFile({
+				path,
+				offset,
+				noTruncate: true
+			}, {}, conv);
+		}
 
 		return "Path: "+path+"\n\n---\n\n"+str;
 	},
@@ -60,7 +80,7 @@ const copyFile = (name, toBase, conv) => {
 	})
 }
 
-const SKILL_VERSION = "1";
+const SKILL_VERSION = "2";
 const nothing = {};
 
 export async function getSkillCache(conv) {
@@ -95,7 +115,9 @@ export async function getSkillCache(conv) {
 					copyFile("aint-agents/SKILL.md", "~/skills/", conv),
 					copyFile("aint-agents/ACL.md", "~/skills/", conv),
 					copyFile("aint-ptc/SKILL.md", "~/skills/", conv),
-					writeFile({ path: "~/skills/.aint-skill-version", content: SKILL_VERSION }, nothing, conv),
+					copyFile("aint-wait/SKILL.md", "~/skills/", conv),
+					copyFile("aint-wait/watch-window.js", "~/skills/", conv),
+					writeFile({ path: "~/skills/.aint-skill-version", content: SKILL_VERSION, overwrite: true }, nothing, conv),
 					EVENT_BUS.post(['initSkills'], conv, writeFile)
 				]);
 				p.finally(() => fs.fs_readonly = true);

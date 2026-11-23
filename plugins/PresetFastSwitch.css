@@ -26,15 +26,19 @@
 
 	position: relative;
 
+	/* 这个容器用来让ts贴底 */
+	& .ts-wrapper {
+		position: absolute;
+		left: calc(100% + 10px);
+		bottom: 0;
+	}
+
 	& .ts {
 		background: var(--panel-2);
 		border: 1px solid var(--border);
 		border-radius: var(--border-radius-md);
 		box-shadow: var(--shadow);
 		padding: 4px;
-
-		position: absolute;
-		left: calc(100% + 10px);
 		width: 300px;
 	}
 
@@ -48,8 +52,7 @@
 }
 
 @media screen and (max-width: 768px) {
-
-	.pretty-select.preset-switch .ts {
+	.pretty-select.preset-switch .ts-wrapper {
 		left: 0;
 		bottom: calc(100% + 10px);
 	}

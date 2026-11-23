@@ -67,7 +67,7 @@ export const requestBackend = async (path, {body, method} = {}) => {
 		res = await fetch(remoteDBUrl+path, init);
 	} catch (e) {
 		if (e.message === 'Failed to fetch')
-			throwDOMException("网络故障", "AbortError");
+			throwDOMException("网络故障", "network_error");
 		throw e;
 	}
 
@@ -94,8 +94,9 @@ export const requestBackend = async (path, {body, method} = {}) => {
 		}
 
 		throw {
+			name: "network_error",
 			status: res.status,
-			error: text
+			message: text
 		};
 	}
 	return decode();
@@ -275,7 +276,7 @@ export const initialize = async (urlOnly) => {
 		const servers = config.db_servers;
 		let dbUrl;
 		if (servers.length > 1) {
-			dbUrl = await connectBestServer(servers, 'db');
+			dbUrl = (await connectBestServer(servers, config.db_pat, 'db'))[0];
 		} else {
 			dbUrl = servers[0];
 		}
@@ -480,17 +481,24 @@ export const uploadBlob = async blob => {
 	try {
 		await u_getBlobInfo([hash, blob.name || '']);
 	} catch {
-		if (maxBlobSize && blob.size > maxBlobSize) throw '文件 '+blob.hash+' 过大';
+		let s = blob.name;
 
-		let url = remoteDBUrl+`blob/`+hash+"?name="+encodeURIComponent(blob.name||"")+"&time="+(blob.lastModified||"");
+		if (maxBlobSize && blob.size > maxBlobSize) throw '文件 '+(s || hash)+' 过大';
+
+		let url = remoteDBUrl+`blob/`+hash+(s ? '?name='+encodeURIComponent(s) : '');
+		const headers = {
+			'Content-Type': blob.type,
+			'Authorization': 'Bearer '+(config.db_pat||'')
+		};
+
+		let t = blob.lastModified;
+		if (t) headers['x-mtime'] = t;
+
 		let res;
 		try {
 			res = await fetch(url, {
 				method: 'POST',
-				headers: {
-					'Content-Type': blob.type,
-					'Authorization': 'Bearer '+(config.db_pat||'')
-				},
+				headers,
 				body: blob
 			});
 		} catch {

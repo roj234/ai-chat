@@ -209,7 +209,7 @@ export function registerVectorDBRoutes(router, dataPath) {
 		}
 
 		// 删除文件
-		const filePath = pathFilter(`vectors/${dbName}.db`, ctx.fsRoot);
+		const filePath = pathFilter(`vectors/${dbName}.db`, ctx);
 		try {
 			await fs.unlink(filePath);
 		} catch (e) {

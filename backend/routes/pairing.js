@@ -135,10 +135,10 @@ export function registerPairingRoutes(router, dataPath) {
 		const userId = ctx.params.userId;
 		if (!userId) return ctx.send(400, "");
 
-		if (pendingMap.size >= MAX_PENDING) ctx.send(429, { error: `服务器繁忙，请稍后再试 (${MAX_PENDING})` });
+		if (pendingMap.size >= MAX_PENDING) return ctx.send(429, { error: `服务器繁忙，请稍后再试 (${MAX_PENDING})` });
 
 		const timeLimiter = Math.trunc(Date.now() / 200);
-		if (lastPairingTime === timeLimiter)  ctx.send(429, { error: `服务器繁忙，请稍后再试 (${timeLimiter})` });
+		if (lastPairingTime === timeLimiter) return ctx.send(429, { error: `服务器繁忙，请稍后再试 (${timeLimiter})` });
 		lastPairingTime = timeLimiter;
 
 		let pairCode, pairPromise, cancel;

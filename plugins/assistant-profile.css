@@ -1,7 +1,7 @@
 
 .assistant-profile {
 	max-height: 310px;
-	padding-right: 4px;
+	padding: 0 4px 1px 0;
 
 	& > ._vl {
 		display: grid;

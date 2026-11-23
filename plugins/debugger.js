@@ -78,7 +78,7 @@ const F12 = async () => {
 		});
 		editor.setValue(logBuffer.join('\n'));
 		output = editor;
-		state1.value = dom[0];
+		state1.value = <div className="editor -inline col">{dom[0]}</div>;
 	});
 };
 

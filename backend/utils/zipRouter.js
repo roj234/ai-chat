@@ -76,12 +76,13 @@ export function createZipRouter(zip) {
 		}
 
 		res.writeHead(200, headers);
-
-		let readable = Readable.from(body);
-		if (needDecompress) {
-			readable = readable.pipe(compression === 'deflate' ? createInflateRaw() : createBrotliDecompress());
+		if (req.method !== 'HEAD') {
+			let readable = Readable.from(body);
+			if (needDecompress) {
+				readable = readable.pipe(compression === 'deflate' ? createInflateRaw() : createBrotliDecompress());
+			}
+			await pipeline(readable, res);
 		}
-		await pipeline(readable, res);
 		return true;
 	};
 }

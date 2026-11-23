@@ -415,11 +415,13 @@ const chunkGather = (message, chunks, index, messages, __isPTC) => {
 		if (finish_reason === 'interrupt') error = "你中断了生成";
 		if (finish_reason === 'length') error = "达到最大输出长度";
 	} else {
-		switch (error.type) {
+		switch (error.name) {
 			case 'disconnect': error = '网络波动，试试点输入框的【继续】'; break;
 			case 'refusal': error = '输出被拒绝\n'+error.message; break;
 			case 'early_stop': error = 'API错误\n连接在收到 finish_reason 前被服务端断开'; break;
-			case 'request_error': error = `API错误 (${error.status})\n`+error.message; break;
+			case 'network_error': error = `API错误 (${error.status})\n`+error.message; break;
+			case 'stream_error': error = `SSE流错误\n`+error.message; break;
+			case 'prompt_error': error = `系统提示词构造失败\n`+error.message; break;
 		}
 	}
 	if (error) {
@@ -677,6 +679,7 @@ const buttonOnLeft = (selectedConversation, messages, ev, overrideAction) => {
 			const clonedMessages = [...msgs];
 			const clonedMessage = cloneMessage(message);
 			clonedMessage.id = BRANCH_TEMP_ID;
+			clonedMessage.time = Date.now();
 			clonedMessage[PINNED] = true;
 			selectedConversation[CURRENT_EDITING] = clonedMessages[self.index] = clonedMessage;
 			messages.value = clonedMessages;

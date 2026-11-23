@@ -6,6 +6,7 @@ import {postcssOkLCHFallback} from "@roj234/ie/plugins/postcss-oklch-fallback.js
 import {postcssInlineLengthVars} from "@roj234/ie/plugins/postcss-inline-length-vars.js";
 import {postcssWoff2Only} from "@roj234/ie/plugins/postcss-woff2-only.js";
 import {sandboxModules} from "./common/build-sandbox-modules.js";
+import {getContentType} from "@roj234/ie/utils/mimeTypes.js";
 
 import packageInfo from "./package.json";
 import serverPackageInfo from './backend/package.json' with {type: 'json'};
@@ -38,12 +39,40 @@ const getCommitNumber = async () => {
     }
 }
 
+const PWA_DIR = path.resolve(__dirname, 'misc/pwa-config');
+
+/**
+ * 开发时把 misc/pwa-config 映射到站点根路径
+ * @returns {import('vite').Plugin}
+ */
+const pwaStaticDevPlugin = () => ({
+    name: 'pwa-static-dev',
+    apply: 'serve',
+    configureServer(server) {
+        const matchers = ['/manifest.json', '/assets/icons/'];
+        server.middlewares.use((req, res, next) => {
+            const pathname = decodeURIComponent((req.url || '').split('?')[0]);
+            if (!matchers.some(p => pathname === p || pathname.startsWith(p))) return next();
+
+            const filePath = path.resolve(PWA_DIR, '.' + pathname);
+            if (!filePath.startsWith(PWA_DIR + path.sep)) return next(); // 目录穿越防护
+
+            fs.promises.stat(filePath).then(info => {
+                if (!info.isFile()) return next();
+                res.setHeader('Content-Type', getContentType(filePath));
+                res.setHeader('Content-Length', info.size);
+                res.setHeader('Cache-Control', 'no-cache');
+                fs.createReadStream(filePath).pipe(res);
+            }, () => next());
+        });
+    }
+});
+
 const isGitHubActions = process.env.GITHUB_ACTIONS === 'true';
-const LOADING_TEMPLATE = fs.readFileSync('./loading.html', 'utf-8').match(/<!--START-->(.+)<!--END-->/s)[1]
+const cleanHtml = s => s
     .replaceAll(/[\r\n]|^[ \t]+|<!--.+?-->|\/\*.+?\*\//gm, '')
-    .replaceAll(/[:,] /g, ([m]) => m)
-    .replaceAll(";}", "}")
-    .replaceAll(" {", "{");
+    .replaceAll(/\s*([:,;{}])\s*/g, '$1')
+    .replaceAll(";}", "}");
 
 //https://cn.vite.dev/
 export default defineConfig(async ({mode}) => {
@@ -110,13 +139,13 @@ export default defineConfig(async ({mode}) => {
         }),
         purgeIconFont(),
         sandboxModules(),
+        pwaStaticDevPlugin(),
         ...(mode === 'production' ? [(await import("file://"+__dirname+"/common/fs-glob.js")).globMacroPlugin()] : [(await import("file://"+SERVER_BUNDLE)).serverDevPlugin()]),
         {
             name: 'inject-build-time',
             transformIndexHtml(html) {
-                html = html.replace("{{loading}}", LOADING_TEMPLATE);
                 if (process.env.NODE_ENV === 'development') return html;
-                return html.replaceAll(/[\r\n]/g, "").replaceAll(/  +/g, " ");
+                return cleanHtml(html);
             }
         },
     ],

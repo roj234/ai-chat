@@ -5,6 +5,7 @@ import {AS_IS} from "unconscious";
 import {createSandbox} from "@roj234/workerbox";
 import {normalizePath} from "@roj234/shared/path";
 import {
+	BY_PTC,
 	getToolParameters,
 	runTools,
 	toolScriptRegistry,
@@ -15,7 +16,7 @@ import {formatSize} from "unconscious/common/Utils.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
 import {HighlightBox} from "/src/components/TextDiff.jsx";
 import {inspect} from "@roj234/util-inspect";
-import {config} from "/src/states.js";
+import {config, EVENT_BUS} from "/src/states.js";
 import {FSE_NotAllowed, FSE_NotFound, FSE_NotSupported, throwDOMException} from "/common/pure-utils.js";
 import {injectMessages} from "/src/inject-message.js";
 import {escapeRegexp} from "@roj234/shared/strings";
@@ -31,16 +32,44 @@ import {escapeRegexp} from "@roj234/shared/strings";
 const sandboxInstances = new Map;
 
 /**
- * @type {Record<string, function(AiChat.Conversation, AiChat.ToolResponse): Record<string, Function>>}
+ * @type {Record<string, function(AiChat.Conversation, AiChat.ToolResponse, Set<function(): void>): Record<string, Function>>}
  */
 export const JS_HOST_MODULES = {
-	'tools': (conv, ctx) => new Proxy({
+	'tools': (conv, ctx, onEnded) => new Proxy({
 		notify(message) {
-			return injectMessages(conv, {
+			return injectMessages(conv, message.role ? message : {
 				role: 'user',
 				label: 'JS沙箱',
 				content: `<js-sandbox>${message}</js-sandbox>`
 			});
+		},
+		reset() {
+			delete ctx.delegatedCalls;
+		},
+		Wait({duration}) {
+			const pm = conv.pendingMessages;
+			if (pm || duration == null) return {  duration: 0, success: !!pm?.length };
+
+			return new Promise(resolve => {
+				const now = Date.now();
+				const timeout = duration && setTimeout(() => {
+					resolve({ duration: Date.now() - now, success: false });
+					removeCallback();
+				}, duration * 1000);
+
+				const removeEventListener = EVENT_BUS.onoff(['messageInject', 'pending'], conv1 => {
+					if (conv !== conv1) return;
+					resolve({ duration: Date.now() - now, success: true });
+					removeCallback();
+				});
+
+				const removeCallback = () => {
+					clearTimeout(timeout);
+					removeEventListener();
+					onEnded.delete(removeCallback);
+				};
+				onEnded.add(removeCallback);
+			})
 		}
 	}, {
 		get(target, key, self) {
@@ -58,8 +87,6 @@ export const JS_HOST_MODULES = {
 			if (!allowed) return;
 			if (definition?.requireUI) throwDOMException(key+" tool require UI access", FSE_NotSupported);
 
-			// FIXME
-			if (key === "Wait") throwDOMException("Wait tool is not supported yet.", FSE_NotSupported);
 			if (key === "RunJS") throwDOMException("Recursion.", FSE_NotAllowed);
 
 			return target[key] ??= async (args) => {
@@ -71,7 +98,8 @@ export const JS_HOST_MODULES = {
 					function: {
 						name: key,
 						arguments: JSON.stringify(args || {})
-					}
+					},
+					[BY_PTC]: true
 				}) - 1;
 
 				await runTools(ptc, conv, pos, undefined, UNSAFE_TOOL_DENY_MESSAGE_AFK);
@@ -440,7 +468,8 @@ export const RunJS = {
 
 		// 它的存在不直接告知模型 (PTC)
 		const hostModules = worker.handlers.hostModules;
-		for (const key in JS_HOST_MODULES) hostModules.set(key, JS_HOST_MODULES[key](conv, response));
+		const endedCallbacks = new Set;
+		for (const key in JS_HOST_MODULES) hostModules.set(key, JS_HOST_MODULES[key](conv, response, endedCallbacks));
 
 		const hangTimer = setTimeout(() => stopWorker(new DOMException(timeout.toFixed(2)+"s", "TimeoutError")), timeout * 1000);
 
@@ -556,7 +585,7 @@ export const RunJS = {
 					...conv.sb_env,
 					...secretNames,
 					...env,
-					SCRIPT_TIMEOUT: timeout
+					SCRIPT_TIMEOUT: timeout * 1000
 				},
 				argv
 			);
@@ -585,6 +614,7 @@ export const RunJS = {
 					handlers.detachLogs ++;
 					console.log('[RunJS]', log);
 				}
+				endedCallbacks.forEach(e => e());
 			}
 		}
 

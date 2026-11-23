@@ -94,11 +94,15 @@ async function saveModel(settings, modelTab) {
 }
 
 /**
+ * @typedef {HTMLElement & {showHide(id: string, show: boolean, exact?: boolean): void, show(): void, byId(string): HTMLElement, sync(boolean, boolean)}} SettingDialog
+ */
+
+/**
  *
  * @param {Array} optionsArray
  * @param {import("unconscious").Reactive<AiChat.Preset>} settings
  * @param {Function} onSettingChanged
- * @return {{showHide(id: string, show: boolean, exact?: boolean): void, show(): void, byId(string): HTMLElement, sync(boolean, boolean)}}
+ * @return {SettingDialog}
  */
 export function createSettingDialog(optionsArray, settings, onSettingChanged) {
 	/** @type {import("unconscious/common/components/Filter").FilterInstance} */

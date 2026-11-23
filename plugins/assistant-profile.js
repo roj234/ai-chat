@@ -234,8 +234,8 @@ const createProfile = async () => {
 
 	const messages = await getMessages(conv);
 
-	cloned.messages = messages.map(s => {
-		const {id,parent,...rest} = s;
+	cloned.messages = messages.filter(s => s.id >= 0).map(s => {
+		const {id,parent,foldGroup,folded,...rest} = s;
 		return rest;
 	});
 	editAssistant(cloned, true);

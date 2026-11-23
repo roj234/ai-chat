@@ -92,7 +92,6 @@ const plugins = [
 	{
 		name: "基础角色扮演",
 		description: "实现角色卡、世界书、预设等数据结构的导入和导出支持，以及请求体的构造，提供基础角色扮演能力",
-		defaultEnabled: true,
 		load: () => import("./rp_basic/BasicRoleplay_i.js")
 	},
 	{

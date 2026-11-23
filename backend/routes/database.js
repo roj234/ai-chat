@@ -78,7 +78,7 @@ export function registerDatabaseRoutes(router, rootPath) {
 		let changed = 0;
 		const startTime = Date.now();
 
-		console.log("[数据库整理] 开始整理");
+		console.log("[数据库整理] 开始整理 "+ctx.params.userId);
 
 		const conversations = db.prepare(`SELECT id, data FROM "conversations"`).all();
 		const updateConversation = db.prepare(`UPDATE "conversations" SET data = ? WHERE id = ?`);
@@ -91,7 +91,7 @@ export function registerDatabaseRoutes(router, rootPath) {
 			}
 		}
 
-		console.log(`[数据库整理] 整理对话: ${changed} / ${conversations.length}`);
+		console.log(`[数据库整理] 更新对话: ${changed} / ${conversations.length}`);
 
 		let firstChanged = 0;
 
@@ -134,7 +134,7 @@ export function registerDatabaseRoutes(router, rootPath) {
 		}
 
 		db.prepare(`UPDATE sqlite_sequence SET seq = ? WHERE name = 'messages'`).run(idCount - 1);
-		console.log(`[数据库整理] 消息 ${changed} / `+alive.size+", 删除导致的 gap="+(idCount - alive.size - 1));
+		console.log(`[数据库整理] 更新消息 ${changed} / `+alive.size+", 删除导致的 gap="+(idCount - alive.size - 1));
 
 		changed = 0;
 		const kvs = ctx.db.prepare(`SELECT type, name, data FROM "kvs"`).all();
@@ -147,7 +147,7 @@ export function registerDatabaseRoutes(router, rootPath) {
 				changed++;
 			}
 		}
-		console.log(`[数据库整理] 处理的KVS条目: ${changed} / ${kvs.length}`);
+		console.log(`[数据库整理] 更新的KVS条目: ${changed} / ${kvs.length}`);
 
 		db.exec(`COMMIT; VACUUM; PRAGMA wal_checkpoint(TRUNCATE);`);
 
@@ -156,7 +156,7 @@ export function registerDatabaseRoutes(router, rootPath) {
 			if (ctx.vectorDB) await remapVectorKeys(ctx.vectorDB, alive);
 
 			const remapped = await logs.remapOwners(owner => messageIds[owner] ?? owner, firstChanged);
-			console.log("[数据库整理] 修改了 "+remapped+" 条日志索引");
+			console.log("[数据库整理] 更新了 "+remapped+" 条日志索引");
 		}
 
 		console.log(`[数据库整理] 耗时: ${Date.now() - startTime}ms`);

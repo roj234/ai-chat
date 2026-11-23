@@ -66,8 +66,8 @@ const MODIFIABLE_ROLE = immutableObjectMap({
 const connectRemoteFileSystem = async mount => {
 	let obj = await kvListGet(BACKEND_SERVER_KVLIST_ID, mount.fs_server);
 	const {servers, pat} = obj;
-	const uri = await connectBestServer(servers, 'fs');
-	return {pat, uri};
+	const [uri, cap] = await connectBestServer(servers, pat, 'fs');
+	return {pat, uri, cap};
 };
 
 /**
@@ -510,6 +510,7 @@ async function callFBI(mount) {
 			if (e.target !== modal) return;
 			e.preventDefault();
 			modal.remove();
+			delete mount[FS_INSTANCE];
 			reject(fsError?.message ?? fsError ?? "未选择文件系统");
 		}}>
 			<div>

@@ -10,15 +10,14 @@ import {sandboxModules} from "./common/build-sandbox-modules.js";
 
 import packageInfo from "./package.json";
 
-import fs from 'node:fs';
 import {globMacroPlugin} from "./common/fs-glob.js";
 import {HLJS_LANGUAGE_FAMILIES, HLJS_LANGUAGE_RE} from "./misc/hljs-language-families.js";
 
-const LOADING_TEMPLATE = fs.readFileSync('./loading.html', 'utf-8').match(/<!--START-->(.+)<!--END-->/s)[1]
+const cleanHtml = s => s
     .replaceAll(/[\r\n]|^[ \t]+|<!--.+?-->|\/\*.+?\*\//gm, '')
-    .replaceAll(/[:,] /g, ([m]) => m)
+    .replaceAll(/([:,])\s+/g, '$1')
     .replaceAll(";}", "}")
-    .replaceAll(" {", "{");
+    .replaceAll(/\s*{\s*/g, "{");
 
 export default {
     define: {
@@ -53,9 +52,9 @@ export default {
         sandboxModules(),
         globMacroPlugin(),
         {
-            name: 'inject-build-time',
+            name: 'remove-pwa',
             transformIndexHtml(html) {
-                return html.replace("{{loading}}", LOADING_TEMPLATE).replace("<link rel=\"manifest\" href=\"manifest.json\" />", "");
+                return cleanHtml(html).replace("<link rel=\"manifest\" href=\"manifest.json\" />", "");
             }
         }
     ],

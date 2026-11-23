@@ -14,7 +14,7 @@ const execPromise = promisify(exec);
  * @param {string} cmd 要执行的命令
  * @returns {Promise<{ success: boolean, output?: string, error?: string }>}
  */
-async function execCommand(cmd) {
+export async function execCommand(cmd) {
 	try {
 		const options = {
 			encoding: 'utf8',

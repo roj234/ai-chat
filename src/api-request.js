@@ -65,7 +65,7 @@ import {base64DecodeToUint8Array} from "@roj234/shared/base64";
 import {DI_messageContainer, DI_messageVirtualList} from "./hooks.js";
 import {encodeObjects, objectIdentityHash} from "./utils/serialization.js";
 import {SHA256} from "unconscious/common/SHA256.js";
-import {DONT_PARSE_HTML_IN_THINKING} from "./components/ThinkBlock.jsx";
+import {DONT_PARSE_HTML_IN_THINKING, extractReasoningTextFromDetails} from "./components/ThinkBlock.jsx";
 import {LLM_COST_SCALE} from "/backend/sync.js";
 import {SP_CONNECT, SP_GENERATE, SP_PREFILL, SP_RETRY, SP_WAIT} from "./components/StatusPill_state.js";
 import {isLlamaCppBackend, PRESET_KVS_ID, resolvePreset} from "./presets.js";
@@ -391,7 +391,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 				}
 			} else {
 				if (resumeId) {
-					assistantMessage.error = { type: 'disconnect' };
+					assistantMessage.error = { name: 'disconnect' };
 					if (isDisplaying()) $update(updateMessageUI);
 				}
 			}
@@ -918,8 +918,8 @@ async function sendCompletionRequest(
 
 				const reasoningDetails = delta.reasoning_details;
 				if (reasoningDetails) {
-					reasoning_text ??= '';
-					assistantMessage.reasoning_details = applyDelta(assistantMessage.reasoning_details, reasoningDetails);
+					const det = assistantMessage.reasoning_details = applyDelta(assistantMessage.reasoning_details, reasoningDetails);
+					reasoning_text ??= extractReasoningTextFromDetails(det);
 					reasoning_format = 'rd';
 				} else if (delta.reasoning_content) {
 					reasoning_text = delta.reasoning_content;
@@ -1073,14 +1073,14 @@ async function sendCompletionRequest(
 
 		if (finishReason === 'content_filter' || refuseText) {
 			assistantMessage.error = {
-				type: 'refusal',
+				name: 'refusal',
 				message: refuseText
 			};
 		}
 
 		if (!finishReason) {
 			finishReason = 'error';
-			assistantMessage.error = conversation.resumeId ? ALLOW_RESUME : { type: "early_stop" };
+			assistantMessage.error = conversation.resumeId ? ALLOW_RESUME : { name: "early_stop" };
 		}
 	} catch (err) {
 		if (err.name === 'AbortError') err = ac.signal.reason;
@@ -1104,11 +1104,6 @@ async function sendCompletionRequest(
 				let noRetry;
 				if (err.status) {
 					noRetry = NO_RETRY_STATUS.has(err.status);
-					err = {
-						type: 'request_error',
-						status: err.status,
-						message: err.message
-					};
 				} else {
 					noRetry = isContentfulMessage(assistantMessage);
 				}
@@ -1281,7 +1276,12 @@ async function buildCompletionPayload(
 
 	messages = expandFolds(unconscious(messages));
 
-	let [systemPrompt, systemBody] = await buildSystemPrompt(config, conversation, config.systemPrompt || defaultSystemPrompt, toolPrompt);
+	let [systemPrompt, systemBody] = await buildSystemPrompt(config, conversation, config.systemPrompt || defaultSystemPrompt, toolPrompt).catch(e => {
+		throw {
+			name: 'prompt_error',
+			message: prettyError(e)
+		}
+	});
 
 	let sid = 0;
 	for (; sid < messages.length; sid++) {
@@ -1515,7 +1515,7 @@ async function buildCompletionPayload(
  * @param {string} toolPrompt
  * @return {Promise<[prompt: string, body: {}]>}
  */
-export const buildSystemPrompt = async (config, conversation, prompt, toolPrompt) => {
+const buildSystemPrompt = async (config, conversation, prompt, toolPrompt) => {
 	let body = {};
 
 	if (prompt === 'nil') return ['', body];

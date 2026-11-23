@@ -41,7 +41,7 @@
 		cursor: grab;
 		overflow: hidden;
 
-		&.moving { cursor: grabbing; }
+		&.-moving { cursor: grabbing; }
 
 		& > .-image {
 			position: absolute;

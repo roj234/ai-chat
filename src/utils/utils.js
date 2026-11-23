@@ -287,10 +287,11 @@ export const scrollMessagesToBottom = (force) => {
 /**
  *
  * @param {string[]} urlList
+ * @param {string} pat
  * @param {string} [requiredCapability]
- * @return {Promise<[string, string]>}
+ * @return {Promise<[string, string[]]>}
  */
-export const connectBestServer = async (urlList, requiredCapability) => {
+export const connectBestServer = async (urlList, pat, requiredCapability) => {
 	const nonce = crypto.randomUUID();
 	const exceptResult = new SHA256().update(nonce+"AiChat").toString();
 
@@ -298,14 +299,15 @@ export const connectBestServer = async (urlList, requiredCapability) => {
 	const timer = setTimeout(() => timeout.abort(new DOMException("连接超时", "TimeoutError")), 10000);
 
 	const testServer = async url => {
-		const  { id, pong, cap } = await jsonFetch(url+'ping', {
+		const  { pong, cap } = await jsonFetch(url+'ping', {
 			signal: timeout.signal,
+			key: pat,
 			body: JSON.stringify({nonce}),
 		})
 		if (pong === exceptResult) {
 			if (requiredCapability && !cap.includes(requiredCapability))
-				throwDOMException('请求的能力不可用');
-			return id;
+				throwDOMException(`服务器 ${url} 不具备能力 ${requiredCapability}`);
+			return cap;
 		}
 		throwDOMException('响应非法');
 	};
@@ -316,10 +318,10 @@ export const connectBestServer = async (urlList, requiredCapability) => {
 		urlList.forEach((server) => {
 			if (!server.endsWith('/')) server += '/';
 
-			testServer(server).then((id) => {
+			testServer(server).then((cap) => {
 				timeout.abort();
 				clearTimeout(timer);
-				res(server);
+				res([server, cap]);
 				count--;
 			}, (e) => {
 				if (!--count) rej(e);

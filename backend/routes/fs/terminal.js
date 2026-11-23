@@ -8,7 +8,7 @@ import {safeStat} from "@roj234/ie/utils/serveFile.js";
  * @param {AiChatBackend.Router} router
  */
 export function registerTerminalRoutes(router) {
-	router.get('/terminal',  (ctx) => ctx.send(ctx.fsNoTerminal ? 403 : 204));
+	router.get('/terminal', (ctx) => ctx.send(ctx.fsNoTerminal ? 403 : 204));
 	const instances = new Map;
 
 	router.post('/terminal', async (ctx) => {

@@ -7,7 +7,7 @@ import {createJsonStream} from "/common/StreamJsonSerializer.js";
 import {deepEntries} from "unconscious/common/json-schema-utils.js";
 import {isLanAddress} from "/common/isLanAddress.js";
 import {getProxyAgent} from "../utils/fetch-hook.js";
-import {convertRequest, responsesProxyHandler} from "./api-proxy-responses.js";
+import {convertResponsesRequest, responsesProxyHandler} from "./api-proxy-responses.js";
 import {apiProxyLog as log, checkToken, processMessageRefs} from "./api-proxy-utils.js";
 import {finishedRequests, ProxyResumeManager, registerResumeRoutes} from "./api-proxy-resume.js";
 import {debugSecret} from "../utils/debugSecret.js";
@@ -162,7 +162,7 @@ async function SSEHandler(logPath, apiPath, blobDir, ctx) {
 			}
 		}
 
-		if (initFormat === 'responses') return responsesProxyHandler(convertRequest(obj, obj.messages), target, logPath, ctx, moderationHandlers);
+		if (initFormat === 'responses') return responsesProxyHandler(convertResponsesRequest(obj, obj.messages), target, logPath, ctx, moderationHandlers);
 
 		body = createJsonStream(obj);
 		//duplex = 'half';

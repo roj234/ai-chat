@@ -26,6 +26,57 @@ const DAY = 86400_000;
 
 const cache = new LRUCache(500, { ttlMode: 'update' });
 
+// ─── 示例资源 ────────────────────────────────────────────
+
+mcp.resource(
+	'config://server',
+	'服务器信息',
+	'application/json',
+	async (uri, extra) => ({
+		contents: [{
+			uri,
+			mimeType: 'application/json',
+			text: JSON.stringify({
+				name: mcp.serverInfo?.name || 'AiChat-MCP-Plugin',
+				version: mcp.serverInfo?.version || '1.0.0',
+				userId: extra.ctx?.params?.userId || null,
+			}, null, 2),
+		}],
+	})
+);
+
+// ─── 示例 Prompt ─────────────────────────────────────────
+
+mcp.prompt(
+	'weather_report',
+	'生成天气预报提示词',
+	[
+		{ name: 'city', description: '城市', required: true },
+		{ name: 'duration', description: '时间范围', required: true },
+		{ name: 'length', description: '摘要长度（short/medium/long）', required: false },
+	],
+	async (args) => {
+		const lengthGuide = {
+			short: '一句话',
+			medium: '一个段落',
+			long: '三个段落',
+		};
+		const guide = lengthGuide[args.length] || lengthGuide.medium;
+
+		return {
+			messages: [{
+				role: 'user',
+				content: {
+					type: 'text',
+					text: `请查询「${args.city}」的${args.duration}天气预报，并用${guide}总结。`,
+				},
+			}],
+		};
+	}
+);
+
+// ─── 示例工具 ─────────────────────────────────────────
+
 mcp.tool(
 	'SearchLocation',
 	'Search latitude and longitude and other information.',

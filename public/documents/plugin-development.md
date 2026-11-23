@@ -2,33 +2,43 @@
 
 AiChat 的插件系统基于模块导入，通过 `plugins/PluginRegistry.js` 注册。大部分功能（工具、角色扮演、UI 增强）都以插件形式实现。
 
-首先，针对不想从源代码编译的用户，我提供了这个 API。  
-不过，这个 API 主要用于调试 bug
+针对不想编译的用户，我提供了 `window.Aint` 接口。尽管它主要用途是在 production 版本上定位 bug
 
 ```js
-// 都有 JSDoc / TypeScript 类型定义
-import {ContentPart, registerToolset} from "/src/toolset.js";
-import {registerCodeBlockRenderer} from "/src/markdown/markdown.js";
-import {registerSchemaMessageRole} from "/common/ReactiveJSON.js";
+// pluginApi.js
+window.Aint = Object.freeze({
+	spec: 261125,
+    // 一个随便放什么的容器
+	plugins: Object.create(null),
 
-window.AiChatAPI = {
-	registerTools: registerToolset,
-	registerCodeBlockRenderer,
-	registerSchemaMessageRole,
-	registerCommand(name, desc, callback) {
-
-	},
-	ContentPart,
+	// 暴露内部状态用于调试
 	config,
-    markMessageDirty,
 	conversation: selectedConversation,
 	messages,
 	conversations,
-    EVENT_BUS
-};
+	currentCombinedConfig,
+	toolScriptRegistry,
+
+	// 注册代码块渲染器
+	registerCodeBlockRenderer,
+	// 注册 schema 消息角色
+	registerSchemaMessageRole,
+
+	// 注册自定义工具
+	registerToolset,
+	markMessageDirty,
+	ContentPart,
+	EVENT_BUS,
+	JS_HOST_MODULES,
+	JS_SANDBOX_MODULES,
+
+	registerCommand(name, desc, callback) {
+		COMMAND_REGISTRY[name] = [callback, desc];
+	},
+});
 ```
 
-registerTools 示例（有 MCP 你可能不太需要它）：
+registerTools 示例（可以注册自定义渲染的工具）：
 
 ```js
 const GetTime = {

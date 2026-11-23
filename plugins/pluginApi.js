@@ -3,33 +3,35 @@ import {config, conversations, EVENT_BUS, messages, selectedConversation} from "
 import {registerCodeBlockRenderer} from "/src/markdown/markdown.js";
 import {registerSchemaMessageRole} from "/common/ReactiveJSON.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
-import {markCombinedPresetDirty, resolvePreset} from "/src/presets.js";
+import {currentCombinedConfig} from "/src/presets.js";
 import {ContentPart, registerToolset, toolScriptRegistry} from "/src/toolset.js";
+import {JS_HOST_MODULES, JS_SANDBOX_MODULES} from "./agent/index.js";
 
 // 插件API
 window.Aint = Object.freeze({
-	spec: 261114,
-	plugins: {},
+	spec: 261125,
+	plugins: Object.create(null),
 
 	config,
 	conversation: selectedConversation,
 	messages,
 	conversations,
-	markMessageDirty,
-	resolvePreset,
-	markCombinedPresetDirty,
-
-	registerToolset,
+	currentCombinedConfig,
 	toolScriptRegistry,
-	ContentPart,
 
 	registerCodeBlockRenderer,
 	registerSchemaMessageRole,
+
+	registerToolset,
+	markMessageDirty,
+	ContentPart,
+	EVENT_BUS,
+	JS_HOST_MODULES,
+	JS_SANDBOX_MODULES,
+
 	registerCommand(name, desc, callback) {
 		COMMAND_REGISTRY[name] = [callback, desc];
 	},
-
-	EVENT_BUS,
 });
 
 /**

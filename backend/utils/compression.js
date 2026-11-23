@@ -97,7 +97,7 @@ const log_schema = [
 	["currency", null, ["USD", "CNY"]],
 	"usage"
 ];
-const provider_kvs_schema = [
+const preset_kvs_schema = [
 	"provider",
 	"endpoint",
 	"accessToken",
@@ -115,6 +115,8 @@ const provider_kvs_schema = [
 	"imageLongLimit",
 	"imageSizeLimit",
 	"reasoning",
+	"reasoningEffort",
+	"reasoningBudget",
 	"canPrefill",
 	"prefillPath",
 	"stripCoT",
@@ -134,13 +136,31 @@ const provider_kvs_schema = [
 	"logit_bias"
 ];
 
+const mcp_kvs_schema = [
+	"name",
+	"url",
+	"key",
+	"desc",
+	"hidden",
+	"prefix",
+];
+
+const assistant_kvs_schema = [
+	...conversation_schema,
+	['messages', message_schema]
+]
+
 bakeSchema(conversation_schema);
 bakeSchema(message_schema);
 bakeSchema(log_schema);
-bakeSchema(provider_kvs_schema);
+bakeSchema(preset_kvs_schema);
+bakeSchema(mcp_kvs_schema);
+bakeSchema(assistant_kvs_schema);
 
 export const KNOWN_KVS = {
-	'provider': provider_kvs_schema
+	'preset': preset_kvs_schema,
+	'mcp': mcp_kvs_schema,
+	'assistant': assistant_kvs_schema
 }
 
 const LOG_RESP_DICT = ['chatcmpl-', 'gen-', 'resp_'];

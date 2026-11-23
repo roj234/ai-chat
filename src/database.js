@@ -33,7 +33,7 @@ EVENT_BUS.on('convNew', initializeState);
 
 export const DONE = Promise.resolve();
 
-export const databaseError = err => {
+const databaseError = err => {
 	if (err.name !== 'NetworkError')
 		showToast("数据库错误!\n"+prettyError(err)+"\n建议导出(备份)当前对话", 'error');
 };

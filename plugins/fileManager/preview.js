@@ -53,7 +53,7 @@ const closeBtn = () =>
 function htmlRenderer(fs, s, path) {
 	const virtualUrl = resolveVirtualUrl(fs, path);
 	if (virtualUrl) {
-		if (config.trustHTML) {
+		if (config.pv_trustHTML) {
 			return <iframe sandbox="allow-same-origin allow-scripts" src={virtualUrl}/>;
 		}
 		return <>

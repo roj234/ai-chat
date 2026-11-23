@@ -258,43 +258,42 @@
         transition: all var(--transition);
         font-size: 12px;
 
-        .vt-head, .vt-row {
+        /* 表头行与数据行共用同一套列定义，保证逐列对齐 */
+        .vt-head-row, .vt-row {
             display: grid;
             align-items: center;
             gap: 1ch;
-            grid-template-columns:
-    minmax(140px, 140fr) minmax(100px, 130fr) minmax(140px, 160fr)
-    minmax(48px,  48fr)  minmax(48px,  48fr)  minmax(48px, 48fr) minmax(40px, 40fr)
-    minmax(72px,  72fr)  minmax(64px,  64fr)  minmax(64px, 64fr) minmax(72px, 72fr);
+            grid-template-columns: 140fr 100fr 120fr 48fr 48fr 48fr 40fr 72fr 64fr 64fr 72fr;
+            min-width: max(100%, 840px);
         }
         .vt-head {
-            position: sticky; top: -18px; z-index: 1;
+            position: sticky; top: -17px; z-index: 1;
             background: var(--bg-card);
             overflow: hidden;
-
-            background: #1d2332;
             color: var(--text-secondary);
             font-weight: 600;
-            padding: 4px 8px;
             border-bottom: 1px solid var(--border-color);
             user-select: none;
+        }
+        .vt-head-row {
+            padding: 4px 8px;
         }
         .vt-body { position: relative; overflow-y: auto; }
         .vt-row {
             padding: 6px 8px;
             border-bottom: 1px solid rgba(42, 48, 64, 0.5);
+            background: var(--bg-table-row);
 
             &.-d {
                 background: var(--bg-table-row-alt);
             }
 
             &:hover {
-                background: var(--bg-table-hover) !important;
+                background: var(--bg-table-hover);
             }
 
             .expand-row-detail {
-                width: max-content;
-                margin-top: 4px;
+                grid-column: 1 / -1;
             }
 
             & .mono {
@@ -379,12 +378,7 @@
         }
 
         .top-bar {
-            flex-direction: column;
-            align-items: stretch;
-
             .spacer { display: none; }
-
-            .-date { width: 100%; }
         }
         .main-container {
             padding: 14px 10px 30px;

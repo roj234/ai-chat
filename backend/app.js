@@ -1,6 +1,6 @@
 import {msgpack_schema, msgpack_schema_version} from "/common/wire-compression-schema.js";
 import {constants, createBrotliCompress, createGzip} from "node:zlib";
-import {RESPONSE_COMPRESS_LEVEL, RESPONSE_USE_MSGPACK_SCHEMA} from "./config.js";
+import {NO_CORS, RESPONSE_COMPRESS_LEVEL, RESPONSE_USE_MSGPACK_SCHEMA} from "./config.js";
 import {decodeMsg, encodeRawMsg} from "@roj234/msgpack";
 import {Router} from "@roj234/expresso";
 
@@ -69,37 +69,30 @@ export class App {
 			return;
 		}
 
-		let method = req.method.toUpperCase();
-
+		const method = req.method;
 		const inputHeaders = req.headers["access-control-request-headers"] || "Content-Type, Authorization, X-Ci, X-Pv, X-Sv";
-
-		// CORS
-		res.setHeader('Access-Control-Allow-Origin', '*');
-
-		if (method === 'OPTIONS') {
-			res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-			res.setHeader('Access-Control-Allow-Headers', inputHeaders);
-			res.writeHead(204);
-			res.end();
-			return;
-		}
-
-		res.setHeader('Access-Control-Allow-Methods', '*');
-		res.setHeader('Access-Control-Allow-Headers', '*');
-		if (method === 'HEAD') method = 'GET';
-
 		const path = url.pathname;
 		// 谦让式协程就是爽啊，什么对象池都可以滚了
-		const match = this.#router.find(method, path);
+		const match = this.#router.find(method === 'HEAD' ? 'GET' : method, path);
+
+		if (NO_CORS) {
+			res.setHeader('Access-Control-Allow-Origin', '*');
+			if (method === 'OPTIONS' && !match?.handler) {
+				res.setHeader('Access-Control-Allow-Methods', (match?.allow?.join(', ') || 'GET')+", HEAD");
+				res.setHeader('Access-Control-Allow-Headers', inputHeaders);
+				res.setHeader("Vary", "access-control-request-headers, access-control-request-method");
+				res.writeHead(204);
+				res.end();
+				return;
+			}
+		}
 
 		if (match !== null) {
 			const {params, handler} = match;
 
 			if (!handler) {
-				res.writeHead(405, {
-					'Content-Type': 'text/plain;charset=utf-8',
-					'Allow': match.allow.join(', '),
-				});
+				res.writeHead(405, { 'Allow': match.allow.join(', ')+", HEAD", });
+				res.end();
 				return;
 			}
 
@@ -133,7 +126,7 @@ export class App {
 				send(status, data) {
 					if (res.headersSent) return;
 
-					if (undefined === data) {
+					if (undefined === data || method === 'HEAD') {
 						res.writeHead(status);
 						res.end();
 						return;
@@ -235,6 +228,12 @@ export class App {
 				} catch {}
 			}
 
+			return;
+		}
+
+		if (method !== 'GET' && method !== 'HEAD') {
+			res.writeHead(405, { 'Allow': 'GET, HEAD', });
+			res.end();
 			return;
 		}
 

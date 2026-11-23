@@ -602,6 +602,8 @@ export class Cancellable {
 	cancel() {}
 }
 
+export const BY_PTC = debugSymbol("PTC");
+
 /**
  *
  * @param {AiChat.AssistantMessage} response
@@ -654,7 +656,10 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 			}
 			if (msg?.[TOOL_IS_RUNNING]) return msg?.[TOOL_IS_RUNNING];
 
-			if (!msg?.pending) msg = tool_responses[i] = { [TOOL_NAME]: name };
+			if (!msg?.pending) {
+				msg = tool_responses[i] = { [TOOL_NAME]: name };
+				if (tc[BY_PTC]) msg[BY_PTC] = true;
+			}
 
 			let parameters = getToolParameters(msg, tc);
 			const allowRun = fn.default || conv.tools.has(name);

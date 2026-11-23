@@ -93,7 +93,7 @@ export function checkToken(ctx) {
 	if (!authorization?.startsWith("Bearer ")) return ctx.send(403, { error: { message: 'Missing or invalid Authorization header. Use: Bearer <api_key>', type: 'authentication_error' } });
 	authorization = authorization.slice(7);
 
-	let target = SSE_PROXY_BACKEND[authorization] || SSE_PROXY_BACKEND['default'];
+	let target = Object.hasOwn(SSE_PROXY_BACKEND, authorization) ? SSE_PROXY_BACKEND[authorization] : SSE_PROXY_BACKEND['default'];
 	if (authorization[0] === '_' || !target/*?.url*/) return ctx.send(403,{ error: { message: 'Unknown API key', type: 'authentication_error' } });
 	if (!target.authorization) {
 		target = {

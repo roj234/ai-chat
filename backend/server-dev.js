@@ -2,7 +2,6 @@ import {createApp} from "./createApp.js";
 import {createSyncManager, createSyncValidateMiddleware} from "./syncServer.js";
 import {WebSocketServer} from "@roj234/ws";
 
-globalThis.AIChatArgs = {}
 globalThis.AiChatAPI.addShutdownHook = () => {}
 
 /**

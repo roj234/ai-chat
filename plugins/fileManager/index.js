@@ -9,12 +9,12 @@ import {onLoad} from "/src/hooks.js";
 import {PROMISE_CATCH} from "/common/pure-utils.js";
 
 EVENT_BUS.on(['getMenu', 'dev'], items => {
-	const set = config.trustHTML;
-	items.push({ icon: set ? "ri-checkbox-line" : "ri-checkbox-blank-line", label: "信任所有 HTML 脚本", danger: !set, act: () => config.trustHTML ^= 1 })
+	const set = config.pv_trustHTML;
+	items.push({ icon: set ? "ri-checkbox-line" : "ri-checkbox-blank-line", label: "信任所有 HTML 脚本", danger: !set, act: () => config.pv_trustHTML ^= 1 })
 })
 
 GLOBAL_SETTINGS.push({
-	id: "trustHTML",
+	id: "pv_trustHTML",
 	type: "radio",
 	_tab: "hide",
 	required: true,
@@ -22,12 +22,25 @@ GLOBAL_SETTINGS.push({
 		"否": 0,
 		"是": 1
 	}
-});
-GLOBAL_SETTINGS.push({
-	id: "imageThumb",
-	name: "文件管理器显示缩略图",
+},{
+	name: "-- FileManager --",
+	_tab: "customize",
+},{
+	id: "pv_thumbnail",
+	name: "文件管理显示缩略图",
 	type: "radio",
 	_tab: "customize",
+	required: true,
+	choices: {
+		"是": 1,
+		"否": 0,
+	}
+},{
+	id: "pv_keepMTime",
+	name: "上传文件保留修改时间",
+	type: "radio",
+	_tab: "customize",
+	inline: true,
 	required: true,
 	choices: {
 		"是": 1,

@@ -1082,8 +1082,8 @@ export const TextEditor = (props) => {
 	const setReadOnly = (value, silent) => {
 		readOnly = !!value;
 		el.classList.toggle("-readonly", readOnly);
+		inputEl.readOnly = readOnly;
 		if (!readOnly && !silent) focus();
-		refresh();
 	};
 
 	const setErrorLine = (line, startCh, endCh) => {
@@ -1106,7 +1106,7 @@ export const TextEditor = (props) => {
 
 	const onContextMenu = props.onContextMenu ?? AS_IS;
 
-	el = <div className="vje -readonly" style={`--lh:${LH}px;--digits:1;--p:${vPadding}px`} onMouseDown={onMouseDown} onContextMenu.prevent={ev => {
+	el = <div className="vje" style={`--lh:${LH}px;--digits:1;--p:${vPadding}px`} onMouseDown={onMouseDown} onContextMenu.prevent={ev => {
 		openContextMenu(ev, scrollEl, onContextMenu([
 			{label: '撤销', icon: "ri-reset-left-line", disabled: !history.canUndo, act: undo},
 			{label: '重做', icon: "ri-reset-right-line", disabled: !history.canRedo, act: redo},
@@ -1279,7 +1279,7 @@ export const TextEditor = (props) => {
 	});
 
 	updateGutterWidth();
-	el.classList.toggle("-readonly", readOnly);
+	setReadOnly(readOnly, true);
 	report();
 	setLanguage(langId).then(() => {
 		paint();

@@ -424,7 +424,7 @@ onLoad(() => {
 		else overrides.reasoningEffort = config.reasoningEffort;
 	})
 
-	CUSTOM_CONTROLS[0].lastElementChild.append(el);
+	CUSTOM_CONTROLS[0].lastElementChild.append(<div className="ts-wrapper">{el}</div>);
 	el.addEventListener('click', e => {
 		e.stopPropagation();
 	})

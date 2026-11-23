@@ -13,7 +13,7 @@ export const pathFilter = (relPath, ctx) => {
     const root = ctx.fsRoot;
     const targetPath = path.resolve(root, relPath);
     // allow path like /tmp/... or C:/tmp/
-    if (ctx.fsNoShell && !(targetPath+"\\").startsWith(root) && !/^(?:[a-zA-Z]:)?[\\/]tmp(?:\/|$)/.test(targetPath)) {
+    if (ctx.fsNoShell && !(targetPath+path.sep).startsWith(root) && !/^(?:[a-zA-Z]:)?[\\/]tmp(?:\/|$)/.test(targetPath)) {
         throw new HttpError(403, 'Path traversal');
     }
     return targetPath;

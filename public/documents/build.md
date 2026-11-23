@@ -1,31 +1,13 @@
 # 构建指南
 
-> 首先，如果你只是想用，可以在 [Release](https://github.com/Roj234/ai-chat/releases) 中直接下载  
-> 我无法保证构建指南是最新版本，如果遇到问题，请查看本项目的 GitHub Action 构建脚本
+> 首先可以在 [Release](https://github.com/Roj234/ai-chat/releases) 中直接下载构建好的版本  
+> 如果你确实想开发，请继续看  
+> 这个文件不会经常更新，所有未提到的内容请看 Action 构建脚本
 
 ## 前置要求
 
-- **Node.js 22+** (建议使用 Node 24 LTS)
-- 下载 [Unconscious](https://github.com/Roj234/unconscious) 框架（该项目未发布到 npm）
-- 下载 [streaming-markdown](https://github.com/Roj234/streaming-markdown) 解析器（该项目未发布到 npm）
-- 一个 OpenAI 兼容的 LLM API 端点（本地或远程均可）
-
-## 快速安装
-> 首先，你需要准备 monorepo，结构如下
-> ```
-> root/
-> ├── unconscious/
-> ├── streaming-markdown/
-> └── ai-chat/
-> ```
-
-```bash
-# 进入项目目录
-cd ai-chat
-
-# 安装依赖
-npm i
-```
+- 安装 **Node.js 22+** (建议使用 Node 24 LTS)
+- 根据 [Github Action](/.github/workflows/build.yml) 中的构建脚本初始化项目
 
 ## 启动开发服务器
 
@@ -60,16 +42,18 @@ npm run preview
 
 #### 命令行参数
 
-| 参数 | 说明                       |
-|------|--------------------------|
-| `-p <port>` | 监听端口                     |
-| `--data <path>` | 数据存储目录                   |
-| `--static dist.zip` | 加载打包在 ZIP 中的前端，并提供静态文件服务 |
-| `--workspace <path>` | 专用文件服务（禁用数据库服务）          |
-| `--cert <path>` | 启用 HTTPS（需提供证书路径）        |
+| 参数                   | 说明   |
+|----------------------|------|
+| `-a <addr>`          | 监听地址 |
+| `-p <port>`          | 监听端口 |
+| `-c config.js`       | 配置文件路径 |
+| `--data <path>`      | 数据存储目录 |
+| `--static dist.zip`  | 静态提供 Zip/Brip 中的前端 |
+| `--workspace <path>` | 以此为工作区根目录启动专用文件服务 |
+| `--cert <path>`      | 指定证书目录以启用 HTTPS |
 
 - 只有专用文件服务，才能执行命令。
-- 设计用途：用户在沙盒中运行专用文件服务，并暴露 HTTP 端口。
+  - 设计用途：用户在沙盒中运行专用文件服务，并暴露 HTTP 端口。
 
 ### 开发后端
 
@@ -84,7 +68,3 @@ npm run preview
 |------|------|--------|
 | `DB_MODE` | 数据库模式 | `local` / `remote` / `mixed` |
 | `DB_SERVER` | 默认 API 服务器地址 | URL 字符串 |
-
-### 安卓版本
-
-我不知道怎么在本地弄，因为我的电脑都没安装 Android SDK，请看 Action

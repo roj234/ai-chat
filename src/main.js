@@ -7,7 +7,6 @@ import {jsHide, prettyError, requestIdleCallback} from "./utils/utils.js";
 import {ConversationList} from "./components/ConversationList.jsx";
 import {GLOBAL_SETTINGS} from "./settings.js";
 import {
-	databaseError,
 	fetchMessages,
 	getMessages,
 	initialize,
@@ -74,15 +73,12 @@ const createApp = () => {
 		scroller= ref(),
 		updateLink= ref(),
 		resizeHandle= ref();
-
-	const settings = createSettingDialog(GLOBAL_SETTINGS, config, onSettingChanged);
+	/**
+	 * @type {SettingDialog}
+	 */
+	let settings;
 
 	const doc = document;
-	/**
-	 * @type CSSStyleDeclaration
-	 */
-	const rootStyle = doc.querySelector(":root").style;
-
 	const toggleSidebar = () => jsHide(sidebar);
 
 	let touchStartY = 0;
@@ -178,62 +174,28 @@ const createApp = () => {
 	appendChild(messagesPanel, <div ref={sentinel} className={"scroll-spy"} aria-hidden />);
 	appendChild(messagesPanel, userInputComposer);
 
-	const toggleSettingUI = settings.showHide;
-
-	toggleSettingUI('prefillPath', false);
-	/**
-	 * @typedef {Array<string> | string | number | [number, number]} SomeType
-	 * @param {string} id
-	 * @param {SomeType} newValue
-	 * @param {Record<string, SomeType>} oldValues
-	 * @return {null|string}
-	 */
-	function onSettingChanged(id, newValue, oldValues) {
-		if (oldValues[id] !== newValue) config._dirty = '*';
-		config[CONFIG_VERSION] = (config[CONFIG_VERSION] || 0) + 1;
-
-		if (id === 'template') {
-			try {
-				const fn = Function("messages", "return " + (newValue || "messages.map(m => `${m.role}: ${m.content}`).join(\'\\n\\n\')"));
-				fn([{role: "user",content:"a"}]).charAt(0);
-				state.completionTemplate = fn;
-			} catch (e) {
-				if (oldValues) return e;
-				showToast("无法实例化提示词模板: " + prettyError(e));
-			}
-		}
-		if (id === 'width') rootStyle.setProperty("--panel-width", newValue + "px");
-		if (id === 'modalities') {
-			toggleSettingUI('image', newValue.includes("image"));
-		}
-
-		if (id === 'mode') {
-			const isTextCompletion = newValue === 'completions';
-			$("app").classList.toggle('tc', isTextCompletion);
-			toggleSettingUI('template', isTextCompletion);
-			toggleSettingUI('reasoning', !isTextCompletion);
-			toggleSettingUI('canPrefill', !isTextCompletion);
-			toggleSettingUI('forceThink', !isTextCompletion);
-			toggleSettingUI('modalities', !isTextCompletion);
-			toggleSettingUI('jsonSupport', !isTextCompletion);
-			toggleSettingUI('prefillPath', !isTextCompletion && config.canPrefill);
-			toggleSettingUI('reasoningEffort', false, true);
-			toggleSettingUI('reasoningBudget', false, true);
-		}
-		if (id === 'generateTitle') toggleSettingUI('title', !!newValue);
-		if (id === 'canPrefill') toggleSettingUI('prefillPath', !!newValue);
-	}
-
 	$watch(messages, () => {
 		messagesPanel.classList.toggle("no-messages", !messages.length);
 	});
 
 	return [
 		App,
-		settings,
 		scroller,
-		(app) => {
+		(set, databaseError) => {
+			settings = set;
 			backToBottomObserver.observe(sentinel);
+
+			addEventListener('beforeprint', e => {
+				const chat = document.querySelector(".chat");
+				chat.classList.add('print');
+				chat.vl.resize();
+				chat.lastElementChild.append(<div style={'display:flex;justify-content:center'}>包含AI生成内容，请仔细甄别。</div>);
+			});
+			addEventListener('afterprint', e => {
+				const chat = document.querySelector(".chat");
+				chat.classList.remove('print');
+				chat.lastElementChild.lastElementChild.remove();
+			});
 
 			// 配置自动同步
 			addEventListener("storage", (e) => {
@@ -281,7 +243,7 @@ const createApp = () => {
 				EVENT_BUS.fire(event, $("app"));
 			}, err => {
 				if (err.error === "no such user") {
-					connectDatabase();
+					setupDatabase();
 				} else if (err.status === 401) {
 					executeLogin(remoteDBUrl);
 				} else {
@@ -416,7 +378,7 @@ const executeLogin = (server) => new Promise((resolve, reject) => {
 	});
 });
 
-const connectDatabase = async () => {
+const setupDatabase = async () => {
 	$("loading")?.remove();
 
 	let apiEndpoint;
@@ -460,66 +422,118 @@ const connectDatabase = async () => {
 
 // Mount
 addEventListener("load", () => {
-	onPluginLoaded.then(async () => {
+	const [app, messageContainer, initApp] = createApp();
+	const wrapper = $("app");
+	appendChildren(wrapper, app);
+
+	$watch($derived(config.pausePolicy), () => {
+		wrapper.classList.toggle('no-motion', config.pausePolicy === PP_UNATTENDED);
+	});
+
+	// 登录
+	const serverCount = config.db_servers.length;
+	if (!isIDB && !serverCount) return setupDatabase();
+
+	// 加载插件
+	const tasks = [onPluginLoaded.catch(e => new Promise(resolve => {
+		SimpleModal({
+			title: "插件出错",
+			message: prettyError(e),
+			confirmMessage: "禁用所有插件",
+			cancelMessage: "忽略",
+			onConfirm() {
+				config.pluginOrder = [];
+				requestIdleCallback(() => location.reload());
+			},
+			onCancel: resolve
+		});
+	}))];
+
+	const onNetworkError = e => new Promise(resolve => {
+		$("loading")?.remove();
+
+		let statusCode = '';
+
+		if (e.name === 'network_error') {
+			statusCode = ' HTTP '+e.status;
+			e = e.message;
+		}
+
+		SimpleModal({
+			title: "服务连接失败"+statusCode,
+			message: prettyError(e),
+			confirmMessage: "重试",
+			cancelMessage: "忽略",
+			onConfirm() {
+				location.reload();
+				return false;
+			},
+			onCancel: resolve
+		});
+	});
+
+	// 连接数据库
+	if (serverCount > 1 || isIDB) tasks.push(initialize(true).catch(onNetworkError));
+
+	Promise.all(tasks).then(() => {
 		if (isIDB) playLoadedAnimation();
 		else EVENT_BUS.on('lea', playLoadedAnimation);
 
-		const [app, settings, messageContainer, onLoad_] = createApp();
+		// 初始化配置面板的DOM，必须在插件加载之后
+		const settings = createSettingDialog(GLOBAL_SETTINGS, config, onSettingChanged);
+		const toggleSettingUI = settings.showHide;
+		/**
+		 * @type CSSStyleDeclaration
+		 */
+		const rootStyle = document.querySelector(":root").style;
 
-		const wrapper = $("app");
-		appendChildren(wrapper, app);
+		/**
+		 * @typedef {Array<string> | string | number | [number, number]} SomeType
+		 * @param {string} id
+		 * @param {SomeType} newValue
+		 * @param {Record<string, SomeType>} oldValues
+		 * @return {null|string}
+		 */
+		function onSettingChanged(id, newValue, oldValues) {
+			if (oldValues[id] !== newValue) config._dirty = '*';
+			config[CONFIG_VERSION] = (config[CONFIG_VERSION] || 0) + 1;
 
-		const serverCount = config.db_servers.length;
-		if (!isIDB && !serverCount) return connectDatabase();
+			if (id === 'template') {
+				try {
+					const fn = Function("messages", "return " + (newValue || "messages.map(m => `${m.role}: ${m.content}`).join(\'\\n\\n\')"));
+					fn([{role: "user",content:"a"}]).charAt(0);
+					state.completionTemplate = fn;
+				} catch (e) {
+					if (oldValues) return e;
+					showToast("无法实例化提示词模板: " + prettyError(e));
+				}
+			}
+			if (id === 'width') rootStyle.setProperty("--panel-width", newValue + "px");
+			if (id === 'modalities') toggleSettingUI('image', newValue.includes("image"));
 
-		if (serverCount > 1 || isIDB) await initialize(true);
+			if (id === 'mode') {
+				const isTextCompletion = newValue === 'completions';
+				$("app").classList.toggle('tc', isTextCompletion);
+				toggleSettingUI('template', isTextCompletion);
+				toggleSettingUI('reasoning', !isTextCompletion);
+				toggleSettingUI('canPrefill', !isTextCompletion);
+				toggleSettingUI('forceThink', !isTextCompletion);
+				toggleSettingUI('modalities', !isTextCompletion);
+				toggleSettingUI('jsonSupport', !isTextCompletion);
+				toggleSettingUI('prefillPath', !isTextCompletion && config.canPrefill);
+				toggleSettingUI('reasoningEffort', false, true);
+				toggleSettingUI('reasoningBudget', false, true);
+			}
+			if (id === 'generateTitle') toggleSettingUI('title', !!newValue);
+			if (id === 'canPrefill') toggleSettingUI('prefillPath', !!newValue);
+		}
 
 		injectCommonDI(settings, messageContainer);
 		EVENT_BUS.fire(['load'], wrapper);
-		onLoad_(wrapper);
 
-		$watch($derived(config.pausePolicy), () => {
-			wrapper.classList.toggle('no-motion', config.pausePolicy === PP_UNATTENDED);
-		})
-	}).catch(e => {
-		$("loading")?.remove();
-		if (typeof e === 'string') {
-			SimpleModal({
-				title: "提示",
-				message: e,
-				onCancel() {
-					location.reload();
-					return false;
-				}
-			});
-			return;
-		}
-		if (e.name === 'AbortError') {
-			showToast("服务器不可用", 'error');
-			return
-		}
-		SimpleModal({
-			title: "系统加载失败",
-			message: prettyError(e),
-			confirmMessage: "禁用所有插件",
-			onCancel() {
-				config.pluginOrder = [];
-				requestIdleCallback(() => location.reload());
-			}
-		})
+		// 从数据库拉取数据
+		initApp(settings, onNetworkError);
 	});
-});
-
-addEventListener('beforeprint', e => {
-	const chat = document.querySelector(".chat");
-	chat.classList.add('print');
-	chat.vl.resize();
-	chat.lastElementChild.append(<div style={'display:flex;justify-content:center'}>包含AI生成内容，请仔细甄别。</div>);
-});
-addEventListener('afterprint', e => {
-	const chat = document.querySelector(".chat");
-	chat.classList.remove('print');
-	chat.lastElementChild.lastElementChild.remove();
 });
 
 if (import.meta.env.DEV) {

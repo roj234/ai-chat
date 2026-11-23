@@ -309,7 +309,7 @@ export const createImageViewer = (title) => {
 			mode = null;
 			drag = null;
 			pinch = null;
-			stage.classList.remove('moving');
+			stage.classList.remove('-moving');
 			return;
 		}
 
@@ -318,7 +318,7 @@ export const createImageViewer = (title) => {
 			mode = 'drag';
 			pinch = null;
 			drag = { x: p.x, y: p.y, panX: x, panY: y };
-			stage.classList.add('moving');
+			stage.classList.add('-moving');
 			return;
 		}
 
@@ -339,7 +339,7 @@ export const createImageViewer = (title) => {
 			w: rect.width,
 			h: rect.height,
 		};
-		stage.classList.remove('moving');
+		stage.classList.remove('-moving');
 	}
 
 	const handlePinch = () => {
@@ -459,7 +459,7 @@ export const createImageViewer = (title) => {
 }
 
 const THUMB = debugSymbol("ThumbAvail");
-export const checkThumbAbility = async fs => config.imageThumb && (fs[THUMB] ??= await callFileSystemFunc(fs, 'thumb', {path:""}).then(res => res.size === 0, () => false));
+export const checkThumbAbility = async fs => config.pv_thumbnail && (fs[THUMB] ??= await callFileSystemFunc(fs, 'thumb', {path:""}).then(res => res.size === 0, () => false));
 
 /**
  *

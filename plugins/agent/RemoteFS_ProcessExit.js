@@ -3,10 +3,11 @@ import {EditableMessageRoles, EVENT_BUS, MessageRoles} from "/src/states.js";
 import "./RemoteFSEvent.css";
 import {HighlightBox} from "/src/components/TextDiff.jsx";
 import {JsonEditor} from "/src/components/JsonEditor.jsx";
+import {escapeHtmlAttr} from "@roj234/shared/strings";
 
 export const PROCESS_EXIT_ROLE = 'process-exit';
 const MERGER = debugSymbol("SyntheticMessage");
-const prefixOrNone = (s, prefix) => s ? prefix + s : '';
+const prefixOrNone = (s, prefix, def = '') => s ? prefix + s : def;
 
 EditableMessageRoles.add(PROCESS_EXIT_ROLE);
 MessageRoles[PROCESS_EXIT_ROLE] = {
@@ -17,9 +18,10 @@ MessageRoles[PROCESS_EXIT_ROLE] = {
 		let content;
 
 		if (event) {
-			content = `<process pid=${item.pid} exitCode="${event.code}" elapsed="${(event.duration/1000).toFixed(1)}s" logFile="${event.logFile}">${prefixOrNone(event.message, '\n')}${prefixOrNone(event.log, '\n\n### Latest log\n\n')}</process>`;
+			const logFile = event.logFile;
+			content = `<process pid=${item.pid} exitCode="${event.code}" elapsed="${(event.duration/1000).toFixed(1)}s"${logFile ? ` logFile="${escapeHtmlAttr(logFile)}"` : ""}>${prefixOrNone(event.message, '\n')}${prefixOrNone(event.log, logFile ? '\n\n### Last 50 lines of output\n\n' : '\n\n### Output', '\n\nNo output')}</process>`;
 		} else {
-			content = `<process pid="${item.pid}">State tracker died. No further notifications.</process>`;
+			content = `<process pid="${item.pid}">Sandbox restarted, no further notifications for this PID, and it MAYBE died.</process>`;
 		}
 
 		const last = output.at(-1);
@@ -48,7 +50,7 @@ MessageRoles[PROCESS_EXIT_ROLE] = {
 						<summary className="-header">
 							<div className="-left">
 								<span className="-pid">#{item.pid}</span>
-								<span className="ellipsis">State tracker died.</span>
+								<span className="ellipsis">服务重启.</span>
 							</div>
 							<div className="-right">
 								<span className="-code error">???</span>
@@ -77,10 +79,10 @@ MessageRoles[PROCESS_EXIT_ROLE] = {
 					{hasLog && <div className="-body">
 						<div className="-logs-header">
 							<span>最后50行输出</span>
-							<button className="ri-file-3-line ghost" onClick={() => {
+							{event.logFile && <button className="ri-file-3-line ghost" onClick={() => {
 								EVENT_BUS.post(['viewFile'], event.logFile);
 							}}>打开日志
-							</button>
+							</button>}
 						</div>
 						<HighlightBox filename=".log" code={event.log}/>
 					</div>}

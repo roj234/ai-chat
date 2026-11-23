@@ -215,9 +215,7 @@ if (WEBSOCKET_SYNC_ENABLE) {
 	router.sync = createSyncManager(wss);
 }
 
-globalThis.AIChatArgs = {
-	hideUser
-}
+globalThis.AiChatAPI.hideUser = hideUser;
 
 // 自动更新
 if (process.env.AINT_UPDATE === '1' && process.connected) {
