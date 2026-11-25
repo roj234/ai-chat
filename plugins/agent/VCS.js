@@ -1,13 +1,11 @@
 import {registerToolset} from "/src/toolset.js";
-import {EVENT_BUS, selectedConversation} from "/src/states.js";
-import {debugSymbol, unconscious} from "unconscious";
-import {COMMAND_REGISTRY} from "/src/commands.js";
-import {showVCSDialog} from "./VCS_dialog.js";
+import {EVENT_BUS} from "/src/states.js";
+import {debugSymbol} from "unconscious";
 import {getImmediateMessages, markMessageDirty, updateConversation} from "/src/database.js";
 import {fileAccess} from "./Mounts.js";
 import {VCS_BASE_BRANCH, VCS_BRANCH, VCS_COMMIT, VCS_DELETE_BRANCH, VCS_REVERT} from "./VCS_shared.js";
 import {getRandomString, prettyError} from "/src/utils/utils.js";
-import {showToast} from "/src/components/Toast.js";
+import {showToast} from "/src/components/Layer.js";
 import {formatDate} from "unconscious/common/Utils.js";
 
 //endregion
@@ -33,9 +31,7 @@ registerToolset(
 - 不会主动清理旧数据
 - 当前版本只支持主工作区和WebFS文件系统
 - 不建议切分支，很慢，而且写磁盘
-- 尚未支持跟踪手动修改
-
-也可用 /vcs 命令手动管理`,
+- 尚未支持跟踪手动修改`,
 	[],
 	{
 		hidden: 'manual',
@@ -120,7 +116,7 @@ const undo = async (conv, path, messages, first, willRestore) => {
 		if (vcsRevision) {
 			await callVCS({
 				mode: VCS_COMMIT,
-				path: UNDO_BRANCH+vcsRevision,
+				branch: UNDO_BRANCH+vcsRevision,
 				backup: willRestore ? REDO_BRANCH+vcsRevision : null,
 			}, R, conv).then(s => {
 				if (s === true) {
@@ -150,7 +146,7 @@ EVENT_BUS.on('switchBranch', async (conv, path, oldMessages, newMessages, first)
 		if (vcsRevision) {
 			await callVCS({
 				mode: VCS_COMMIT,
-				path: REDO_BRANCH+vcsRevision,
+				branch: REDO_BRANCH+vcsRevision,
 				backup: UNDO_BRANCH+vcsRevision,
 			}, R, conv).then(s => {
 				if (s === true) {
@@ -180,11 +176,3 @@ EVENT_BUS.on('switchBranch', async (conv, path, oldMessages, newMessages, first)
 
 	dialog();
 });
-
-
-COMMAND_REGISTRY['vcs'] = [
-	() => {
-		showVCSDialog(unconscious(selectedConversation));
-	},
-	"打开文件管理窗口",
-];

@@ -2,11 +2,10 @@ import {getToolParameters, registerToolset} from "/src/toolset.js";
 import {formatSize} from "unconscious/common/Utils.js";
 import {renderMarkdownToElement} from "/src/markdown/markdown.js";
 import {createReactiveJSON, createReactiveMarkdown} from "/common/ReactiveJSON.js";
-import {openContextMenu} from "/src/components/Menu.js";
+import {openMenu, showToast} from "/src/components/Layer.js";
 import {unconscious} from "unconscious";
 import {EVENT_BUS, MessageRoles, onConversationLoaded, selectedConversation} from "/src/states.js";
 import {getImmediateMessages, markMessageDirty, updateConversation} from "/src/database.js";
-import {showToast} from "/src/components/Toast.js";
 
 import {customRoleRegHelper} from "./pluginApi.js";
 
@@ -151,7 +150,7 @@ Allegro: 阻止模型输出正文（会无法调用其它工具）`, [SubmitResp
 		if (!acf) return;
 
 		ev.preventDefault();
-		openContextMenu(ev, ev.target.closest('ul'), [
+		openMenu(ev, ev.target.closest('ul'), [
 			{icon: acf.convert ? "ri-checkbox-line" : "ri-volume-mute-line", label: "Adagio", act: () => {
 				acf.convert ^= 1;
 				updateConversation(conv);
@@ -166,7 +165,7 @@ Allegro: 阻止模型输出正文（会无法调用其它工具）`, [SubmitResp
 				acf.enforce ^= 1;
 				updateConversation(conv);
 			}},
-		], true);
+		]);
 	},
 	onActivated(conv) {
 		conv.acf = { convert: 1, transform: 1 };

@@ -7,7 +7,7 @@ import {SHA256} from "unconscious/common/SHA256.js";
 import {base64Encode} from "@roj234/shared/base64";
 import {connectBestServer, prettyError} from "../utils/utils.js";
 import {$store, $update, AS_IS, debugSymbol, unconscious} from "unconscious";
-import SimpleModal from "../components/SimpleModal.jsx";
+import {showToast, openModal} from "../components/Layer.js";
 import {delta, patch, rep} from "unconscious/common/deepEqual.js";
 import {PROTOCOL_VERSION} from "/backend/sync.js";
 import {
@@ -21,7 +21,6 @@ import {
 } from "../database.js";
 import {LRUCache} from "@roj234/lru-cache";
 import {sleep, throwDOMException} from "/common/pure-utils.js";
-import {showToast} from "../components/Toast.js";
 import {isLanAddress} from "../../common/isLanAddress.js";
 
 let clientId;
@@ -256,7 +255,7 @@ export const upsertMessage = async message => message.id = await u_upsertMessage
 export const deleteMessage = batched("message/delete");
 
 const showIncompatibleDialog = backendVersion => {
-	SimpleModal({
+	openModal({
 		title: "通信协议不兼容",
 		message:
 			"检测到前后端通信协议版本不一致，可能导致功能异常或数据错误。\n\n" +

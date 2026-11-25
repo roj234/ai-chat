@@ -4,8 +4,7 @@ import {INDEX, VirtualList} from "unconscious/common/VirtualList.js";
 import {advancePos, History, TextDocument} from "./syntax-editor/document.js";
 import {loadLanguage} from "/src/markdown/highlight.js";
 import {highlightWindow, isSameLanguage, lineDOM} from "./syntax-editor/tokenizer.js";
-import SimpleModal from "/src/components/SimpleModal.jsx";
-import {openContextMenu} from "/src/components/Menu.js";
+import {openMenu, openModal} from "/src/components/Layer.js";
 import {copyWithAnimation} from "/src/utils/utils.js";
 import {normalizeLineTerminator} from "@roj234/shared/strings";
 import {AS_IS} from "@roj234/shared";
@@ -488,17 +487,26 @@ export const TextEditor = (props) => {
 		let selected = 0;
 		if (a.line !== b.line || a.ch !== b.ch) {
 			if (a.line === b.line) selected = b.ch - a.ch;
-			else {
-				selected = doc.lines[a.line].text.length - a.ch + b.ch;
-				for (let i = a.line + 1; i < b.line; i++) selected += doc.lines[i].text.length + 1;
-			}
+			else selected = -1;
 		}
+
 		onStatus({
 			line: head.line + 1,
 			ch: head.ch + 1,
 			lineCount: doc.lines.length,
 			chars: doc.charCount,
-			selected,
+			selection: selected ? {
+				from: a,
+				to: b,
+				get chars() {
+					if (selected < 0) {
+						selected = doc.lines[a.line].text.length - a.ch + b.ch;
+						for (let i = a.line + 1; i < b.line; i++) selected += doc.lines[i].text.length + 1;
+					}
+
+					return selected;
+				}
+			} : null,
 			rendered: vl.dom.childElementCount,
 			total: doc.lines.length,
 			readOnly,
@@ -1028,7 +1036,7 @@ export const TextEditor = (props) => {
 					case "z": return shift ? redo() : undo();
 					case "y": return redo();
 					case "g":
-						SimpleModal({
+						openModal({
 							title: "Go to line:column",
 							type: "input",
 							value: (head.line+1)+":"+(head.ch+1),
@@ -1107,7 +1115,7 @@ export const TextEditor = (props) => {
 	const onContextMenu = props.onContextMenu ?? AS_IS;
 
 	el = <div className="vje" style={`--lh:${LH}px;--digits:1;--p:${vPadding}px`} onMouseDown={onMouseDown} onContextMenu.prevent={ev => {
-		openContextMenu(ev, scrollEl, onContextMenu([
+		openMenu(ev, scrollEl, onContextMenu([
 			{label: '撤销', icon: "ri-reset-left-line", disabled: !history.canUndo, act: undo},
 			{label: '重做', icon: "ri-reset-right-line", disabled: !history.canRedo, act: redo},
 			{ sep: true },
@@ -1132,7 +1140,7 @@ export const TextEditor = (props) => {
 
 			}},
 			{label: `语言 (${langId})`, icon: "ri-global-line", act: () => {
-				SimpleModal({
+				openModal({
 					title: "设置语法高亮的语言",
 					placeholder: "下拉框尚未实现！",
 					type: "input",
@@ -1145,7 +1153,7 @@ export const TextEditor = (props) => {
 			{label: '自动换行 (未实现)', icon: "ri-text-wrap", disabled: true, act: () => {
 
 			}},
-		]), true);
+		]));
 	}}>
 		<div className="-fade" />
 		<div className="-gutter" ref={gutterEl}>

@@ -1,4 +1,4 @@
-import SimpleModal from "/src/components/SimpleModal.jsx";
+import {openModal} from "/src/components/Layer.js";
 import {connectBestServer, prettyError} from "/src/utils/utils.js";
 import {kvListSet} from "/src/database.js";
 import {ContentPart} from "/src/toolset.js";
@@ -9,7 +9,7 @@ export const BACKEND_SERVER_KVLIST_ID = "fs_backend_uri";
 
 export const addRemoteFileSystem = (prevData = { servers: [''] }) => new Promise((resolve, reject) => {
 	const connect = $state();
-	SimpleModal({
+	openModal({
 		title: "🐳 缚印 (专用文件服务)",
 		after: $computed(() => unconscious(connect) ? <div className={"input-warning"}>{connect}</div> : null),
 		type: "filter",

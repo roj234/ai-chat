@@ -11,9 +11,10 @@ import {isIDB, kvListDel, kvListGet} from "/src/database.js";
 import "./characterViewer.css";
 import {openWindow} from "/src/components/Windows.jsx";
 import {
-	exportForCV_characterList,
-	exportForCV_createConversation,
-	exportForCV_openCharacterEditor
+	_viewer_characterList,
+	_viewer_loadCharacterList,
+	_viewer_openCharacterEditor,
+	exportForCV_createConversation
 } from "../BasicRoleplay.js";
 import {Icon_search} from "/src/components/Icons.jsx";
 import {decodeObjects} from "/src/utils/serialization.js";
@@ -38,7 +39,8 @@ const cards = $asyncState(async page => {
 		}
 	}
 
-	let data = await Promise.all(exportForCV_characterList.map(item => kvListGet(CHAR_TYPE, item.name)));
+	await _viewer_loadCharacterList();
+	let data = await Promise.all(_viewer_characterList.map(item => kvListGet(CHAR_TYPE, item.name)));
 
 	if (term) {
 		term = term.toLowerCase();
@@ -123,7 +125,7 @@ Only output the translation result, no explanations, no additional text.`,
 	return accumulated;
 }
 
-const showEditModal = name => exportForCV_openCharacterEditor(name);
+const showEditModal = name => _viewer_openCharacterEditor(name);
 
 async function saveCard(name) {
 	const card = await kvListGet(CHAR_TYPE, name);
@@ -194,7 +196,7 @@ function confirmDelete(name, e) {
 }
 
 EVENT_BUS.on(['kvs', CHAR_TYPE], (name) => {
-	const idx = unconscious(exportForCV_characterList).findIndex(item => item.name === name);
+	const idx = unconscious(_viewer_characterList).findIndex(item => item.name === name);
 	if (idx >= 0) $update(currentPage);
 });
 

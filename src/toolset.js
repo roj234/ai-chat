@@ -14,7 +14,7 @@ import {loadingBlock, prettyError} from "./utils/utils.js";
 
 import "./toolset.css";
 import {compileSchema, validateAndShowError} from "unconscious/common/json-schema-utils.js";
-import {showToast} from "./components/Toast.js";
+import {showToast} from "./components/Layer.js";
 import {MCPClient} from "/common/MCPClient.js";
 import {parseJson5} from "@roj234/stream-json";
 import {highlightJsonLike} from "./markdown/highlight.js";

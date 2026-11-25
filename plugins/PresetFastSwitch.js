@@ -10,7 +10,7 @@ import {
 	PRESET_KVS_ID,
 	presets
 } from "/src/presets.js";
-import {showToast} from "/src/components/Toast.js";
+import {showToast} from "/src/components/Layer.js";
 
 const getLockedPresetName = () => {
 	const p = selectedConversation.presets;
@@ -41,7 +41,7 @@ const main = <div className={"pretty-select preset-switch up"} style={"width: au
 				updateConversation(conv);
 			}} />
 		<span className="ellipsis" title={currentPreset}>{currentPreset}</span>
-		<span className="arrow-icon ri-arrow-down-s-line"></span>
+		<span className="-arrow ri-arrow-down-s-line"></span>
 	</div>
 
 	<div className="dropdown">

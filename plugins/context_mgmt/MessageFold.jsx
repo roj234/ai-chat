@@ -1,7 +1,7 @@
 import "./MessageFold.css";
 import {openWindow} from "/src/components/Windows.jsx";
 import {$computed, $state, $update, $vforeach, $watch, AS_IS, ref, unconscious} from "unconscious";
-import {showToast} from "/src/components/Toast.js";
+import {showToast} from "/src/components/Layer.js";
 import {messages, selectedConversation} from "/src/states.js";
 import {markMessageDirty, updateConversation} from "/src/database.js";
 import {enableBranches} from "/src/utils/BranchManager.js";

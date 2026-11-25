@@ -5,6 +5,7 @@ import {onLoad} from "../hooks.js";
 import {ITEM_KEY} from "unconscious/common/VirtualList.js";
 import {Icon_search} from "./Icons.jsx";
 import {LOCKED} from "../states.js";
+import {closeMenu, openMenu} from "./Layer.js";
 
 let instances = new Set;
 /**
@@ -14,6 +15,7 @@ let instances = new Set;
  * @param {import("unconscious").Reactive<string>} selection
  * @param {function('s' | 'd' | string, string): void} onChanged
  * @param {'up'|'down'} dir
+ * @param {function(): Promise<?> | void} [lazy]
  * @param {Function} [add]
  * @param {Function} [actions]
  * @param {string} [displayName]
@@ -23,6 +25,7 @@ let instances = new Set;
  */
 export function Dropdown({
 	items, selection, onChanged, dir = 'down',
+	lazy,
 	add, actions, displayName = "name"
 }) {
 	const filterText = $state("");
@@ -31,10 +34,17 @@ export function Dropdown({
 		<div className="input" tabIndex={0} onClick.stop={() => {
 			if (main.classList.toggle("open")) {
 				filterText.value = "";
+
+				if (lazy) {
+					const loading = <div className="center"><div className="spinner"/></div>;
+					options.append(loading);
+					lazy().finally(() => loading.remove());
+					lazy = null;
+				}
 			}
 		}}>
 			<span>{() => unconscious(selection) ?? "default"}</span>
-			<span className={"arrow-icon ri-arrow-down-s-line"}></span>
+			<span className={"-arrow ri-arrow-down-s-line"}></span>
 		</div>
 
 		<div className={"dropdown"}>
@@ -49,16 +59,18 @@ export function Dropdown({
 					if (r !== false) filterText.value = "";
 				}} />}
 			</div>
-			<ul ref={options} onClick.capture.delegate{".ri-delete-bin-line"}.stop={({target}) => {
-				const classList = target.classList;
-				if (classList.toggle("clicked")) {
-					setTimeout(() => {
-						classList.remove("clicked");
-					}, 2000);
-				} else {
-					const element = target.closest("li");
-					onChanged('d', element[ITEM_KEY]);
-				}
+			<ul ref={options} onClick.capture.delegate{".ri-delete-bin-line"}.stop={(e) => {
+				const target = e.target.closest("li");
+				openMenu(e, options, [
+					{ label: `删除 ${JSON.stringify(target[ITEM_KEY])}？` },
+					{ el: <div className="row" style="justify-content:center">
+						<button className="btn ghost" onClick={closeMenu}>留</button>
+						<button className="btn danger" onClick={() => {
+							onChanged('d', target[ITEM_KEY]);
+							closeMenu();
+						}}>删</button>
+					</div> }
+				], true);
 			}}
 			onClick.delegate{"li"}={(e) => {
 				onChanged('s', e.delegateTarget[ITEM_KEY], e);
@@ -68,7 +80,7 @@ export function Dropdown({
 					const filter = unconscious(filterText);
 					return filter ? arr.filter(({name}) => name.toLowerCase().includes(filter)) : arr;
 				}, null, true), (item) => {
-					const deleteBtn = item[LOCKED] ? null : <i className="ri-delete-bin-line" title="删除"/>;
+					const deleteBtn = item[LOCKED] ? null : <button className="ri-delete-bin-line" title="删除" tabIndex={0} />;
 					return <li className={item.className} tabIndex={0} class:selected={unconscious(selection) === item.name} title={item[displayName]}>
 						<span className="ellipsis">{item[displayName]}</span>
 						{actions ? <div className="-btns">{actions(item)}{deleteBtn}</div> : deleteBtn}

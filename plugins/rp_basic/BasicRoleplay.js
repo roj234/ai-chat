@@ -29,12 +29,11 @@ import {GLOBAL_SETTINGS} from "/src/settings.js";
 
 import {cloneNamed, downloadFile} from "/src/utils/utils.js";
 import {parseImageMeta} from "/common/imate.js";
-import {isIDB, kvListDel, kvListGet, kvListGetKeys, kvListSet} from "/src/database.js";
+import {DONE, isIDB, kvListDel, kvListGet, kvListGetKeys, kvListSet} from "/src/database.js";
 import {getToolParameters, registerToolset} from "/src/toolset.js";
-import {showToast} from "/src/components/Toast.js";
+import {openModal, showToast} from "/src/components/Layer.js";
 import {Dropdown} from "/src/components/Dropdown.jsx";
 import {createTab} from "/src/components/SettingDialog.jsx";
-import SimpleModal from "/src/components/SimpleModal.jsx";
 import {_CharacterEditor, _LorebookEditor, _PresetEditor, markDirty} from "./PresetPanel.jsx";
 import {convertSTCharacter, convertSTLorebook, convertSTPreset, normalizeCRLF} from "./convert.js";
 import {
@@ -85,7 +84,7 @@ const INST = debugSymbol("CharacterInstance");
 //region createSchemaEditColumn
 function showOverwriteConfirm(item, typeStr, callback) {
 	if (item._dirty) {
-		SimpleModal({
+		openModal({
 			title: `${typeStr} ${JSON.stringify(item.name)} 已修改`,
 			message: "点击确定丢弃修改，或取消并自行保存。",
 			onConfirm: callback,
@@ -111,6 +110,7 @@ const storeOptions = {
  *     items: import("unconscious").Reactive<(Object & AiChat.IDBKVList)[]>,
  *     item: import("unconscious").Reactive<Object & AiChat.IDBKVList>,
  *     openEditor: function(string): void,
+ *     loadItems: function(): void
  * ]}
  */
 function createSchemaEditColumn(typeId, editorConstructor, defaultValue = {}) {
@@ -148,7 +148,7 @@ function createSchemaEditColumn(typeId, editorConstructor, defaultValue = {}) {
 			<button className={"ri- btn primary"} disabled={() => !selectedItem._dirty} onClick={() => {
 				if (typeId === "st|char") return doSave(selectedItem.name);
 
-				SimpleModal({
+				openModal({
 					type: "input",
 					title: "输入" + typeStr + "名称 【当前：" + selectedItem.name + "】",
 					placeholder: "重命名就在这填新名字，否则直接确认",
@@ -191,13 +191,21 @@ function createSchemaEditColumn(typeId, editorConstructor, defaultValue = {}) {
 
 	const typeStr = definition[typeId][0];
 
+	let loaded;
+	const loadItems = () => {
+		if (loaded) return DONE;
+		loaded = true;
+		return kvListGetKeys(typeId, items);
+	};
+
 	const dropdown = <Dropdown
 		items={items}
+		lazy={loadItems}
 		selection={$computed(() => (selectedItem._dirty || "") + (selectedItem.name || ""))}
-		actions={() => <i className="ri-download-line" title="导出"></i>}
+		actions={() => <button className="ri-download-line" title="导出" />}
 		add={(name) => {
 			showOverwriteConfirm(selectedItem, typeStr, () => {
-				SimpleModal({
+				openModal({
 					type: "input",
 					title: "输入新" + typeStr + "名",
 					value: name,
@@ -223,7 +231,7 @@ function createSchemaEditColumn(typeId, editorConstructor, defaultValue = {}) {
 			if (type === 'd') {
 				kvListDel(typeId, name);
 			} else {
-				if (e.target.tagName === "I") {
+				if (e.target.className === 'ri-download-line') {
 					e.stopPropagation();
 					doExport(kvListGet(typeId, name));
 					return;
@@ -285,6 +293,7 @@ function createSchemaEditColumn(typeId, editorConstructor, defaultValue = {}) {
 				dropdown.setSelection(name);
 			}));
 		},
+		loadItems
 	];
 }
 
@@ -337,11 +346,12 @@ const [presetBar, presetList, currentPreset] = createSchemaEditColumn("st|preset
 		}
 	]
 });
-const [charBar, characterList, currentCharacter, openCharacterEditor] = createSchemaEditColumn("st|char", _CharacterEditor);
+const [charBar, characterList, currentCharacter, openCharacterEditor, loadCharacterList] = createSchemaEditColumn("st|char", _CharacterEditor);
 const [lorebookBar, lorebookList, currentLorebook] = createSchemaEditColumn("st|lorebook", _LorebookEditor);
 
-export const exportForCV_openCharacterEditor = openCharacterEditor;
-export const exportForCV_characterList = characterList;
+export const _viewer_openCharacterEditor = openCharacterEditor;
+export const _viewer_characterList = characterList;
+export const _viewer_loadCharacterList = loadCharacterList;
 
 //region 从角色卡新建对话
 charBar.prepend(
@@ -490,9 +500,6 @@ GLOBAL_SETTINGS.push(
 );
 
 onLoad(() => {
-	kvListGetKeys("st|preset", presetList);
-	kvListGetKeys("st|char", characterList);
-	kvListGetKeys("st|lorebook", lorebookList);
 	EVENT_BUS.on(['kvs', 'st|lorebook'], async (name, event) => {
 		/** @type {AiChat.DnD.MyChatRuntimeData} */
 		const instance = selectedConversation[INST];

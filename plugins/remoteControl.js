@@ -10,7 +10,7 @@ import {
 	switchToConversation
 } from "/src/states.js";
 import {$state, $unwatch, $update, $vforeach, $watch, unconscious} from "unconscious";
-import {showToast} from "/src/components/Toast.js";
+import {showToast} from "../src/components/Layer.js";
 import {DI, DID_RMI, DID_SEND_BUTTON, onLoad} from "/src/hooks.js";
 import {delta, patch, rep} from "unconscious/common/deepEqual.js";
 import {prettyError} from "/src/utils/utils.js";
@@ -149,7 +149,7 @@ const RMI = {
 
 		const changeConversation = <div className="pretty-select preset-switch up">
 			<div className="input" onClick.stop={() => changeConversation.classList.toggle("open")}>切换远程会话<span
-				className="arrow-icon ri-arrow-down-s-line"></span></div>
+				className="-arrow ri-arrow-down-s-line"></span></div>
 			<ul className="dropdown" style={"width:250px"} onClick.delegate{"li"}={e => {
 				if (unconscious(rpcBusy)) return;
 				const conv = e.delegateTarget._conv;

@@ -1,6 +1,6 @@
 import "./ImageViewer.css";
 import {debugSymbol} from "@roj234/shared";
-import {openContextMenu} from "/src/components/Menu.js";
+import {openMenu} from "/src/components/Layer.js";
 import {queueMacrotask} from "unconscious/common/queueMacrotask.js";
 import {VirtualList} from "unconscious/common/VirtualList.js";
 import {$cleanup, $state} from "unconscious";
@@ -50,10 +50,10 @@ export const createImageViewer = (title) => {
 
 	const contextMenu = e => {
 		e.preventDefault();
-		openContextMenu(e, dom, [
+		openMenu(e, dom, [
 			{ icon: "ri-download-line", label: "下载", act: download },
 			{ icon: pixelated ? "ri-checkbox-line" : "ri-checkbox-blank-line", label: "邻近插值缩放 (像素)", act: () => pixelated = dom.classList.toggle('-pixelated') },
-		]);
+		], true);
 	};
 
 	const download = () => {

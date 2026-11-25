@@ -51,6 +51,6 @@ const editJson = async () => {
 
 EVENT_BUS.on(['getMenu', 'dev'], items => {
 	items.push(
-		{ icon: "ri-braces-line", label: "编辑会话 JSON", disabled: !unconscious(selectedConversation), act: editJson }
+		{ icon: "ri-braces-line", label: "编辑会话数据", disabled: !unconscious(selectedConversation), act: editJson }
 	);
 })

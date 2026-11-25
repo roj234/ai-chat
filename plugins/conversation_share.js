@@ -1,5 +1,5 @@
 import {COMMAND_REGISTRY} from "/src/commands.js";
-import SimpleModal from "/src/components/SimpleModal.jsx";
+import {openModal} from "/src/components/Layer.js";
 import {isIDB} from "/src/database.js";
 import {requestBackend} from "/src/database/remoteDB.js";
 import {unconscious} from "unconscious";
@@ -12,7 +12,7 @@ if (!isIDB) {
 			const url = location.href.slice(0, -location.hash.length)+"#!shareView/"+pat;
 			const canvas = (await import("@roj234/qr")).renderQRCodeToCanvas(url);
 
-			SimpleModal({
+			openModal({
 				title: "手机浏览器扫码打开",
 				message: <>{url}<br/>{canvas}</>
 			})

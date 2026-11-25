@@ -1,4 +1,4 @@
-import {showToast} from "./components/Toast.js";
+import {showToast} from "./components/Layer.js";
 import {config} from "./states.js";
 import {$state, debugSymbol, isReactive} from "unconscious";
 

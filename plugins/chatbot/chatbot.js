@@ -12,13 +12,12 @@ import {conversations, EVENT_BUS, findConversation, messages, switchToConversati
 import {agentLoop} from "/src/api-request.js";
 import {$stampLock, $state, $unwatch, $watch} from "unconscious";
 import {renderMarkdownToString} from "/src/markdown/markdown.js";
-import {showToast} from "/src/components/Toast.js";
+import {showToast, openModal} from "/src/components/Layer.js";
 import {throttled} from "/common/pure-utils.js";
 import {getMessages} from "/src/database.js";
 import {onLoad} from "/src/hooks.js";
 import {duplicateConversation} from "/src/data-exchange.js";
 import {prettyError} from "/src/utils/utils.js";
-import SimpleModal from "/src/components/SimpleModal.jsx";
 import {debugSymbol} from "@roj234/shared";
 
 const BOT = debugSymbol("Chatbot");
@@ -311,7 +310,7 @@ registerToolset("Chatbot", "将该对话接入聊天机器人", [SendMessage, Li
 	hidden: "manual",
 	onActivated(conv) {
 		return new Promise((resolve, reject) => {
-			SimpleModal({
+			openModal({
 				title: "输入服务器地址",
 				message: "WIP，没有输入校验，如果要改，你需要重新打开此功能",
 				type: "input",

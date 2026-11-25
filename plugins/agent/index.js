@@ -1,15 +1,16 @@
+import {COMMAND_REGISTRY} from "../../src/commands.js";
+import {VHandle} from "./VirtualFileSystem.js";
+import {createWebFileSystem} from "./WebFSDriver.js";
+import {unconscious} from "unconscious";
+import {EVENT_BUS, selectedConversation} from "/src/states.js";
+import {callFileSystemFunc, FS_SOURCE, getFileSystem} from "./Mounts.js";
+
 export {fileAccess, createFileSystem, createFileSystemAsync, callFileSystemFunc, getFileSystem, FS_SOURCE, FS_INSTANCE, vfsIdentity} from "./Mounts.js";
 export {getChangeableFiles, FileChangerNames} from "./overwrite-monitor.js";
 
 export {VHandle, SimpleDirectory, NAMED_VFS} from "./VirtualFileSystem.js";
 export {RunJS, JS_HOST_MODULES, JS_SANDBOX_MODULES} from "./run_js.js";
 export {getSkillCache} from "./skills.js";
-
-import {VHandle} from "./VirtualFileSystem.js";
-import {createWebFileSystem} from "./WebFSDriver.js";
-import {unconscious} from "unconscious";
-import {EVENT_BUS, selectedConversation} from "/src/states.js";
-import {callFileSystemFunc, FS_SOURCE, getFileSystem} from "./Mounts.js";
 
 /**
  *
@@ -30,7 +31,7 @@ export const SW_VFS_TYPES = new Set(['local', 'opfs', 'db', 'api']);
 export const resolveVirtualUrl = (fs, path) => {
 	const sw = navigator.serviceWorker?.controller;
 	const mount = fs[FS_SOURCE];
-	if (sw && mount && SW_VFS_TYPES.has(mount.fs_type)) return "vfs/"+(mount.fs_type+'@'+encodeURIComponent(mount.fs_base||'')+"@"+encodeURIComponent(mount.fs_server||''))+"/"+encodeURIComponent(path).replaceAll("%2F", "/");
+	if (sw && mount && !mount.fs_branch && SW_VFS_TYPES.has(mount.fs_type)) return "vfs/"+(mount.fs_type+'@'+encodeURIComponent(mount.fs_base||'')+"@"+encodeURIComponent(mount.fs_server||''))+"/"+encodeURIComponent(path).replaceAll("%2F", "/");
 };
 
 EVENT_BUS.on('resolveUrl', async (path, _, fs) => {
@@ -45,3 +46,11 @@ EVENT_BUS.on('resolveUrl', async (path, _, fs) => {
 	const fsType = fs[FS_SOURCE].fs_type;
 	return (fsType !== 'local' && fsType !== 'opfs' && resolveVirtualUrl(fs, realpath)) || callFileSystemFunc(fs, 'readRaw', { path: realpath });
 });
+
+COMMAND_REGISTRY['vfs'] = [
+	() => {
+		const conv = unconscious(selectedConversation);
+		import("./VFSManager.js").then(mod => mod.openVFSDialog(conv));
+	},
+	"打开文件管理窗口",
+];

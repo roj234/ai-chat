@@ -6,15 +6,15 @@ import {$asyncState, $state, $vforeach, appendChild, unconscious} from "unconsci
 import {onLoad} from "/src/hooks.js";
 import {getMessages, kvListDel, kvListGet, kvListGetKeys, kvListSet} from "/src/database.js";
 import {config, selectedConversation} from "/src/states.js";
-import SimpleModal from "/src/components/SimpleModal.jsx";
+import {openModal, showToast} from "/src/components/Layer.js";
 import {presets} from "/src/presets.js";
 import {IMAGE_MIMES} from "/src/components/UserInputComposer.jsx";
 import {formatSize} from "unconscious/common/Utils.js";
 import {serializeMsgpack} from "/src/database/remoteDB.js";
-import {showToast} from "/src/components/Toast.js";
 import {compressImage} from "/common/imate.js";
 import {importConversationData} from "/src/data-exchange.js";
-import {inspect} from "@roj234/util-inspect";
+import {JsonEditor} from "/src/components/JsonEditor.jsx";
+import {PLACEHOLDERS, setPlaceholder} from "/src/utils/placeholder.js";
 
 const PROFILE_KVS_ID = 'assistant';
 const profiles = $state([]);
@@ -36,7 +36,7 @@ const stringLengthFilter = (val) => {
 };
 
 const editAssistant = (cloned, isCreate) => {
-	const modal = SimpleModal({
+	const modal = openModal({
 		type: "filter",
 		title: isCreate ? "创建助手" : <>{"编辑助手 "+cloned.name+" "}
 			<button className="btn danger" onClick={(e) => {
@@ -71,7 +71,7 @@ const editAssistant = (cloned, isCreate) => {
 			name: cloned.name,
 			description: cloned.meta?.description,
 			avatar: cloned.meta?.avatar,
-			systemPrompt: cloned.overrides?.systemPrompt || defaultSystemPrompt,
+			systemPrompt: cloned.systemPrompt || defaultSystemPrompt,
 			activatedModules: [...cloned.activatedModules || []],
 			tools: [...cloned.tools || []],
 			grantedTools: [...cloned.grantedTools || []],
@@ -104,6 +104,7 @@ const editAssistant = (cloned, isCreate) => {
 				type: "textbox",
 				id: "systemPrompt",
 				name: "系统提示词",
+				title: "修改这里，会影响相同助手的会话。其他选项不会，那些是复制，这个是引用。",
 				required: true
 			},
 			{
@@ -124,11 +125,18 @@ const editAssistant = (cloned, isCreate) => {
 				}
 			},
 			{
+				type: "element",
+				name: "字段覆盖",
+				title: "暂时只有这种界面。",
+				element: <JsonEditor value={cloned.overrides} onChange={(str, obj, err) => { if (!err) cloned.overrides = obj; }} />
+			},
+			{
 				type: "list",
 				name: "激活的工具集",
 				title: "示例：移除 Files 后，可单独开关各个文件工具；禁用工具集会同时禁用其系统提示。",
 				id: "activatedModules",
 				required: true,
+				half: true,
 				pattern: (value) => {
 					value = value.trim();
 					if (!value) throw '工具集名称不能为空';
@@ -146,6 +154,7 @@ const editAssistant = (cloned, isCreate) => {
 				name: "激活的工具",
 				id: "tools",
 				required: true,
+				half: true,
 				pattern: toolNameFilter
 			},
 			{
@@ -153,19 +162,19 @@ const editAssistant = (cloned, isCreate) => {
 				name: "授权的工具",
 				id: "grantedTools",
 				required: true,
+				half: true,
 				pattern: toolNameFilter
 			},
 			{
 				type: "element",
-				//id: "mnt",
 				name: "文件系统",
-				title: "还不支持在这里改。",
-				element: <pre>{inspect(cloned.mnt)}</pre>
+				title: "暂时只有这种界面。",
+				element: <JsonEditor value={cloned.mnt} onChange={(str, obj, err) => { if (!err) cloned.mnt = obj; }} />
 			},
 		],
 		async onConfirm(obj) {
 			cloned.time = Date.now();
-			(cloned.overrides ??= {}).systemPrompt = obj.systemPrompt;
+			(cloned.overrides ??= {}).systemPrompt = `{{profile:${obj.name}}}`;
 
 			const keys = ['activatedModules', 'tools', 'grantedTools', 'presets'];
 			for (let i = 0; i < keys.length; i++) {
@@ -197,6 +206,7 @@ const editAssistant = (cloned, isCreate) => {
 				avatar
 			};
 
+			cloned.systemPrompt = obj.systemPrompt;
 			return kvListSet(cloned, PROFILE_KVS_ID, obj.name).catch(e => {
 				showToast("保存失败\n"+prettyError(e), 'error');
 				return false;
@@ -232,6 +242,12 @@ const createProfile = async () => {
 		cloned.mnt = Object.fromEntries(Object.entries(conv.mnt).map(([k, v]) => [k, cloneNamed(v, fsKeys)]));
 	}
 
+	const systemPrompt = cloned.overrides?.systemPrompt;
+	if (systemPrompt) {
+		cloned.systemPrompt = systemPrompt;
+		delete cloned.overrides.systemPrompt;
+	}
+
 	const messages = await getMessages(conv);
 
 	cloned.messages = messages.filter(s => s.id >= 0).map(s => {
@@ -256,12 +272,13 @@ const safeCreateAssistant = async (name) => {
 }
 
 /**
- *
+ * @param {string} _name
  * @returns {Promise<void>}
  */
-export const createAssistant = async info => {
-	const {messages, type, name, time, meta, ...conv} = await kvListGet(PROFILE_KVS_ID, info);
+export const createAssistant = async _name => {
+	const {messages, type, name, time, meta, ...conv} = await kvListGet(PROFILE_KVS_ID, _name);
 	conv.time = Date.now();
+	conv.meta = { profile: _name };
 	if (config.temporaryChat) {
 		conv.temporary = true;
 		conv.id = "temporary-"+conv.time;
@@ -295,6 +312,11 @@ onLoad((app) => {
 		</div>
 	</div>);
 });
+
+PLACEHOLDERS['profile'] = async (conv, name) => {
+	const data = (await kvListGet(PROFILE_KVS_ID, name)).systemPrompt;
+	return setPlaceholder(conv, 'profile:'+name, data);
+};
 
 GLOBAL_SETTINGS.push({
 	name: <>助手

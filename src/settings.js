@@ -6,7 +6,7 @@ import {webviewSetUserAgent} from "/vendor/jsBridge.js";
 import {onLoad} from "./hooks.js";
 import {toolScriptRegistry} from "./toolset.js";
 import {inspect} from "@roj234/util-inspect";
-import {showToast} from "./components/Toast.js";
+import {showToast} from "./components/Layer.js";
 
 const defaultSystemPrompt = `You are {{model}}, a helpful assistant.
 {{modelPrompt}}

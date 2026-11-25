@@ -299,6 +299,15 @@ select, .my-select {
     display: flex;
     justify-content: center;
     align-items: center;
+    height: 100%;
+    overflow: hidden;
+    flex-grow: 1;
+    padding: 8px;
+
+    & > .spinner {
+        width: 64px;
+        height: 64px;
+    }
 }
 
 /* Z-index 层级表 */

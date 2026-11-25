@@ -1,5 +1,5 @@
 import {config, conversations, EVENT_BUS, messages, selectedConversation} from "./states.js";
-import {showToast} from "./components/Toast.js";
+import {openMenu, showToast} from "./components/Layer.js";
 import {deleteDatabase, getMessages, isIDB, kvListGetValues, kvListSet, updateConversation} from "./database.js";
 import {downloadFile, prettyError} from "./utils/utils.js";
 import {ZipReader, ZipWriter} from "@roj234/jszip/io";
@@ -8,7 +8,6 @@ import {decodeObjects, serializeJSON} from "./utils/serialization.js";
 import {GLOBAL_SETTINGS, PRIVATE_CONFIG_KEY} from "./settings.js";
 import {DI_settings} from "./hooks.js";
 import {createJsonParser} from "@roj234/stream-json";
-import {openContextMenu} from "./components/Menu.js";
 import {Icon_exportAll, Icon_exportChat, Icon_exportChats, Icon_exportProviders} from "./components/Icons.jsx";
 
 const sleep = () => new Promise(resolve => setTimeout(resolve));
@@ -205,20 +204,42 @@ export const importConversation = async e => {
 	}
 };
 
-export const duplicateConversation = async (ignoreMessages) => {
-	const conv = unconscious(selectedConversation);
+/**
+ *
+ * @param {number} ignoreMessages
+ * @param {AiChat.Conversation} [conv]
+ * @return {Promise<void | AiChat.Conversation>}
+ */
+export const duplicateConversation = async (ignoreMessages, conv) => {
+	conv ??= unconscious(selectedConversation);
 	if (!conv?.ready) {
 		showToast('无对话选中', 'error');
 		return;
 	}
-	conv.title += ' 另存 '+new Date().toISOString();
 
-	const copied = structuredClone(conv);
-	await importConversationData(copied, ignoreMessages ? [] : structuredClone(unconscious(messages).filter(item => item.id >= 0)));
+	const copyConv = structuredClone(conv);
+	copyConv.title += ' 另存 '+new Date().toISOString();
+
+	let copyMessages;
+	if (ignoreMessages) {
+		copyMessages = [];
+	} else {
+		const messages1 = (await getMessages(conv)).filter(item => item.id >= 0 || item.role === 'fold');
+		copyMessages = messages1.map(item => {
+			if (item.role === 'fold') return { role: 'user', label: "上下文摘要 (可编辑)", content: structuredClone(item.content) };
+			const p = structuredClone(item);
+			delete p.parent;
+			return p;
+		});
+	}
+
+	delete copyConv.bm_leaf;
+
+	await importConversationData(copyConv, copyMessages);
 
 	showToast('已将当前对话另存为', 'ok');
 
-	return copied;
+	return copyConv;
 };
 
 /**
@@ -349,7 +370,7 @@ GLOBAL_SETTINGS.push(
 					{ icon: <Icon_exportAll />, label: "导出所有数据", act: () => exportConversation(7) },
 				];
 				EVENT_BUS.post(['getMenu', 'backup'], items);
-				openContextMenu(ev, ev.target.closest(".filter"), items);
+				openMenu(ev, ev.target.closest(".filter"), items);
 			}}>导出</button>
 		</div>
 	},
@@ -360,13 +381,14 @@ GLOBAL_SETTINGS.push(
 		_order: -1,
 		element: <div className={"choice-scroll"}>
 			<button className="btn ghost" onClick={ev => {
+				const conv = unconscious(selectedConversation);
 				/** @type {MenuItem[]} */
 				const items = [
 					{
-						icon: "ri-file-copy-line",
-						label: "复制对话",
-						disabled: !unconscious(selectedConversation),
-						act: duplicateConversation
+						icon: "ri-database-2-line",
+						label: "重建系统提示词",
+						disabled: !conv,
+						act: () => EVENT_BUS.post(['convCacheClear'], conv)
 					},
 				];
 
@@ -377,7 +399,7 @@ GLOBAL_SETTINGS.push(
 				}
 
 				EVENT_BUS.post(['getMenu', 'dev'], items);
-				openContextMenu(ev, ev.target.closest(".filter"), items);
+				openMenu(ev, ev.target.closest(".filter"), items);
 			}}>开发者选项</button>
 		</div>
 	},

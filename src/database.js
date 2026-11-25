@@ -13,7 +13,7 @@ import {deepEqual, delta, patch} from "unconscious/common/deepEqual.js";
 import {cloneNamed, prettyError} from "./utils/utils.js";
 import * as idb from "./database/indexedDB.js";
 import * as remote from "./database/remoteDB.js";
-import {showToast} from "./components/Toast.js";
+import {showToast} from "./components/Layer.js";
 import {enableBranches} from "./utils/BranchManager.js";
 
 

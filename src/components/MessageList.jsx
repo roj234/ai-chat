@@ -57,7 +57,7 @@ import {cloneMessage, enableBranches, switchBranch} from "../utils/BranchManager
 import {PINNED, VirtualList} from "unconscious/common/VirtualList.js";
 import {EditWidget} from "./EditWidget.jsx";
 
-import SimpleModal from "./SimpleModal.jsx";
+import {openMenu, openModal} from "./Layer.js";
 import {ToolCallEditor} from "./ToolCallEditor.jsx";
 import {StatusPill} from "./StatusPill.jsx";
 import {UsageBlock} from "./UsageBlock.jsx";
@@ -65,7 +65,6 @@ import {decodeObjects, encodeObjects} from "../utils/serialization.js";
 import {inspect} from "@roj234/util-inspect";
 import {formatDuration} from "/common/pure-utils.js";
 import {AUDIO_MIMES, IMAGE_MIMES, TEXT_MIMES} from "./UserInputComposer.jsx";
-import {openContextMenu} from "./Menu.js";
 import {openJsonEditor} from "./JsonEditor.jsx";
 import {createWaveNav} from "./WaveNav.jsx";
 
@@ -635,7 +634,7 @@ const buttonOnLeft = (selectedConversation, messages, ev, overrideAction) => {
 			const end = self.end_index || (self.index + 1);
 			if (end !== msgs.length) {
 				if (messages.slice(self.index, end).some(m => m.tool_calls)) {
-					SimpleModal({
+					openModal({
 						title: `不允许删除带工具调用的中间消息`,
 						message: `这是为了保证【工具调用】状态正确回溯。
 使用【编辑并重发】或【重新生成】选项避免物理删除。
@@ -801,7 +800,7 @@ const buttonOnLeft = (selectedConversation, messages, ev, overrideAction) => {
 			}});
 
 			if (!isLast) items.push({label: '从此处删除', icon: "ri-scissors-line", danger: true, act: (ev) => {
-				SimpleModal({
+				openModal({
 					title: "删除后续所有消息？",
 					message: `共 ${msgs.length - self.index} 条`,
 					onConfirm() {
@@ -812,7 +811,7 @@ const buttonOnLeft = (selectedConversation, messages, ev, overrideAction) => {
 				})
 			}});
 
-			openContextMenu(ev, vl.dom, items);
+			openMenu(ev, vl.dom, items, true);
 		}
 	}
 };

@@ -12,7 +12,7 @@ import {
 	updateMessageUI
 } from "../states.js";
 import {decodeObjects, serializeJSON} from "../utils/serialization.js";
-import {showToast} from "../components/Toast.js";
+import {showToast} from "../components/Layer.js";
 import {$computed, $state, $update, ONCE_EVENT, unconscious} from "unconscious";
 import {DI, DID_RMI, DID_TITLE_POSITION, onLoad} from "../hooks.js";
 

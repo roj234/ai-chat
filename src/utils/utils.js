@@ -1,9 +1,8 @@
-import {showToast} from "../components/Toast.js";
 import {$cleanup, $watch, debugSymbol, unconscious} from "unconscious";
 import {highlightJsonLike} from "../markdown/highlight.js";
 import {webviewDownloadFile} from "/vendor/jsBridge.js";
 import {auxKeyboardOnly, lastScrollDirectionIsUp} from "../states.js";
-import SimpleModal from "../components/SimpleModal.jsx";
+import {showToast, openModal} from "../components/Layer.js";
 import {base64Encode} from "@roj234/shared/base64";
 import {DI_messageContainer} from "../hooks.js";
 import {jsonFetch} from "/common/fetch-utils.js";
@@ -171,7 +170,7 @@ export const BlobImage = ({src}) => {
  */
 export const deleteWithDrawback = (message, confirm, cancel, isKeyboard) => {
 	if (isKeyboard || auxKeyboardOnly) {
-		SimpleModal({
+		openModal({
 			message: '确认删除"'+message+'？',
 			accent: 'danger',
 			confirmMessage: '删除',

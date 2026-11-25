@@ -2,7 +2,7 @@ import {prettyError} from "/src/utils/utils.js";
 import {config} from "/src/states.js";
 import {provider_presets} from "/media/provider_presets.js";
 import {DI_settings, onLoad} from "/src/hooks.js";
-import SimpleModal from "/src/components/SimpleModal.jsx";
+import {showToast, openModal} from "/src/components/Layer.js";
 import {jsonEval, jsonGet} from "unconscious/common/json-schema-utils.js";
 import {applyDelta, sseFetch} from "/common/fetch-utils.js";
 import {highlightJsonLike} from "/src/markdown/highlight.js";
@@ -10,7 +10,6 @@ import {AsyncButton} from "/src/components/AsyncButton.jsx";
 import {renderMarkdownToElement} from "/src/markdown/markdown.js";
 import {$unwatch, $watch, unconscious} from "unconscious";
 import {models, updateModels} from "/src/presets.js";
-import {showToast} from "/src/components/Toast.js";
 import {resolveDBRelativeURL} from "/src/database.js";
 
 const EMPTY_WAV = `UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=`;
@@ -351,7 +350,7 @@ const testModel = () => new Promise((resolve, reject) => {
 
 			const {content, ...rest} = msg;
 
-			SimpleModal({
+			openModal({
 				title: "连接成功",
 				message: <>响应：
 					{renderMarkdownToElement(<div className={"md"} />, content || "")}
@@ -360,7 +359,7 @@ const testModel = () => new Promise((resolve, reject) => {
 潜在花费：输入 300-3000 token (根据模型能力), 输出 ~300 token`}</>,
 				onConfirm() {
 					checkModelCapability().then((res) => {
-						SimpleModal({
+						openModal({
 							title: "能力探测完成",
 							message: "数据已经保存\n" + res,
 							onConfirm: null,
@@ -386,7 +385,7 @@ const testModel = () => new Promise((resolve, reject) => {
 			}
 			const errstr = prettyError(err);
 
-			SimpleModal({
+			openModal({
 				title: title,
 				message: <div dangerouslySetInnerHTML={highlightJsonLike(errstr)}/>,
 				confirmMessage: disableRetry ? undefined : "以兼容模式重试",

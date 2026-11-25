@@ -8,6 +8,10 @@
     border-radius: var(--border-radius-md);
     height: 40px;
 
+    & button {
+        flex-shrink: 0;
+    }
+
     &.loading {
         border: 1px dashed transparent;
         justify-content: flex-start;

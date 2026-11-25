@@ -151,11 +151,8 @@ const toggleMaximize = (w) => {
 
 export const unmaximizeFocusedWindow = () => {
 	if (focusedWindow) {
-		const cl = focusedWindow.root.classList;
-		if (cl.contains(MAXIMIZED)) {
-			cl.remove(MAXIMIZED);
-			return true;
-		}
+		minimizeWindow(focusedWindow);
+		return true;
 	}
 	return false;
 };
@@ -287,6 +284,8 @@ export const openWindow = ({
 		if (element.element) {
 			state.onFocus = element.onFocus;
 			state.onBack = element.onBack;
+			actions ??= element.actions;
+			state.title ??= element.title;
 			element = element.element;
 		}
 	}
@@ -298,7 +297,7 @@ export const openWindow = ({
 		height = ih;
 	} else {
 		left = clamp((iw - width) / 2 + offset, 0, iw - 120);
-		top = clamp((ih - height) / 2 + offset, 0, ih - 120);
+		top = clamp((ih - (height || 0.5 * ih)) / 2 + offset, 0, ih - 120);
 	}
 
 	const pos = id.lastIndexOf(':');
@@ -306,11 +305,11 @@ export const openWindow = ({
 
 	const root = (
 		<div className="window"
-			 style={`left:${left}px;top:${top}px;width:${width}px;height:${height}px;`}
+			 style={`left:${left}px;top:${top}px;width:${width}px;height:${height?height+'px':'auto'};`}
 			 onPointerDown={() => focusWindow(state)}>
 			<div className="win-header">
-				<span className="icon">{cloneContent(icon)}</span>
-				<span className="title" onPointerDown.left={startDrag} onDblClick={handleMaximize}>{cloneContent(title)}</span>
+				<span className="icon center">{cloneContent(icon)}</span>
+				<span className="title" onPointerDown.left={startDrag} onDblClick={handleMaximize}>{cloneContent(state.title)}</span>
 				<span className="controls">
 					{actions}
 					<button className="ri-subtract-line ghost" title="最小化" onClick={() => minimizeWindow(state)}></button>
@@ -355,7 +354,7 @@ const Taskbar = () => {
 						else if (w === focusedWindow) minimizeWindow(w);
 						else focusWindow(w);
 					}}>
-					<span className="icon">{cloneContent(w.icon)}</span>
+					<span className="icon center">{cloneContent(w.icon)}</span>
 					<span className="label">{cloneContent(w.title)}</span>
 					<button className="ri-close-line" title="关闭" onClick.stop={() => closeWindow(w.id)}></button>
 				</div>
@@ -377,7 +376,7 @@ const mountTaskbar = () => {
 	appendChild(body, container);
 
 	body.addEventListener('click', ({target}) => {
-		if (target.isConnected && focusedWindow && !target.closest('.MDI') && !target.closest('.menu')) {
+		if (target.isConnected && focusedWindow && !target.closest('.MDI') && !target.closest('.taskbar')) {
 			focusedWindow.onFocus?.(false);
 			focusedWindow = null;
 			$update(windowList);

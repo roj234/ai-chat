@@ -1,4 +1,4 @@
-import {showToast} from "/src/components/Toast.js";
+import {showToast} from "/src/components/Layer.js";
 
 /** toast 左侧的小圆点字符 */
 const TOAST_ICON = {ok: '✓', err: '×', warn: '!', info: 'i'};

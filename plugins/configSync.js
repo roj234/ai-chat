@@ -2,7 +2,7 @@ import {$derived, $watch, unconscious} from "unconscious";
 import {config, conversations} from "/src/states.js";
 import {getKV, setKV} from "/src/database.js";
 import {DI_settings, onLoad} from "/src/hooks.js";
-import {showToast} from "/src/components/Toast.js";
+import {showToast} from "../src/components/Layer.js";
 import {AsyncButton} from "/src/components/AsyncButton.jsx";
 import {GLOBAL_SETTINGS, PRIVATE_CONFIG_KEY} from "/src/settings.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";

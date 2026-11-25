@@ -1,4 +1,4 @@
-import {showToast} from "/src/components/Toast.js";
+import {showToast} from "/src/components/Layer.js";
 import {config} from "/src/states.js";
 import {debugSymbol} from "unconscious";
 import {getTextContent} from "/src/utils/utils.js";

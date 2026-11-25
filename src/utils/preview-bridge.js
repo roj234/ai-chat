@@ -1,4 +1,4 @@
-import SimpleModal from "../components/SimpleModal.jsx";
+import {openModal} from "../components/Layer.js";
 import {EVENT_BUS} from "../states.js";
 import {$cleanup, $state} from "unconscious";
 import {createJsonParser} from "@roj234/stream-json";
@@ -15,7 +15,7 @@ export const callPreviewImage = (src, title) => {
 		const fallback = <img src={typeof src === 'string' ? src : src.toUrl()} alt={src.name}/>;
 		$cleanup(fallback, () => src.revokeUrl?.());
 
-		SimpleModal({
+		openModal({
 			title: `图像预览 ${title ? `(${title})` : ""}`,
 			className: "full",
 			message: fallback

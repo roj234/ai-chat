@@ -4,7 +4,7 @@ import {LOCKED, messages, selectedConversation} from "../states.js";
 import {$state, $update, $watch, appendChildren, debugSymbol, isReactive, ref, unconscious} from "unconscious";
 import {BlobImage, onReuse_Callback} from "../utils/utils.js";
 import {highlight, highlightJsonLike} from "../markdown/highlight.js";
-import SimpleModal from "./SimpleModal.jsx";
+import {openModal} from "./Layer.js";
 import {updateConversation} from "../database.js";
 import {BorderSpinner} from "./BorderSpinner.jsx";
 import {CollapseButton} from "./ThinkBlock.jsx";
@@ -58,7 +58,7 @@ export function ToolCallCard(props) {
                         }
 
                         if (toolResponse?.[TOOL_IS_RUNNING] && null == toolResponse.content) {
-                            SimpleModal({
+                            openModal({
                                 title: "并发警告",
                                 message: "工具当前标记为【正在运行】，重复执行【可能】造成并发竞态，确认？",
                                 onConfirm: runOperation

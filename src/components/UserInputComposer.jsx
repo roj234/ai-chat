@@ -17,7 +17,7 @@ import {createSendButton} from "./SendButton.jsx";
 import {bind, scrollMessagesToBottom} from "../utils/utils.js";
 import {$derived, $state, $update, $watch, unconscious} from "unconscious";
 import {handleCommand} from "../commands.js";
-import SimpleModal from "./SimpleModal.jsx";
+import {openModal} from "./Layer.js";
 import {getBlob} from "../database.js";
 import {webviewUploadImage} from "/vendor/jsBridge.js";
 import {openRecorder} from "/plugins/voiceInput/Recorder.jsx";
@@ -43,7 +43,7 @@ async function parseUserInput(text, attachments) {
 		if (text.length >= 50000) {
 			const huge = text.length > 200000;
 			if (!huge && null == choice) choice = await new Promise((resolve) => {
-				SimpleModal({
+				openModal({
 					title: `文本较长（${text.length} 字符）`,
 					message: "是否转为附件？",
 					onConfirm() {
@@ -266,7 +266,7 @@ export const createUserInputComposer = (scroller) => {
 				options.push("点击上条消息的【重新生成】按钮");
 				options.push("在上上条消息处【分支】");
 
-				SimpleModal({
+				openModal({
 					title: "无法在异常响应后追加数据",
 					message: "以下是可用的解决方案：\n"+options.join('\n')
 				});

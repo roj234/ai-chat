@@ -1,4 +1,4 @@
-import {showToast} from "../components/Toast.js";
+import {showToast} from "../components/Layer.js";
 import {prettyError} from "./utils.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
 

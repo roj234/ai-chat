@@ -1,0 +1,69 @@
+
+.vfs-title {
+	display:flex;
+	justify-content:space-between;
+	font-size: 14px;
+
+	gap: 8px;
+	.row {
+		gap: 4px;
+	}
+
+	.tooltip {
+		font-size: 13px;
+	}
+
+	.my-select {
+		padding: 4px 10px;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.-mods {
+		&:empty {
+			display: none;
+		}
+
+		background: var(--warning-bg);
+		border: 1px solid var(--warning-border);
+		color: var(--warning-accent);
+
+		font-weight: 700;
+		padding: 0 0.5ch;
+	}
+}
+
+/* 工具栏 */
+.vfs-toolbar {
+	padding: 6px 20px;
+
+	border-bottom: 1px solid var(--border);
+	display: flex;
+	font-size: 14px;
+
+	& .btn { padding: 5px 8px; }
+
+	.fa-alert {
+		padding: 0 8px;
+	}
+}
+
+.explorer .fileList .row {
+	&.-m { color: var(--warning-accent); }
+	&.-a { color: var(--ok); }
+	&.-d { color: var(--error); }
+}
+
+.vcs-diff-title {
+	font-size: 12px;
+
+	& .bin {
+		color: var(--muted);
+	}
+}
+
+/* 右侧 Diff 详情预览 */
+.vcs-diff {
+	& .textDiff { padding: 0; }
+}

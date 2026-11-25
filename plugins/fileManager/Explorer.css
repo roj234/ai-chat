@@ -88,11 +88,12 @@
 
 	& main {
 		.head, .row {
-			display:grid;grid-template-columns:28px minmax(0,1fr) 120px 80px;
+			display:grid;
+			grid-template-columns:28px minmax(0,240fr) minmax(110px, 110fr) minmax(72px, 72fr);
 		}
 
 		.head {
-			align-items:center;flex:none;padding:0 10px 0 14px;height:34px;
+			align-items:center;flex:none;padding:0 4px 0 14px;height:34px;
 			font-size:11px;color:var(--muted);
 			border-bottom:1px solid var(--border);user-select:none;
 
@@ -101,6 +102,7 @@
 
 				&:hover{background:var(--chip-hover)}
 				&.on{color:var(--accent)}
+				&.r {flex-direction: row-reverse}
 			}
 		}
 
@@ -110,7 +112,7 @@
 
 			.row{
 				user-select: none;
-				gap:8px;align-items:center;height:40px;padding:0 4px 0 8px;
+				gap:0;align-items:center;height:40px;padding:0 4px 0 8px;
 				font-size: 14px;
 				&:hover{background:var(--chip-bg)}
 				&.sel{background:var(--chip-hover);}
@@ -121,8 +123,12 @@
 				& .name{
 					display:flex;align-items:center;gap:5px;
 					margin-right: auto;
+					max-width: 100%;
 				}
-				& .size, & .time{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;text-align:right}
+				& .size, & .time{
+					font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;text-align:right;
+					margin-left: auto;
+				}
 			}
 
 			.ico{
@@ -276,7 +282,7 @@
 					content: "···";
 					font-size: 32px;
 				}
-				& .dropdown { top: calc(-100%); }
+				& .dropdown { top: -40px; }
 				& button {display: none;}
 				&:hover .list {
 					display: block;
@@ -284,6 +290,5 @@
 
 			}
 		}
-		.my-input{width:120px}
 	}
 }

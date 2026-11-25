@@ -45,3 +45,10 @@ ${content}
 
 	return setPlaceholder(conv, "#AGENTS.md", text);
 };
+
+PLACEHOLDERS['file'] = async (conv, name) => {
+	return setPlaceholder(conv, 'file:'+name, await readFile({
+		path: name,
+		noTruncate: true
+	}, {}, conv));
+}

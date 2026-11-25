@@ -5,7 +5,7 @@ import "./llamaCpp.css";
 import {prettyError} from "/src/utils/utils.js";
 import {jsonFetch} from "/common/fetch-utils.js";
 import {GLOBAL_SETTINGS} from "/src/settings.js";
-import {showToast} from "/src/components/Toast.js";
+import {showToast} from "/src/components/Layer.js";
 import {isLlamaCppBackend, models, setIsLlamaCppBackend, updateModels} from "/src/presets.js";
 import {resolveDBRelativeURL} from "/src/database.js";
 

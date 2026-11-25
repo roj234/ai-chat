@@ -28,7 +28,7 @@ import {
 	VCS_GET_BASE,
 	VCS_REVERT
 } from "./VCS_shared.js";
-import {showToast} from "/src/components/Toast.js";
+import {showToast} from "/src/components/Layer.js";
 import {prettyError} from "/src/utils/utils.js";
 
 /**
@@ -382,7 +382,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 		writeRaw: ({path, content}) => fsCommonApi.write(path, content, null, 1).then(() => teh.del(path)),
 		appendRaw: api.append,
 
-		vcs: async ({mode, path, limit, backup, target, emptyOnly}) => {
+		vcs: async ({mode, path, limit, backup, branch: srcBranch, target, emptyOnly}) => {
 			if (mode === VCS_GET) {
 				const overlayHandle = (await resolveHandle(rootHandle, path, READ | REQUIRE_FILE).catch(() => {}))?.[2];
 				return overlayHandle && await overlayHandle.getFile();
@@ -440,7 +440,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 				const entries = await glob(rootHandle._upper, path, "", true, acl1);
 				const pattern = new RegExp("^"+parseGlobPattern(path, true)+"$", 'ui');
 
-				let prefix = '';
+				let truncated = false;
 
 				const deleted = new Set;
 
@@ -454,7 +454,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 					let displayPath = relDir ? relDir + '/' + name : name;
 
 					if (result.length >= limit) {
-						prefix = `[TRUNCATED to ${limit} entries, use a more specific path or pattern]\n`;
+						truncated = true;
 						break;
 					}
 
@@ -463,12 +463,12 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 					deleted.delete(displayPath);
 					if (handle.kind === 'file') {
 						const file = await handle.getFile(true);
-						const item = [h ? "modify" : "add", displayPath];
-						item.push(new Date(file.lastModified).toISOString().slice(0, -5)+'Z');
+						const item = [displayPath, h ? "m" : "a"];
+						item.push(file.lastModified);
 						result.push(item);
 					} else {
 						deleted.delete(displayPath+'/');
-						if (!h) result.push(["dir", displayPath]);
+						if (!h) result.push([displayPath, "a"]);
 					}
 				}
 
@@ -476,7 +476,7 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 
 				for (let path of deleted) {
 					const handle = await resolveHandle(realHandle, path, 0).catch(e => {});
-					if (handle) result.push(["del", path]);
+					if (handle) result.push([path, "d"]);
 				}
 
 				return result;
@@ -487,13 +487,13 @@ mtime: ${new Date(file.lastModified).toISOString()}`
 				let targetDir = realHandle,
 					srcFS = rootHandle,
 					backupFS;
-				if (path && path !== VCS_BASE_BRANCH) {
-					if (path === branch) throwDOMException("提交目标不能是当前暂存区", "InvalidModificationError");
-					srcFS = await createOverlayFileSystem(await realHandle.getDirectoryHandle(OVERLAYFS_INTERNAL+path), realHandle);
+				if (srcBranch && srcBranch !== VCS_BASE_BRANCH) {
+					if (srcBranch === branch) throwDOMException("提交目标不能是当前暂存区", "InvalidModificationError");
+					srcFS = await createOverlayFileSystem(await realHandle.getDirectoryHandle(OVERLAYFS_INTERNAL+srcBranch), realHandle);
 				}
-				if (target) targetDir = await realHandle.getDirectoryHandle(OVERLAYFS_INTERNAL+target);
+				if (target && target !== VCS_BASE_BRANCH) targetDir = await realHandle.getDirectoryHandle(OVERLAYFS_INTERNAL+target);
 
-				const opt = { clean: !!backup, lower: targetDir };
+				const opt = { clean: typeof backup === 'string' || backup === false, lower: targetDir, path };
 
 				if (backup) {
 					backupFS = await realHandle.getDirectoryHandle(OVERLAYFS_INTERNAL+backup, CREATE_OPT);

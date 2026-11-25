@@ -38,7 +38,6 @@ import {
 	ONCE_EVENT,
 	unconscious
 } from "unconscious";
-import {showToast} from "./components/Toast.js";
 import failure from "../media/failure.js";
 import complete from "../media/complete.js";
 import {
@@ -57,7 +56,7 @@ import {
 import {BODY_PARAMETERS, defaultSystemPrompt, defaultTitlePrompt} from "./settings.js";
 import {createJsonStream} from "/common/StreamJsonSerializer.js";
 import {createAntiSlopSampler} from "./anti-slop-sampler.js";
-import SimpleModal from "./components/SimpleModal.jsx";
+import {showToast, openModal} from "./components/Layer.js";
 import {highlightJsonLike} from "./markdown/highlight.js";
 import {deepEntries, jsonEval} from "unconscious/common/json-schema-utils.js";
 import {applyDelta, jsonFetch, ORIGINAL_ERROR, sseFetch} from "/common/fetch-utils.js";
@@ -736,7 +735,7 @@ async function sendCompletionRequest(
 
 	if (config.reviewRequest && !error && data.body) {
 		error = await new Promise((resolve) => {
-			SimpleModal({
+			openModal({
 				title: "预览请求体",
 				message: <div style={"max-height:50vh;overflow:auto"} dangerouslySetInnerHTML={highlightJsonLike(data.body, 1e6, 30000)} />,
 				onConfirm() {resolve();},
@@ -1189,7 +1188,7 @@ async function buildCompletionPayload(
 		const lastModel = assistantMessage.model;
 		if (lastModel && cleanModelName(lastModel) !== cleanModelName(config.model) && config.pausePolicy > PP_UNATTENDED) {
 			await new Promise((resolve, reject) => {
-				SimpleModal({
+				openModal({
 					title: "你是否主动切换了模型？",
 					message: `上次使用的模型：${lastModel}\n当前使用的模型：${config.model}`,
 					onConfirm() {resolve();},

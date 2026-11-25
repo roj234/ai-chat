@@ -12,12 +12,10 @@ import {
 	switchToConversation,
 	updateConversationListUI
 } from "../states.js";
-import SimpleModal from "./SimpleModal.jsx";
-import {exportConversation} from "../data-exchange.js";
+import {openMenu, openModal, showToast} from "./Layer.js";
+import {duplicateConversation, exportConversation} from "../data-exchange.js";
 import "/plugins/rp_basic/TagList.css";
-import {showToast} from "./Toast.js";
 import {deleteWithDrawback, prettyError} from "../utils/utils.js";
-import {openContextMenu} from "./Menu.js";
 
 const GROUP_LABELS = ["置顶", "今天", "昨天", "7天内", "30天内"];
 // 分组逻辑：基于时间戳计算相对日期
@@ -94,7 +92,7 @@ export const ConversationList = () => {
 			</button>
 			<button className={"btn danger"} onClick={e => {
 				const ids = conversations.filter(item => item[SELECTED]);
-				SimpleModal({
+				openModal({
 					title: "确认删除选中的 " + ids.length + " 条对话？",
 					accent: "danger",
 					onConfirm() {
@@ -122,8 +120,7 @@ export const ConversationList = () => {
 
 		const conv = (ev.delegateTarget ?? ev.target.closest('.chat-item'))._conv;
 		const pinned = conv.meta?.pinned;
-		openContextMenu(ev, list, [
-			{label: '导出', icon: "ri-download-line", act: () => exportConversation(1, conv)},
+		openMenu(ev, list, [
 			{label: pinned ? "取消置顶" : "置顶", icon: pinned ? "ri-pushpin-fill" : "ri-pushpin-line", act: () => {
 				const meta = conv.meta ??= {};
 				if (!meta.pinned) meta.pinned = true;
@@ -131,7 +128,7 @@ export const ConversationList = () => {
 				updateConversation(conv).then(() => $update(conversations));
 			}},
 			{label: '重命名', icon: "ri-edit-line", act: () => {
-				SimpleModal({
+				openModal({
 					type: "input",
 					title: "请输入新标题",
 					placeholder: "清除标题, 下次对话后重新生成",
@@ -141,6 +138,9 @@ export const ConversationList = () => {
 					}
 				});
 			}},
+			{ sep: true },
+			{label: '导出', icon: "ri-download-line", act: () => exportConversation(1, conv)},
+			{label: '另存 (当前分支)', icon: "ri-file-copy-line", act: () => duplicateConversation(0, conv)},
 			{ sep: true },
 			{label: '批量删除', icon: "ri-checkbox-multiple-line", act: () => {
 				inSelectionMode = 1;
@@ -179,7 +179,7 @@ export const ConversationList = () => {
 					$update(conversations);
 				}, isKeyboard);
 			}},
-		]);
+		], true);
 	}
 
 	const keyFunc = conv => conv.textContent ?? conv.id+"\0"+conv.title+"\0"+(+conv[LOCKED]);

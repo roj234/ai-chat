@@ -2,7 +2,7 @@ import {loadLanguage} from "/src/markdown/highlight.js";
 import {readAsString} from "/common/chardet.js";
 import {closeWindow, openWindow} from "/src/components/Windows.jsx";
 import {AudioPlayer} from "./AudioPlayer.jsx";
-import {showToast} from "/src/components/Toast.js";
+import {showToast} from "/src/components/Layer.js";
 import {formatDate, formatSize, immutableObjectMap} from "unconscious/common/Utils.js";
 import {renderMarkdownToElement} from "/src/markdown/markdown.js";
 import {callFileSystemFunc, FS_SOURCE, resolveVirtualUrl, vfsIdentity} from "../agent/index.js";
@@ -127,9 +127,10 @@ export async function vfsPreview(fs, path, overrideFileName, editable, __knownMe
 	let canEdit = data.size < PREVIEW_TEXT_MAX;
 
 	if (canEdit && (loadLanguage(extname, true) || TEXT_EXT.test(extname))) {
-		kind = extname === 'txt' ? 'text' : 'code';
+		kind = 'code';
 		if (editable !== 'y') {
-			if (extname === 'md') kind = 'md';
+			if (extname === 'txt') kind = 'text';
+			else if (extname === 'md') kind = 'md';
 			else if (/xhtml|html|htm/i.test(extname)) kind = 'html';
 		}
 		if (editable === 't') return kind === 'code' ? 'y' : 'a'; // 不支持预览，事实上就是编辑
@@ -149,7 +150,10 @@ export async function vfsPreview(fs, path, overrideFileName, editable, __knownMe
 		else if (AUDIO_EXT.test(extname)) kind = 'audio';
 		else if (extname === 'pdf') kind = 'pdf';
 
-		if (directUrl) data.toUrl = () => directUrl;
+		if (directUrl) {
+			data.toUrl = () => directUrl;
+			data.revokeUrl = () => {};
+		}
 		else if (data.size > PREVIEW_NOSW_MAX) kind = 'too-large';
 		else data = await callFileSystemFunc(fs, 'readRaw', {path});
 
@@ -238,5 +242,6 @@ export function vfsPreviewImage(images, fs, forcedIndex) {
 }
 
 export {createEditorWidget} from "./Editor.js";
+export {createExplorerWidget} from "./Explorer.jsx";
 
 export const createAudioPlayerWidget = (blob) => <AudioPlayer src={blob} />;

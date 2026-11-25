@@ -1,7 +1,6 @@
 import {config, EVENT_BUS, selectedConversation} from "/src/states.js";
-import {unconscious} from "unconscious";
+import {$state, unconscious} from "unconscious";
 import {createFileSystem, FS_SOURCE, getFileSystem} from "../agent/index.js";
-import {COMMAND_REGISTRY} from "/src/commands.js";
 import {GLOBAL_SETTINGS} from "/src/settings.js";
 import {prefixTitle, registerToolset} from "/src/toolset.js";
 import {normalizePath} from "@roj234/shared/path";
@@ -48,11 +47,6 @@ GLOBAL_SETTINGS.push({
 	}
 })
 
-COMMAND_REGISTRY["upload"] = [
-	() => EVENT_BUS.post(['viewFile'], ''),
-	"在当前对话的工作区创建文件"
-];
-
 EVENT_BUS.on('viewFile', async (path, _, node, fs) => {
 	if (fs == null) {
 		const conv = unconscious(selectedConversation);
@@ -69,6 +63,7 @@ EVENT_BUS.on('pvi', async (blob, _, name) => {
 });
 EVENT_BUS.on('pva', async (blob) => (await import("./preview.js")).createAudioPlayerWidget(blob));
 EVENT_BUS.on('pve', async (options) => (await import("./preview.js")).createEditorWidget(options));
+EVENT_BUS.on('pvex', async (fs, _, cwd) => (await import("./preview.js")).createExplorerWidget(fs, cwd ?? $state("")));
 
 /**
  * @type {AiChat.FunctionTool}

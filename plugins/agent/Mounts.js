@@ -1,8 +1,7 @@
 import {IndexedDBAccess} from "/src/utils/dbAccess.js";
-import SimpleModal from "/src/components/SimpleModal.jsx";
+import {openModal, showToast} from "/src/components/Layer.js";
 import {connectBestServer, prettyError} from "/src/utils/utils.js";
 import {config, EVENT_BUS} from "/src/states.js";
-import {showToast} from "/src/components/Toast.js";
 import {createWebFileSystem} from "./WebFSDriver.js";
 import {createConfigFileSystem} from "./ConfigFileSystem.js";
 import {NAMED_VFS} from "./VirtualFileSystem.js";
@@ -173,7 +172,10 @@ navigator.serviceWorker?.addEventListener('message', async ({data}) => {
 		} else {
 			const fs_base = payload.fs_base;
 			if (fsType === 'local') {
-				packet = {handle: await connectLocalFileSystem(fs_base)};
+				const parts = fs_base.split('/');
+				let baseDir = await connectLocalFileSystem(parts.shift());
+				if (parts.length) baseDir = await resolveDirectory(baseDir, parts);
+				packet = {handle: baseDir};
 			} else if (fsType === 'opfs') {
 				let baseDir = await navigator.storage.getDirectory();
 				if (fs_base) baseDir = await resolveDirectory(baseDir, fs_base, CREATE_OPT);
@@ -350,7 +352,7 @@ async function callFBI(mount) {
 				}, e => {});
 			}
 
-			SimpleModal({
+			openModal({
 				title: "修改名称 (slug)",
 				type: "input",
 				placeholder: defaultChoice,
@@ -557,7 +559,7 @@ async function callFBI(mount) {
 										// same file
 									} else {
 										displayName = await new Promise((resolve, reject) => {
-											SimpleModal({
+											openModal({
 												title: `为文件夹 ${displayName} 设置别名`,
 												type: "input",
 												placeholder: "名称为空或存在同名文件夹",

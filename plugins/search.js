@@ -5,7 +5,7 @@ import {formatDate} from "unconscious/common/Utils.js";
 import {findConversation, selectedConversation, switchToConversation} from "/src/states.js";
 import {onLoad} from "/src/hooks.js";
 import {renderMarkdownToElement} from "/src/markdown/markdown.js";
-import {showToast} from "/src/components/Toast.js";
+import {showToast} from "../src/components/Layer.js";
 import {openWindow} from "/src/components/Windows.jsx";
 import {Icon_search} from "/src/components/Icons.jsx";
 

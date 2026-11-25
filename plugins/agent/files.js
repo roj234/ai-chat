@@ -11,7 +11,7 @@ import {DiffHeader, HighlightBox, makeDiff, TextDiff} from "/src/components/Text
 import {markMessageDirty} from "/src/database.js";
 import {normalizePath} from "@roj234/shared/path";
 import {getChangeableFiles} from "./overwrite-monitor.js";
-import {showToast} from "/src/components/Toast.js";
+import {showToast} from "/src/components/Layer.js";
 import {shellPrompt, shellTools} from "./RemoteFSShell.js";
 import {vcsAvailableKey, vcsEnabledKey} from "./VCS.js";
 import {resolvePreset} from "/src/presets.js";
@@ -579,7 +579,7 @@ const Mounts = {
 	name: "Mounts",
 	description: "List all mounted VFSs" +
 		"Return: `\"<mount-point>\" (type=<type>, remote_path=<base>, label=<label>)`.\n" +
-		"Non-root mount points are accessed via `~/<mount-point>/`.\nClear all VFSs: UI command \`/fsreset\`.",
+		"Non-root mount points are accessed via `~/<mount-point>/`.\nUI command `/vfs`.",
 	title: () => "列出文件系统",
 
 	async script(_, resp, conv) {
@@ -637,10 +637,11 @@ const FILESYSTEM_AUX_PROMPT = debugSymbol("PromptCache");
 /**
  * @param {AiChat.Conversation} conv
  */
-const resetFileSystemSettings = conv => {
+export const resetWorkspaceFileSystem = conv => {
 	delete conv.fs_base;
 	delete conv.fs_type;
 	delete conv.fs_server;
+	delete conv.fs_branch;
 	delete conv[FS_INSTANCE];
 	delete conv[FILESYSTEM_AUX_PROMPT];
 };
@@ -703,7 +704,7 @@ registerToolset(
 
 			return filesystemPrompt + auxPrompt;
 		},
-		onDeactivated: resetFileSystemSettings
+		onDeactivated: resetWorkspaceFileSystem
 	}
 );
 registerToolset(
@@ -774,7 +775,7 @@ COMMAND_REGISTRY["fsreset"] = [
 	(args) => {
 		const conv = unconscious(selectedConversation);
 		if (!conv) return;
-		resetFileSystemSettings(conv);
+		resetWorkspaceFileSystem(conv);
 		showToast("下一次文件操作将要求重新选择");
 	},
 	"重置文件系统选择"
@@ -790,5 +791,5 @@ COMMAND_REGISTRY["mount"] = [
 		await createFileSystem(opt);
 		(conv.mnt ??= {}) [args[0]] = opt;
 	},
-	"创建新的文件系统挂载点 /mnt <name>"
+	"创建新的文件系统挂载点"
 ];

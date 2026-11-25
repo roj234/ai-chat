@@ -10,7 +10,7 @@ import {downloadFile, prettyError} from "/src/utils/utils.js";
 import {EVENT_BUS} from "/src/states.js";
 import {mdiToast} from "./MDIToast.js";
 import {readAsString} from "/common/chardet.js";
-import SimpleModal from "/src/components/SimpleModal.jsx";
+import {openModal} from "/src/components/Layer.js";
 import {createJsonParser} from "@roj234/stream-json";
 import {AS_IS} from "@roj234/shared";
 
@@ -86,7 +86,7 @@ export const openFileEditor = async (fs, path, editable, language) => {
 					};
 
 					if (dirty.value && editor.getValue() !== content) {
-						SimpleModal({
+						openModal({
 							title: "丢弃未保存的修改？",
 							onConfirm: op
 						});
@@ -127,7 +127,7 @@ export const openFileEditor = async (fs, path, editable, language) => {
 			return <>
 				{editor.element}
 				<footer className="-status">
-					<span className="-item">行 {() => status.line}，列 {() => status.ch}{() => status.selected ? ` (${formatNumber(status.selected)} 字符, unk 行)` : ""}</span>
+					<span className="-item">行 {() => status.line}，列 {() => status.ch}{() => status.selection ? ` (${formatNumber(status.selection.chars)} 字符, ${status.selection.to.line - status.selection.from.line + 1} 行)` : ""}</span>
 					<span className="-sep"/>
 					<span className="-item">{() => formatNumber(status.lineCount)} 行 · {() => formatSize(status.chars)}</span>
 				</footer>
@@ -195,7 +195,7 @@ export const createEditorWidget = async (options = {}) => {
 			{editor.element}
 			<footer className="-status">
 				<span
-					className="-item">行 {() => status.line}，列 {() => status.ch}{() => status.selected ? ` (${formatNumber(status.selected)} 字符, unk 行)` : ""}</span>
+					className="-item">行 {() => status.line}，列 {() => status.ch}{() => status.selection ? ` (${formatNumber(status.selection.chars)} 字符, ${status.selection.to.line - status.selection.from.line + 1} 行)` : ""}</span>
 				<span className="-sep"/>
 				<span className="-item">{() => formatNumber(status.lineCount)} 行 · {() => formatSize(status.chars)}</span>
 				<span className="-sep"/>

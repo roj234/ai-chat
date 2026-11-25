@@ -1,7 +1,7 @@
 import {getToolParameters, registerToolset} from "/src/toolset.js"
 import {MessageRoles, messages, onConversationLoaded, selectedConversation, updateMessageUI} from "/src/states.js"
 import {COMMAND_REGISTRY} from "/src/commands.js"
-import {showToast} from "/src/components/Toast.js"
+import {showToast} from "../../src/components/Layer.js";
 import {$update, unconscious} from "unconscious"
 import {enableBranches, expandFolds} from "/src/utils/BranchManager.js";
 import {getImmediateMessages, getMessages, markMessageDirty,} from "/src/database.js";

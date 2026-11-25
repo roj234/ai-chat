@@ -1,4 +1,4 @@
-import {showToast} from "./components/Toast.js";
+import {showToast} from "./components/Layer.js";
 import {config, messages} from "./states.js";
 import {unconscious} from "unconscious";
 import {tokenize} from "unconscious/common/StringTokenizer.js";

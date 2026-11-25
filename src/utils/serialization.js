@@ -1,6 +1,6 @@
 import {getBlob, uploadBlob} from "../database.js";
 import {deepEntries} from "unconscious/common/json-schema-utils.js";
-import {showToast} from "../components/Toast.js";
+import {showToast} from "../components/Layer.js";
 import {prettyError} from "./utils.js";
 import {SHA256} from "unconscious/common/SHA256.js";
 import {encodeRawMsg} from "@roj234/msgpack";

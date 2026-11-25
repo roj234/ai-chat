@@ -1,6 +1,6 @@
 import {BlobImage, indexInParent} from "../utils/utils.js";
 import {$foreach, $update} from "unconscious";
-import {showToast} from "./Toast.js";
+import {showToast} from "./Layer.js";
 import {readAsString} from "/common/chardet.js";
 import {formatSize} from "unconscious/common/Utils.js";
 import {currentCombinedConfig} from "../presets.js";

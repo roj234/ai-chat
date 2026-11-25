@@ -1,15 +1,16 @@
-import {getCurrentTheme} from "../states.js";
+import {EVENT_BUS, getCurrentTheme} from "../states.js";
 import {kvListGet} from "../database.js";
 import {PRESET_KVS_ID} from "../presets.js";
 import {debugSymbol} from "@roj234/shared";
 
 /**
- * @type {Record<string, string | function(AiChat.Conversation): Promise<string>>}
+ * @type {Record<string, string | function(AiChat.Conversation, string): Promise<string>>}
  */
 export const PLACEHOLDERS = {};
 
 const TEMPORARY_PLACEHOLDER = debugSymbol("PlaceholderOnConversation");
 
+EVENT_BUS.on('convCacheClear', (conv) => { delete conv[TEMPORARY_PLACEHOLDER]; });
 /**
  *
  * @param {AiChat.Conversation} conv

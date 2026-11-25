@@ -35,10 +35,9 @@ import {
 } from "./states.js";
 import {submitUserChatMessage} from "./api-request.js";
 import {MessageList} from "./components/MessageList.jsx";
-import {showToast} from "./components/Toast.js";
+import {showToast, openModal, closeTopLayer} from "./components/Layer.js";
 import {TitleEditor} from "./components/TitleEditor.jsx";
 import {createSettingDialog} from "./components/SettingDialog.jsx";
-import SimpleModal, {closeTopmostModal} from "./components/SimpleModal.jsx";
 import {createUserInputComposer} from "./components/UserInputComposer.jsx";
 import {onPluginLoaded} from "/plugins/PluginRegistry.js";
 import {DI, DID_TITLE_POSITION, injectCommonDI} from "./hooks.js";
@@ -352,7 +351,7 @@ const executeLogin = (server) => new Promise((resolve, reject) => {
 	let modal;
 	sseFetch(server+"login", { signal: abort.signal }, ({code, token, skip}) => {
 		if (code) {
-			modal = SimpleModal({
+			modal = openModal({
 				title: "交互式登录",
 				message: "在服务端输入\n    /accept "+code+"\n以登录",
 				onCancel: null,
@@ -388,7 +387,7 @@ const setupDatabase = async () => {
 	} catch {}
 	if (import.meta.env.DEV && !apiEndpoint) apiEndpoint = '/api/';
 
-	SimpleModal({
+	openModal({
 		type: "input",
 		title: "连接数据库",
 		message: `请输入${apiEndpoint ? "用户名" : "数据库服务地址"}。` + (DB_MODE === "mixed" && "\n点击取消使用本地数据库。"),
@@ -436,7 +435,7 @@ addEventListener("load", () => {
 
 	// 加载插件
 	const tasks = [onPluginLoaded.catch(e => new Promise(resolve => {
-		SimpleModal({
+		openModal({
 			title: "插件出错",
 			message: prettyError(e),
 			confirmMessage: "禁用所有插件",
@@ -459,7 +458,7 @@ addEventListener("load", () => {
 			e = e.message;
 		}
 
-		SimpleModal({
+		openModal({
 			title: "服务连接失败"+statusCode,
 			message: prettyError(e),
 			confirmMessage: "重试",
@@ -555,7 +554,7 @@ addEventListener("keydown", e => {
 
 if (IS_ANDROID_BUILD) {
 	setBackHandler(() => {
-		if (closeTopmostModal()) return true;
+		if (closeTopLayer()) return true;
 		if (unmaximizeFocusedWindow()) return true;
 	});
 }

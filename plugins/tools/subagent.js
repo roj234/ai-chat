@@ -35,7 +35,7 @@ import {parseJson5} from "@roj234/stream-json";
 import {lockConversation, unlockConversation} from "/src/conversation-lock.js";
 import {Wait} from "../rp_kit/Wait.js";
 import {AGENT_MESSAGE_ROLE} from "./subagent-role.js";
-import {showToast} from "/src/components/Toast.js";
+import {showToast} from "/src/components/Layer.js";
 
 compileSchema(schema);
 
@@ -822,6 +822,7 @@ const hijackLoop = conv => {
 EVENT_BUS.on('loopEntry', hijackLoop);
 
 const AGENT_CACHE = debugSymbol("AgentDefinitions");
+EVENT_BUS.on('convCacheClear', (conv) => { delete conv[AGENT_CACHE]; });
 async function initAgentCache(conv) {
 	let agentCache = conv[AGENT_CACHE];
 	if (!agentCache) {

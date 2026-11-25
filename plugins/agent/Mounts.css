@@ -1,6 +1,5 @@
 /* 警示卡片容器 */
 .fa-alert {
-    margin-top: 6px;
     justify-content: space-between;
     font-size: 14px;
 
@@ -42,6 +41,8 @@
 
 .fa-modal {
     .my-input { margin: 10px 0; }
+    .fa-alert { margin-top: 6px; }
+    & > div { padding: 12px; }
 
     /* 筛选标签条 */
     & .tabs {

@@ -1,4 +1,4 @@
-import SimpleModal from "/src/components/SimpleModal.jsx";
+import {showToast, openModal} from "/src/components/Layer.js";
 import {highlightJsonLike} from "/src/markdown/highlight.js";
 import {$computed, $state, $update, $watch, $watchWithCleanup, unconscious} from "unconscious";
 import {VirtualList} from "unconscious/common/VirtualList.js";
@@ -9,7 +9,6 @@ import "./ToolManager.css";
 import "../rp_basic/PresetPanel.css";
 import {CUSTOM_CONTROLS, ensureConversation, selectedConversation} from "/src/states.js";
 import {onLoad} from "/src/hooks.js";
-import {showToast} from "/src/components/Toast.js";
 import {prettyError} from "/src/utils/utils.js";
 import {getKV, setKV} from "/src/database.js";
 import {MCPClient} from "/common/MCPClient.js";
@@ -141,7 +140,7 @@ function createList() {
 							className="delete-btn"
 							onClick={() => {
 								const idx = mcps.findIndex(mcp => mcp.name === mod.name);
-								SimpleModal({
+								openModal({
 									title: "确认删除",
 									message: <div dangerouslySetInnerHTML={highlightJsonLike(mcps[idx])}/>,
 									accent: 'danger',
@@ -191,7 +190,7 @@ function openSkillManager() {
 }
 
 async function addOrEditMCPServer(existed, existedIdx) {
-	SimpleModal({
+	openModal({
 		type: "filter",
 		title: `${existed ? "编辑" : "添加"}MCP服务器`,
 		placeholder: existed,

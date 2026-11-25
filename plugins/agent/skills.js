@@ -83,13 +83,14 @@ const copyFile = (name, toBase, conv) => {
 const SKILL_VERSION = "2";
 const nothing = {};
 
+EVENT_BUS.on('convCacheClear', (conv) => { delete conv[SKILL_INFO]; });
 export async function getSkillCache(conv) {
 	let skillCache = conv[SKILL_INFO];
 	if (!skillCache) {
 		const index = {};
 		let prompt = `<skills>\n`;
 
-		if (conv.activatedModules.has("Files")) {
+		if (conv.activatedModules?.has("Files")) {
 			const path = "~/skills/.aint-skill-version";
 			try {
 				const version = await readFile( {

@@ -5,11 +5,10 @@ import {cloneNamed, prettyError} from "./utils/utils.js";
 import {deepEqual} from "unconscious/common/deepEqual.js";
 import {jsonFetch} from "/common/fetch-utils.js";
 import {config, CONFIG_VERSION, EVENT_BUS, LOCKED, selectedConversation} from "./states.js";
-import {showToast} from "./components/Toast.js";
 import {throttledPromiseLast} from "/common/pure-utils.js";
 import {Dropdown} from "./components/Dropdown.jsx";
 import {presetCategories, PROMPT_TEMPLATES} from "./settings.js";
-import SimpleModal from "./components/SimpleModal.jsx";
+import {showToast, openModal} from "./components/Layer.js";
 
 export const PRESET_KVS_ID = 'preset';
 
@@ -179,7 +178,7 @@ export function PromptDropdown() {
 				loadPreset(':'+name).then(() => prevName = name);
 			}
 		}} add={(name) => {
-			SimpleModal({
+			openModal({
 				type: 'input',
 				title: "保存提示词",
 				placeholder: '起个名字...',

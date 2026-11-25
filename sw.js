@@ -71,10 +71,9 @@ const rpcTasks = new Map;
  *
  * @param {number} type
  * @param {any} payload
- * @param {boolean} [broadcast]
  * @return {Promise<any>}
  */
-const RPC = (type, payload, broadcast) => new Promise((resolve) => {
+const RPC = (type, payload) => new Promise((resolve) => {
 	const id = rpcId;
 	self.clients.matchAll({ type: 'window' }).then(clients => {
 		if (!clients.length) {
@@ -84,12 +83,8 @@ const RPC = (type, payload, broadcast) => new Promise((resolve) => {
 
 		rpcTasks.set(id, resolve);
 		const message = [id, type, payload];
-		if (broadcast) {
-			for (let i = 0; i < clients.length; i++) {
-				clients[i].postMessage(message);
-			}
-		} else {
-			clients[0].postMessage(message);
+		for (let i = 0; i < clients.length; i++) {
+			clients[i].postMessage(message);
 		}
 	});
 	rpcId += 2;
@@ -137,7 +132,11 @@ const handleVfsRequest = async (request, event) => {
 		if (root) url.searchParams.set('root', root);
 
 		// real server
-		const upstream = await fetch(url, {headers});
+		const upstream = await fetch(url, {
+			headers,
+			cache: 'no-cache',
+			referrerPolicy: "no-referrer"
+		});
 		return new Response(upstream.body, upstream);
 	} else {
 		const paths = parts.map(decodeURIComponent);

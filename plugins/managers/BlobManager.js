@@ -1,5 +1,5 @@
 import {$asyncState, $computed, $foreach, $state, $update, $watch, unconscious} from "unconscious";
-import SimpleModal from "/src/components/SimpleModal.jsx";
+import {openModal} from "/src/components/Layer.js";
 import {formatSize, prettyTime} from "unconscious/common/Utils.js";
 import {copyWithAnimation, deleteWithDrawback} from "/src/utils/utils.js";
 import {callPreviewImage} from "/src/utils/preview-bridge.js";
@@ -71,7 +71,7 @@ const updateSelected = e => {
 const deleteSelected = () => {
 	const checked = table.querySelectorAll('.row-check:checked');
 
-	SimpleModal({
+	openModal({
 		title: `是否删除选中的 ${checked.length} 项？`,
 		onConfirm() {
 			const all = [];

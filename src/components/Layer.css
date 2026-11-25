@@ -1,0 +1,252 @@
+
+/* 模态弹窗 */
+.modal::backdrop {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0,0,0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+dialog.modal:not([open]) { display: none; }
+dialog.modal { padding: 0; }
+
+.modal {
+    background-color: var(--panel-2);
+    border-radius: var(--border-radius-md);
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 12px var(--bg);
+
+    &:not(.full) {
+        max-width: min(768px, calc(100vw - 32px));
+        min-width: min(100vw, max(384px, 20%));
+        max-height: min(90dvh, 768px);
+    }
+    &.full {
+        max-width: 100vw;
+        max-height: 100dvh;
+    }
+
+    animation: bounceIn 0.3s ease-out;
+    transform-origin: center;
+
+    display: flex;
+    flex-direction: column;
+
+    & > .-head, > .-body, > .-butt {
+        padding: 8px 12px;
+    }
+
+    & > .-head {
+        display: flex;
+        align-items: center;
+        background-color: var(--bg);
+        border-bottom: 1px solid var(--border);
+    }
+
+    & > .-body {
+        color: var(--muted);
+        overflow: auto;
+        white-space: pre-wrap;
+        line-height: 1.5;
+        font-size: 16px;
+
+        & > img {
+            object-fit: cover;
+        }
+
+        & > .filter {
+            background: none;
+            padding: 0;
+        }
+
+        & p {
+            margin: 0;
+        }
+
+        & > input, & > textarea {
+            margin-top: 8px;
+            background-color: var(--bg);
+        }
+    }
+
+    & .-butt {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        padding-top: 0;
+    }
+}
+
+/* Simple CSS Animations */
+@keyframes fadeIn {
+    from {opacity: 0;}
+    to {opacity: 1;}
+}
+
+@keyframes bounceIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9) translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+/* 右键菜单 */
+.menu {
+    position:fixed;padding:5px;border-radius:10px;
+    background:var(--card);border:1px solid var(--border);box-shadow:var(--shadow);animation:pop .12s ease-out;
+    & > button {
+        display:flex;align-items:center;gap:9px;width:100%;height:30px;padding:0 9px;border-radius:6px;
+        font-size:12.5px;color:var(--muted);
+        &:not(:disabled) {
+            &:hover{background:var(--chip-hover);color:var(--text)}
+            &.danger2:hover{color:var(--error-text-color);background:var(--error-bg)}
+        }
+        &:disabled{opacity:.4;cursor:not-allowed}
+        & svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+        & i {font-size:16px}
+    }
+    & > span {
+        display:flex;align-items:center;height:30px;padding:0 9px;
+        font-size:12.5px;color:var(--muted);
+
+    }
+    & > hr{border:none;border-top:1px solid var(--border);margin:4px 2px}
+}
+
+/* 改成抽屉样式 */
+@media (max-width: 767px) {
+    .menu:not(.-always) {
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        top: unset !important;
+        min-width: unset;
+        padding: 20px 0;
+
+        &::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            backdrop-filter: blur(3px);
+        }
+
+        &::after {
+            content: "";
+            position: absolute;
+            background: var(--muted);
+            border-radius: 4px;
+            height: 4px;
+            width: 36px;
+            top: 10px;
+            left: calc(50% - 18px);
+        }
+    }
+}
+
+@keyframes pop{
+    from{transform:scale(.97) translateY(6px);opacity:.6}
+    to{transform:none;opacity:1}
+}
+
+/* 提示条 */
+.toasts {
+    position: absolute;
+    --bottom: 20px;
+    bottom: var(--bottom);
+    right: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: flex-end;
+    overflow: hidden;
+
+    &.fix {
+        position: fixed;
+    }
+}
+
+.toast {
+    position: relative;
+
+    max-height: 50vh;
+    max-width: max(350px, 33vw);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+
+    font-size: 14px;
+
+    padding: var(--spacing-sm) var(--spacing-md); border-radius: var(--border-radius-sm);
+    white-space: pre-wrap;
+    word-break: break-word;
+
+    animation: slideIn 0.3s ease-out forwards;
+    transition: opacity 0.3s ease-out;
+
+    /* 关闭动画：点击后滑出 */
+    &.-closing {
+        animation: slideOut 0.6s ease-out forwards;
+        opacity: 0;
+    }
+
+    &.info {
+        background:var(--panel);
+        border:1px solid var(--border);
+
+        & > .close { color: var(--text); }
+    }
+
+    & .close {
+        color: white;
+        font-size: 20px;
+        font-weight: bold;
+        padding: 0 4px;
+        opacity: 0.7;
+        transition: opacity 0.2s;
+        align-self: flex-end;
+
+        &:hover {
+            opacity: 1;
+        }
+    }
+
+    /* 倒计时进度条 */
+    & > .timer {
+        position: absolute;
+        bottom: -1px;
+        left: 0;
+        height: 2px;
+        background: var(--accent);
+        width: 100%;
+        transform-origin: left;
+        animation: countdown linear forwards;
+
+        /* 鼠标移入时暂停倒计时 */
+        .toast:hover & {
+            animation-play-state: paused;
+        }
+    }
+}
+
+@keyframes slideIn {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+}
+@keyframes slideOut {
+    0%  { transform: translateX(0); }
+    50% { transform: translateX(100%); }
+    100% { transform: translate(100%, 100%); }
+}
+@keyframes countdown {
+    from { transform: scaleX(1); }
+    to { transform: scaleX(0); }
+}

@@ -89,7 +89,9 @@
 
 @media (hover: hover) {
     .edit-btn { display: none; }
-    .chat-item:hover .edit-btn { display: block; }
+    .chat-item:hover, .chat-item:focus-within {
+        .edit-btn { display: block; }
+    }
 }
 
 .moving .edit-btn {

@@ -1,5 +1,5 @@
 import {debugSymbol, unconscious} from "unconscious";
-import {showToast} from "../components/Toast.js";
+import {showToast} from "../components/Layer.js";
 import {BRANCH_MANAGER, EVENT_BUS, messages as reactiveMessages} from "../states.js";
 import {redoToolCalls, undoToolCalls} from "../toolset.js";
 import {FSE_NotAllowed, FSE_NotFound, throwDOMException} from "/common/pure-utils.js";
