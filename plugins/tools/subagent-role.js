@@ -10,6 +10,7 @@ const MERGER = debugSymbol("SyntheticMessage");
 EditableMessageRoles.add(AGENT_MESSAGE_ROLE);
 MessageRoles[AGENT_MESSAGE_ROLE] = {
 	name: "代理消息",
+	role: 'user',
 	combine: true,
 	compose(item, output) {
 		let content = `<agent-message from="${item.from}" type="${item.type}">\n\n${item.content}\n\n</agent-message>`;

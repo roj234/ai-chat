@@ -148,6 +148,7 @@ const Read = {
 			path: { type: "string", },
 			format: {
 				type: "string",
+				default: "raw",
 				enum: ["raw", "lineNumber"]
 			},
 			offset: { type: "integer" },
@@ -158,7 +159,7 @@ const Read = {
 				description: "Maximum characters to return. Output will be truncated at the end of the last line that fits, every returned line is intact."
 			}
 		},
-		required: ["path", "format"]
+		required: ["path"]
 	}
 };
 

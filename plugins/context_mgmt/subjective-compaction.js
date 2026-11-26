@@ -1,7 +1,5 @@
 import {getToolParameters, registerToolset} from "/src/toolset.js"
-import {MessageRoles, messages, onConversationLoaded, selectedConversation, updateMessageUI} from "/src/states.js"
-import {COMMAND_REGISTRY} from "/src/commands.js"
-import {showToast} from "../../src/components/Layer.js";
+import {MessageRoles, messages, onConversationLoaded, updateMessageUI} from "/src/states.js"
 import {$update, unconscious} from "unconscious"
 import {enableBranches, expandFolds} from "/src/utils/BranchManager.js";
 import {getImmediateMessages, getMessages, markMessageDirty,} from "/src/database.js";
@@ -13,15 +11,15 @@ import {resolvePreset} from "/src/presets.js";
 import {customRoleRegHelper} from "../pluginApi.js";
 import {JsonFile} from "../agent/VirtualFileSystem.js";
 import {createWebFileSystem} from "../agent/WebFSDriver.js";
+import {escapeHtmlAttr} from "@roj234/shared/strings";
 
-const ID = "ContextCompression";
+export const DCP_ID = "ContextCompression";
 
 /**
  * @param {AiChat.Conversation} conv
  */
-const getState = conv => (conv[ID] ??= {
-	tokensSaved: 0,
-	manual: false,
+const getState = conv => (conv[DCP_ID] ??= {
+	estSaved: 0,
 	nudgeCounter: 0,
 });
 
@@ -43,13 +41,19 @@ function computeIds(path) {
 		}
 
 		if (m.role === 'fold') {
+			const count = m.end - m.start + 1;
+			if (m.disabled) {
+				for (let j = 0; j < count; j++) {
+					idMap.set("m"+pad3(seq + j), -m.group);
+				}
+			}
 			idMap.set(m.group, i);
-			seq += m.end - m.start + 1;
+			seq += count;
 
 			const n = parseInt(m.group.slice(1), 10);
 			if (n >= nextGroup) nextGroup = n + 1;
 		} else {
-			idMap.set("m" + pad3(seq), i);
+			idMap.set("m"+pad3(seq), i);
 			seq++;
 		}
 	}
@@ -95,9 +99,7 @@ Include multiple independent ranges as separate entries in \`ranges\` array.`,
 	},
 
 	async script(params, response, conv) {
-		const state = getState(conv);
-
-		const path = expandFolds(await getMessages(conv));
+		const path = await getMessages(conv);
 		let {idMap, nextGroup} = computeIds(path);
 
 		const topic = params.topic;
@@ -111,7 +113,10 @@ Include multiple independent ranges as separate entries in \`ranges\` array.`,
 			let endIdx = idMap.get(endId);
 			if (endIdx == null) throw `Invalid or unknown message/block for endId: ${endId}`;
 
-			if (startIdx === endIdx) throw "range must contain more than 1 message";
+			if (startIdx < 0) throw `Message ${startId} is inside a DISABLED block b${-startIdx} and cannot be operate individually. Ask user for details.`;
+			if (endIdx < 0) throw `Message ${endId} is inside a DISABLED block b${-endIdx} and cannot be operate individually. Ask user for details.`;
+
+			if (startIdx === endIdx) throw "Range must contain more than 1 message";
 			if (startIdx > endIdx) throw `startId (${startId}) must appear before endId (${endId})`;
 
 			if (path[startIdx].role === 'user' && path[startIdx + 1].role !== 'user') startIdx++;
@@ -122,7 +127,7 @@ Include multiple independent ranges as separate entries in \`ranges\` array.`,
 			resolved.push({
 				startIdx,
 				endIdx,
-				tokensSaved: removed,
+				estSaved: removed,
 				summary: range.summary.replace(/\((b[^)]+)\)/g, (match, idStr) => {
 					const block = path.find(m => m.role === 'fold' && m.group === idStr)
 					if (!block) return match
@@ -140,7 +145,7 @@ Include multiple independent ranges as separate entries in \`ranges\` array.`,
 
 		let saved = 0;
 		for (const r of ordered) {
-			saved += r.tokensSaved;
+			saved += r.estSaved;
 		}
 
 		ordered.reverse();
@@ -166,7 +171,7 @@ Include multiple independent ranges as separate entries in \`ranges\` array.`,
 		if (unconscious(messages) === bm) $update(updateMessageUI);
 		response.blockIds = newIds;
 		response.usage = conv.contextUsage;
-		response.saved = saved;
+		response.estSaved = saved;
 
 		return `OK`;
 	},
@@ -243,8 +248,7 @@ const messageListHandler = {
 }
 const VFSRoot = new NestedMap();
 
-
-registerToolset(ID, "主动上下文管理\n使用 /dcp ui 打开配置界面", [Compress, Marker], {
+registerToolset(DCP_ID, "主动上下文管理\n使用 /dcp ui 打开配置界面", [Compress, Marker], {
 	hidden: 'manual',
 	systemPrompt: `<context-management>
 Use \`Compress\` tool to replace stale conversation ranges with dense summaries.
@@ -304,7 +308,7 @@ It is our responsibility to keep a sharp, high-quality context window.
 	}
 })
 
-const [registerRole_, unregisterRole] = customRoleRegHelper(ID);
+const [registerRole_, unregisterRole] = customRoleRegHelper(DCP_ID);
 
 function registerRole(conv) {
 	if (!registerRole_(conv)) return;
@@ -315,16 +319,17 @@ function registerRole(conv) {
 }
 
 onConversationLoaded((conv, path, messages) => {
-	if (conv.activatedModules?.has(ID)) registerRole(conv, messages);
+	if (conv.activatedModules?.has(DCP_ID)) registerRole(conv, messages);
 });
 
-MessageRoles[ID] = {
+MessageRoles[DCP_ID] = {
 	async preprocess(self, messages, conv) {
 		const state = getState(conv);
 		if (!state) return;
 
 		const output = messages.map(m => ({...m}));
 		const limit = (await resolvePreset(conv)).maxContext;
+		let saved = 0;
 
 		let seq = 1;
 
@@ -426,10 +431,11 @@ ${m.content}
 					const pron = result.blockIds.length > 1;
 					output.splice(++i, 0, {
 						role: 'user',
-						content: `<context-compressed topic="${arg.topic}">
+						content: `<context-compression-event topic="${escapeHtmlAttr(arg.topic)}">
 Compression finished. Range${pron ? 's' : ''} [${rangeStr.join(', ')}] ${pron?'are':'is'} replaced by summary block${pron ? 's' : ''} [${result.blockIds.join(', ')}].
-${result.usage != null ? `Context usage before compression: ${result.usage} / ${limit}. Token saved (approx): ${result.saved / 4}\n`: ''}</context-compressed>`
-					})
+${result.usage != null ? `Context usage before compression: ${result.usage} / ${limit}. Token saved (approx): ${result.estSaved / 4}\n`: ''}</context-compression-event>`
+					});
+					saved += result.estSaved;
 				}
 			}
 		}
@@ -437,14 +443,16 @@ ${result.usage != null ? `Context usage before compression: ${result.usage} / ${
 		// reminder
 		const usage = conv.contextUsage;
 
-		if (limit && !state.manual && usage > 0) {
+		state.estSaved += saved;
+
+		if (limit && state.nudgeCounter >= 0 && usage > 0) {
 			const pct = usage / limit;
 			if (pct > 0.8 || limit - usage < 32768) {
 				if (state.nudgeCounter >= 5) {
 					output.push({
 						role: "user",
 						content: `<context-compression-reminder>
-Context usage is elevated (${usage} / ${limit}). Look for a closed, self-contained range and compress it.
+Context: ${usage} / ${limit} (${(pct * 100).toFixed(0)}%). Look for a closed, self-contained range and compress it.
 Prefer older, resolved history. Batch independent ranges if ready.
 </context-compression-reminder>`
 					})
@@ -458,59 +466,3 @@ Prefer older, resolved history. Batch independent ranges if ready.
 		return output;
 	}
 }
-
-// ── /dcp Commands ──────────────────────────────────────────
-
-const fmt = n => n != null ? n.toLocaleString() : "?"
-
-COMMAND_REGISTRY["dcp"] = [
-	async (args) => {
-		const sub = args[0] || ""
-		const conv = unconscious(selectedConversation);
-		if (!conv) {
-			showToast("未选中对话", "error");
-			return
-		}
-
-		const state = getState(conv);
-
-		// TODO 被动压缩
-		switch (sub) {
-			default: {
-				const path = await getMessages(conv);
-				const blocks = path.filter(m => m.role === 'fold');
-				const lines = [
-					"/dcp ui          — 打开上下文管理器",
-					"/dcp manual on   — 开启手动模式",
-					"/dcp manual off  — 关闭手动模式",
-					"",
-					`顶层压缩块: ${blocks.filter(b => !b.disabled).length} 活跃 / ${blocks.length} 总计`,
-					`Token 节省(估): ${fmt(state.tokensSaved)}`,
-					`自动压缩: ${!state.manual ? "开" : "关"}`
-				];
-				showToast(lines.join("\n"), "info");
-				break
-			}
-
-			case "ui": {
-				import ("./MessageFold.jsx").then(mod => mod.showMessageFolder());
-				break
-			}
-
-			case "manual": {
-				const mode = args[1]
-				if (mode === "on") {
-					state.manual = true
-					showToast("手动模式: 开 — 不再自动提醒压缩，LLM 也不会主动压缩", "info")
-				} else if (mode === "off") {
-					state.manual = false
-					showToast("手动模式: 关 — 恢复自动压缩提醒", "info")
-				} else {
-					showToast(`手动模式: ${state.manual ? "开" : "关"}`, "info")
-				}
-				break
-			}
-		}
-	},
-	"上下文管理: /dcp [ui|manual [on|off]]"
-]

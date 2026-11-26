@@ -4,6 +4,7 @@ import {$once, createReactiveMarkdown, registerSchemaMessageRole, schemaToPrompt
 import {$foreach, unconscious} from "unconscious";
 import {abortCompletion, config, ensureConversation, messages} from "/src/states.js";
 import {COMMAND_REGISTRY} from "/src/commands.js";
+import {USER_PROMPT_ROLE} from "../../pluginApi.js";
 
 const ID = 'aichat/translator';
 
@@ -88,7 +89,7 @@ const sendAction = async (messages, prompt) => {
 
 	const time = Date.now();
 	messages.push({
-		role: "userPrompt",
+		role: USER_PROMPT_ROLE,
 		time,
 		content: prompt,
 		[USER_PROMPT]: `

@@ -5,3 +5,5 @@ node_modules
 config.js
 
 /public/assets/sandbox/
+/vendor/remixicon/index.html
+/*.iml

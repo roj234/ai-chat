@@ -35,7 +35,7 @@ import {
 } from "./states.js";
 import {submitUserChatMessage} from "./api-request.js";
 import {MessageList} from "./components/MessageList.jsx";
-import {showToast, openModal, closeTopLayer} from "./components/Layer.js";
+import {closeTopLayer, openModal, showToast} from "./components/Layer.js";
 import {TitleEditor} from "./components/TitleEditor.jsx";
 import {createSettingDialog} from "./components/SettingDialog.jsx";
 import {createUserInputComposer} from "./components/UserInputComposer.jsx";
@@ -496,6 +496,8 @@ addEventListener("load", () => {
 		function onSettingChanged(id, newValue, oldValues) {
 			if (oldValues[id] !== newValue) config._dirty = '*';
 			config[CONFIG_VERSION] = (config[CONFIG_VERSION] || 0) + 1;
+
+			EVENT_BUS.post(['settings', id], newValue, toggleSettingUI, oldValues);
 
 			if (id === 'template') {
 				try {

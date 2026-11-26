@@ -255,7 +255,7 @@ export async function responsesProxyHandler(body, target, logPath, ctx, moderati
 
 	body.input = body.input.flat();
 
-	const pm = new ProxyResumeManager(ctx, body, target.trace && logPath);
+	const pm = new ProxyResumeManager(ctx, body, target.trace && logPath, target);
 	ctx.res.once('close', () => pm.end());
 
 	let indices = new Map(), toolCallIndex = 0;

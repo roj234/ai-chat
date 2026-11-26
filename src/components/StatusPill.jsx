@@ -1,6 +1,6 @@
-import {config, PP_UNATTENDED} from "../states.js";
+import {abortCompletion, config, PP_UNATTENDED} from "../states.js";
 import "./StatusPill.css";
-import {$computed, unconscious} from "unconscious";
+import {$cleanup, $computed, unconscious} from "unconscious";
 import {SP_CONNECT, SP_GENERATE, SP_PREFILL, SP_RETRY, SP_WAIT} from "./StatusPill_state.js";
 import {Icon_lightning} from "./Icons.jsx";
 
@@ -56,24 +56,68 @@ export const StatusPill = ({kind, data}) => {
 			default:
 			case SP_CONNECT:
 				return <div className="ai-status connect">
-					<div className="icon"></div>
+					<div className="icon" />
 					<loading-motd />
 				</div>;
 			case SP_WAIT:
 				return <div className="ai-status wait">
-					<div className="icon"></div>
+					<div className="icon" />
 					<span>正在准备响应...</span>
 				</div>;
 			case SP_RETRY: {
 				const [count, maxCount, delay] = unconscious(data);
-				return <div className="ai-status wait">
-					<div className="icon"></div>
-					<span>发生错误，{delay}ms后重试... ({count} / {maxCount})</span>
+				const scheduledTime = Date.now() + delay;
+
+				const SIZE = 24;
+				const RADIUS = 8;
+				const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+
+				const bar = <svg:circle className="-bar" cx={SIZE / 2} cy={SIZE / 2} r={RADIUS}/>;
+
+				bar.style.strokeDasharray = bar.style.strokeDashoffset = CIRCUMFERENCE;
+				//bar.style.stroke = 'var(--ap-yellow)';
+
+				const anim = bar.animate([
+					{ strokeDashoffset: 0 },
+					{ strokeDashoffset: CIRCUMFERENCE }
+				], delay);
+
+				const node = <span/>;
+				const callback = () => {
+					const remain = Math.ceil((scheduledTime - Date.now()) / 1000);
+					if (!remain) clearInterval(timer);
+
+					node.textContent = remain;
+					node.animate(
+						[
+							{transform: 'translateY(58%) scale(.7)', opacity: 0},
+							{transform: 'translateY(0) scale(1)', opacity: 1}
+						],
+						{duration: 340, easing: 'cubic-bezier(.2,1.4,.4,1)'}
+					);
+				};
+
+				callback();
+
+				const timer = setInterval(callback, 1000);
+				$cleanup(bar, () => clearInterval(timer));
+
+				return <div className="ai-status wait" style="gap:4px">
+					<div className="ring-progress" style={`width:${RADIUS * 2 + 2}px;height:${RADIUS * 2 + 2}px`}>
+						<div className="icon" />
+						<svg width={SIZE} height={SIZE}>
+							<circle className="-track" cx={SIZE / 2} cy={SIZE / 2} r={RADIUS}/>
+							{bar}
+						</svg>
+					</div>
+					<span>发生错误，{node}s后重试... ({count} / {maxCount})</span>
+					<button className="btn danger-focus ri-close-line" style="padding:4px" title="取消重试" onClick={() => abortCompletion.abort?.()} />
 				</div>;
 			}
 			case SP_PREFILL:
 				return <div className="ai-status prefill">
-					<svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+					<svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+						 stroke-linecap="round">
 						<path d="M21 12a9 9 0 1 1-6.219-8.56"/>
 					</svg>
 					<span>预填充</span>

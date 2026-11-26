@@ -120,7 +120,7 @@ jobs:
       contents: read
       pages: write
       id-token: write
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    if: github.event_name == 'push'
     needs:
       - build
     runs-on: ubuntu-latest
@@ -140,9 +140,24 @@ jobs:
           unzip -qq -o dist.zip -d dist -x "/INFO" || [[ $? -eq 1 ]]
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: dist/
+
+      # artifact 服务偶发有秒级（事故期间可达分钟级）延迟，先等它出现再部署
+      - name: Wait for github-pages artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 30); do
+            if gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
+              --jq '[.artifacts[].name] | index("github-pages") // empty' | grep -q .; then
+              echo "github-pages artifact is visible"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::warning::github-pages artifact 仍未出现（已等 150s），继续部署"
 
       - name: Deploy to GitHub Pages
         id: deployment
@@ -156,7 +171,7 @@ jobs:
       - build
       - build-apk
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[release]'))
+    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '[release]'))
 
     steps:
       - name: Download release package

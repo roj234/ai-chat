@@ -15,6 +15,7 @@ import {COMMAND_REGISTRY} from "/src/commands.js";
 import {UpdateVariable} from "../../rp_kit/Variables.js";
 import {runTools} from "/src/toolset.js";
 import {getRandomString} from "/src/utils/utils.js";
+import {USER_PROMPT_ROLE} from "../../pluginApi.js";
 
 const ID = 'my/storyTurn';
 
@@ -148,7 +149,7 @@ const sendAction = async (messages, prompt) => {
 
 	const time = Date.now();
 	messages.push({
-		role: "userPrompt",
+		role: USER_PROMPT_ROLE,
 		time,
 		content: prompt,
 		[USER_PROMPT]: `${schemaToPrompt(schemaToLLM, config.jsonSupport)}${promptPrefix}
@@ -184,7 +185,7 @@ const onCompleted = async (conv, messages, assistantResponse) => {
 	}
 
 	const userMessage = messages.at(-2);
-	if (userMessage.role === 'userPrompt') {
+	if (userMessage.role === USER_PROMPT_ROLE) {
 		delete userMessage.prompt;
 		// 需要换一个对象才能让 keyFunc 更新
 		messages[messages.length - 2] = {

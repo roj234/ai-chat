@@ -332,9 +332,8 @@ const createVCSDialog = (conv) => {
 			{$computed(() => {
 				return branches.error ? null :
 					<div className="row">
-						覆盖层
+						模型工作层
 						<div className="pretty-select down">
-							<span className="tooltip down">切换覆盖层会同时改变LLM操作的文件系统</span>
 							<button className="my-select" onClick={({target}) => {
 								target.closest(".pretty-select").classList.toggle("open");
 							}}>
@@ -351,7 +350,7 @@ const createVCSDialog = (conv) => {
 		element: <>
 			<div className="vfs-toolbar">
 				<label className="row">
-					只读
+					{() => unconscious(selectedFileSystem) === './' ? "全局只读" : "此挂载只读"}
 					<input className="switch" type="checkbox" checked={isReadonly}
 						   onChange={({target}) => {
 							   const fs = conv.mnt[selectedFileSystem.slice(2, -1)] ?? conv;

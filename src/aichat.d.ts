@@ -693,6 +693,7 @@ declare namespace AiChat {
             name: string;
             /** 允许与助手消息合并显示 */
             combine?: boolean;
+            role?: 'user' | 'assistant';
 
             /**
              * @param self 当前消息

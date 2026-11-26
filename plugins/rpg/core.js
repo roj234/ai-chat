@@ -5,7 +5,7 @@ import {createSandbox} from "@roj234/workerbox";
 import {ZipReader} from "@roj234/jszip/io";
 import {schemaToTypeScriptDefinition} from "unconscious/common/json-schema-utils.js";
 
-export {USER_PROMPT} from "/common/ReactiveJSON.js";
+export {USER_PROMPT} from "../pluginApi.js";
 
 export const runSchemaRole = async (role, schema, messages, overrides) => {
 	const conv = unconscious(selectedConversation);

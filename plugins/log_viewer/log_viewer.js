@@ -11,6 +11,7 @@ import {VirtualList} from "unconscious/common/VirtualList.js";
 import {EVENT_BUS} from "/src/states.js";
 
 import "./log_viewer.css";
+import {throttledPromiseLast} from "../../common/pure-utils.js";
 
 // ============ STATE ============
 let allLogs = [];
@@ -669,7 +670,7 @@ const toggleRow = async (log, row, makeDetails) => {
 };
 
 
-const refreshData = async (auto) => {
+const refreshData = throttledPromiseLast(async (auto) => {
 	$refreshIndicator.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #6b7385;border-top-color:#4d94ff;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:4px;"></span> 加载中...';
 	try {
 		const logs = await fetchLogs();
@@ -696,7 +697,7 @@ const refreshData = async (auto) => {
 			);
 		}
 	}
-};
+});
 
 // ============ EVENT LISTENERS ============
 

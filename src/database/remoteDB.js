@@ -7,7 +7,7 @@ import {SHA256} from "unconscious/common/SHA256.js";
 import {base64Encode} from "@roj234/shared/base64";
 import {connectBestServer, prettyError} from "../utils/utils.js";
 import {$store, $update, AS_IS, debugSymbol, unconscious} from "unconscious";
-import {showToast, openModal} from "../components/Layer.js";
+import {openModal, showToast} from "../components/Layer.js";
 import {delta, patch, rep} from "unconscious/common/deepEqual.js";
 import {PROTOCOL_VERSION} from "/backend/sync.js";
 import {
@@ -452,6 +452,7 @@ _FakeBlob.prototype = {
 	constructor: File,
 	toUrl() {return remoteDBUrl+`blob/`+this.hash;},
 	revokeUrl() {},
+	async stream() {return (await this.blob()).stream();},
 	async blob() {return this[BLOB] ??= await (await fetch(this.toUrl(), { cache: 'force-cache', integrity: 'sha256-'+this.hash }).catch(() => {throw new Error("附件 "+(this.name||this.hash)+" 丢失或损坏")})).blob();},
 	async toDataURL() {return (await this.blob()).toDataURL();},
 	async arrayBuffer() {return (await this.blob()).arrayBuffer();},

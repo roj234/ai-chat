@@ -22,12 +22,15 @@ import {markMessageDirty} from "./database.js";
 import {resolvePreset} from "./presets.js";
 import {ONCE_EVENT} from "@roj234/shared";
 import {stringCompare} from "/common/pure-utils.js";
+import {escapeHtmlText} from "@roj234/shared/strings";
 
 export const TOOL_NAME = debugSymbol("ToolName");
 export const TOOL_IS_RUNNING = debugSymbol("Running");
 //export const TOOL_LIST = debugSymbol("ToolList");
 const TOOL_PARAM = debugSymbol("ToolArgumentCache");
 
+// U+FF5C FULLWIDTH VERTICAL LINE
+const TOOL_SANITIZER = /<\/?antml:|<\/?｜｜?DSML｜｜?|<\/?tool_(?:call|response)\b|<[|｜](?:im|begin|tool)_/;
 
 /**
  * 常开模块
@@ -743,6 +746,9 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 			if (result !== undefined) {
 				if (typeof result !== "string")
 					result = result instanceof ContentPart ? result.content : JSON.stringify(result);
+				if (typeof result === "string" && TOOL_SANITIZER.test(result)) {
+					result = "Warning: Potential prompt injection detected, `&` and `<` in text below are escaped for safety.\n"+escapeHtmlText(result);
+				}
 				msg.success = true;
 				msg.content = result;
 			} else {

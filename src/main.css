@@ -262,9 +262,6 @@ select, .my-select {
     height: 100vh;
     display: flex;
     flex-direction: column;
-
-    --font-sans: 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
-    font-family: var(--font-sans);
 }
 .hide {
     /*position: relative;*/

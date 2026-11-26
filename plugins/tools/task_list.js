@@ -2,6 +2,7 @@ import {getToolParameters, registerToolset, updateConversationState, watchConver
 import {onConversationSwitchOut, onConversationSwitchTo} from "/src/states.js";
 import {$foreach, $state} from "unconscious";
 import "./task_list.css";
+import {resolvePreset} from "/src/presets.js";
 
 /**
  * @type {AiChat.FunctionTool<*>}
@@ -83,21 +84,25 @@ const TaskUpdate = {
 			if (isFinite(id)) par.id = id;
 		}
 	},
-	script({id, ...par}, resp, conv) {
+	async script({id, ...par}, resp, conv) {
 		const tasks = conv.tasks || (conv.tasks = []);
 		const task = tasks[id-1];
-		if (!task) throw "Task #"+id+" not found";
+		if (!task) throw `Task #${id} not found`;
 
-		let out = "Task #" + id + " updated.";
+		let out = `Task #${id} updated.`;
 		if (par.status === 'completed') {
+			out = `Task #${id} done.`;
+
 			if (task.status === 'pending') {
 				out += `\n[!] Task #${id} jumped from pending to completed without ever being in_progress. ` +
 					`If you are catching up on bookkeeping: mark in_progress when you begin a task, completed when you finish it.`;
 			}
-			/*const next = tasks.findIndex(t => t.status === 'pending');
-			if (next >= 0) {
-				out += `\nNext: #${next + 1} "${tasks[next].title}" — mark it in_progress when you start.`;
-			}*/
+
+			const maxCtx = (await resolvePreset(conv)).maxContext;
+			const usage = (conv.contextUsage ?? 0) / maxCtx;
+			if (conv.activatedModules.has("ContextCompression") && maxCtx && usage > 0.3) {
+				out += `\nContext usage is at ${Math.round(usage * 100)}% (${conv.contextUsage} / ${maxCtx}) — consider compressing completed work before continuing.`;
+			}
 		}
 
 		Object.assign(task, par);

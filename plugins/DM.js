@@ -19,12 +19,6 @@ function TextRing(btn, it) {
 	const root = <div className="ring">
 		{btn}
 		<svg width={SIZE} height={SIZE}>
-			<defs>
-				<linearGradient id="ringGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-					<stop offset="0%" stop-color="#00c6ff"/>
-					<stop offset="100%" stop-color="#0072ff"/>
-				</linearGradient>
-			</defs>
 			<circle className="track" cx={SIZE / 2} cy={SIZE / 2} r={RADIUS}/>
 			<circle className="bar" cx={SIZE / 2} cy={SIZE / 2} r={RADIUS} ref={bar}/>
 		</svg>

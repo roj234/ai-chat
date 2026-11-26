@@ -43,7 +43,7 @@ import "./assistant-profile.js";
 // JSON编辑
 import "./tools/json_editor.js";
 // 上下文压缩
-import "./context_mgmt/subjective-compaction.js";
+import "./context_mgmt/index.js";
 // 任务列表
 import "./tools/task_list.js";
 // 子智能体
@@ -102,6 +102,12 @@ const plugins = [
 		load: registerMermaidRenderer
 	},
 	{
+		name: "缓存保活",
+		description: "把5分钟超时变成半小时甚至1小时！",
+		defaultEnabled: true,
+		load: () => import("./kvcache-keepalive.js"),
+	},
+	{
 		name: "多媒体资源生成",
 		description: "提供ComfyUI/SD WebUI文生图工具，以及TTS工具（后者WIP）",
 		load: registerMultimediaGeneration
@@ -124,7 +130,7 @@ const plugins = [
 	},
 	{
 		name: "耗时分析",
-		description: "使用 `/actime` 命令查看当前对话的分析",
+		description: "用 `/actime` 命令分析当前对话",
 		defaultEnabled: true,
 		load: () => import("./actime/actime.js")
 	},
@@ -138,10 +144,16 @@ const plugins = [
 		load: () => import("./contentFilter.js")
 	},
 	{
+		name: "被动上下文压缩",
+		description: "用户执行的 `/compact` 命令",
+		defaultEnabled: true,
+		load: () => import("./context_mgmt/passive-compaction.js")
+	},
+	{
 		name: "控制台",
-		load: () => import("./debugger.js"),
 		description: "显示一个交互式JS控制台，可以运行JS代码并查看控制台日志",
 		defaultEnabled: IS_ANDROID_BUILD,
+		load: () => import("./debugger.js"),
 	},
 ];
 

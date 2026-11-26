@@ -56,7 +56,7 @@ import {
 import {BODY_PARAMETERS, defaultSystemPrompt, defaultTitlePrompt} from "./settings.js";
 import {createJsonStream} from "/common/StreamJsonSerializer.js";
 import {createAntiSlopSampler} from "./anti-slop-sampler.js";
-import {showToast, openModal} from "./components/Layer.js";
+import {openModal, showToast} from "./components/Layer.js";
 import {highlightJsonLike} from "./markdown/highlight.js";
 import {deepEntries, jsonEval} from "unconscious/common/json-schema-utils.js";
 import {applyDelta, jsonFetch, ORIGINAL_ERROR, sseFetch} from "/common/fetch-utils.js";
@@ -80,7 +80,8 @@ import {resolvePlaceholder} from "./utils/placeholder.js";
  */
 export const submitUserChatMessage = async (loop, conv) => {
 	conv ??= unconscious(selectedConversation);
-	if (false === EVENT_BUS.post(["loopEntry"], conv)) return;
+	if (false === EVENT_BUS.post(["beforeLoop"], conv)) return;
+	await EVENT_BUS.post(["loop"], conv);
 
 	let versionId = await getMessages(conv);
 
@@ -93,7 +94,7 @@ export const submitUserChatMessage = async (loop, conv) => {
 	try {
 		let result;
 		do {
-			result = await agentLoop(conv, messages_, null, !loop);
+			result = await agentLoop(conv, messages_, null, !loop && { noTool: true });
 
 			if (versionId !== getImmediateMessages(conv)) {
 				messages_ = $stampLock(messages, await getMessages(conv));
@@ -105,6 +106,7 @@ export const submitUserChatMessage = async (loop, conv) => {
 		if (runningConversations.has(conv.id)) return;
 		throw e;
 	} finally {
+		EVENT_BUS.post(["loopExit"], conv);
 		unlockConversation(conv.id);
 	}
 };
@@ -169,10 +171,14 @@ const cleanModelName = name => {
  * @param {AiChat.LocalPreset & {
  *     renderer?: Function
  * }} [cfg]
- * @param {boolean} [__skipToolCall]
+ * @param {{
+ *     noTool?: boolean,
+ *     capture?: boolean,
+ *     usage?: string
+ * }} [extraAction]
  * @returns {Promise<false|string>}
  */
-export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
+export async function agentLoop(conversation, messages, cfg, extraAction) {
 	if (conversation.noAI) throw new DOMException("文件传输助手功能已经弃用。这条提示很快也将删除");
 	if (runningConversations.has(conversation.id)) throw new DOMException("agentLoop is running for "+conversation.id);
 
@@ -213,7 +219,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 	const render = (message, force) => {
 		const isThinking = isReactive(message.think);
 		const obj = isThinking ? message.think : message;
-		const container = findStreamingContainer(isThinking);
+		const container = findStreamingContainer(isThinking, message);
 
 		if (!container) {
 			if (!obj.content) return;
@@ -290,7 +296,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		oldValue = newValue;
 	});
 
-	EVENT_BUS.post(['loopBegin'], conversation);
+	EVENT_BUS.post(['loopReq'], conversation);
 
 	if (!IS_ANDROID_BUILD) document.title = `工作中(${runningConversations.size}) - ${PAGE_TITLE}`;
 
@@ -408,6 +414,10 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 				if (needLog) {
 					promises.push((isIDB ? promises.at(-1) : DONE).then(() => {
 						if (assistantMessage.id >= 0) logItem.id = assistantMessage.id;
+
+						const usage = extraAction?.usage;
+						if (usage) logItem.usage = usage;
+
 						return appendBillingLog(logItem);
 					}));
 				}
@@ -423,7 +433,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 		let toolTurnReached;
 		const turnLimit = cfg.maxToolTurns ?? 500;
-		if (tone === '' && !__skipToolCall && !hasPendingInput() && !(toolTurnReached = turnLimit && !(countAgenticTurns(messages_uc) % turnLimit))) {
+		if (tone === '' && !extraAction?.noTool && !hasPendingInput() && !(toolTurnReached = turnLimit && !(countAgenticTurns(messages_uc) % turnLimit))) {
 			const timer = setTimeout(commitMessage, 2000);
 			addEventListener("beforeunload", commitMessage);
 
@@ -460,7 +470,7 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 						messages.push({
 							role: "assistant",
 							finish_reason: 'error',
-							error: `Paused due to continuous turn limit reached (${turnLimit})`
+							error: {name:'turn_limit',limit:turnLimit}
 						});
 					} else {
 						notifyUser(conversation, "请审查工具调用", false);
@@ -475,7 +485,33 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 
 		const commitedDueToToolTimeout = promises.length;
 
+		const capture = extraAction?.capture;
+		if (capture) {
+			safelyRemoveLastMessage(messages, assistantMessage);
+		} else if ('error' !== finishReason && 'interrupt' !== finishReason) {
+			if (!conversation.title) {
+				if (logItem[TITLE]) {
+					setConversationTitle(conversation, logItem[TITLE], true);
+					delete logItem[TITLE];
+				} else if (assistantMessage.content || messages_uc.length > 10) {
+					generateChatTitle(conversation, messages_uc, cfg);
+				}
+			}
+
+			const max = cfg.maxContext;
+			if (max && conversation.contextUsage >= max) {
+				finishReason = 'interrupt';
+				messages.push({
+					role: "assistant",
+					finish_reason: 'error',
+					error: {name:'context_limit',usage:conversation.contextUsage,limit:max}
+				});
+			}
+		}
+		if (hasPendingInput()) finishReason = 'userInput';
+
 		commitMessage();
+		promises.push(EVENT_BUS.post(['loopResp'], conversation, finishReason, assistantMessage));
 		await Promise.all(promises);
 
 		if (commitedDueToToolTimeout) {
@@ -483,20 +519,13 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 			await updateConversation(conversation, messages_uc);
 		}
 
-		if ('error' !== finishReason && 'interrupt' !== finishReason && !conversation.title) {
-			if (logItem[TITLE]) {
-				setConversationTitle(conversation, logItem[TITLE]);
-				delete logItem[TITLE];
-			} else if (assistantMessage.content || messages_uc.length > 10) {
-				generateChatTitle(conversation, messages_uc, cfg);
-			}
-		}
-		if (hasPendingInput()) finishReason = 'userInput';
-
-		// context usage
+		// update context usage
 		if (isDisplaying()) $update(updateConversationUI);
 
+		if (capture) return [finishReason, assistantMessage];
+
 		if (abort.signal.aborted) return false;
+
 		return finishReason;
 	} catch (e) {
 		// resume failed
@@ -510,8 +539,6 @@ export async function agentLoop(conversation, messages, cfg, __skipToolCall) {
 		if (!IS_ANDROID_BUILD) document.title = runningNow ? `工作中(${runningNow}) - ${PAGE_TITLE}` : PAGE_TITLE;
 		$update(updateConversationListUI);
 		abort.value = null;
-
-		await EVENT_BUS.post(['loopEnd'], conversation);
 	}
 }
 
@@ -618,10 +645,9 @@ Directly output title in JSON \` { "title": <conversation title> } \`, no explai
 	}
 };
 
+const MARKDOWN_APPEND = 2, MARKDOWN_END = 3;
 
-export const MARKDOWN_APPEND = 2, MARKDOWN_END = 3;
-
-export const findStreamingContainer = think => {
+const findStreamingContainer = (think, message) => {
 	const loading = DI_messageVirtualList.lastElementChild?.querySelector(".body>.ai-status");
 	if (loading) {
 		let element = loading.previousElementSibling;
@@ -630,7 +656,7 @@ export const findStreamingContainer = think => {
 			if (think) {
 				if (element.matches(".think.shimmer")) return element.children[1];
 			} else {
-				if (element.matches(".md")) return element;
+				if (element.matches(".md") && element._key === message) return element;
 			}
 		}
 	}

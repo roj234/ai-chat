@@ -92,5 +92,5 @@ export const flushNotifications = (conv, messages) => {
 	}
 }
 
-EVENT_BUS.on(['loopBegin'], conv => flushNotifications(conv, getImmediateMessages(conv)));
-EVENT_BUS.on(['loopEnd'], conv => flushNotifications(conv, getImmediateMessages(conv)));
+EVENT_BUS.on(['loopReq'], conv => flushNotifications(conv, getImmediateMessages(conv)));
+EVENT_BUS.on(['loopResp'], conv => flushNotifications(conv, getImmediateMessages(conv)));

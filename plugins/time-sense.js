@@ -79,6 +79,7 @@ function formatTimePair(prev, now) {
 EditableMessageRoles.add(TIME_SENSE_ROLE);
 MessageRoles[TIME_SENSE_ROLE] = {
 	name: "时间更新",
+	role: 'user',
 	compose(item, output) {
 		const prev = item.content?.prev;
 		const now = item.time;

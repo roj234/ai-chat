@@ -20,6 +20,7 @@ import {config, EVENT_BUS} from "/src/states.js";
 import {FSE_NotAllowed, FSE_NotFound, FSE_NotSupported, throwDOMException} from "/common/pure-utils.js";
 import {injectMessages} from "/src/inject-message.js";
 import {escapeRegexp} from "@roj234/shared/strings";
+import {debugSymbol} from "@roj234/shared";
 
 /**
  *
@@ -30,6 +31,8 @@ import {escapeRegexp} from "@roj234/shared/strings";
  * }>}
  */
 const sandboxInstances = new Map;
+
+const lastWaited = debugSymbol("LastIndex");
 
 /**
  * @type {Record<string, function(AiChat.Conversation, AiChat.ToolResponse, Set<function(): void>): Record<string, Function>>}
@@ -46,20 +49,37 @@ export const JS_HOST_MODULES = {
 		reset() {
 			delete ctx.delegatedCalls;
 		},
-		Wait({duration}) {
+		consume(content) {
 			const pm = conv.pendingMessages;
-			if (pm || duration == null) return {  duration: 0, success: !!pm?.length };
+			const idx = pm.findIndex(s => deepEqual(content, s));
+			if (idx < 0) return { success: false, duration: 0, content: "NotFoundError: 未找到该通知" };
+			pm.splice(idx, 1);
+			ctx[lastWaited]--;
+			return { success: true, duration: 0, content: "Success" };
+		},
+		Wait({duration}) {
+			const offset = ctx[lastWaited] || 0;
+			const pm = conv.pendingMessages || [];
+			const msgCount = pm.length;
+
+			const newMessage = msgCount > offset;
+			if (newMessage || duration == null) {
+				ctx[lastWaited] = msgCount;
+				return { duration: 0, success: newMessage, content: pm.slice(offset) };
+			}
 
 			return new Promise(resolve => {
 				const now = Date.now();
 				const timeout = duration && setTimeout(() => {
-					resolve({ duration: Date.now() - now, success: false });
+					resolve({ duration: Date.now() - now, success: false, content: [] });
 					removeCallback();
 				}, duration * 1000);
 
 				const removeEventListener = EVENT_BUS.onoff(['messageInject', 'pending'], conv1 => {
 					if (conv !== conv1) return;
-					resolve({ duration: Date.now() - now, success: true });
+					const pm = conv.pendingMessages;
+					resolve({ duration: Date.now() - now, success: true, content: pm.slice(offset) });
+					ctx[lastWaited] = pm.length;
 					removeCallback();
 				});
 

@@ -55,7 +55,7 @@ type ToolResult = Promise<{
     success: boolean
     time: number
     duration: number
-    content: string | ContentPart
+    content: string | ContentPart[]
 }>
 ```
 
@@ -81,12 +81,21 @@ import {Wait} from 'tools';
 // 注意：PTC中的Wait工具只接收 duration 一个参数，且支持小数。
 // 省略或设置为 nullish 将查询当前是否有通知，不等待。
 // 设置为 0 将无限期等待，直到收到通知
+// 返回的 content （若存在）是一个数组，每个元素是收到的通知。
 const result = await Wait({ duration: 0.5 });
+let toConsume;
 if (result.success) {
-    console.log(`等待 ${result.duration}ms 后收到通知`);
+    console.log(`等待 ${result.duration}ms 后收到${result.content.length}个通知`);
+    toConsume = result.content[0];
 } else {
     // 未收到通知
 }
+
+// 读取的通知不被消费：它们仍然会推送给你；如果希望删除某个通知，这么做：
+import {consume} from 'tools';
+// 然后，这条通知就被 PTC 消费了，不会通过对话推送给你
+await consume(toConsume);
+
 ```
 
 ## 使用和限制

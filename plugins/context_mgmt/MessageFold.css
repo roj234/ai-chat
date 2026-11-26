@@ -1,4 +1,11 @@
 
+.mb-title {
+	display: flex;
+	font-size: 14px;
+	align-items: center;
+	gap: 8px;
+}
+
 /* ============ 消息列表区 ============ */
 .mb-messages {
 	padding: 14px 18px;
@@ -36,12 +43,19 @@
 		height: 20lh !important;
 	}
 
-	&:not(.open) .body {
-		height: 1lh;
-		overflow: hidden;
+	&:not(.open) {
+		.body {
+			height: 1lh;
+			overflow: hidden;
+		}
 
-		& .tag {
+		.tag {
 			flex-shrink: 0;
+		}
+
+		.text-input {
+			height: 34px;
+			pointer-events: none;
 		}
 	}
 
@@ -75,7 +89,6 @@
 		cursor: initial;
 
 		.text-input {
-			height: auto;
 			flex: 1;
 			border-radius: 6px;
 			padding: 6px 10px;

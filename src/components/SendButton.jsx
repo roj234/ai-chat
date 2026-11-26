@@ -32,18 +32,12 @@ export function ContextRing(sendBtn) {
 	const CIRCUMFERENCE = 2 * Math.PI * RADIUS; // ≈ 502.65
 	let bar, tooltipDiv;
 	const usageText = $state("");
-	const root = <div className="ring">
+	const root = <div className="ring-progress" style="width:30px;height:30px">
 		{sendBtn}
-		<span className={"tooltip"} ref={tooltipDiv}>上下文: {usageText}</span>
+		<span className="tooltip" ref={tooltipDiv}>上下文: {usageText}</span>
 		<svg width={SIZE} height={SIZE}>
-			<defs>
-				<linearGradient id="ringGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-					<stop offset="0%" stop-color="#00c6ff"/>
-					<stop offset="100%" stop-color="#0072ff"/>
-				</linearGradient>
-			</defs>
-			<circle className="track" cx={SIZE / 2} cy={SIZE / 2} r={RADIUS}/>
-			<circle className="bar" cx={SIZE / 2} cy={SIZE / 2} r={RADIUS} ref={bar}/>
+			<circle className="-track" cx={SIZE / 2} cy={SIZE / 2} r={RADIUS}/>
+			<circle className="-bar" cx={SIZE / 2} cy={SIZE / 2} r={RADIUS} ref={bar}/>
 		</svg>
 	</div>;
 

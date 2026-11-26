@@ -1,0 +1,13 @@
+
+.cache-warmup {
+	display: inline-block;
+	margin-bottom:4px;
+	padding:6px;
+	border-radius: var(--border-radius-lg);
+	border: 1px solid var(--border);
+	background:var(--panel);
+
+	&:empty {
+		display: none;
+	}
+}

@@ -62,6 +62,7 @@ const extOf = n => {
 	const i = n.lastIndexOf('.');
 	return i > 0 ? n.slice(i + 1).toLowerCase() : '';
 };
+const isDirectory = a => a.type !== 'file';
 
 /* ============================== 图标 ============================== */
 
@@ -304,7 +305,7 @@ export const createExplorerWidget = (fs, cwd) => {
 		const key = unconscious(sortKey);
 		const dir = unconscious(sortDir);
 		return list.sort((a, b) => {
-			if (key !== 'size' && (a.type === 'dir') !== (b.type === 'dir')) return a.type === 'dir' ? -1 : 1;
+			if (key !== 'size' && isDirectory(a) !== isDirectory(b)) return isDirectory(a) ? -1 : 1;
 
 			let r = 0;
 			if (key === 'size') r = (a.size) - (b.size);
@@ -529,9 +530,12 @@ export const createExplorerWidget = (fs, cwd) => {
 
 	/**
 	 * @param {FileEntry} path
-	 * @param {{toggle?: boolean, range?: boolean}} [options]
+	 * @param {PointerEvent} [ev]
 	 */
-	function selectRow(path, {toggle = false, range = false} = {}) {
+	function selectRow(path, ev = {}) {
+		const toggle = ev.ctrlKey || ev.metaKey;
+		const range = ev.shiftKey;
+
 		if (range && anchor != null) {
 			const a = sorted.indexOf(anchor), b = sorted.indexOf(path);
 			if (a >= 0 && b >= 0) {
@@ -718,7 +722,7 @@ export const createExplorerWidget = (fs, cwd) => {
 	 * @param {boolean} [edit]
 	 */
 	const openEntry = (e, edit) => {
-		if (e.type === 'dir') loadDir(e.path);
+		if (isDirectory(e)) loadDir(e.path);
 		else {
 			if (IMAGE_EXT.test(e.name)) {
 				const images = sorted.filter(e => IMAGE_EXT.test(e.name));
@@ -768,7 +772,7 @@ export const createExplorerWidget = (fs, cwd) => {
 		const items = [];
 
 		if (!multi) {
-			const isDir = e.type === 'dir';
+			const isDir = isDirectory(e);
 			const testResult = isDir ? 'n' : await vfsPreview(fs, e.path, e.name, 't', e);
 			if (testResult !== 'y') items.push({label: isDir ? '打开' : '预览', icon: isDir ? "ri-folder-line" : "ri-eye-line", act: () => openEntry(e)},);
 			if (testResult !== 'n') items.push({label: '编辑', icon: "ri-edit-2-line", act: () => openEntry(e, true)},);
@@ -896,8 +900,7 @@ export const createExplorerWidget = (fs, cwd) => {
 			try {
 				await vfsCopyMove(srcFS, path, fs, dest, cut);
 				pasted.push(dest);
-				const isDir = it.type === 'dir';
-				if (isDir) {
+				if (isDirectory(it)) {
 					invalidateTreeCache(parentOf(path));
 					invalidateTreeCache(parentOf(dest));
 				}
@@ -989,7 +992,7 @@ export const createExplorerWidget = (fs, cwd) => {
 			call('copy', {src, dest, move: true, overwrite: false}).then(() => {
 				highlightAfterChange = dest;
 				$update(cwd);
-				if (e.type === 'dir') {
+				if (isDirectory(e)) {
 					invalidateTreeCache(parentOf(src));
 					invalidateTreeCache(parentOf(dest));
 				}
@@ -1039,7 +1042,7 @@ export const createExplorerWidget = (fs, cwd) => {
 			}
 
 			input.focus();
-			if (e.type === 'file' && dot > 0) input.setSelectionRange(0, dot);
+			if (!isDirectory(e) && dot > 0) input.setSelectionRange(0, dot);
 			else input.select();
 		});
 
@@ -1089,7 +1092,7 @@ export const createExplorerWidget = (fs, cwd) => {
 				if (!deleted.length) return;
 
 				deleted.forEach(it => {
-					if (it.type === 'dir') invalidateTreeCache(parentOf(it.path));
+					if (isDirectory(it)) invalidateTreeCache(parentOf(it.path));
 				});
 			}
 		});
@@ -1307,6 +1310,7 @@ export const createExplorerWidget = (fs, cwd) => {
 		const tag = (ev.target.tagName || '').toLowerCase();
 		const typing = (tag === 'input' && ev.target.type !== 'checkbox') || tag === 'textarea' || ev.target.isContentEditable;
 		const ctrlKey = ev.ctrlKey || ev.metaKey;
+		const shiftKey = ev.shiftKey;
 		const origKey = ev.key;
 		const key = origKey.toLowerCase();
 
@@ -1390,16 +1394,19 @@ export const createExplorerWidget = (fs, cwd) => {
 		if (origKey === 'ArrowDown') {
 			let idx = 0;
 			let item;
-			if (selectedCount === 1) {
-				item = sorted[idx = sorted.indexOf(firstItem)+1] ?? sorted[idx = 0];
-			} else if (selectedCount === 0) {
+			if (selectedCount === 0) {
 				item = sorted[0];
 			} else {
-				selection.value.forEach(i => item = i);
-				idx = sorted.indexOf(item);
+				if (selectedCount > 1) {
+					selection.value.forEach(i => item = i);
+				} else {
+					item = firstItem;
+				}
+
+				item = sorted[idx = sorted.indexOf(item)+1] ?? sorted[idx = 0];
 			}
 
-			selectRow(item);
+			selectRow(item, ev);
 			scrollToSelectedItem(ev, idx);
 			return;
 		}
@@ -1407,16 +1414,14 @@ export const createExplorerWidget = (fs, cwd) => {
 		if (origKey === 'ArrowUp') {
 			let idx;
 			let item;
-			if (selectedCount === 1) {
-				item = sorted.at(idx = sorted.indexOf(firstItem)-1);
-			} else if (selectedCount === 0) {
+			if (selectedCount === 0) {
 				item = sorted.at(idx = -1);
 			} else {
 				item = firstItem;
-				idx = sorted.indexOf(item);
+				item = sorted.at(idx = sorted.indexOf(firstItem)-1);
 			}
 
-			selectRow(item);
+			selectRow(item, ev);
 			scrollToSelectedItem(ev, idx);
 		}
 	}
@@ -1428,7 +1433,7 @@ export const createExplorerWidget = (fs, cwd) => {
 	 * @return {JSX.Element}
 	 */
 	function makeRow(e) {
-		const isDir = e.type === 'dir';
+		const isDir = isDirectory(e);
 		let icon;
 
 		if (isDir) {
@@ -1448,7 +1453,7 @@ export const createExplorerWidget = (fs, cwd) => {
 					onClick={ev => {
 						if (ev.target.nodeName === "INPUT") return;
 						if (ev.detail === 1) {
-							selectRow(e, {toggle: ev.ctrlKey || ev.metaKey, range: ev.shiftKey});
+							selectRow(e, ev);
 						} else {
 							openEntry(e);
 							clearTimeout(e.timer);
@@ -1646,7 +1651,7 @@ export const createExplorerWidget = (fs, cwd) => {
 						let bytes = 0;
 						entries.forEach(e => {
 							if (selection.value.has(e)) {
-								if (e.type !== 'file') {
+								if (isDirectory(e)) {
 									bytes = -Infinity;
 								} else {
 									bytes += e.size;

@@ -22,7 +22,7 @@
 .dropdown {
     position: relative;
 
-    &:not(:hover) > .list {
+    &:not(:hover):not(:focus-within) > .list {
         display: none;
     }
     & button:focus + .list {

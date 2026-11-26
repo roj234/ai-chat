@@ -195,7 +195,7 @@ export function createTextFileEditHelper(fs) {
 		let content = respLines.join('\n') + '\x03';
 		if (truncated || needWarning) {
 			if (truncated) content += `TRUNCATED(maxChars): Only ${respLines.length} of ${last - first} lines shown.\n`;
-			if (!noWarn && needWarning) content += `OVERFLOW(${needWarning}): Only ${last - first} lines available in the range.\n`;
+			if (!noWarn && needWarning) content += `EOF: Only ${last - first} lines available.\n`;
 		} else if (last === lineCount) {
 			content += 'EOF\n';
 		}

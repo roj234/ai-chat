@@ -36,24 +36,25 @@ src/               前端主应用
   anti-slop-sampler.js AntiSlop 采样器
 
   UserOnboard.js   新手引导（driver.js）
-common/            前后端共享：ACL、MCPClient、ReactiveJSON、fetch/fs/glob、压缩 schema、CSS 引擎…
-media/             音效合成、供应商预设、默认提示词与介绍图
+common/            前后端共享：ACL、MCPClient、ReactiveJSON、fetch/fs/glob、压缩 schema
+media/             音效、供应商预设、默认提示词与介绍图
 plugins/           前端插件（按需 import）
-  PluginRegistry.js  插件加载顺序、window.AiChatAPI、命令注册
-  agent/             文件系统（VFS/Mounts/OverlayFS/VCS）、文件与 Shell 工具、技能、RunJS 沙箱、AGENTS.md 注入
+  PluginRegistry.js  插件加载
+  pluginApi.js       window.Aint API接口
+  agent/             文件系统抽象、文件与 Shell 工具、技能、RunJS 沙箱、AGENTS.md 注入
   managers/          Blob 管理器、工具管理器
   fileManager/       文件浏览器 / 预览 / 终端
-  context_mgmt/      上下文压缩（主动 / 被动）
+  context_mgmt/      主动和被动上下文压缩
   rp_basic/          角色扮演基础（角色卡 / 世界书 / 预设）
-  rp_kit/            交互式模拟（骰子、变量、QTE、Wait、AskUser）
-  actime/            会话耗时统计（ACTime）
+  rp_kit/            交互式模拟
+  actime/            会话耗时统计
   rpg/               实验性 JSON Schema 游戏框架（已弃用，仅保留示例）
   tools/             预装工具：图表、记忆、JSON 编辑、任务列表、子智能体、生图、上下文占用、追问
   chatbot/           微信机器人
   voiceInput/        录音
   search.js          消息搜索
   thinking_slider/   思考强度滑条
-  其余根级插件：DM、PresetFastSwitch、remoteControl、configSync、llamaCpp、mermaid、customBackground、session-cache 等
+  其余插件：DM、PresetFastSwitch、remoteControl、configSync、llamaCpp、mermaid、customBackground、session-cache 等
 backend/           可选 Node 后端
   server.js        入口，解析 CLI 参数（-p / --data / --workspace / --static / -c …）
   init.js          路由与数据库装配

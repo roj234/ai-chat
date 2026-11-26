@@ -19,6 +19,7 @@ import {createStreamingMarkdownParser, registerCodeBlockRenderer} from "/src/mar
 import {EditableMessageRoles, MessageCopyHandler, MessageRoles} from "/src/states.js";
 import {JsonEditor} from "/src/components/JsonEditor.jsx";
 import {schemaToTypeScriptDefinition, validateAndShowError} from "unconscious/common/json-schema-utils.js";
+import {USER_PROMPT_ROLE} from "../plugins/pluginApi.js";
 
 const IS_FINISHED = debugSymbol('is_finished');
 const SYM = debugSymbol("REACTIVE_JSON");
@@ -87,36 +88,6 @@ export function createReactiveMarkdown(container, value) {
 	return container;
 }
 
-export const USER_PROMPT = debugSymbol("RealPrompt");
-EditableMessageRoles.add("userPrompt");
-MessageRoles["userPrompt"] = {
-	name: "CraftRPG提示块",
-	compose(self, output) {
-		if (self[USER_PROMPT]) {
-			output.push({
-				role: "user",
-				content: self[USER_PROMPT]
-			});
-		} else {
-			throw '找不到提示词，请重新调用SchemaRole';
-		}
-	},
-	renderContent(self, chunks, index, isEditing, messages, defaultRenderContent) {
-		if (self[USER_PROMPT]) {
-			chunks.push({
-				type: "think",
-				think: {
-					title: "展开完整提示",
-					content: prompt
-				}
-			});
-		} else {
-			self.role = "user";
-		}
-		defaultRenderContent(self, chunks, self.content);
-	}
-}
-
 /**
  *
  * @param {string} id
@@ -141,7 +112,7 @@ export function registerSchemaMessageRole(id, name, renderer, compose, schema, o
 			assistantResponse.content = parser.end(true);
 
 			const userMessage = messages.at(-2);
-			if (userMessage.role === 'userPrompt') {
+			if (userMessage.role === USER_PROMPT_ROLE) {
 				delete userMessage.prompt;
 				// 需要换一个对象才能让 keyFunc 更新
 				// TODO 以后可以在这里放hook实现regen

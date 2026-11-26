@@ -493,9 +493,10 @@ GLOBAL_SETTINGS.push(
 		required: true,
 		_tab: "character",
 		choices: {
+			"是": true,
 			"否": false,
-			"是": true
-		}
+		},
+		default: false,
 	},
 );
 
@@ -1050,6 +1051,7 @@ MessageRoles["st|char"] = {
 
 MessageRoles["st|greeting"] = {
 	name: "开场白",
+	role: 'assistant',
 	/**
 	 * @param {AiChat.DnD.MyCharConversation} card
 	 * @param output

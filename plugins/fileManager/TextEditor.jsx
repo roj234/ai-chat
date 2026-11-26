@@ -121,7 +121,7 @@ export const TextEditor = (props) => {
 	let hlTriggerCount = 0;
 
 	/** @type {HTMLElement} */
-	let el, scrollEl, gutterEl, gutterInner, errMark, phEl;
+	let el, scrollEl, gutterEl, gutterInner, errMark, phEl, shadeEl;
 	/** @type {HTMLTextAreaElement} */
 	let inputEl;
 	/** @type {VirtualList} */
@@ -339,6 +339,8 @@ export const TextEditor = (props) => {
 		if (end === 0 && el.isConnected) return requestAnimationFrame(syncGutter);
 
 		const top = scrollEl.scrollTop;
+		shadeEl.style.display = top > 0 ? 'block' : '';
+
 		const key = start+":"+end+":"+top+":"+errorLine;
 		if (key === gutterKey) return;
 		gutterKey = key;
@@ -354,7 +356,7 @@ export const TextEditor = (props) => {
 		}
 
 		const hasError = errorLine >= 0 && errorLine < doc.lines.length;
-		errMark.style.display = hasError ? "block" : "none";
+		errMark.style.display = hasError ? "block" : "";
 		if (hasError) {
 			errMark.style.transform = `translateY(${errorLine * LH - top}px)`;
 		}
@@ -1155,7 +1157,7 @@ export const TextEditor = (props) => {
 			}},
 		]));
 	}}>
-		<div className="-fade" />
+		<div className="-shade" ref={shadeEl} />
 		<div className="-gutter" ref={gutterEl}>
 			<div className="-lines" ref={gutterInner}/>
 			<div className="-hl" ref={errMark}/>

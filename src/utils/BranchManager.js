@@ -124,6 +124,7 @@ function createBranchManager(conv, messages) {
 	// 禁用分支管理器
 	const deactivate = () => {
 		delete conv.bm_leaf;
+		updatePath();
 
 		// 不再真实禁用对象，否则很容易出问题，反正刷新了也会没
 		return;

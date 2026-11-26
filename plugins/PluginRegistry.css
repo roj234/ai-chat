@@ -157,13 +157,18 @@
         box-shadow: 0 1px 3px rgba(0,0,0,0.2);
         transition: left 0.2s, transform 0.2s;
     }
-}
 
-.switch:checked {
-    background: var(--ok);
+    &:checked {
+        background: var(--ok);
 
-    &::after {
-        left: calc(100% - 2px);
-        transform: translateX(-100%);
+        &::after {
+            left: calc(100% - 2px);
+            transform: translateX(-100%);
+        }
+    }
+
+    &:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
     }
 }

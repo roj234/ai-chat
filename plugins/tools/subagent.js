@@ -819,7 +819,7 @@ const hijackLoop = conv => {
 	}
 };
 //EVENT_BUS.on(['messageInject', 'ok'], hijackLoop);
-EVENT_BUS.on('loopEntry', hijackLoop);
+EVENT_BUS.on('beforeLoop', hijackLoop);
 
 const AGENT_CACHE = debugSymbol("AgentDefinitions");
 EVENT_BUS.on('convCacheClear', (conv) => { delete conv[AGENT_CACHE]; });

@@ -65,7 +65,7 @@ registerToolset(
 	}
 );
 
-EVENT_BUS.on('loopEnd', conv => {
+EVENT_BUS.on('loopResp', conv => {
 	if (!conv.activatedModules?.has(vcsEnabledKey) || conv.meta?.owner) return;
 
 	const messages = getImmediateMessages(conv);

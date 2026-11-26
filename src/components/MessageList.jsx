@@ -244,15 +244,17 @@ const chunkRenderer = m => {
 					return <EditWidget value={text} placeholder={"消息正文 content"} onChange={onChange} />;
 				}
 
+				let assistantKey = item.key;
+				if (Array.isArray(assistantKey)) assistantKey = assistantKey[0];
 				if (typeof text !== 'string') return createBlobDisplay(text, "ri-file-text-line");
-				return config.pausePolicy === PP_UNATTENDED ? <details className="md" onToggle.once={e => {
+				return config.pausePolicy === PP_UNATTENDED ? <details _key={assistantKey} className="md" onToggle.once={e => {
 					const self = e.currentTarget;
 					if (self.childNodes.length === 1) {
 						renderMarkdownToElement(self, item.text);
 					}
 				}}>
 					<summary>已折叠 Markdown</summary>
-				</details> : renderMarkdownToElement(<div className="md"/>, text);
+				</details> : renderMarkdownToElement(<div _key={assistantKey} className="md"/>, text);
 			}
 			case "images":
 				if (isEditing(m.key)) {
@@ -421,6 +423,8 @@ const chunkGather = (message, chunks, index, messages, __isPTC) => {
 			case 'network_error': error = `API错误 (${error.status})\n`+error.message; break;
 			case 'stream_error': error = `SSE流错误\n`+error.message; break;
 			case 'prompt_error': error = `系统提示词构造失败\n`+error.message; break;
+			case 'context_limit': error = `达到上下文限制\n`+error.usage+'/'+error.limit; break;
+			case 'turn_limit': error = `达到最大轮数限制\n`+error.limit; break;
 		}
 	}
 	if (error) {

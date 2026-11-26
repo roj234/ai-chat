@@ -23,6 +23,7 @@
 	gap: 8px;
 	color: var(--muted);
 	user-select: none;
+	height: 1lh;
 
 	& .num {
 		font-family: var(--code-font);
@@ -30,7 +31,7 @@
 	}
 
 	/* 各状态颜色适配 */
-	& > .icon {
+	& .icon {
 		position: relative;
 		width: 8px;
 		height: 8px;
@@ -87,6 +88,7 @@
 	}
 	&.generate {
 		color: var(--ap-green);
+		gap: 4px;
 
 		& .icon {
 			width: 14px;

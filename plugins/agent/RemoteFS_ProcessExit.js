@@ -12,6 +12,7 @@ const prefixOrNone = (s, prefix, def = '') => s ? prefix + s : def;
 EditableMessageRoles.add(PROCESS_EXIT_ROLE);
 MessageRoles[PROCESS_EXIT_ROLE] = {
 	name: "进程退出",
+	role: 'user',
 	combine: true,
 	compose(item, output) {
 		const event = item.content;

@@ -1,16 +1,17 @@
 import "./MessageFold.css";
 import {openWindow} from "/src/components/Windows.jsx";
 import {$computed, $state, $update, $vforeach, $watch, AS_IS, ref, unconscious} from "unconscious";
-import {showToast} from "/src/components/Layer.js";
+import {openMenu, showToast} from "/src/components/Layer.js";
 import {messages, selectedConversation} from "/src/states.js";
 import {markMessageDirty, updateConversation} from "/src/database.js";
 import {enableBranches} from "/src/utils/BranchManager.js";
+import {DCP_ID} from "./subjective-compaction.js";
 
 function MessageFoldManager({conversation, messages, onChange}) {
 	const sel = $state({});
 
 	/** 校验 [s, e] 是否与已有 blocks 重叠 */
-	const _overlaps = (s, e) => messages.slice(s, e).some(b => b.role === 'fold');
+	const _overlaps = (s, e) => messages.slice(s, e+1).some(b => b.role === 'fold');
 	const _emitChange = () => onChange(conversation, messages);
 	const _toast =(msg, isError = false) => showToast(msg, isError ? 'error' : '');
 
@@ -63,9 +64,6 @@ function MessageFoldManager({conversation, messages, onChange}) {
 
 	const _onMsgClick = (event) => {
 		const delegateTarget = event.delegateTarget;
-
-		delegateTarget.classList.toggle("open");
-
 		const index = parseInt(delegateTarget.firstElementChild.dataset.id, 10);
 		if (delegateTarget.classList.contains('in-block')) {
 			if (event.target !== delegateTarget && event.target !== delegateTarget.firstElementChild) return;
@@ -89,6 +87,34 @@ function MessageFoldManager({conversation, messages, onChange}) {
 		} else {
 			sel.value = { start: index };
 		}
+	};
+
+	const _onMsgMenu = (event) => {
+		if (event.target.matches("textarea")) return;
+		const target = event.delegateTarget;
+		const msg = target._key;
+		// id < 0
+		if (!msg) return;
+
+		const isExpanded = target.classList.contains('open');
+		const menu = [
+			{ icon: isExpanded ? "ri-collapse-vertical-line" : "ri-expand-vertical-line", label: isExpanded ? "收起" : "展开", act: () => target.classList.toggle("open") },
+		];
+
+		if (msg.role === 'fold') {
+			menu.push(
+				{ sep: true },
+				{ icon: "ri-inbox-unarchive-line", label: "解压", danger: true, act: () => {
+					unconscious(messages).unfold(msg);
+					$update(messages);
+					_emitChange();
+					target.remove();
+				} },
+			)
+		}
+
+		event.preventDefault();
+		openMenu(event, $messages, menu);
 	}
 
 	const _createBlock = () => {
@@ -99,7 +125,7 @@ function MessageFoldManager({conversation, messages, onChange}) {
 			let bm = enableBranches(unconscious(conversation));
 			messages.value = bm;
 
-			bm.fold(s, e, { content: '[Compressed block]' });
+			bm.fold(s, e, { content: '' });
 
 			sel.value = {};
 			_emitChange();
@@ -110,8 +136,8 @@ function MessageFoldManager({conversation, messages, onChange}) {
 	}
 
 	let $messages = ref();
-	return <>
-		<div className="mb-messages" ref={$messages} onClick.delegate{'.mb-msg'}={_onMsgClick}>{$vforeach(messages, (msg, i) => {
+	const body = <>
+		<div className="mb-messages" ref={$messages} onClick.delegate{'.mb-msg'}={_onMsgClick} onContextMenu.delegate{'.mb-msg'}={_onMsgMenu}>{$vforeach(messages, (msg, i) => {
 			if (msg.id < 0) {
 				return <div className="mb-msg disabled">
 					<span className="no">{i}</span>
@@ -123,9 +149,9 @@ function MessageFoldManager({conversation, messages, onChange}) {
 			}
 
 			if (msg.role === 'fold') {
-				return <div className={'mb-msg in-block ' + (msg.disabled ? ' disabled' : '')}>
+				return <div className={'mb-msg in-block ' + (msg.disabled ? ' disabled' : '')} _key={msg}>
 					<span className='no' data-id={i}>{`#${msg.start} - #${msg.end}`}</span>
-					<textarea className="text-input" value={msg.content} placeholder={'压缩块的摘要…'} onChange={({target}) => {
+					<textarea className="text-input" value={msg.content} placeholder='压缩块的摘要…' onChange={({target}) => {
 						msg.content = target.value;
 						markMessageDirty(msg);
 						_emitChange();
@@ -144,13 +170,6 @@ function MessageFoldManager({conversation, messages, onChange}) {
 							target.closest(".mb-msg").classList.toggle('disabled', !!msg.disabled);
 						}}
 					/>
-					<button className='btn danger-focus' onClick={({target}) => {
-						unconscious(messages).unfold(msg);
-						$update(messages);
-						_emitChange();
-						target.closest(".mb-msg").remove();
-					}}>解压
-					</button>
 				</div>;
 			}
 
@@ -162,7 +181,7 @@ function MessageFoldManager({conversation, messages, onChange}) {
 					if (item.type !== 'text')
 						others.push(item.type);
 					else {
-						text = item.text;
+						text = text ? text + '\n\n' + item.text : item.text;
 					}
 				}
 			}
@@ -171,7 +190,7 @@ function MessageFoldManager({conversation, messages, onChange}) {
 			if (msg.think) others.push(`已思考${(msg.think.duration / 1000) .toFixed(1)}秒`);
 			if (msg.tool_calls) msg.tool_calls.forEach(item => others.push("已运行 "+item.function.name));
 
-			const row = <div className='mb-msg'>
+			const row = <div className='mb-msg' _key={msg}>
 				<span className="no" data-id={i}>{i}</span>
 				<div className="body">
 					{others.map((t) => (<span className="tag">{t}</span>))}
@@ -204,16 +223,46 @@ function MessageFoldManager({conversation, messages, onChange}) {
 					_createBlock();
 				}}
 			>
-				压缩
+				创建压缩块
 			</button>
 		</div>
 	</>;
+
+	return {
+		actions: <div className="mb-title">
+			<label className="row">
+				<span className="tooltip">
+					在上下文超过80%或不足32k时<br/>
+					每5轮调用提醒模型压缩上下文。
+				</span>
+				压缩提醒
+				<input
+					className="switch"
+					type="checkbox"
+					disabled={() => null == conversation[DCP_ID]}
+					checked={() => conversation[DCP_ID]?.nudgeCounter >= 0}
+					onChange={({target}) => {
+						conversation[DCP_ID].nudgeCounter = target.checked ? 0 : -1;
+						updateConversation(unconscious(conversation));
+					}}
+				/>
+			</label>
+			{$computed(() => {
+				const blocks = messages.filter(m => m.role === 'fold');
+				return `顶层压缩块: ${blocks.filter(b => !b.disabled).length} / ${blocks.length} 已节省: ${fmt(conversation[DCP_ID]?.estSaved)}`
+			}, [conversation, messages])}
+		</div>,
+		element: body
+	}
 }
 
+const fmt = n => n != null ? n.toLocaleString() : "?"
+
 export const showMessageFolder = () => openWindow({
-	id: "messageFolder",
+	id: "ctxMan",
+	icon: <i className="ri-stack-line"/>,
 	title: "上下文管理器",
-	element: MessageFoldManager({
+	element: () => MessageFoldManager({
 		conversation: selectedConversation,
 		messages: messages,
 		onChange: (conversation, messages) => {

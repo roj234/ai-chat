@@ -174,7 +174,6 @@ const editAssistant = (cloned, isCreate) => {
 		],
 		async onConfirm(obj) {
 			cloned.time = Date.now();
-			(cloned.overrides ??= {}).systemPrompt = `{{profile:${obj.name}}}`;
 
 			const keys = ['activatedModules', 'tools', 'grantedTools', 'presets'];
 			for (let i = 0; i < keys.length; i++) {
@@ -276,12 +275,16 @@ const safeCreateAssistant = async (name) => {
  * @returns {Promise<void>}
  */
 export const createAssistant = async _name => {
-	const {messages, type, name, time, meta, ...conv} = await kvListGet(PROFILE_KVS_ID, _name);
+	const {systemPrompt, messages, type, name, time, meta, ...conv} = await kvListGet(PROFILE_KVS_ID, _name);
 	conv.time = Date.now();
 	conv.meta = { profile: _name };
 	if (config.temporaryChat) {
 		conv.temporary = true;
 		conv.id = "temporary-"+conv.time;
+	}
+	conv.overrides = {
+		...conv.overrides,
+		systemPrompt: `{{profile:${_name}}}`
 	}
 	await importConversationData(conv, messages);
 };
@@ -305,7 +308,7 @@ onLoad((app) => {
 	const logo = app.querySelector(".composer > .logo");
 	const mod = logo.querySelector(".-model");
 
-	appendChild(logo, <div className="row assistant-picker" class:empty={() => !profiles.length}>
+	appendChild(logo, <div className="row assistant-picker" class:empty={() => selectedConversation.id || !profiles.length}>
 		<div className="-label">{mod}<span className="-desc">或者，选择一个助手</span></div>
 		<div className="-row">
 			{$vforeach(profiles, assistantChip, item => JSON.stringify([item.name, item.meta, item.time]), {horizontal: true})}

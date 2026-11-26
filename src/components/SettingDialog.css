@@ -108,7 +108,7 @@
 
 }
 
-@media screen and (max-width: 767px) {
+@container mdiwin (max-width: 640px) {
     .ntp {
         width: 100%;
         min-height: 100%;
@@ -124,18 +124,19 @@
             & ._vl {
                 padding: 0;
                 flex-direction: row;
-                width: 100%;
-                overflow: auto;
-
-                &::-webkit-scrollbar {
-                    display: none;
-                }
             }
         }
     }
 }
 
-@media (min-width: 768px) {
+@media (pointer: coarse) {
+    .ntp .sidebar-list::-webkit-scrollbar {
+        display: none;
+
+    }
+}
+
+@media (any-hover: hover) {
     .ntp {
         & .chat-item {
             background: var(--chip-bg);

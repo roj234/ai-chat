@@ -283,9 +283,10 @@ export const registerRemoteControl = () => {
 		type: "radio",
 		required: true,
 		choices: {
-			"拒绝": false,
 			"允许": true,
+			"拒绝": false,
 		},
+		default: false
 	});
 
 	DI[DID_RMI] = RMI;
