@@ -253,6 +253,10 @@ export function createMarkdownRenderer(root, options = {}) {
 						if (!options.trusted)
 							node.prepend(<i className="ri-external-link-line" />)
 					} else if (!options.external) {
+						const scheme = /^([a-z]+):\/\//i.exec(value)?.[1];
+						if (scheme && scheme.toLowerCase() !== 'file') {
+							if (EVENT_BUS.post(['mdURI', scheme], value, node, options.fs)) return;
+						}
 						node.style.cursor = 'pointer';
 						node.addEventListener('click', () => EVENT_BUS.post(['viewFile'], (options.base||'')+value, node, options.fs));
 						return;

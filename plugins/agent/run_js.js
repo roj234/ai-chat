@@ -134,6 +134,11 @@ export const JS_HOST_MODULES = {
  * @type {Record<string, { path?: string, url?: string, description: string, k?: string, alias?: string[] }>}
  */
 export const JS_SANDBOX_MODULES = {
+	'comfy': {
+		path: 'assets/sandbox/comfy.js',
+		description: 'ComfyUI driver',
+		k: "comfy"
+	},
 	'@roj234/stream-json': {
 		path: "assets/sandbox/stream-json.js",
 		description: `Fast Streaming JSON5 Parser
@@ -351,10 +356,10 @@ export const RunJS = {
 - ES2023+, top-level await, import, import attributes and dynamic import(), no live bindings.
 - Supports CommonJS-style \`module.exports\`, extension must be \`.cjs\`.
 - Globals without import: Buffer, process, fs, crypto.subtle, CompressionStream, OffscreenCanvas, FontFace.
-- Node.js shim modules: \`fs/promises\`, \`path\`, \`url\`, no require() or sync fs methods.
+- Node.js shim modules: \`fs/promises\`, \`path\`, \`url\`, \`util\`, no require() or sync fs methods.
 - Its fs can access all VFSs, and cwd = workspace root.
 - After the module evaluated, the sandbox detaches — MUST await top-level Promises.
-- Permissions: "eval" for Function, wasm and remote import().
+- Permissions: "unsafe-eval" for eval, wasm and remote import().
 - For Uint8Array, use \`fs.writeFile(path, data, { transfer: true })\` (or appendFile) to transfer the buffer ownership for better performance. The returned promise resolves to a new Uint8Array with the same content; the original buffer becomes invalid.`,
 	parameters: {
 		type: "object",
@@ -391,7 +396,7 @@ export const RunJS = {
 			permissions: {
 				type: "array",
 				items: {
-					enum: ['eval']
+					enum: ['unsafe-eval']
 				}
 			},
 			timeout: {
@@ -457,7 +462,7 @@ export const RunJS = {
 
 			const handlers = { hostModules };
 			const realPermissions = ['fs', 'net'];
-			if (permissions?.includes('eval')) realPermissions.push('eval');
+			if (permissions?.includes('unsafe-eval')) realPermissions.push('eval');
 
 			worker = createSandbox(handlers,  realPermissions, { hostModules, name: "Aint-"+thread });
 			worker.handlers = handlers;
@@ -494,12 +499,16 @@ export const RunJS = {
 		const hangTimer = setTimeout(() => stopWorker(new DOMException(timeout.toFixed(2)+"s", "TimeoutError")), timeout * 1000);
 
 		worker.handlers.load = (path, loader, systemModule) => {
-			if (!systemModule || path.startsWith("~/")) return readFile({
-				path,
-				noTruncate: true
-			}, {}, conv).catch(e => {
-				throwDOMException("Failed to fetch module "+inspect(path)+": "+e.message)
-			});
+			if (!systemModule || path.startsWith("~/")) {
+				const idx = path.lastIndexOf("?");
+				if (idx >= 0) path = path.slice(0, idx);
+				return readFile({
+					path,
+					noTruncate: true
+				}, {}, conv).catch(e => {
+					throwDOMException("Failed to fetch module "+inspect(path)+": "+e.message)
+				});
+			}
 
 			if (aliases.has(path)) {
 				worker.handlers.log('[WARN] Builtin module '+path+' is alias, DO NOT IMPORT, THEY ARE ALREADY USABLE.');
@@ -529,8 +538,8 @@ export const RunJS = {
 
 				const url = ESM_CDN + path;
 
-				if (!permissions?.includes('eval'))
-					throwDOMException("Failed to fetch module "+inspect(url)+": Requires 'eval' permission.");
+				if (!permissions?.includes('unsafe-eval'))
+					throwDOMException("Failed to fetch module "+inspect(url)+": Requires 'unsafe-eval' permission.");
 
 				return `export * from ${JSON.stringify(url)};\nexport {default} from ${JSON.stringify(url)};`;
 			})
@@ -631,6 +640,7 @@ export const RunJS = {
 				delete handlers.load;
 				handlers.detachLogs = 0;
 				handlers.log = (log) => {
+					if (import.meta.env.DEV && log === '[DEBUG] [ie] connected.') return;
 					handlers.detachLogs ++;
 					console.log('[RunJS]', log);
 				}
@@ -688,7 +698,7 @@ export const SearchModules = {
 		if (!keys.length) return `No module found.
 Try directly import npm packages:
   import z from "zod@3";  import "lodash/merge";  import {x} from "@scope/pkg";
-Remote imports need permissions: ["eval"].`;
+Remote imports need permissions: ["unsafe-eval"].`;
 
 		return `Found ${keys.length} modules.
 ---

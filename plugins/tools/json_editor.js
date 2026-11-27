@@ -149,9 +149,10 @@ Returns "valid" on success, or error messages with node path on failure.`,
 
 registerToolset(
 	"JsonEditor",
-	"JSON patch and validation.",
+	"JSON edit and validation.",
 	[EditJson, ValidateJson],
 	{
+		usable: true,
 		default: true,
 		depend: ["Files"]
 	}

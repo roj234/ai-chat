@@ -66,10 +66,6 @@ export class EventBus {
 	post(event, first, ...rest) {
 		const x = [];
 
-		const onError = (e) => {
-			console.error(e);
-			showToast("事件发送失败\n"+prettyError(e), 'error');
-		};
 		const stack = [...event];
 		while (stack.length) {
 			let set = this.#events.get(stack);
@@ -78,12 +74,11 @@ export class EventBus {
 					const res = fn.call(null, first, event, ...rest);
 					if (res instanceof Promise) {
 						x.push(res);
-						res.catch(onError);
-					}
-					else if (res != null)
+					} else if (res != null)
 						return res;
 				} catch (e) {
-					onError(e);
+					console.error(e);
+					showToast("事件发送失败\n"+prettyError(e), 'error');
 				}
 			}
 

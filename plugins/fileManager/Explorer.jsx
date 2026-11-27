@@ -74,9 +74,10 @@ const iconFolder2 = () => <div className="icon ri-folder-fill" style="background
  * 现在 FileBrowserInterface 也算"真的存在"了
  * @param {AiChat.FileSystemInstance} [fs]
  * @param {string} [path]
+ * @param {string | Set<string>} [highlight]
  * @return {Promise<import("/src/components/Windows.jsx").WindowState>}
  */
-export const openFileBrowser = async (fs, path = '') => {
+export const openFileBrowser = async (fs, path = '', highlight) => {
 	fs ??= await createFileSystem(unconscious(selectedConversation));
 
 	const fsId = vfsIdentity(fs[FS_SOURCE]);
@@ -91,7 +92,7 @@ export const openFileBrowser = async (fs, path = '') => {
 			return el;
 		},
 	});
-	await browser.navigateTo(path);
+	await browser.navigateTo(path, highlight);
 	return browser;
 };
 
@@ -216,7 +217,7 @@ const myNormalizePathAllowAbsolute = path => (path[0] === '/' && path.length > 1
 /**
  * @param {AiChat.FileSystemInstance} fs
  * @param {import("unconscious").Reactive<string>} cwd
- * @return {{ navigateTo(string): Promise<void>, onFocus(boolean): void, element: JSX.Element }}
+ * @return {{ navigateTo(path: string, hl?: Set<String>): Promise<void>, onFocus(boolean): void, element: JSX.Element }}
  */
 export const createExplorerWidget = (fs, cwd) => {
 	const myId = vfsIdentity(fs[FS_SOURCE]);
@@ -1714,7 +1715,10 @@ export const createExplorerWidget = (fs, cwd) => {
 
 	return {
 		element: body,
-		navigateTo: s => loadDir(myNormalizePathAllowAbsolute(s)),
+		navigateTo(cwd, highlight) {
+			loadDir(myNormalizePathAllowAbsolute(cwd));
+			highlightAfterChange = highlight;
+		},
 		/**
 		 * @param {function(menu: MenuItem[], selection: FileEntry[]): MenuItem[]} onContextMenu
 		 * @param {function(el: JSX.Element, item: FileEntry): JSX.Element} onRenderRow

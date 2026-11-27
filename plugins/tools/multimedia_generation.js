@@ -4,78 +4,50 @@ import {GLOBAL_SETTINGS} from "/src/settings.js";
 import {config} from "/src/states.js";
 import {callCreateAudioPlayer} from "/src/utils/preview-bridge.js";
 import {isPureObject} from "unconscious";
-import {BlobImage, getRandomString, loadingBlock} from "/src/utils/utils.js";
+import {BlobImage, downloadFile, getRandomString, loadingBlock} from "/src/utils/utils.js";
 import {jsonFetch} from "/common/fetch-utils.js";
 import "./multimedia_generation.css";
-import {DI_settings, onLoad} from "/src/hooks.js";
 import {parseJson5} from "@roj234/stream-json";
 
 import {compressImage, limitMaxSide} from "/common/imate.js";
 import {fileAccess} from "../agent/index.js";
-import {TemplateFormatter} from "/common/template-formatter.js";
 import {normalizePath} from "@roj234/shared/path";
 import {resolvePreset} from "/src/presets.js";
+
+import {comfy, compileWorkflow, NodeGraph} from "/common/comfyui.js";
+import {registerDataImportHandler} from "../../src/data-exchange.js";
+import {openWindow} from "../../src/components/Windows.jsx";
 
 /**
  * 将 ComfyUI 流程模板发送至服务器并获取生成的图像 Blob
  * @param {string} endpoint
- * @param {string} template
- * @param {Record<string, any>} params
+ * @param {string} workflow
  * @returns {Promise<Blob[]>} - 返回图像的 Blob 对象
  */
-const callComfyAPI = (endpoint, template, params) => {
-	for (const name in params) params[name] = JSON.stringify(params[name]);
-	const prompt = JSON.parse(TemplateFormatter.format(template, params));
-
-	const client_id = crypto.randomUUID();
-	const ws = new WebSocket(endpoint.replace("http", "ws")+`/ws?clientId=${client_id}`);
-	ws.binaryType = 'blob';
-
-	const promise = new Promise((resolve, reject) => {
-		let promptId = null;
-
-		ws.onopen = () => {
-			jsonFetch(`${endpoint}/prompt`, {
-				body: JSON.stringify({ prompt, client_id })
-			}).then(data => {
-				promptId = data.prompt_id;
-			}).catch(reject);
-		};
-
-		const images = [];
-		ws.onmessage = async (event) => {
-			// 处理字符串消息（状态更新）
-			if (typeof event.data === 'string') {
-				const message = JSON.parse(event.data);
-
-				if (message.type === 'execution_success') {
-					// 如果执行完成（node 为 null），则返回收集到的图片
-					if (message.data.prompt_id === promptId) {
-						if (images.length) {
-							resolve(images);
-						} else {
-							reject(new Error("任务已完成但未接收到图像数据"));
-						}
-					}
-				}
-			}
-			// 处理二进制消息（图像数据）
-			else {
-				// 根据 ComfyUI 协议，前 8 个字节是类型/格式首部
-				// 对应 Python 中的 out[8:]
-				images.push(new Blob([event.data.slice(8)], { type: 'image/png' }));
-			}
-		};
-
-		ws.onerror = (error) => {
-			reject(new Error(`WebSocket 错误: ${error.message}`));
-		};
-	});
-	promise.finally(() => {
-		ws.close();
-	});
-	return promise;
+const comfyGenerate = async (endpoint, workflow) => {
+	const graph = new NodeGraph(Function('cg', compileWorkflow(JSON.parse(workflow))));
+	const client = comfy(endpoint);
+	const task = await client.submit(graph);
+	return {
+		done: task.done.then(artifacts => Promise.all(artifacts.map(a => a.get()))),
+		cancel: task.cancel
+	}
 };
+
+registerDataImportHandler('application/json', (d, multiple, name) => {
+	if (typeof d.id === 'string' && typeof d.revision === 'number' && typeof d.last_node_id === 'number' && typeof d.last_link_id === 'number' && Array.isArray(d.nodes)) {
+		const file = new File([`export const graph = cg => {\n${compileWorkflow(d)}}`], name.slice(0, name.length-2));
+		const dom = <a onClick={() => downloadFile(file)}>点击下载 {file.name}</a>;
+		openWindow({
+			id: "comfyGraphResult",
+			title: "ComfyUI转换结果",
+			height: 200,
+			width: 280,
+			element: () => <div className="col" />
+		}).element.append(dom);
+		return true;
+	}
+})
 
 /**
  * 调用 Stable Diffusion 标准 API (SDAPI) 生成图像
@@ -97,7 +69,7 @@ const callSDAPI = async (endpoint, params = {}) => {
 
 const generateImage = (endpoint, params) => {
 	if (endpoint.endsWith("/prompt")) {
-		return callComfyAPI(new URL(endpoint).origin, config.mg_img_comfy_workflow, params);
+		return comfyGenerate(new URL(endpoint).origin, config.mg_img_comfy_workflow, params);
 	} else {
 		return callSDAPI(endpoint, params);
 	}
@@ -140,26 +112,17 @@ const Draw = {
 				type: "string",
 				description: "高度详细的自然语言提示词，包含主体、环境、构图、光影及艺术风格等。建议至少250字",
 			},
-			aspectRatio: {
+			size: {
 				type: "string",
-				pattern: "^\\d{1,2}:\\d{1,2}$",
-				example: ["1:1", "4:3", "16:9"],
+				example: ["1024x1024"],
+				description: "512-4096；模型可能不支持 4K 输出",
 			},
-			longEdge: {
-				type: "integer",
-				minimum: 512,
-				maximum: 2048,
-			},
-			saveTo: {
+			savePath: {
 				type: "string",
-				description: "保存目录。省略时只展示给用户和你，不落磁盘",
-			},
-			options: {
-				type: "object",
-				description: "根据要求附加。"
+				description: "保存目录。",
 			}
 		},
-		required: ["prompt", "aspectRatio", "longEdge"]
+		required: ["prompt", "size", "savePath"]
 	},
 
 	script: ({ prompt, aspectRatio, longEdge, options, saveTo }, context, conv) => {
@@ -376,10 +339,9 @@ sampler_name cfg_scale steps
 
 	registerToolset(
 		"MultimediaGeneration",
-		"Generate image, audio and speech from text instructions.",
-		[Draw, ListVoices, DesignVoice, Say],
+		"不落盘的内联多媒体工具 重构中.",
+		[Draw, Say],
 		{
-			depend: ['Files'],
 			systemPrompt(conv) {
 				let fsType = conv.fs_type;
 				const tools = conv.tools;
@@ -410,13 +372,4 @@ sampler_name cfg_scale steps
 				return prompt && ("<AIGC-info>\n"+prompt+"</AIGC-info>");
 			},
 		});
-
-	onLoad(() => {
-		const owner = DI_settings.byId('mg_img_api');
-		owner.append(<datalist id={DATALIST_ID}>
-			<option value={"http://127.0.0.1:8188/prompt"} label={"ComfyUI 默认"}/>
-			<option value={"http://127.0.0.1:1234/sdapi/v1"} label={"Stable-diffusion.cpp 默认"}/>
-		</datalist>);
-		owner.children[0].setAttribute("list", DATALIST_ID);
-	});
 };

@@ -126,7 +126,7 @@ export async function vfsPreview(fs, path, overrideFileName, editable, __knownMe
 	const directUrl = resolveVirtualUrl(fs, path);
 	let canEdit = data.size < PREVIEW_TEXT_MAX;
 
-	if (canEdit && (loadLanguage(extname, true) || TEXT_EXT.test(extname))) {
+	if (canEdit && extname !== 'svg' && (loadLanguage(extname, true) || TEXT_EXT.test(extname))) {
 		kind = 'code';
 		if (editable !== 'y') {
 			if (extname === 'txt') kind = 'text';
@@ -161,6 +161,7 @@ export async function vfsPreview(fs, path, overrideFileName, editable, __knownMe
 	}
 
 	if (kind === 'code') return openFileEditor(fs, path, editable !== 'n', extname);
+	if (kind === 'image') return vfsPreviewImage([{path, name: overrideFileName || filename}], fs);
 
 	const actionBar = <div className="row">
 		{editable !== 'n' && <button className="ri-edit-2-line ghost" title="编辑" onClick={() => {
@@ -173,8 +174,6 @@ export async function vfsPreview(fs, path, overrideFileName, editable, __knownMe
 			});
 		}}/>
 	</div>;
-
-	if (kind === 'image') return vfsPreviewImage([{path, name: overrideFileName || filename}], fs);
 
 	const previewWindow = openWindow({
 		id: "preview "+(kind === 'md'? "-md ": "")+encodeURI(vfsIdentity(fs[FS_SOURCE])+path),
@@ -242,6 +241,6 @@ export function vfsPreviewImage(images, fs, forcedIndex) {
 }
 
 export {createEditorWidget} from "./Editor.js";
-export {createExplorerWidget} from "./Explorer.jsx";
+export {createExplorerWidget, openFileBrowser} from "./Explorer.jsx";
 
 export const createAudioPlayerWidget = (blob) => <AudioPlayer src={blob} />;

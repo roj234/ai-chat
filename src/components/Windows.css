@@ -208,6 +208,12 @@
         flex-shrink: 0;
         align-items: center;
 
+        & .-act {
+            margin-right: 2px;
+            padding-right: 8px;
+            border-right: 1px solid var(--border);
+        }
+
         & button {
             padding: 3px;
         }

@@ -8,9 +8,8 @@ import "./time-sense.css";
 const ID = "TimeSense";
 const TIME_SENSE_ROLE = 'time-sense';
 
-registerToolset(ID, '在结束超过1小时的对话上插入之前时间和当前时间', [], {
+registerToolset(ID, '对话间隔提示\n间隔超过 1 小时再继续对话时，向模型注明上次和本次对话的时间。', [], {
 	default: true,
-	hidden: "manual",
 });
 
 const fullDateFormatter = new Intl.DateTimeFormat(undefined, {

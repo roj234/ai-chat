@@ -1,6 +1,6 @@
-import {showToast, openModal} from "/src/components/Layer.js";
+import {openModal, showToast} from "/src/components/Layer.js";
 import {highlightJsonLike} from "/src/markdown/highlight.js";
-import {$computed, $state, $update, $watch, $watchWithCleanup, unconscious} from "unconscious";
+import {$cleanup, $computed, $state, $unwatch, $update, $watch, unconscious} from "unconscious";
 import {VirtualList} from "unconscious/common/VirtualList.js";
 import {addMCPServer, defaultGroups, toolScriptRegistry, toolset} from "/src/toolset.js";
 import {renderMarkdownToElement} from "/src/markdown/markdown.js";
@@ -16,6 +16,7 @@ import {getWindow, openWindow} from "/src/components/Windows.jsx";
 import {currentCombinedConfig} from "/src/presets.js";
 import {PLACEHOLDERS} from "/src/utils/placeholder.js";
 import {AS_IS} from "@roj234/shared";
+import {Icon_MCP} from "../../src/components/Icons.jsx";
 
 const mcps = $state([]);
 let registeredMcps;
@@ -24,7 +25,7 @@ PLACEHOLDERS["mdfmt"] = `- Code fences: add \`:filename\` (e.g. \`\`\`html:index
 
 const refreshTools = $computed(() => !selectedConversation.ready);
 const currentTools = $computed(() => {
-	return Object.entries(toolset).filter(([k, v]) => v.hidden !== true).map(([k, v]) => ({
+	return Object.entries(toolset).filter(([k, v]) => v.description != null).map(([k, v]) => ({
 		name: k,
 		...v
 	}));
@@ -33,12 +34,8 @@ const currentTools = $computed(() => {
 onLoad(() => {
 	getKV('mcps', mcps);
 	$watch(mcps, () => {
-		const arr = unconscious(mcps);
-		if (registeredMcps) setKV('mcps', arr.length ? arr : undefined);
-
 		registeredMcps && registeredMcps.forEach(close => close());
-		registeredMcps = arr.map(({url, name, desc, ...rest}) => addMCPServer(url, name, desc, rest));
-
+		registeredMcps = unconscious(mcps).map(({url, name, desc, ...rest}) => addMCPServer(url, name, desc, rest));
 		$update(refreshTools);
 	}, false);
 
@@ -48,6 +45,11 @@ onLoad(() => {
 });
 
 const isActivated = (conv, mod) => conv.activatedModules?.has(mod);
+
+const mcpChanged = () => {
+	const arr = unconscious(mcps);
+	setKV('mcps', arr.length ? arr : undefined);
+};
 
 /**
  *
@@ -105,13 +107,12 @@ function createList() {
 
 	const virtualList = new VirtualList({
 		element: list,
-		itemHeight: 88,
 		renderer(mod) {
 			let desc = mod.uiDesc || mod.description;
 			let name = mod.name;
 			const pos = desc.indexOf('\n');
 			if (pos < 0) {
-				if (mod.hidden) {
+				if (desc && desc.length < 30) {
 					name = desc;
 					desc = '';
 				}
@@ -123,7 +124,7 @@ function createList() {
 			const item = <li data-name={mod.name}>
 				<div className="summary">
 					<span className="name" title={mod.name}>{name}</span>
-					{mod.hidden && <small title={"需要人工操作"}>手动</small>}
+					{mod.usable && <i className="ri-apps-2-ai-line"/>}
 					{mod.tools?.length && <small title={mod.tools.join("\n")}>{mod.tools.length} 个工具</small>}
 					{mod.data === "MCP" && <div style="display:flex">
 						<button
@@ -146,6 +147,7 @@ function createList() {
 									accent: 'danger',
 									onConfirm() {
 										mcps.splice(idx, 1);
+										mcpChanged();
 										const vlIdx = virtualList.findIndex(mod);
 										virtualList.items.splice(vlIdx, 1);
 										virtualList.setItems(virtualList.items);
@@ -172,24 +174,20 @@ function createList() {
 			return item;
 		},
 		keyFunc(item) {
-			return item.name + '/' + (isActivated(selectedConversation, item.name) ? 1 : 0);
+			return item.name;
+		},
+		onReuse(node, item) {
+			node.firstElementChild.lastElementChild.checked = isActivated(selectedConversation, item.name);
 		}
 	});
 
 	return [list, virtualList];
 }
 
-function openSkillManager() {
-	const [el, vl] = createList();
-
-	$watchWithCleanup(currentTools, () => {
-		vl.setItems(unconscious(currentTools));
-	});
-
-	return <div className={`preset-panel skill-manager`}>{el}</div>
-}
-
 async function addOrEditMCPServer(existed, existedIdx) {
+	const prevUrl = existed?.url;
+	const prevKey = existed?.key;
+
 	openModal({
 		type: "filter",
 		title: `${existed ? "编辑" : "添加"}MCP服务器`,
@@ -230,12 +228,12 @@ async function addOrEditMCPServer(existed, existedIdx) {
 			},
 			{
 				type: "radio",
-				id: "hidden",
+				id: "usable",
 				required: true,
 				name: "模型自行激活 (必须填写简介)",
 				choices: {
-					"拒绝": 'manual',
-					"允许": null
+					"允许": true,
+					"拒绝": false,
 				},
 			},
 			{
@@ -257,14 +255,16 @@ async function addOrEditMCPServer(existed, existedIdx) {
 		confirmMessage: existed ? "保存" : "添加",
 
 		async onConfirm(state) {
-			const client = new MCPClient(state.url, {key: state.key});
-			try {
-				await client.connect();
-			} catch (e) {
-				showToast("连接失败:\n" + prettyError(e), 'error');
-				return false;
-			} finally {
-				client.disconnect().catch(AS_IS);
+			if (state.url !== prevUrl || state.key !== prevKey) {
+				const client = new MCPClient(state.url, {key: state.key});
+				try {
+					await client.connect();
+				} catch (e) {
+					showToast("连接失败:\n" + prettyError(e), 'error');
+					return false;
+				} finally {
+					client.disconnect().catch(AS_IS);
+				}
 			}
 
 			const obj = unconscious(state);
@@ -274,6 +274,7 @@ async function addOrEditMCPServer(existed, existedIdx) {
 
 			if (existed) mcps[existedIdx] = obj;
 			else mcps.push(obj);
+			mcpChanged();
 		}
 	});
 }
@@ -293,7 +294,8 @@ CUSTOM_CONTROLS.push(
 			if (!ms || (!open && !ms.size)) {
 				conv.tools = new Set;
 				conv.activatedModules = new Set;
-				await toolScriptRegistry['Use'].script({modules: [...defaultGroups]}, {}, conv);
+				// See files.js
+				await toolScriptRegistry['Use'].script({modules: [...defaultGroups]}, { firstOpen: true }, conv);
 				$update(selectedConversation);
 				$update(refreshTools);
 			}
@@ -301,11 +303,17 @@ CUSTOM_CONTROLS.push(
 			if (open) return;
 
 			openWindow({
-				id: "skillManager",
+				id: "toolManager",
 				icon: <i className='ri-tools-line'/>,
-				title: "工具和技能配置",
-				actions: <button className="ri-add-line btn ghost" title={"添加MCP服务器"} onClick={() => addOrEditMCPServer()}/>,
-				element: openSkillManager,
+				title: "工具、技能与 MCP 服务器",
+				actions: <button className="btn ghost add-mcp" title="添加MCP服务器" onClick={() => addOrEditMCPServer()}><Icon_MCP /><i className="ri-add-line"/></button>,
+				element: () => {
+					const [el, vl] = createList();
+					const cb = () => { vl.setItems(unconscious(currentTools)); };
+					$watch(currentTools, cb);
+					$cleanup(el, () => $unwatch(currentTools, cb));
+					return <div className="preset-panel -tm">{el}</div>;
+				},
 				dock: "right",
 				width: 400
 			})

@@ -11,7 +11,7 @@
 - **极高的兼容性**：几乎所有开源闭源模型的API支持通过约束采样生成完美的JSON
 
 ### Part1 流式 JSON 解析
-![image](../../docs/reactive_json.gif)  
+![一个2.3MB的动图](../../media/reactive_json.gif)  
 基于流式 JSON 解析器，UI：
 *   **无需等待**：不再需要盯着空白屏幕/破碎的字符串等待回复结束。
 *   **流式绑定**：数据到达的瞬间，Markdown 文本、变量状态、选项按钮增量渲染。
@@ -33,7 +33,7 @@
 让 AI 和你协作 JSON，同样基于严格模式和 JSON Schema
 
 状态：已完成
-- 【JsonEditor】插件，可以自行在 GUI 内启用，代码位于 plugins/toolset/json_editor.js
+- 【JsonEditor】插件，可以自行在 GUI 内启用，代码位于 plugins/tools/json_editor.js
 
 ### Part3 世界对象模型
 构造游戏世界的标准化对象，例如一个【地点】需要什么，一个【人物】需要什么。  

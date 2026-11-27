@@ -22,48 +22,41 @@ const REDO_BRANCH = "S";
 
 const makeRevision = () => formatDate("ymd_his_")+getRandomString(3);
 
-registerToolset(
-	vcsEnabledKey,
-	`自动版本控制
-> 允许撤回模型对工作区的修改.
+registerToolset(vcsEnabledKey, `允许撤销模型修改
+按轮次记录模型对工作区的修改，不记录手动编辑。
 
-- 每轮对话创建一个 \`.0V\` 开头的文件夹
-- 不会主动清理旧数据
-- 当前版本只支持主工作区和WebFS文件系统
-- 不建议切分支，很慢，而且写磁盘
-- 尚未支持跟踪手动修改`,
-	[],
-	{
-		hidden: 'manual',
-		depend: ['Files'],
-		onActivated(conv) {
-			const activeBranch = STAGING_BRANCH+makeRevision();
-			conv.vcsBranch = activeBranch;
-			return callVCS({
+- 每轮创建一个 \`.0V\` 开头的隐藏文件夹
+- 永不清理历史
+- *目前*只支持根挂载和 \`local\` 文件系统
+- 可以但不建议切分支，慢并且写磁盘`, [], {
+	depend: ['Files'],
+	onActivated(conv) {
+		const activeBranch = STAGING_BRANCH+makeRevision();
+		conv.vcsBranch = activeBranch;
+		return callVCS({
+			mode: VCS_BRANCH,
+			path: activeBranch,
+		}, R, conv);
+	},
+	onDeactivated(conv) {
+		return Promise.all([
+			callVCS({
+				mode: VCS_COMMIT,
+			}, R, conv),
+			callVCS({
 				mode: VCS_BRANCH,
-				path: activeBranch,
+				path: VCS_BASE_BRANCH,
+			}, R, conv),
+		]).then(() => {
+			const activeBranch = conv.vcsBranch;
+			delete conv.vcsBranch;
+			return callVCS({
+				mode: VCS_DELETE_BRANCH,
+				path: activeBranch
 			}, R, conv);
-		},
-		onDeactivated(conv) {
-			return Promise.all([
-				callVCS({
-					mode: VCS_COMMIT,
-				}, R, conv),
-				callVCS({
-					mode: VCS_BRANCH,
-					path: VCS_BASE_BRANCH,
-				}, R, conv),
-			]).then(() => {
-				const activeBranch = conv.vcsBranch;
-				delete conv.vcsBranch;
-				return callVCS({
-					mode: VCS_DELETE_BRANCH,
-					path: activeBranch
-				}, R, conv);
-			});
-		}
+		});
 	}
-);
+});
 
 EVENT_BUS.on('loopResp', conv => {
 	if (!conv.activatedModules?.has(vcsEnabledKey) || conv.meta?.owner) return;

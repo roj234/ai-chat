@@ -12,18 +12,23 @@
 	background: var(--panel);
 	flex: 1;
 	overflow: auto;
+
+	& ._vl {
+		display: grid;
+		gap: 8px;
+	}
 }
 .mb-msg {
 	display: flex;
 	gap: 10px;
 	align-items: flex-start;
-	padding: 10px 12px;
-	margin-bottom: 8px;
+	padding: 8px 12px;
 	border-radius: 10px;
 	border: 1.5px solid transparent;
 	background: var(--chip-bg);
 	cursor: pointer;
 	transition: all .15s ease;
+	font-size: 14px;
 	user-select: none;
 
 	&.disabled {
@@ -45,7 +50,7 @@
 
 	&:not(.open) {
 		.body {
-			height: 1lh;
+			height: calc(1lh + 2px);
 			overflow: hidden;
 		}
 

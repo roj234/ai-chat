@@ -3,7 +3,6 @@ import {debugSymbol} from "unconscious";
 import {fileAccess} from "./Mounts.js";
 import {createAsyncQueue, stringCompare} from "/common/pure-utils.js";
 import {EVENT_BUS} from "/src/states.js";
-import {isIDB} from "/src/database.js";
 import {PLACEHOLDERS} from "/src/utils/placeholder.js";
 
 const SKILL_INFO = debugSymbol("Skills");
@@ -90,7 +89,7 @@ export async function getSkillCache(conv) {
 		const index = {};
 		let prompt = `<skills>\n`;
 
-		if (conv.activatedModules?.has("Files")) {
+		if (conv.mnt?.skills) {
 			const path = "~/skills/.aint-skill-version";
 			try {
 				const version = await readFile( {
@@ -106,7 +105,7 @@ export async function getSkillCache(conv) {
 					json: true
 				}, nothing, conv);
 
-				const fs = conv.mnt['skills'];
+				const fs = conv.mnt.skills;
 				fs.fs_readonly = false;
 
 				await Promise.allSettled(aintSkills.map(data => deleteFile({path: "~/skills/"+data[0]}, nothing, conv)));
@@ -168,13 +167,11 @@ export async function getSkillCache(conv) {
 	return skillCache;
 }
 
-registerToolset("Skills", "技能", [Skill], {
-	hidden: 'manual',
-	default: !isIDB,
+registerToolset("Skills", "技能\n让模型按任务加载对应的操作指南。", [Skill], {
+	default: true,
 	async systemPrompt(conv) {
 		return (await getSkillCache(conv)).prompt;
 	},
-	//depend: ["Files"],
 	onActivated(conv) {
 		(conv.mnt || (conv.mnt = {}))["skills"] = {
 			fs_builtin: true,

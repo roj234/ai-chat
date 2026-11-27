@@ -6,6 +6,7 @@ import {build as esbuildBuild} from 'esbuild';
 
 export const SANDBOX_MODULES = [
 	'@roj234/stream-json',
+	'./common/comfy.js',
 	'unconscious/common/SHA256.js',
 	'unconscious/common/text-diff.js',
 	'unconscious/common/xml-parser.js',
@@ -14,7 +15,8 @@ export const SANDBOX_MODULES = [
 ];
 
 const SANDBOX_BUILTINS = [
-	'base64', 'buffer', 'fs', 'fs/promises', 'path', 'process', 'url', 'util', 'node:*',
+	'buffer', 'fs', 'fs/promises', 'path', 'process', 'url', 'util', 'node:*',
+	'@roj234/shared/base64'
 ];
 
 const buildOne = async (req, root, specifier) => {
@@ -22,12 +24,26 @@ const buildOne = async (req, root, specifier) => {
 	const x = path.extname(specifier);
 	const outFile = path.join(root, 'public', 'assets', 'sandbox', path.basename(x ? specifier.slice(0, -x.length) : specifier)+".js");
 
+	const renamer = {
+		name: 'renamer',
+		setup(build) {
+			build.onResolve({ filter: /^@roj234\/util-inspect$/ }, () => ({
+				path: 'util',
+				external: true, // 不打包,保留为外部引用
+			}))
+			build.onResolve({ filter: /^\/.*/ }, (p) => ({
+				path: path.join(path.resolve('.'), p.path),
+			}))
+		},
+	}
+
 	const {outputFiles} = await esbuildBuild({
 		define: {
 			'import.meta.env.DEV': 'false',
 			'import.meta.env.PROD': 'true',
 			'import.meta.env.MODE': '"production"',
-			'process.env.NODE_ENV': '"production"'
+			'process.env.NODE_ENV': '"production"',
+			'IS_ANDROID_BUILD': 'false'
 		},
 		entryPoints: [entry],
 		bundle: true,
@@ -38,6 +54,7 @@ const buildOne = async (req, root, specifier) => {
 		minify: true,
 		charset: 'utf8',
 		legalComments: 'none',
+		plugins: [renamer],
 		external: SANDBOX_BUILTINS,
 	});
 

@@ -423,7 +423,7 @@ export const deleteDatabase = async () => requestBackend('database', {method: 'D
 export const blobHash = async blob => {
 	let arrayBuffer;
 
-	if (blob.size < 1048576 * 32) {
+	if (blob.size < 1048576 * 32 && crypto.subtle) {
 		// Web Crypto 好垃圾哦
 		// 这时候我就怀念 Java 的手操内存了
 		const buffer = await blob.arrayBuffer();

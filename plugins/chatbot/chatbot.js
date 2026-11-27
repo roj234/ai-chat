@@ -12,7 +12,7 @@ import {conversations, EVENT_BUS, findConversation, messages, switchToConversati
 import {agentLoop} from "/src/api-request.js";
 import {$stampLock, $state, $unwatch, $watch} from "unconscious";
 import {renderMarkdownToString} from "/src/markdown/markdown.js";
-import {showToast, openModal} from "/src/components/Layer.js";
+import {openModal, showToast} from "/src/components/Layer.js";
 import {throttled} from "/common/pure-utils.js";
 import {getMessages} from "/src/database.js";
 import {onLoad} from "/src/hooks.js";
@@ -307,7 +307,6 @@ class Chatbot {
 }
 
 registerToolset("Chatbot", "将该对话接入聊天机器人", [SendMessage, ListTools], {
-	hidden: "manual",
 	onActivated(conv) {
 		return new Promise((resolve, reject) => {
 			openModal({

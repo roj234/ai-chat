@@ -8,7 +8,7 @@ AiChat 后端提供三种互相独立的功能：
 
 API Proxy 负责将前端的 LLM 请求代理转发到上游 API，同时支持流量节省、格式转换、会话恢复、中止和调试追踪。
 
-文件：`backend/api-request/*.js`
+文件：`backend/api-proxy/*.js`（路由注册在 `api-proxy-openai.js`，恢复/中止在 `api-proxy-resume.js`）
 
 前端只支持 OpenAI chat completions API。Responses和其它API的格式转换通过后端的format字段完成
 
@@ -75,7 +75,7 @@ POST /v1/abort/:id
 #### 带提示词缓存的对话接口
 
 ```http
-POST /v1/chat/completions/ref
+POST /v1/chat/completions/refs
 ```
 
 该接口支持额外三种消息角色：
@@ -156,7 +156,7 @@ export const SSE_PROXY_MODERATION = AiChatAPI.advancedLLMProxy(externalKeys, ext
 
 ## 2. 文件服务
 
-文件服务提供文件系统操作和（可选）命令执行能力。基础路径为 `/api/fs`，所有端点使用 POST 方法，请求体为 JSON。  
+文件服务提供文件系统操作和（可选）命令执行能力。基础路径为 `/api/fs`（多用户模式下为 `/api/v2/:userId/fs`，此时不可执行命令），请求体为 JSON（`readRaw` / `thumb` 为 GET）。  
 这些参数的格式和工具Schema定义的参数完全相同，ground truth是工具Schema。
 
 ### 2.1 安全模型（参考实现）
@@ -167,11 +167,10 @@ export const SSE_PROXY_MODERATION = AiChatAPI.advancedLLMProxy(externalKeys, ext
 
 ### 2.2 文件操作
 
-代码见 `backend/routes/agent.js`
+代码见 `backend/routes/file-service.js`
 
-支持 read write patch edit mkdir delete copymove 等  
-还支持二进制流式接口(接收/返回 Blob) readRaw writeRaw appendRaw  
-其中 readRaw 接口支持分片下载， writeRaw 接口支持分片上传（暂时没有通过它在 API 文件系统上实现 fs.open）
+支持 `read` `readRaw` `write` `writeRaw` `append` `appendRaw` `patch` `edit` `atomicEdit` `mkdir` `copy` `delete` `stat` `list` `thumb` `event` 等  
+`readRaw` 接口支持分片下载，`writeRaw` 接口支持分片上传（未来可以通过它在 API 文件系统上实现 fs.open）
 
 ### 2.3 命令执行
 
@@ -186,13 +185,14 @@ GET /api/fs/env
 **响应**：
 ```json
 {
-  "prompt": "os: Linux\nshell: bash\nnode: v22.0.0\n..."
+  "programs": "os: Linux\nshell: bash\nnode: v22.0.0\n...",
+  "location": "/path/to/workspace/"
 }
 ```
 
-返回系统环境摘要（OS、Shell、已安装工具等），填充系统提示词。
+`programs` 是系统环境摘要（OS、Shell、已安装工具等）的**字符串**，用于填充系统提示词；`location` 是当前文件服务根目录。该端点只在允许命令执行时注册。
 
-同时还有其他接口，详见 `RemoteFSShell.js`
+前端侧的其它命令接口（spawn / shell / kill / feed）详见 `plugins/agent/RemoteFSShell.js`
 
 ---
 
@@ -216,7 +216,7 @@ Authorization: Bearer <pat-token>
 POST /api/v2/:userId/login
 ```
 
-**查询参数**：`?desc=设备描述`（未实现）
+**查询参数**：`?desc=设备描述`（会打印到服务端控制台的配对请求里）
 
 **响应**：`text/event-stream`
 
@@ -253,9 +253,11 @@ POST /api/v2/:userId/batch
 [
   [{ "id": 1, "title": "对话1", "time": 1721000000000 }],
   true,
-  [3]
+  [6, 52428800]
 ]
 ```
+
+`version` 返回 `[PROTOCOL_VERSION, MAX_UPLOAD_SIZE]`，当前为 `[6, 52428800]`（协议版本 6，Blob 最大 50MB）。
 
 部分操作失败时，HTTP 状态码仍为 200，失败项在数组中返回 `{ "error": "..." }`。  
 
@@ -308,36 +310,23 @@ KVS 用于存储类型化数据（如预设、角色卡、世界书），每条�
 | `log` | `id` | log 对象 | 根据 message_id 查询日志 |
 | `log/by-rowid` | `rowid` | log 对象 | 根据日志表 ROWID 查询完整日志 |
 | `log/insert` | `{id, time?, ...data}` | `boolean` | 写入日志。 |
+| `logs` | `[start?, end?, lastRow?]` | log 对象数组 | 按时间范围列出日志（最多 5000 条），不含 `request_id` 和 `usage` 字段以减少体积。`lastRow` 用于分页 |
 
 #### 3.2.6 Blob（附件）
 
 | 操作名 | 参数 | 返回值 | 说明 |
 |--------|------|--------|------|
-| `blob` | `hash`（base64url） | `{name, type, size, lastModified}` | 获取附件元信息 |
+| `blob` | `[hash, name?]` | `{name, type, size, lastModified}` | 获取附件元信息（`hash` 为 base64url） |
+| `blob/del` | `hash` | `boolean` | 删除附件 |
 
 #### 3.2.7 系统
 
 | 操作名 | 参数 | 返回值 | 说明 |
 |--------|------|--------|------|
 | `sync` | `null` | WebSocket URL 字符串 | 获取实时同步连接地址 |
-| `version` | `null` | `[3]` | 通信协议版本号 |
+| `version` | `null` | `[PROTOCOL_VERSION, MAX_UPLOAD_SIZE]` | 通信协议版本号，当前 `[6, 52428800]` |
 
 ### 3.3 独立端点
-
-#### 日志列表
-
-```http
-GET /api/v2/:userId/logs
-```
-
-**查询参数**：
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `start` | `0` | 起始时间戳（毫秒） |
-| `end` | `Date.now()` | 截止时间戳（毫秒） |
-
-**响应**：日志数组（最多 5000 条），不含 `request_id` 和 `usage` 字段以减少体积。
 
 #### 数据库维护
 
@@ -387,11 +376,11 @@ ws://host:port/api/sync?u=<userId>&t=<pat-token>
 
 实时多客户端数据同步。连接成功后收到 `SYNC_INIT` 消息。
 
-具体协议详见 `syncClient.js` 和 `syncServer.js`
+具体协议详见 `src/database/syncClient.js` 和 `backend/syncServer.js`
 
 **编码**：JSON 或 Msgpack（由 `RESPONSE_USE_MSGPACK_SCHEMA` 配置控制）。
 
-**单包大小限制**：4KB。
+**单包大小限制**：64KB。
 
 ---
 
@@ -399,7 +388,7 @@ ws://host:port/api/sync?u=<userId>&t=<pat-token>
 
 客户端需同时满足两个条件才能使用 Msgpack 压缩：
 1. `Accept` 头包含 `application/vnd.msgpack`
-2. `X-SV` 头等于服务端的 `msgpack_schema_version`（在 `common/MsgpackSchema.js` 中定义）
+2. `x-sv` 头等于服务端的 `msgpack_schema_version`（在 `common/wire-compression-schema.js` 中定义）
 
 参考服务端支持 Gzip 和 Brotli 压缩
 

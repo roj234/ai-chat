@@ -857,10 +857,8 @@ Available agent definitions:
 			}
 		}
 
-		await loadDefinition("agents");
-		if (conv.mnt?.["skills"]) {
-			await loadDefinition("~/skills/agents");
-		}
+		if (conv.fs_type) await loadDefinition("agents");
+		if (conv.mnt?.skills) await loadDefinition("~/skills/agents");
 		await finish();
 
 		sortable.sort((a, b) => stringCompare(a.name, b.name)).forEach(metadata => {
@@ -876,21 +874,14 @@ Available agent definitions:
 	return agentCache;
 }
 
-registerToolset(
-	"Subagent",
-	"Create agents to autonomously execute a task and return the result.",
-	[CreateAgent, NotifyAgent, TerminateAgent, ResumeAgent, Wait],
-	{
-		default: true,
-		async systemPrompt(conv) {
-			if (!conv.activatedModules.has("Files")) return;
-
-			const agentList = (await initAgentCache(conv)).prompt;
-			return agentList;
-			//return (agentList?agentList+'\n':'')+`<agent-id>${conv.id}</agent-id>`;
-		}
+registerToolset("Subagent", "子智能体\n由其他助手处理子任务，当前助手汇总结果。", [CreateAgent, NotifyAgent, TerminateAgent, ResumeAgent, Wait], {
+	default: true,
+	async systemPrompt(conv) {
+		const agentList = (await initAgentCache(conv)).prompt;
+		return agentList;
+		//return (agentList?agentList+'\n':'')+`<agent-id>${conv.id}</agent-id>`;
 	}
-);
+});
 
 JS_HOST_MODULES["agents"] = owner => {
 	return ({

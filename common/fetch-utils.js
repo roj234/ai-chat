@@ -57,7 +57,7 @@ export const jsonFetch = (url, {key = "", ...data} = {}) => FETCH(url, {
 const makeHeaders = (data, key) => {
 	const headers = {};
 	if (key) headers['Authorization'] = "Bearer "+key;
-	if (data.body) headers['Content-Type'] = 'application/json';
+	if (typeof data.body === 'string') headers['Content-Type'] = 'application/json';
 	return headers;
 }
 

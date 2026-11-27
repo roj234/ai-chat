@@ -226,3 +226,8 @@ export const formatDuration = seconds => {
 };
 
 export const stringCompare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+
+export const randomUUID = crypto.randomUUID ? crypto.randomUUID.bind(crypto) : (() => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+	const r = (Math.random() * 16) | 0;
+	return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+}));

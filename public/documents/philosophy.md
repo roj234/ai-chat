@@ -9,12 +9,12 @@
 | LLM | OpenAI API | 任何兼容端点 |
 | T2I | ComfyUI / A1111 WebUI | [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) |
 | TTS | 自定义规范（OpenAI + 音色 API） | [qwen3-audio.cpp](https://github.com/Roj234/qwen3-audio.cpp) |
-| 数据库 | 自定义 API | `backend/init.js` |
-| 文件访问 | 自定义 API | `backend/routes/agent.js` |
+| 数据库 | 自定义 API | `backend/createApp.js` + `backend/routes/*` |
+| 文件访问 | 自定义 API | `backend/routes/file-service.js` |
 | 更多工具 | MCP | 任何 MCP 服务器 |
 
 如果不需要执行命令，就不需要外部文件访问服务，Chrome 的 FileSystem API 足够了。
-- 当项目的文件有几千个的时候，还是建议使用文件访问服务（ripgrep），否则一次针对根目录的 Grep 要花费数秒。
+- 当项目的文件有几千个的时候，还是建议使用文件访问服务，否则一次针对根目录的 Grep 要花费数秒。
 
 如果参考实现满足不了需求，换掉它，而不是让我做我用不上的功能（比如比现在更复杂的鉴权）。
 - 换句话说，你要说服我一个功能有意义，我才会添加他，而不是“别人都有”

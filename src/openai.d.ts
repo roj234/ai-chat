@@ -3,283 +3,283 @@
 
 import * as JsonSchemaUtils from "unconscious/common/json-schema-utils";
 
-declare namespace OpenAI {
-    // 模型名称
-    type Model = string;
-    // 消息角色
-    type Role = 'developer' | 'system' | 'user' | 'assistant' | 'tool';
+declare global {
+    namespace OpenAI {
 
-    type BaseResponse = {
-        id: string;
-        //object: string;
-        //choices: (NonStreamingChoice | StreamingChoice | TextChoice)[];
-        created: number; // Unix timestamp
-        model: string;
-        system_fingerprint?: string; // Only present if the provider supports it
-        // Usage data is always returned for non-streaming.
-        // When streaming, usage is returned exactly once in the final chunk
-        // before the [DONE] message, with an empty choices array.
-        usage?: OpenRouter.ResponseUsage;
+        // 模型名称
+        type Model = string;
+        // 消息角色
+        type Role = 'developer' | 'system' | 'user' | 'assistant' | 'tool';
 
-        // Llama.cpp
-        timings?: LlamaCpp.ResponseUsage;
-        prompt_progress?: LlamaCpp.PrefillProgress;
+        type BaseResponse = {
+            id: string;
+            //object: string;
+            //choices: (NonStreamingChoice | StreamingChoice | TextChoice)[];
+            created: number; // Unix timestamp
+            model: string;
+            system_fingerprint?: string; // Only present if the provider supports it
+            // Usage data is always returned for non-streaming.
+            // When streaming, usage is returned exactly once in the final chunk
+            // before the [DONE] message, with an empty choices array.
+            usage?: OpenRouter.ResponseUsage;
 
-        // SSE Proxy
-        resumable?: SSEProxyResumer;
-        new_cached?: string[];
+            // Llama.cpp
+            timings?: LlamaCpp.ResponseUsage;
+            prompt_progress?: LlamaCpp.PrefillProgress;
 
-        provider?: string; // Model provider
-    };
+            // SSE Proxy
+            resumable?: SSEProxyResumer;
+            new_cached?: string[];
 
-    type ChatCompletionResponse = BaseResponse & {
-        object: 'chat.completion';
-        choices: NonStreamingChoice[];
-    }
-    type ChatCompletionChunk = BaseResponse & {
-        object: 'chat.completion.chunk';
-        choices: ChatChoice[];
-    }
-    type TextCompletionChunk = BaseResponse & {
-        object: 'text_completion';
-        choices: TextChoice[];
-    }
-
-    type Response = ChatCompletionResponse | ChatCompletionChunk | TextCompletionChunk;
-
-    type SSEProxyResumer = {
-        now: number;
-        start: number;
-        ft?: number;
-        re?: number;
-        end?: true;
-    }
-
-    namespace LlamaCpp {
-        type ResponseUsage = {
-            cache_n: number,
-            prompt_n: number,
-            predicted_n: number,
-            predicted_per_second: number;
+            provider?: string; // Model provider
         };
 
-        type PrefillProgress = {
-            processed: number;
-            total: number;
+        type ChatCompletionResponse = BaseResponse & {
+            object: 'chat.completion';
+            choices: NonStreamingChoice[];
         }
-    }
-
-    interface BaseReasoningDetail {
-        id: string;
-        format: 'unknown' | 'openai-responses-v1' | 'xai-responses-v1' | 'anthropic-claude-v1' | 'google-gemini-v1';
-    }
-
-    interface ReasoningSummary extends BaseReasoningDetail {
-        type: 'reasoning.summary';
-        summary: string;
-    }
-
-    interface ReasoningText extends BaseReasoningDetail {
-        type: 'reasoning.text';
-        text: string;
-        signature?: string;
-    }
-
-    interface ReasoningEncrypted extends BaseReasoningDetail {
-        type: 'reasoning.encrypted';
-        data: string;
-    }
-
-    type ReasoningDetail = ReasoningSummary | ReasoningText | ReasoningEncrypted;
-
-    namespace OpenRouter {
-        // OpenRouter always returns detailed usage information.
-        // Token counts are calculated using the model's native tokenizer.
-        type ResponseUsage = {
-            /** Including images, input audio, and tools if any */
-            prompt_tokens: number;
-            /** The tokens generated */
-            completion_tokens: number;
-            /** Sum of the above two fields */
-            total_tokens: number;
-
-            /** Breakdown of prompt tokens (optional) */
-            prompt_tokens_details?: {
-                cached_tokens: number;        // Tokens cached by the endpoint
-                cache_write_tokens?: number;  // Tokens written to cache (models with explicit caching)
-                audio_tokens?: number;        // Tokens used for input audio
-                video_tokens?: number;        // Tokens used for input video
-            };
-
-            /** Breakdown of completion tokens (optional) */
-            completion_tokens_details?: {
-                reasoning_tokens?: number;    // Tokens generated for reasoning
-                audio_tokens?: number;        // Tokens generated for audio output
-                image_tokens?: number;        // Tokens generated for image output
-            };
-
-            /** Cost in credits (optional) */
-            cost?: number;
-            /** Whether request used Bring Your Own Key */
-            is_byok?: boolean;
-            /** Detailed cost breakdown (optional) */
-            cost_details?: {
-                upstream_inference_cost?: number;             // Only shown for BYOK requests
-                upstream_inference_prompt_cost: number;
-                upstream_inference_completions_cost: number;
-            };
-
-            /** Server-side tool usage (optional) */
-            server_tool_use?: {
-                web_search_requests?: number;
-            };
-        };
-    }
-
-    // 消息对象
-    type BaseMessage = {
-        role: Role;
-        content: string | ContentPart[];
-    }
-    type AssistantMessage = BaseMessage & {
-        role: 'assistant';
-        refusal?: string;
-        reasoning?: string; // OpenAI
-        reasoning_content?: string; // Llama.cpp
-        reasoning_details?: OpenAI.ReasoningDetail[]; // OpenRouter
-        tool_calls?: ToolCall[];
-        images?: ImagePart[]; // OpenRouter
-        audio?: AudioData[];
-    }
-    type Message = BaseMessage | ToolCallMessage | AssistantMessage;
-
-    type AudioData = {
-        data: string; // Base64
-        expires_at: number;
-        id: string;
-        transcript: string;
-    }
-
-    type ToolCallMessage = BaseMessage & {
-        role: 'tool';
-        tool_call_id: string;
-    }
-
-    type TextPart = {
-        type: 'text';
-        text: string | Blob | File;
-    }
-    type ImagePart = {
-        type: 'image_url';
-        image_url: {
-            // file://, http:// or base64 encoded string
-            url: File | Blob | string;
-            detail: 'low' | 'default' | 'high';
-        };
-    }
-    type AudioPart = {
-        type: 'input_audio';
-        input_audio: {
-            data: File | Blob | string;
-            // llama.cpp only support them
-            format: "wav" | "mp3";// | "aiff" | "aac" | "ogg" | "flac" | "m4a"
-        };
-    }
-    type VideoPart = {
-        type: 'video_url';
-        video_url: {
-            url: File | Blob | string;
-            detail: 'low' | 'default' | 'high';
+        type ChatCompletionChunk = BaseResponse & {
+            object: 'chat.completion.chunk';
+            choices: ChatChoice[];
         }
-    }
+        type TextCompletionChunk = BaseResponse & {
+            object: 'text_completion';
+            choices: TextChoice[];
+        }
 
-    type ContentPart = TextPart | ImagePart | AudioPart | VideoPart;
+        type Response = ChatCompletionResponse | ChatCompletionChunk | TextCompletionChunk;
 
-    type ToolCall = {
-        id: string;
-        type: 'function';
-        function: {
+        type SSEProxyResumer = {
+            now: number;
+            start: number;
+            ft?: number;
+            re?: number;
+            end?: true;
+        }
+
+        namespace LlamaCpp {
+            type ResponseUsage = {
+                cache_n: number,
+                prompt_n: number,
+                predicted_n: number,
+                predicted_per_second: number;
+            };
+
+            type PrefillProgress = {
+                processed: number;
+                total: number;
+            }
+        }
+
+        interface BaseReasoningDetail {
+            id: string;
+            format: 'unknown' | 'openai-responses-v1' | 'xai-responses-v1' | 'anthropic-claude-v1' | 'google-gemini-v1';
+        }
+
+        interface ReasoningSummary extends BaseReasoningDetail {
+            type: 'reasoning.summary';
+            summary: string;
+        }
+
+        interface ReasoningText extends BaseReasoningDetail {
+            type: 'reasoning.text';
+            text: string;
+            signature?: string;
+        }
+
+        interface ReasoningEncrypted extends BaseReasoningDetail {
+            type: 'reasoning.encrypted';
+            data: string;
+        }
+
+        type ReasoningDetail = ReasoningSummary | ReasoningText | ReasoningEncrypted;
+
+        namespace OpenRouter {
+            // OpenRouter always returns detailed usage information.
+            // Token counts are calculated using the model's native tokenizer.
+            type ResponseUsage = {
+                /** Including images, input audio, and tools if any */
+                prompt_tokens: number;
+                /** The tokens generated */
+                completion_tokens: number;
+                /** Sum of the above two fields */
+                total_tokens: number;
+
+                /** Breakdown of prompt tokens (optional) */
+                prompt_tokens_details?: {
+                    cached_tokens: number;        // Tokens cached by the endpoint
+                    cache_write_tokens?: number;  // Tokens written to cache (models with explicit caching)
+                    audio_tokens?: number;        // Tokens used for input audio
+                    video_tokens?: number;        // Tokens used for input video
+                };
+
+                /** Breakdown of completion tokens (optional) */
+                completion_tokens_details?: {
+                    reasoning_tokens?: number;    // Tokens generated for reasoning
+                    audio_tokens?: number;        // Tokens generated for audio output
+                    image_tokens?: number;        // Tokens generated for image output
+                };
+
+                /** Cost in credits (optional) */
+                cost?: number;
+                /** Whether request used Bring Your Own Key */
+                is_byok?: boolean;
+                /** Detailed cost breakdown (optional) */
+                cost_details?: {
+                    upstream_inference_cost?: number;             // Only shown for BYOK requests
+                    upstream_inference_prompt_cost: number;
+                    upstream_inference_completions_cost: number;
+                };
+
+                /** Server-side tool usage (optional) */
+                server_tool_use?: {
+                    web_search_requests?: number;
+                };
+            };
+        }
+
+        // 消息对象
+        type BaseMessage = {
+            role: Role;
+            content: string | ContentPart[];
+        }
+        type AssistantMessage = BaseMessage & {
+            role: 'assistant';
+            refusal?: string;
+            reasoning?: string; // OpenAI
+            reasoning_content?: string; // Llama.cpp
+            reasoning_details?: OpenAI.ReasoningDetail[]; // OpenRouter
+            tool_calls?: ToolCall[];
+            images?: ImagePart[]; // OpenRouter
+            audio?: AudioData[];
+        }
+        type Message = BaseMessage | ToolCallMessage | AssistantMessage;
+
+        type AudioData = {
+            data: string; // Base64
+            expires_at: number;
+            id: string;
+            transcript: string;
+        }
+
+        type ToolCallMessage = BaseMessage & {
+            role: 'tool';
+            tool_call_id: string;
+        }
+
+        type TextPart = {
+            type: 'text';
+            text: string | Blob | File;
+        }
+        type ImagePart = {
+            type: 'image_url';
+            image_url: {
+                // file://, http:// or base64 encoded string
+                url: File | Blob | string;
+                detail: 'low' | 'default' | 'high';
+            };
+        }
+        type AudioPart = {
+            type: 'input_audio';
+            input_audio: {
+                data: File | Blob | string;
+                // llama.cpp only support them
+                format: "wav" | "mp3";// | "aiff" | "aac" | "ogg" | "flac" | "m4a"
+            };
+        }
+        type VideoPart = {
+            type: 'video_url';
+            video_url: {
+                url: File | Blob | string;
+                detail: 'low' | 'default' | 'high';
+            }
+        }
+
+        type ContentPart = TextPart | ImagePart | AudioPart | VideoPart;
+
+        type ToolCall = {
+            id: string;
+            type: 'function';
+            function: {
+                name: string;
+                arguments: string; // JSON 字符串
+            };
+        }
+
+        // 聊天完成请求
+        type ChatCompletionRequest = {
+            model: Model;
+            messages: Message[];
+            frequency_penalty?: number; // -2.0 到 2.0，默认 0
+            presence_penalty?: number; // -2.0 到 2.0，默认 0
+            max_completion_tokens?: number; // 最大令牌数，1 到 4096+
+            n?: number; // 生成的完成数量，默认 1
+            temperature?: number; // 0 到 2，默认 1
+            top_p?: number; // 0 到 1，默认 1
+            stop?: string | string[]; // 停止序列
+            stream?: boolean; // 是否流式响应，默认 false
+            tools?: Tool[]; // 工具定义（可选）
+            tool_choice?: 'none' | 'auto' | 'required' | {type: "function", function: {"name": string}};
+        }
+
+        // 工具定义
+        type Tool = {
+            type: 'function';
+            function: FunctionToolJSON;
+        }
+
+        type FunctionToolJSON = {
             name: string;
-            arguments: string; // JSON 字符串
-        };
-    }
-
-    // 聊天完成请求
-    type ChatCompletionRequest = {
-        model: Model;
-        messages: Message[];
-        frequency_penalty?: number; // -2.0 到 2.0，默认 0
-        presence_penalty?: number; // -2.0 到 2.0，默认 0
-        max_completion_tokens?: number; // 最大令牌数，1 到 4096+
-        n?: number; // 生成的完成数量，默认 1
-        temperature?: number; // 0 到 2，默认 1
-        top_p?: number; // 0 到 1，默认 1
-        stop?: string | string[]; // 停止序列
-        stream?: boolean; // 是否流式响应，默认 false
-        tools?: Tool[]; // 工具定义（可选）
-        tool_choice?: 'none' | 'auto' | 'required' | {type: "function", function: {"name": string}};
-    }
-
-    // 工具定义
-    type Tool = {
-        type: 'function';
-        function: FunctionToolJSON;
-    }
-
-    type FunctionToolJSON = {
-        name: string;
-        description: string;
-        parameters: ObjectSchema;
-    }
-
-    type Schema = JsonSchemaUtils.Schema;
-    type ObjectSchema = JsonSchemaUtils.ObjectSchema;
-
-    // region Choice
-    type Choice = {
-        index: number;
-        finish_reason?: 'stop' | 'length' | 'function_call' | 'content_filter' | 'tool_calls' | 'error';
-        native_finish_reason?: string;
-        error?: ErrorResponse;
-
-        logprobs?: {
-            content: ((LogprobItem | PostSampleProbItem) & {
-                top_logprobs?: LogprobItem[];
-                top_probs?: PostSampleProbItem[];
-            })[]
+            description: string;
+            parameters: ObjectSchema;
         }
-    }
-    interface NonStreamingChoice extends Choice {
-        message: AssistantMessage;
-    }
-    interface ChatChoice extends Choice {
-        delta: Partial<AssistantMessage>;
-    }
-    interface TextChoice extends Choice {
-        text: string;
-    }
 
-    type ErrorResponse = {
-        code: number; // See "Error Handling" section
-        message: string;
-        metadata?: Record<string, unknown>; // Contains additional error information such as provider details, the raw error message, etc.
-    };
+        type Schema = JsonSchemaUtils.Schema;
+        type ObjectSchema = JsonSchemaUtils.ObjectSchema;
 
-    type LogprobItem = {
-        id: number;
-        logprob: number;
-        token: string;
-        bytes?: number[];
-    }
+        // region Choice
+        type Choice = {
+            index: number;
+            finish_reason?: 'stop' | 'length' | 'function_call' | 'content_filter' | 'tool_calls' | 'error';
+            native_finish_reason?: string;
+            error?: ErrorResponse;
 
-    type PostSampleProbItem = {
-        id: number;
-        prob: number;
-        token: string;
-        bytes?: number[];
+            logprobs?: {
+                content: ((LogprobItem | PostSampleProbItem) & {
+                    top_logprobs?: LogprobItem[];
+                    top_probs?: PostSampleProbItem[];
+                })[]
+            }
+        }
+        interface NonStreamingChoice extends Choice {
+            message: AssistantMessage;
+        }
+        interface ChatChoice extends Choice {
+            delta: Partial<AssistantMessage>;
+        }
+        interface TextChoice extends Choice {
+            text: string;
+        }
+
+        type ErrorResponse = {
+            code: number; // See "Error Handling" section
+            message: string;
+            metadata?: Record<string, unknown>; // Contains additional error information such as provider details, the raw error message, etc.
+        };
+
+        type LogprobItem = {
+            id: number;
+            logprob: number;
+            token: string;
+            bytes?: number[];
+        }
+
+        type PostSampleProbItem = {
+            id: number;
+            prob: number;
+            token: string;
+            bytes?: number[];
+        }
+        //endregion
     }
-    //endregion
 }
-
-// 全局声明（如果不使用命名空间）
-export type { OpenAI };

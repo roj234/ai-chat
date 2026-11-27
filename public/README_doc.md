@@ -1,6 +1,6 @@
 # Aint 文档
 
-> 上次更新 2026/11/19
+> 上次更新 2026/11/27
 
 现代化的高性能纯 Web 多用途 AI 前端，基于 [Unconscious](https://github.com/Roj234/unconscious) 响应式框架。
 

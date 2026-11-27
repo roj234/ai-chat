@@ -248,8 +248,10 @@ const messageListHandler = {
 }
 const VFSRoot = new NestedMap();
 
-registerToolset(DCP_ID, "主动上下文管理\n使用 /dcp ui 打开配置界面", [Compress, Marker], {
-	hidden: 'manual',
+registerToolset(DCP_ID, "允许模型主动管理上下文\n" +
+	"[/ctx](cmd://ctx) 打开编辑器，你可以编辑或压缩上下文。\n" +
+	"`/compact` 让模型压缩当前上下文。\n" +
+	"关闭后，仍可点击或输入上述命令。", [Compress, Marker], {
 	systemPrompt: `<context-management>
 Use \`Compress\` tool to replace stale conversation ranges with dense summaries.
 

@@ -572,8 +572,7 @@ const FetchLorebook = {
 };
 
 const RP_TOOLSET_ID = 'rp:imp';
-registerToolset(RP_TOOLSET_ID, "", [FetchLorebook], {
-	hidden: true,
+registerToolset(RP_TOOLSET_ID, null, [FetchLorebook], {
 	systemPrompt(conv, tools) {
 		const lbCache = conv[INST].lbCache;
 

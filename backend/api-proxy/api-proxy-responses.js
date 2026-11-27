@@ -57,7 +57,7 @@ function convertContentPart(content, role) {
 	return content.map((part) => {
 		if (part.type === 'text' && typeof part.text === 'string')
 			return {type: role === 'assistant' ? 'output_text' : 'input_text', text: part.text};
-		if (part.type === 'image_url' && role === 'user' && typeof part.image_url?.url === 'string')
+		if (part.type === 'image_url' && role === 'user')
 			return {
 				type: 'input_image',
 				image_url: part.image_url.url,

@@ -2,7 +2,7 @@ import "./MessageFold.css";
 import {openWindow} from "/src/components/Windows.jsx";
 import {$computed, $state, $update, $vforeach, $watch, AS_IS, ref, unconscious} from "unconscious";
 import {openMenu, showToast} from "/src/components/Layer.js";
-import {messages, selectedConversation} from "/src/states.js";
+import {auxMainlyTouch, messages, selectedConversation} from "/src/states.js";
 import {markMessageDirty, updateConversation} from "/src/database.js";
 import {enableBranches} from "/src/utils/BranchManager.js";
 import {DCP_ID} from "./subjective-compaction.js";
@@ -42,7 +42,7 @@ function MessageFoldManager({conversation, messages, onChange}) {
 		let showClear = true;
 
 		if (sel.start == null) {
-			hintContent = <span className="mb-hint">点选<b>起始</b>消息</span>;
+			hintContent = <span className="mb-hint">点选<b>起始</b>消息，<b>${auxMainlyTouch ? '长按': '右键'}</b>一条消息可以展开它</span>;
 			showClear = false;
 		} else if (sel.end == null) {
 			hintContent = <span className="mb-hint">已选起始 <b>#{sel.start}</b>，继续点选<b>结束</b>消息</span>;

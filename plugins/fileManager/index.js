@@ -71,13 +71,19 @@ EVENT_BUS.on('pvex', async (fs, _, cwd) => (await import("./preview.js")).create
  */
 const OpenFile = {
 	name: "OpenFile",
-	description: "用默认程序打开文件/文件夹，若提供 file，则在 path 文件夹中高亮它",
 	requireUI: true,
+	description: "Open a file or folder for the user, or highlight a file in its containing folder.",
 	parameters: {
 		type: "object",
 		properties: {
-			path: { type: "string", },
-			file: { type: "string", description: "Optional file name to highlight" },
+			path: {
+				type: "string",
+				description: "Path to open. If `file` is provided, this must be its containing folder."
+			},
+			file: {
+				type: "string",
+				description: "Name of the file to highlight instead of opening it. Use the filename only, not a path."
+			}
 		},
 		required: ["path"]
 	},
@@ -87,13 +93,20 @@ const OpenFile = {
 		let fs;
 		[path, fs] = await getFileSystem(path, conv);
 		const editable = fs[FS_SOURCE].fs_readonly ? 'n' : 'a';
-		await (await import("./preview.js")).vfsPreview(fs, normalizePath(path).join('/'), null, editable);
+		const mod = await import("./preview.js");
+		const myPath = normalizePath(path).join('/');
+		if (file) {
+			await mod.openFileBrowser(fs, myPath, file ? myPath+'/'+file : null)
+		} else {
+			await mod.vfsPreview(fs, myPath, null, editable);
+		}
 		return 'Opened';
 	}
 };
 
-registerToolset("OpenFile", "让AI给你打开文件夹", [OpenFile], {
-	hidden: "manual"
+registerToolset("OpenFile", "打开文件夹", [OpenFile], {
+	depend: ['Files'],
+	default: true
 });
 
 // UI

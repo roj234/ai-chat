@@ -17,8 +17,6 @@ src/               前端主应用
   database/        本地/云端数据库和同步服务实现
   markdown/        流式 Markdown 和语法高亮渲染器
   utils/           通用工具
-  doc_viewer/      文档查看独立页
-  log_viewer/      请求日志独立页
 
   states.js        全局响应式状态中心 + EVENT_BUS
   settings.js      GLOBAL_SETTINGS 与默认系统/标题提示词
@@ -40,7 +38,9 @@ common/            前后端共享：ACL、MCPClient、ReactiveJSON、fetch/fs/g
 media/             音效、供应商预设、默认提示词与介绍图
 plugins/           前端插件（按需 import）
   PluginRegistry.js  插件加载
-  pluginApi.js       window.Aint API接口
+  pluginApi.js       window.Aint API接口（前端调试/扩展入口）
+  document_viewer.js 设置面板【文档】：应用内浏览 public/README_doc.md
+  log_viewer/        设置面板【统计】：请求日志与计费面板
   agent/             文件系统抽象、文件与 Shell 工具、技能、RunJS 沙箱、AGENTS.md 注入
   managers/          Blob 管理器、工具管理器
   fileManager/       文件浏览器 / 预览 / 终端
@@ -56,12 +56,14 @@ plugins/           前端插件（按需 import）
   thinking_slider/   思考强度滑条
   其余插件：DM、PresetFastSwitch、remoteControl、configSync、llamaCpp、mermaid、customBackground、session-cache 等
 backend/           可选 Node 后端
-  server.js        入口，解析 CLI 参数（-p / --data / --workspace / --static / -c …）
-  init.js          路由与数据库装配
-  router.js        自研路由
-  routes/          messages / kv / database / blob-storage / log / search / vectordb / pairing / terminal / agent
+  server.js        CLI 入口，解析命令行并创建服务器
+  createApp.js     路由注册与数据库加载
+  app.js           路由器，处理 CORS/压缩/Msgpack 编码
+  sync.js          同步相关C/S共享常量定义
+  syncServer.js    同步服务端；前端客户端在 src/database/syncClient.js
+  routes/          各页面的路由，其中 file-service 含 fs/terminal/shell 等
   api-proxy/       OpenAI / Responses 兼容代理、限流、断点续传
-  plugins/         后端插件（characterViewer、codeGraph、eventDriver、weather、MCP 示例）自动加载
+  plugins/         示例后端插件
   rag/             向量数据库与本地 embedding 实现
   utils/           UserManager、PAT、压缩、MCP Server、日志钩子等
   config.default.js 配置模板
@@ -95,8 +97,10 @@ npm run preview
 
 顶层页面入口（`rollupOptions.input`）：
 
-- `vite.config.js`：`index.html`、`log_viewer.html`、`docs.html`、`markdown.html`、`sw.js`
-- `vite.app.config.js`：`index.html`、`log_viewer.html`、`docs.html`、`sw.js`（无 `markdown.html`）
+- `vite.config.js`：`index.html`（`main`）、`sw.js`
+- `vite.app.config.js`：`index.html`（`main`）、`sw.js`
+
+历史独立页（`log_viewer.html`、`docs.html`、`markdown.html`）已移除，日志/文档改为 `plugins/log_viewer/`、`plugins/document_viewer.js` 的应用内面板；`test.html` 是开发用测试页，不进构建。
 
 新增顶层页面时，两个配置都要登记（安卓版不需要的除外）。
 
@@ -116,9 +120,9 @@ npm run preview
 | `/` 指令 | `src/commands.js` 的 `COMMAND_REGISTRY` |
 | 前端工具 | 调用 `registerToolset(name, description, toolDefs, options)`（`src/toolset.js`），类型定义 `AiChat.FunctionToolImpl` |
 | 技能系统 / AGENTS.md 注入 | `plugins/agent/skills.js`、`plugins/agent/agents-md.js` |
-| 前端插件 | 在 `plugins/<name>/` 新建，并在 `plugins/PluginRegistry.js` import；可用 `window.AiChatAPI` |
-| 后端 API | `backend/init.js` 装配 + `backend/routes/*.js` |
-| 后端插件 | `backend/plugins/<name>/index.js`，default export 接收 `(router, workspace)`，自动加载 |
+| 前端插件 | 在 `plugins/<name>/` 新建，并在 `plugins/PluginRegistry.js` import |
+| 后端 API | `backend/createApp.js` 装配 + `backend/routes/*.js` |
+| 后端插件 | `backend/plugins/<name>/main.js`，default export 接收 `(router, workspace)`，并在 `config.js` 的 `PLUGINS` 里登记 |
 | 数据库 / 同步 | `src/database.js`、`src/database/*`、`backend/sync*.js` |
 
 其他约定：

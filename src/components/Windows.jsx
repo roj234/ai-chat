@@ -311,7 +311,7 @@ export const openWindow = ({
 				<span className="icon center">{cloneContent(icon)}</span>
 				<span className="title" onPointerDown.left={startDrag} onDblClick={handleMaximize}>{cloneContent(state.title)}</span>
 				<span className="controls">
-					{actions}
+					<span className="-act">{actions}</span>
 					<button className="ri-subtract-line ghost" title="最小化" onClick={() => minimizeWindow(state)}></button>
 					{resizable && <button ref={maxBtn} className="ri-fullscreen-line ghost" title="最大化" onClick={handleMaximize}></button>}
 					<button className="ri-close-line" title="关闭" onClick={() => closeWindow(state)}></button>

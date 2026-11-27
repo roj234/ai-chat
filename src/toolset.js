@@ -39,7 +39,7 @@ const TOOL_SANITIZER = /<\/?antml:|<\/?｜｜?DSML｜｜?|<\/?tool_(?:call|respo
 export const defaultGroups = new Set(["Use"]);
 /**
  * 工具集摘要，在调用后激活工具
- * @type {Record<string, {description: string, tools: string[], skill?: string, hidden: boolean | 'manual', systemPrompt: string, depend?: string[]}>}
+ * @type {Record<string, {description: string | null, tools: string[], skill?: string, usable: boolean, systemPrompt: string, depend?: string[]}>}
  */
 export const toolset = {};
 /**
@@ -82,14 +82,21 @@ export class ContentPart {
 	}
 }
 
-const listUsableToolset = activatedModules => Object.keys(toolset).filter(name => !toolset[name].hidden && !activatedModules.has(name));
+const listUsableToolset = activatedModules => {
+	const canIUse = (name) => {
+		const ts = toolset[name];
+		return (activatedModules.has(name) || ts.usable) && (!ts.depend || ts.depend.every(canIUse));
+	};
+
+	return Object.keys(toolset).filter( (name, idx) => {
+		const ts = toolset[name];
+		return !activatedModules.has(name) && ts.usable && (!ts.depend || ts.depend.every(canIUse));
+	});
+}
 
 const NSLOOKUP = debugSymbol("Namespace-less Lookup");
 
-toolset["Use"] = {
-	description: "允许模型激活工具",
-	hidden: "manual"
-};
+toolset["Use"] = {description: "按需启用工具\n开启时，模型可以自行启用带 <i class=\"ri-apps-2-ai-line\"/> 图标的工具"};
 toolScriptRegistry["Use"] = {
 	default: true,
 	reentrant: true,
@@ -118,7 +125,7 @@ toolScriptRegistry["Use"] = {
 
 				activatedModules.add(moduleName);
 				if (onActivated) {
-					toolArr = await onActivated(conv);
+					toolArr = await onActivated(conv, response);
 					toolArr = toolArr?.map(t => t.name || t) || [];
 				}
 
@@ -389,7 +396,7 @@ const NO_PARAMETERS = {
  *     namespace?: string,
  *     onActivated?: function(AiChat.Conversation): AiChat.FunctionTool[],
  *     onDeactivated?: function(AiChat.Conversation),
- *     hidden?: boolean | 'manual',
+ *     usable?: boolean,
  *     depend?: string[],
  *     systemPrompt?: string | function(AiChat.Conversation): string | Promise<string>,
  *     default?: boolean,
@@ -525,7 +532,7 @@ export const addMCPServer = (mcpBaseUrl, mcpName, mcpDescription = "External too
 		},
 		onActivated: connectServer,
 		data: "MCP",
-		hidden: options.hidden
+		usable: options.usable
 	});
 
 	return () => {
@@ -595,15 +602,6 @@ const UNSAFE_TOOL_DENY_MESSAGE = "User doesn't permit this tool use. Nothing cha
 export const UNSAFE_TOOL_DENY_MESSAGE_AFK = "AutoDenied: user is not present and cannot permit this tool.";
 
 export const TC_SCHEMA_ERROR = 4, TC_NEED_INTERACTION = 1, TC_ERROR = 2;
-
-/**
- * 可取消的工具 (请尽量撤销副作用)
- */
-export class Cancellable {
-	/** @return {Promise<any>} */
-	done() {}
-	cancel() {}
-}
 
 export const BY_PTC = debugSymbol("PTC");
 
@@ -737,13 +735,15 @@ export const runTools = async (response,  conv, forceRerun, allowUnsafe, customR
 			if (result instanceof Promise) {
 				updateMessageIf(conv);
 				result = await result;
-			} else if (result instanceof Cancellable) {
-				updateMessageIf(conv);
-				if (signal.aborted) result.cancel();
-				signal.addEventListener('abort', () => result.cancel(), ONCE_EVENT);
-				result = await result.done();
 			}
 			if (result !== undefined) {
+				if (result?.cancel) {
+					updateMessageIf(conv);
+					if (signal.aborted) result.cancel();
+					signal.addEventListener('abort', () => result.cancel(), ONCE_EVENT);
+					result = await result.done;
+				}
+
 				if (typeof result !== "string")
 					result = result instanceof ContentPart ? result.content : JSON.stringify(result);
 				if (typeof result === "string" && TOOL_SANITIZER.test(result)) {

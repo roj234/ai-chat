@@ -212,5 +212,5 @@ registerToolset("Chart", "Create charts and data visualizations from CSV files."
 		})
 	}
 }], {
-	depend: ['Files']
+	depend: ['Files'], usable: true
 });

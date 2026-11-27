@@ -145,7 +145,8 @@ llama-server --path ./dist
 | [高级功能](public/documents/advanced-features.md) | AntiSlop、对话分支、角色扮演基础、思考模式 |
 | [RPG 管线](public/documents/rpg-pipeline.md) | 约束采样、流式 JSON 解析 |
 | [插件开发](public/documents/plugin-development.md) | 工具注册、命令、后端插件 |
-| [API 参考](public/documents/api-reference.md) | LLM 中转站、批量请求、WebSocket 同步 | 
+| [API 参考](public/documents/api-reference.md) | LLM 中转站、批量请求、WebSocket 同步 |
+| [ReactiveJSON](public/documents/ReactiveJSON.md) | 自定义 Schema 角色和流式 JSON 解析 |
 | [设计哲学](public/documents/philosophy.md) | 设计理念 |
 | [路线图](public/documents/roadmap.md) | 已知问题和计划中的功能 |
 | [TTS & 生图](public/documents/tts.md) | 端点配置与 API 规范 |

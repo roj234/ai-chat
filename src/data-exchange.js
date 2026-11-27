@@ -167,7 +167,8 @@ export const importConversation = async e => {
 		let obj = file;
 		let err;
 		try {
-			if (file.type.endsWith("/zip")) {
+			let type = file.type;
+			if (type.endsWith("/zip")) {
 				await loadBackupZip(file, e);
 				continue;
 			} else if (/\.jsonl?$/i.test(file.name)) {
@@ -184,10 +185,12 @@ export const importConversation = async e => {
 						await importConversationData(rest, messages, files.length > 1);
 						continue;
 					}
+
+					type = 'application/json'+(jsonl.length > 1 ? 'l' : '');
 				}
 			}
 
-			for (let fn of dataImportHandlers[file.type] || []) {
+			for (let fn of dataImportHandlers[type] || []) {
 				const promise = fn(obj, files.length > 1, file.name);
 				if (promise && await promise)
 					continue loop;

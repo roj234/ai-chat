@@ -115,21 +115,20 @@ There are ${memories} in total, which > 100. You should remove stale entries wit
 	return memoryCache;
 }
 
-registerToolset("Memories", "人格和长期记忆", [], {
-	hidden: 'manual',
+registerToolset("Memories", "人格与长期记忆", [], {
 	systemPrompt: getMemoryCache,
-	depend: ["Files"],
 	onActivated(conv) {
 		(conv.mnt || (conv.mnt = {}))["memory"] = {
 			fs_builtin: true,
 			fs_base: "memory",
 			fs_name: "长期记忆",
 			//fs_readonly: true
-		};getMemoryCache(conv);
+		};
+		getMemoryCache(conv);
 		return [];
 	},
 	onDeactivated(conv) {
 		const mnt = conv.mnt;
-		if (mnt) delete mnt["memory"];
+		if (mnt) delete mnt.memory;
 	}
 });

@@ -626,12 +626,10 @@ const shellFallbackTools = [RunJS, SearchModules];
 
 // 隐藏工具集，仅用于注册所有动态加载的工具
 registerToolset(
-	"Files/Dynamic",
-	"",
-	[...shellTools, ...shellFallbackTools, ...imageReadTools],
-	{
-	hidden: true
-});
+	"Files_",
+	null,
+	[...shellTools, ...shellFallbackTools, ...imageReadTools]
+);
 
 const FILESYSTEM_AUX_PROMPT = debugSymbol("PromptCache");
 
@@ -650,21 +648,31 @@ export const resetWorkspaceFileSystem = conv => {
 
 registerToolset(
 	"Files",
-	"Operate files in the workspace and code execution.",
+	"文件操作与命令执行\n开关不影响创建的挂载。使用 [/vfs](cmd://vfs) 管理挂载和只读。",
 	fileSystemTools,
 	{
 		default: true,
+		async onActivated(conv, options) {
+			let fsType = conv.fs_type;
+			// See ToolManager.js
+			if (null == fsType && !options._auto) {
+				await createFileSystem(conv);
+				fsType = conv.fs_type;
+			}
+		},
 		async systemPrompt(conv) {
 			let fsType = conv.fs_type;
+			// 兜底（？）我也不知道会不会触发。
+			if (null == fsType) {
+				await createFileSystem(conv);
+				fsType = conv.fs_type;
+			}
+
 			const tools = conv.tools;
 			const activatedModules = conv.activatedModules;
 			const addTools = tool => tools.add(tool.name);
 			const removeTools = tool => tools.delete(tool.name);
 
-			if (null == fsType) {
-				await createFileSystem(conv);
-				fsType = conv.fs_type;
-			}
 
 			const isVirtualFileSystem = fsType === 'opfs' || fsType === 'config' || fsType === 'db';
 
@@ -705,30 +713,14 @@ registerToolset(
 
 			return filesystemPrompt + auxPrompt;
 		},
-		onDeactivated: resetWorkspaceFileSystem
-	}
-);
-registerToolset(
-	"Files/Readonly",
-	"文件系统只读.",
-	[],
-	{
-		hidden: "manual",
-		onActivated(conv) {
-			conv.fs_readonly = true;
-		},
-		onDeactivated(conv) {
-			conv.fs_readonly = false;
-		}
 	}
 );
 registerToolset(
 	"Files/RunJS",
-	"有Shell也启用沙箱.",
+	"始终启用 JavaScript 沙箱\n程序化工具调用(PTC)必须用它。",
 	[RunJS],
 	{
 		default: true,
-		hidden: "manual",
 		depend: ["Files"]
 	}
 );

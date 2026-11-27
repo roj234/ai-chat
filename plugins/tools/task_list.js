@@ -119,14 +119,9 @@ const TaskUpdate = {
 
 let taskDiv;
 
-registerToolset(
-	"TaskList",
-	"Create and manage structured task list for your current session. This helps track progress, organize complex tasks, and demonstrate thoroughness.",
-	[TaskCreate, TaskUpdate],
-	{
-		default: true
-	}
-);
+registerToolset("TaskList", "任务清单 (TODOs)", [TaskCreate, TaskUpdate], {
+	default: true
+});
 
 onConversationSwitchOut(conv => {
 	taskDiv?.remove();

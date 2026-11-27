@@ -1,8 +1,12 @@
 
 /* 主容器 */
-.skill-manager {
+.preset-panel.-tm {
     & small {
         font-size: 12px;
+        color: var(--text-lighter);
+    }
+    & i.ri-apps-2-ai-line {
+        font-size: 14px;
         color: var(--text-lighter);
     }
 
@@ -10,5 +14,19 @@
         font-size: 14px;
         color: var(--text-lighter);
         padding: 0 8px 8px;
+    }
+}
+
+.add-mcp {
+    display: flex;
+    font-size: 20px;
+    padding-right: 6px;
+    position: relative;
+
+    > i {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        font-size: 12px;
     }
 }

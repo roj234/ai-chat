@@ -2,11 +2,11 @@ import {$cleanup, $watch, debugSymbol, unconscious} from "unconscious";
 import {highlightJsonLike} from "../markdown/highlight.js";
 import {webviewDownloadFile} from "/vendor/jsBridge.js";
 import {auxKeyboardOnly, lastScrollDirectionIsUp} from "../states.js";
-import {showToast, openModal} from "../components/Layer.js";
+import {openModal, showToast} from "../components/Layer.js";
 import {base64Encode} from "@roj234/shared/base64";
 import {DI_messageContainer} from "../hooks.js";
 import {jsonFetch} from "/common/fetch-utils.js";
-import {throwDOMException} from "/common/pure-utils.js";
+import {randomUUID, throwDOMException} from "/common/pure-utils.js";
 import {SHA256} from "unconscious/common/SHA256.js";
 import {AS_IS} from "@roj234/shared";
 import {callPreviewImage} from "./preview-bridge.js";
@@ -242,7 +242,7 @@ export const downloadFile = (blob, ext) => {
 		a.href = url;
 		a.download = filename;
 		a.click();
-		queueMicrotask(() => URL.revokeObjectURL(url));
+		queueMicrotask(() => blob.revokeUrl());
 	}
 };
 
@@ -291,7 +291,7 @@ export const scrollMessagesToBottom = (force) => {
  * @return {Promise<[string, string[]]>}
  */
 export const connectBestServer = async (urlList, pat, requiredCapability) => {
-	const nonce = crypto.randomUUID();
+	const nonce = randomUUID();
 	const exceptResult = new SHA256().update(nonce+"AiChat").toString();
 
 	const timeout = new AbortController();

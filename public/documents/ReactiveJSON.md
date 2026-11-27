@@ -2,7 +2,7 @@
 
 当你使用 LLM 生成结构化 JSON 时，通常需要等待整个字符串接收完毕才能解析。**ReactiveJSON** 允许你在 JSON 还在传输时，就实时地将已解析的部分渲染到页面上。
 
-本教程将基于 `StoryEngine.js` 的实现，教你如何构建一个支持流式渲染的 AI 互动界面。
+本教程参考 `plugins/rpg/example/StoryTurn.js`，教你如何构建一个支持流式渲染的 AI 互动界面。
 
 ## 1. 核心概念
 
@@ -224,7 +224,7 @@ COMMAND_REGISTRY["say"] = [
 
 ## 5. 完整代码结构参考
 
-你可以参考 `StoryEngine.js` 的组织方式：
+你可以参考 `plugins/rpg/example/StoryTurn.js`：
 
 1. **定义 Schema**：确保 LLM 输出既符合业务需要，又能被 UI 安全渲染。
 2. **注册渲染器**：使用 `registerSchemaMessageRole`，将角色 ID 与 UI 函数绑定。

@@ -191,7 +191,4 @@ const SuggestFollowups = {
 	}
 };
 
-registerToolset("SuggestFollowups", "让模型生成相关问题(追问)", [SuggestFollowups], {
-	hidden: 'manual',
-	systemPrompt: prompt
-})
+registerToolset("SuggestFollowups", "推荐后续问题", [SuggestFollowups], {systemPrompt: prompt});

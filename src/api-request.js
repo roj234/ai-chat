@@ -70,7 +70,7 @@ import {SP_CONNECT, SP_GENERATE, SP_PREFILL, SP_RETRY, SP_WAIT} from "./componen
 import {isLlamaCppBackend, PRESET_KVS_ID, resolvePreset} from "./presets.js";
 import {expandFolds} from "./utils/BranchManager.js";
 import {lockConversation, unlockConversation} from "./conversation-lock.js";
-import {abortable, sleep} from "/common/pure-utils.js";
+import {abortable, randomUUID, sleep} from "/common/pure-utils.js";
 import {resolvePlaceholder} from "./utils/placeholder.js";
 
 /**
@@ -1264,7 +1264,7 @@ async function buildCompletionPayload(
 	}
 
 	{
-		if (config.generateTitle === 'ds' && !conversation.title) {
+		if (config.generateTitle === 'ds' && !conversation.title && config.model.includes('deepseek')) {
 			body.title = { enabled: true };
 		}
 	}
@@ -1429,7 +1429,7 @@ async function buildCompletionPayload(
 	}
 
 	{
-		const getUserId = () => config.userId || (config.userId = crypto.randomUUID());
+		const getUserId = () => config.userId ||= randomUUID();
 
 		const userIdField = config.userIdField;
 		if (userIdField) {

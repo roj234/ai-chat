@@ -1,6 +1,6 @@
 import {showToast} from "./components/Layer.js";
-import {config, messages} from "./states.js";
-import {unconscious} from "unconscious";
+import {config, EVENT_BUS, messages} from "./states.js";
+import {$state, unconscious} from "unconscious";
 import {tokenize} from "unconscious/common/StringTokenizer.js";
 import {submitUserChatMessage} from "./api-request.js";
 
@@ -40,6 +40,17 @@ export const COMMAND_REGISTRY = {
 		"继续上一条助手消息"
 	]
 };
+
+EVENT_BUS.on(['mdURI', 'cmd'], (uri, _, a) => {
+	const kbd = <kbd></kbd>;
+	a.replaceWith(kbd);
+	a.onclick = ev => {
+		handleCommand($state(uri.slice(5)), a);
+	};
+	a.style.cursor = 'pointer';
+	kbd.append(a);
+	return true;
+});
 
 /**
  * 解析指令字符串

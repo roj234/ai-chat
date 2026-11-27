@@ -142,7 +142,6 @@ registerToolset(ID, `反输出审核
 Adagio: 输出的工具调用转为正文（建议开）
 Moderato: 输入中的正文转为工具调用（选开）
 Allegro: 阻止模型输出正文（会无法调用其它工具）`, [SubmitResponse], {
-	hidden: "manual",
 	systemPrompt: `Respond by calling ${name} now, with your complete response in "content". NO TEXT OUTSIDE THAT TOOL CALL.`,
 	menu: (ev) => {
 		const conv = unconscious(selectedConversation);

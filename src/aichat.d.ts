@@ -1,913 +1,914 @@
-import {OpenAI} from "./openai";
 import {PP_AUTO, PP_INTERACTIVE, PP_SUPERVISED, PP_UNATTENDED} from "./states";
 
-declare namespace AiChat {
-    type FSType = 'db' | 'api' | 'local' | 'config' | 'opfs' | 'vfs' | 'zip';
-
-    type GlobSegment = {
-        t: 0,
-        re: RegExp,
-    } | { t: 1 } | {
-        t: 2,
-        branches: GlobSegment[]
-    };
-
-    type GlobNFA = {
-        re: RegExp[];
-        masks: Uint32Array;
-        match: number;
-        carry: number;
-        start: number;
-        suffix: number;
-    };
-
-    /** 等待中的后台进程退出事件 */
-    type FSEvent = {
-        runId?: string;
-        type: string;
-        pid: number;
-        /** 启动原因 */
-        explanation?: string;
-        /** VFS */
-        cwd?: string;
-        /** 启动时间 */
-        start?: number;
-        /** 退出说明；true 表示静默退出（不注入消息） */
-        message?: string | true;
-        code?: string;
-        logFile?: string;
-        log?: string;
-        duration?: number;
-    }
-
-    type Mount = {
-        fs_type: FSType;
-        fs_base?: string;
-        fs_server?: string;
-        fs_builtin?: boolean;
-        fs_events?: FSEvent[];
-        fs_readonly?: boolean;
-
-        // only available for local/opfs/vfs
-        fs_ACL?: { ignore?: string, acl?: string };
-        fs_branch?: string;
-    }
-
-    export type Conversation = Mount & {
-        id: number,
-        title: string,
-        time: number,
-
-        temporary?: true,
-
-        /** 消息是否从DB加载完成 */
-        ready?: boolean,
-
-        /** SSE Proxy 的断点续传ID */
-        resumeId?: string,
-        /** 断点续传 & 分支结合时的临时 parent id */
-        resumeParent?: number;
-        /** Schema 模式使用的自定义渲染器ID和后处理函数 */
-        roleId?: string;
-
-        /** 已激活的模块(技能) */
-        activatedModules?: Set<string>,
-        /** 允许使用的工具 */
-        tools?: Set<string>,
-        /** 本会话中自动允许的工具 */
-        grantedTools?: Set<string>,
-
-        /** 当前已用上下文大小（从response的usage提取） */
-        contextUsage?: number;
-
-        /** 分支对话，最后一条对话的ID */
-        bm_leaf?: number;
-
-        mnt?: Record<string, Mount>;
-        sb_secureEnv?: Record<string, { value: string, domain: string }>;
-
-        /** 覆盖全局配置，高于 config 优先级 */
-        presets?: string | string[];
-        /** 覆盖全局配置，高于 presets 优先级 */
-        overrides?: Partial<LocalPreset>;
-
-        /** pending消息缓存 */
-        pendingMessages?: Message[];
-    }
-
-    export type SubagentConversation = Conversation & {
-        /** 子智能体宿主 */
-        owner: number;
-
-        sa_maxTurns?: number;
-        // 已被中止
-        sa_terminated?: true;
-        // 重定向目标
-        sa_redirect?: Object;
-        // 上次推送的消息ID，去重用
-        sa_notify?: number;
-    }
-
-    export type Message = BaseMessage | AssistantMessage | FoldedMessage;
-
-    type BaseMessage = OpenAI.Message & {
-        // No 'tool' type here
-        role: string | OpenAI.Role;
-        id: number;
-        time: number;
-        error?: string | { type: string };
-        // 插件注册hook用的消息可以选择隐藏自身不渲染
-        hidden?: boolean;
-        // 父消息的偏移量，分支对话用
-        parent?: number;
-        // 所属折叠块的 id
-        foldGroup?: string[];
-        // payload
-        folded?: Object[];
-
-        // 自定义名称
-        label?: string;
-    }
-
-    type FoldedMessage = {
-        role: "fold";
-        group: string;
-        start: number;
-        end: number;
-    }
-
-    type FinishReason = 'length' | 'tool_calls' | 'stop' | 'error' | 'interrupt';
-
-    type AssistantMessage = BaseMessage & {
-        role: 'assistant';
-        model: string;
-        /**
-         * 仅用做渲染
-         */
-        think?: Thinking;
-        reasoning_details?: OpenAI.ReasoningDetail[];
-        tool_calls?: OpenAI.ToolCall[]; // or reactive
-        tool_responses?: ToolResponse[];
-        finish_reason: FinishReason;
-        log?: BillingLog;
-    }
-
-    export type MessageListItem = {
-        key: BaseMessage | AssistantMessage,
-        index: number,
-        end_index?: number,
-        role: string,
-        content: ResponseContentPart[];
-    }
-
-    type ToolResponse = {
-        // 工具调用时间统计
-        time: number;
-        duration?: number;
-
-        content?: string | OpenAI.ContentPart[];
-        success?: boolean;
-
-        delegatedCalls?: {
-            tool_calls: OpenAI.ToolCall[],
-            tool_responses: ToolResponse[],
-        }
-    } & Record<string, any>;
-
-    export type Thinking = {
-        format: "r" | "rc" | "rd" | string;
-        content?: string;
-        duration?: number;
-        // not stored, for text partial match only
-        index?: number;
-        start?: number;
-    };
-
-    type ReasoningEffort = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
-
-    type ModelConfig = {
-        provider: string
-
-        endpoint: string
-        accessToken: string
-        model: string
-        mode: 'chat' | 'completions'
-        max_completion_tokens: number
-
-        template: string
-
-        canPrefill: boolean
-        prefillPath: string
-
-        forceThink: boolean | null
-        reasoningTogglePath: string
-        reasoningEffortPath: string
-        maxTokensPath: string
-
-        modalities: ('image' | 'audio' | 'tool')[]
-        additionalBody: Record<string, any>
-
-        streamDuplex: boolean
-        useRefs: boolean
-
-        imageLongLimit: number,
-        imageSizeLimit: number,
-        imageAllowWebp: boolean
-
-        userId: string,
-        userIdField: string,
-        sessionIdField: string
-
-        supportedEfforts: ReasoningEffort[]
-        modelPrompt: string
-
-        maxContext: number
-
-        jsonSupport: 0 | 1 | 2 | 3
-    }
-
-    type SamplingConfig = {
-        temperature: number
-        top_p: number
-        top_k: number
-        min_p: number
-        frequency_penalty: number
-        presence_penalty: number
-        stop: string[]
-        antiSlop: Record<string, number>
-        logit_bias: Record<string, number>
-    }
-
-    type PromptConfig = {
-        systemPrompt: string
-        reasoningEffort: ReasoningEffort
-        reasoningBudget: number
-        stripCoT: boolean | 'm'
-    }
-
-    type TitleModelConfig = {
-        generateTitle: boolean | 'ds'
-        titleModel: string
-        titlePrompt: string
-    }
-
-    type MiscPreset = {
-        sound: false | 'always' | 'background',
-
-        reviewRequest: boolean,
-        reviewMessage: boolean,
-        logSSE: boolean,
-
-        permittedTools: string[],
-        maxToolTurns: number
-        pausePolicy: PP_UNATTENDED | PP_AUTO | PP_SUPERVISED | PP_INTERACTIVE,
-        toolRetryLimit: number
-
-        // UI
-        think: 0 | 1,
-        tools: 0 | 1,
-        wakelock: 0 | 1,
-        parseThinkTag: boolean
-    }
-
-    type AgentFSPreset = {
-        fs_autoMount: boolean;
-        sb_env?: Record<string, string>;
-        sb_secureUrl?: string[];
-        sb_secureEnv?: Record<string, { value: string, domain: string }>;
-    }
-
-    type ManualOverridePreset = {
-        disableTools?: boolean;
-    }
-
-    type GlobalPreset = {
-        name: string,
-
-        db_servers: string[],
-        db_pat: string,
-
-        theme?: 'light' | 'dark';
-        allowHTMLTags: ('basic' | 'style' | 'script')[]
-
-        blobCacheCapacity: number,
-        subagentDepth: number,
-
-        temporaryChat: boolean,
-
-        nickname: string;
-
-        combineToolCalls: 0 | 1,
-        expandThinkBlock: 0 | 1,
-        checkUpdate: 0 | 1,
-
-        apiRetry: number
-        readTimeout: number
-    }
-
-    type LocalPreset = ModelConfig & SamplingConfig & PromptConfig & TitleModelConfig & MiscPreset & ManualOverridePreset & AgentFSPreset;
-    type Preset = LocalPreset & GlobalPreset;
-
-    type BillingLog = {
-        request_id: string,
-        id?: number,
-        provider: string,
-        model: string,
-
-        // 不包含 cached_tokens
-        input_tokens: number,
-        // 包含 reasoning_tokens
-        output_tokens: number,
-        reasoning_tokens?: number,
-        cached_tokens?: number,
-        // 独立
-        cache_write_tokens?: number,
-
-        time: number,
-        latency: number,
-        duration: number,
-        finish_reason: string,
-
-        cost: number,
-        currency: string,
-    }
-
-    type ProgressPart = {
-        type: "progress";
-        kind: "connect" | "wait" | "prefill" | "generate";
-        data: number | string;
-    }
-
-    type ThinkPart = {
-        type: "think";
-        think: Thinking & {
-            title?: string
-        };
-    }
-
-    type GalleryPart = {
-        type: "images";
-        images: OpenAI.ImagePart[];
-    }
-
-    type ToolPart = {
-        type: "tool";
-        delegated?: boolean;
-        tool: OpenAI.ToolCall;
-        message: AssistantMessage;
-        // index of message.tool_calls
-        idx: number;
-    }
-
-    type ToolUIPart = {
-        type: "tool_ui";
-        name: string;
-        response: ToolResponse;
-        // indexOf messages[]
-        idx: number;
-    }
-
-    type UsagePart = {
-        type: "usage";
-    }
-
-    type ErrorPart = {
-        type: "error";
-        title?: string;
-        error: string;
-    }
-
-    type BranchPart = {
-        type: "branch";
-        current: number;
-        total: number;
-    }
-
-    type HTMLPart = {
-        type: "html";
-        html: string;
-    }
-
-    /** 组合工具调用：顶部“处理中/已处理 XX 秒” */
-    type ToolsHeaderPart = {
-        type: "tools_header";
-        start: number;
-        end: number;
-        openKey: AssistantMessage;
-    }
-
-    /** 组合工具调用：被折叠的一组工具调用（思维链等） */
-    type ToolGroupPart = {
-        type: "tool_group";
-        rounds: number;
-        time: number;
-        openKey: AssistantMessage;
-    }
-
-    type ResponseContentPart = (OpenAI.TextPart | OpenAI.AudioPart | GalleryPart | ThinkPart | ToolPart | ToolUIPart | UsagePart | ErrorPart | BranchPart | HTMLPart | ProgressPart | ToolsHeaderPart | ToolGroupPart) & {
-        key?: object;
-    };
-
-    type FunctionToolInteractiveMode = false | true | "secure";
-    type FunctionToolReentrantMode = false | true | "stateless";
-
-    type FunctionToolImpl<Payload> = {
-        // 交互模式
-        // - false/默认: 自动执行，自动提交 (大部分工具)
-        // - true:      自动执行，手动提交 (如 ask_user 要求用户做出选择)
-        // - 'secure':  手动执行，显式允许 (如 run_process 可能执行任意命令)
-        interactive?: FunctionToolInteractiveMode;
-        // 重入模式
-        // 如果 interactive 为 'secure'，那么每个执行（包括本该是自动的）都可能要求用户交互（如果用户没有选择允许全部），这可能导致意外的执行顺序，因而不建议设置 reentrant 为 false 外的值
-        //
-        // - false/默认:    script()只执行一次，适用于状态存放在工具内或对话外的工具（如扔骰子(internal)，文件操作(external)）
-        // - true:         script()在切换到分支/导入时顺序执行，适用于状态存放在全局存储的工具（如变量更新(global)）
-        // - 'stateless':  script()在渲染前执行一次，适用于无状态工具（如 chart 从参数构造图表）
-        reentrant?: FunctionToolReentrantMode;
-
-        // 禁止在子代理中使用
-        requireUI?: boolean;
-
-        /**
-         * 是否允许并行执行（true=总体并行, same=单工具并行）
-         */
-        parallel?: boolean | 'same';
-
-        /**
-         * 在折叠模式也要渲染，因为类型是输出（仅 tool_ui 模式）
-         */
-        artifact?: 'i' | 'o' | 'io';
-
-        /**
-         * 生成工具调用标题
-         * @param request
-         * @param context
-         */
-        title?: (request: OpenAI.ToolCall, context?: ToolResponse & Payload) => string;
-
-        /**
-         * 尝试修复工具调用参数并更新调用历史
-         */
-        fix?: (parameters: Record<string, any>, error: string) => void;
-
-        /**
-         *
-         * @param parameters schema中定义的参数
-         * @param response 工具响应（任意对象），可以存入工具调用结果，以及renderer函数需要的数据
-         * @param global_storage 全局状态存储
-         */
-        script: (parameters: Record<string, any>, response: ToolResponse & Payload, global: Conversation, toolName: string, message: AssistantMessage) => any | Promise<any>;
-        /**
-         * 撤销script造成的更改
-         * reentrant=true 时建议指定 undo，除非*你真的知道你在做什么*
-         * 在切换到其他分支/删除时倒序执行 undo
-         * undo 必须能处理 script 完全没运行的情况（比如开头就报错了）
-         * @param context 和 script 中传入的 response 是同一个对象
-         * @param global_storage 全局状态存储
-         */
-        undo?: (context: ToolResponse & Payload, global: Conversation, toolCall: OpenAI.ToolCall) => void;
-
-        /**
-         * UI渲染函数
-         * @param context 和 script 中传入的 response 是同一个对象
-         * @param has_successor 是否不是最后一条消息，可以决定生成什么HTML
-         * @param message 如果渲染器修改了消息（主要是那些 interactive=true 的）需要调用 markMessageDirty 函数
-         */
-        renderer?: (context: ToolResponse & Payload, has_successor: boolean, toolCall: OpenAI.ToolCall, message: AssistantMessage) => JSX.Element;
-        /**
-         * 工具生成时的流式渲染函数
-         * @param inputBox 输入框
-         */
-        streamRenderer?: (inputBox: HTMLPreElement, message: AssistantMessage) => (json: string) => void;
-        /**
-         * 工具调用展开后的【参数】框的渲染函数
-         * 覆盖的话请注意不要漏掉了本来可以展示的参数。
-         */
-        renderInput?: (context: ToolResponse & Payload, box: HTMLElement, toolCall: OpenAI.ToolCall, message: AssistantMessage) => HTMLElement | false;
-        /**
-         * 工具调用展开后的【返回值】框的渲染函数
-         * 这个函数可能被调用多次，而且状态可能是不完整的，返回 false 默认处理
-         */
-        renderOutput?: (context: ToolResponse & Payload, box: HTMLElement, toolIsRunning: boolean, toolCall: OpenAI.ToolCall, message: AssistantMessage) => HTMLElement | false;
-        /**
-         * 判断是否需要重新生成HTML
-         * 往keys里面填任何对象
-         *
-         * @param keys 响应式列表的key
-         * @param context 和 script 中传入的 response 是同一个对象
-         * @param has_successor 是否不是最后一条消息
-         * @param message 如果渲染器修改了消息（主要是那些 interactive=true 的）需要调用 markMessageDirty 函数
-         */
-        keyFunc?: (keys: any[], context: ToolResponse & Payload, has_successor: boolean, message: AssistantMessage) => void;
-    }
-
-    type FunctionTool<Payload> = OpenAI.FunctionToolJSON & FunctionToolImpl<Payload>;
-
-    type ApiModel = {
-        id: string;
-        aliases: string[];
-        tags: string[];
-        object: "model";
-        created: number;
-        status: {
-            value: "loaded" | "loading" | "unloaded";
-        }
-    }
-
-    type IDBKVList = {
-        type?: IDBValidKey,
-        name?: IDBValidKey,
-        meta?: any
-    }
-
-    type LLMRequestContext = {
-        antiSlop?: AntiSlop
-    }
-
-    type AntiSlop = {
-        sample(chunk: OpenAI.TextChoice | OpenAI.ChatChoice, message: AssistantMessage): true | void;
-    }
-
-    type MarkdownRendererOptions = {
-        noHighlight?: boolean,
-        stream?: boolean,
-        noImage?: boolean,
-        trusted?: boolean,
-
-        fs?: AiChat.FileSystemInstance,
-        base?: string,
-    }
-
-    type FileSystemInstance = {};
-
-    class Cancellable<T> {
-        done: Promise<T>
-        cancel(): void
-    }
-
-    type VirtualHandle = VirtualDirectoryHandleHandler | VirtualFileHandleHandler;
-    type VirtualPathItem = (string | any);
-
-    type VirtualFileHandleHandler = {
-        read(metadataOnly: boolean, path: VirtualPathItem[]): Promise<File>;
-        write(data: (string | Blob)[], path: VirtualPathItem[]): Promise<void>;
-    }
-
-    type VirtualDirectoryHandleHandler = {
-        entries(path: VirtualPathItem[]): AsyncGenerator<[string, VirtualHandle], void, any>;
-        child(childNameAndPath: VirtualPathItem[], dir: boolean, create: boolean, path: Readonly<VirtualPathItem[]>): Promise<VirtualHandle>;
-        rm(name: string, recursive: boolean, path: VirtualPathItem[]): Promise<void>;
-    }
-
-    namespace DnD {
-        //region 酒馆类型定义
-        type SillyTavernCharacterCard = {
-            spec: "chara_card_v2",
-            spec_version: "2.0",
-            data: STCardSpec3
-        }
-
-        interface STCardSpec3 {
-            name: string,
-            description: string,
-            personality: string;
-            firstMes: string;
-            avatar?: string;
-            mesExample: string;
-            scenario: string;
-            creatorNotes: string;
-            systemPrompt: string,
-            postHistoryInstructions: string
-            alternateGreetings?: string[]
-            tags: string[],
-            creator: string,
-            creationDate: number,
-            modificationDate: number,
-            groupOnlyGreetings: string[],
-            characterVersion: string,
-
-            world: string
-            depthPrompt: {
-                role: "system" | "user" | "assistant";
-                depth: number;
-                prompt: string;
-            },
-
-            characterBook: null | {
-                entries: STLorebookEntry[],
-                name: string
-            },
-        }
-
-        type STLorebookEntry = {
-            name: string;
-            comment: string,
-
-            keys: string[],
-
-            secondary_keys: string[],
-            keysecondary: string[],
-
-            content: string,
-            // 不基于滑动窗口
-            constant: boolean,
-            // 不是很懂，感觉不如正则？
-            selective: boolean,
-
-            priority: number,
-            enabled: boolean,
-            position: "after_char" | "before_char" | number,
-
-            excludeRecursion: boolean,
-            preventRecursion: boolean,
-            delayUntilRecursion: boolean,
-            depth: number;
-            role: null | number;
-
-            uid?: number;
-            displayIndex?: number;
-
-            probability: number;
+declare global {
+    namespace AiChat {
+        type FSType = 'db' | 'api' | 'local' | 'config' | 'opfs' | 'vfs' | 'zip';
+
+        type GlobSegment = {
+            t: 0,
+            re: RegExp,
+        } | { t: 1 } | {
+            t: 2,
+            branches: GlobSegment[]
         };
 
-        type SillyTavernPreset = {
-            extensions: Record<string, any>
-            // unused
-            /*
-            temperature: number,
-            frequency_penalty: number,
-            presence_penalty: number,
-            repetition_penalty: 1,
-            top_p: number,
-            top_k: number,
-            top_a: number,
-            min_p: number,
-            assistant_prefill: string,
-            assistant_impersonation: string,
-            squash_system_messages: true,
-            continue_prefill: false,
-            continue_postfix: string,
-            function_calling: false,
-            show_thoughts: true,
-            reasoning_effort: high,
+        type GlobNFA = {
+            re: RegExp[];
+            masks: Uint32Array;
+            match: number;
+            carry: number;
+            start: number;
+            suffix: number;
+        };
+
+        /** 等待中的后台进程退出事件 */
+        type FSEvent = {
+            runId?: string;
+            type: string;
+            pid: number;
+            /** 启动原因 */
+            explanation?: string;
+            /** VFS */
+            cwd?: string;
+            /** 启动时间 */
+            start?: number;
+            /** 退出说明；true 表示静默退出（不注入消息） */
+            message?: string | true;
+            code?: string;
+            logFile?: string;
+            log?: string;
+            duration?: number;
+        }
+
+        type Mount = {
+            fs_type: FSType;
+            fs_base?: string;
+            fs_server?: string;
+            fs_builtin?: boolean;
+            fs_events?: FSEvent[];
+            fs_readonly?: boolean;
+
+            // only available for local/opfs/vfs
+            fs_ACL?: { ignore?: string, acl?: string };
+            fs_branch?: string;
+        }
+
+        export type Conversation = Mount & {
+            id: number,
+            title: string,
+            time: number,
+
+            temporary?: true,
+
+            /** 消息是否从DB加载完成 */
+            ready?: boolean,
+
+            /** SSE Proxy 的断点续传ID */
+            resumeId?: string,
+            /** 断点续传 & 分支结合时的临时 parent id */
+            resumeParent?: number;
+            /** Schema 模式使用的自定义渲染器ID和后处理函数 */
+            roleId?: string;
+
+            /** 已激活的模块(技能) */
+            activatedModules?: Set<string>,
+            /** 允许使用的工具 */
+            tools?: Set<string>,
+            /** 本会话中自动允许的工具 */
+            grantedTools?: Set<string>,
+
+            /** 当前已用上下文大小（从response的usage提取） */
+            contextUsage?: number;
+
+            /** 分支对话，最后一条对话的ID */
+            bm_leaf?: number;
+
+            mnt?: Record<string, Mount>;
+            sb_secureEnv?: Record<string, { value: string, domain: string }>;
+
+            /** 覆盖全局配置，高于 config 优先级 */
+            presets?: string | string[];
+            /** 覆盖全局配置，高于 presets 优先级 */
+            overrides?: Partial<LocalPreset>;
+
+            /** pending消息缓存 */
+            pendingMessages?: Message[];
+        }
+
+        export type SubagentConversation = Conversation & {
+            /** 子智能体宿主 */
+            owner: number;
+
+            sa_maxTurns?: number;
+            // 已被中止
+            sa_terminated?: true;
+            // 重定向目标
+            sa_redirect?: Object;
+            // 上次推送的消息ID，去重用
+            sa_notify?: number;
+        }
+
+        export type Message = BaseMessage | AssistantMessage | FoldedMessage;
+
+        type BaseMessage = OpenAI.Message & {
+            // No 'tool' type here
+            role: string | OpenAI.Role;
+            id: number;
+            time: number;
+            error?: string | { type: string };
+            // 插件注册hook用的消息可以选择隐藏自身不渲染
+            hidden?: boolean;
+            // 父消息的偏移量，分支对话用
+            parent?: number;
+            // 所属折叠块的 id
+            foldGroup?: string[];
+            // payload
+            folded?: Object[];
+
+            // 自定义名称
+            label?: string;
+        }
+
+        type FoldedMessage = {
+            role: "fold";
+            group: string;
+            start: number;
+            end: number;
+        }
+
+        type FinishReason = 'length' | 'tool_calls' | 'stop' | 'error' | 'interrupt';
+
+        type AssistantMessage = BaseMessage & {
+            role: 'assistant';
+            model: string;
+            /**
+             * 仅用做渲染
              */
-
-            impersonationPrompt: string,
-            newChatPrompt: string,
-            newGroupChatPrompt: string,
-            newExampleChatPrompt: string,
-            continueNudgePrompt: string,
-            biasPresetSelected: string,
-            maxContextUnlocked: boolean,
-            wiFormat: string,
-            scenarioFormat: string,
-            personalityFormat: string,
-            groupNudgePrompt: string,
-            prompts: STPresetPrompt[]
-            promptOrder: {
-                character_id: number,
-                order: {
-                    identifier: UUID,
-                    enabled: boolean
-                }[]
-            }[]
+            think?: Thinking;
+            reasoning_details?: OpenAI.ReasoningDetail[];
+            tool_calls?: OpenAI.ToolCall[]; // or reactive
+            tool_responses?: ToolResponse[];
+            finish_reason: FinishReason;
+            log?: BillingLog;
         }
 
-        type STPresetPrompt = {
-            identifier: UUID,
+        export type MessageListItem = {
+            key: BaseMessage | AssistantMessage,
+            index: number,
+            end_index?: number,
+            role: string,
+            content: ResponseContentPart[];
+        }
+
+        type ToolResponse = {
+            // 工具调用时间统计
+            time: number;
+            duration?: number;
+
+            content?: string | OpenAI.ContentPart[];
+            success?: boolean;
+
+            delegatedCalls?: {
+                tool_calls: OpenAI.ToolCall[],
+                tool_responses: ToolResponse[],
+            }
+        } & Record<string, any>;
+
+        export type Thinking = {
+            format: "r" | "rc" | "rd" | string;
+            content?: string;
+            duration?: number;
+            // not stored, for text partial match only
+            index?: number;
+            start?: number;
+        };
+
+        type ReasoningEffort = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
+
+        type ModelConfig = {
+            provider: string
+
+            endpoint: string
+            accessToken: string
+            model: string
+            mode: 'chat' | 'completions'
+            max_completion_tokens: number
+
+            template: string
+
+            canPrefill: boolean
+            prefillPath: string
+
+            forceThink: boolean | null
+            reasoningTogglePath: string
+            reasoningEffortPath: string
+            maxTokensPath: string
+
+            modalities: ('image' | 'audio' | 'tool')[]
+            additionalBody: Record<string, any>
+
+            streamDuplex: boolean
+            useRefs: boolean
+
+            imageLongLimit: number,
+            imageSizeLimit: number,
+            imageAllowWebp: boolean
+
+            userId: string,
+            userIdField: string,
+            sessionIdField: string
+
+            supportedEfforts: ReasoningEffort[]
+            modelPrompt: string
+
+            maxContext: number
+
+            jsonSupport: 0 | 1 | 2 | 3
+        }
+
+        type SamplingConfig = {
+            temperature: number
+            top_p: number
+            top_k: number
+            min_p: number
+            frequency_penalty: number
+            presence_penalty: number
+            stop: string[]
+            antiSlop: Record<string, number>
+            logit_bias: Record<string, number>
+        }
+
+        type PromptConfig = {
+            systemPrompt: string
+            reasoningEffort: ReasoningEffort
+            reasoningBudget: number
+            stripCoT: boolean | 'm'
+        }
+
+        type TitleModelConfig = {
+            generateTitle: boolean | 'ds'
+            titleModel: string
+            titlePrompt: string
+        }
+
+        type MiscPreset = {
+            sound: false | 'always' | 'background',
+
+            reviewRequest: boolean,
+            reviewMessage: boolean,
+            logSSE: boolean,
+
+            permittedTools: string[],
+            maxToolTurns: number
+            pausePolicy: PP_UNATTENDED | PP_AUTO | PP_SUPERVISED | PP_INTERACTIVE,
+            toolRetryLimit: number
+
+            // UI
+            think: 0 | 1,
+            tools: 0 | 1,
+            wakelock: 0 | 1,
+            parseThinkTag: boolean
+        }
+
+        type AgentFSPreset = {
+            fs_autoMount: boolean;
+            sb_env?: Record<string, string>;
+            sb_secureUrl?: string[];
+            sb_secureEnv?: Record<string, { value: string, domain: string }>;
+        }
+
+        type ManualOverridePreset = {
+            disableTools?: boolean;
+        }
+
+        type GlobalPreset = {
             name: string,
-            enabled: boolean,
-            injection_position: number,
-            injection_depth: number,
-            injection_order: number,
-            role: OpenAI.Role,
-            content: string,
-            system_prompt: boolean,
-            marker: boolean,
-            forbid_overrides: boolean,
-            injection_trigger: string[]
-        }
-        //endregion
 
-        interface CustomMessageRole {
+            db_servers: string[],
+            db_pat: string,
+
+            theme?: 'light' | 'dark';
+            allowHTMLTags: ('basic' | 'style' | 'script')[]
+
+            blobCacheCapacity: number,
+            subagentDepth: number,
+
+            temporaryChat: boolean,
+
+            nickname: string;
+
+            combineToolCalls: 0 | 1,
+            expandThinkBlock: 0 | 1,
+            checkUpdate: 0 | 1,
+
+            apiRetry: number
+            readTimeout: number
+        }
+
+        type LocalPreset = ModelConfig & SamplingConfig & PromptConfig & TitleModelConfig & MiscPreset & ManualOverridePreset & AgentFSPreset;
+        type Preset = LocalPreset & GlobalPreset;
+
+        type BillingLog = {
+            request_id: string,
+            id?: number,
+            provider: string,
+            model: string,
+
+            // 不包含 cached_tokens
+            input_tokens: number,
+            // 包含 reasoning_tokens
+            output_tokens: number,
+            reasoning_tokens?: number,
+            cached_tokens?: number,
+            // 独立
+            cache_write_tokens?: number,
+
+            time: number,
+            latency: number,
+            duration: number,
+            finish_reason: string,
+
+            cost: number,
+            currency: string,
+        }
+
+        type ProgressPart = {
+            type: "progress";
+            kind: "connect" | "wait" | "prefill" | "generate";
+            data: number | string;
+        }
+
+        type ThinkPart = {
+            type: "think";
+            think: Thinking & {
+                title?: string
+            };
+        }
+
+        type GalleryPart = {
+            type: "images";
+            images: OpenAI.ImagePart[];
+        }
+
+        type ToolPart = {
+            type: "tool";
+            delegated?: boolean;
+            tool: OpenAI.ToolCall;
+            message: AssistantMessage;
+            // index of message.tool_calls
+            idx: number;
+        }
+
+        type ToolUIPart = {
+            type: "tool_ui";
             name: string;
-            /** 允许与助手消息合并显示 */
-            combine?: boolean;
-            role?: 'user' | 'assistant';
+            response: ToolResponse;
+            // indexOf messages[]
+            idx: number;
+        }
+
+        type UsagePart = {
+            type: "usage";
+        }
+
+        type ErrorPart = {
+            type: "error";
+            title?: string;
+            error: string;
+        }
+
+        type BranchPart = {
+            type: "branch";
+            current: number;
+            total: number;
+        }
+
+        type HTMLPart = {
+            type: "html";
+            html: string;
+        }
+
+        /** 组合工具调用：顶部“处理中/已处理 XX 秒” */
+        type ToolsHeaderPart = {
+            type: "tools_header";
+            start: number;
+            end: number;
+            openKey: AssistantMessage;
+        }
+
+        /** 组合工具调用：被折叠的一组工具调用（思维链等） */
+        type ToolGroupPart = {
+            type: "tool_group";
+            rounds: number;
+            time: number;
+            openKey: AssistantMessage;
+        }
+
+        type ResponseContentPart = (OpenAI.TextPart | OpenAI.AudioPart | GalleryPart | ThinkPart | ToolPart | ToolUIPart | UsagePart | ErrorPart | BranchPart | HTMLPart | ProgressPart | ToolsHeaderPart | ToolGroupPart) & {
+            key?: object;
+        };
+
+        type FunctionToolInteractiveMode = false | true | "secure";
+        type FunctionToolReentrantMode = false | true | "stateless";
+
+        type FunctionToolImpl<Payload> = {
+            // 交互模式
+            // - false/默认: 自动执行，自动提交 (大部分工具)
+            // - true:      自动执行，手动提交 (如 ask_user 要求用户做出选择)
+            // - 'secure':  手动执行，显式允许 (如 run_process 可能执行任意命令)
+            interactive?: FunctionToolInteractiveMode;
+            // 重入模式
+            // 如果 interactive 为 'secure'，那么每个执行（包括本该是自动的）都可能要求用户交互（如果用户没有选择允许全部），这可能导致意外的执行顺序，因而不建议设置 reentrant 为 false 外的值
+            //
+            // - false/默认:    script()只执行一次，适用于状态存放在工具内或对话外的工具（如扔骰子(internal)，文件操作(external)）
+            // - true:         script()在切换到分支/导入时顺序执行，适用于状态存放在全局存储的工具（如变量更新(global)）
+            // - 'stateless':  script()在渲染前执行一次，适用于无状态工具（如 chart 从参数构造图表）
+            reentrant?: FunctionToolReentrantMode;
+
+            // 禁止在子代理中使用
+            requireUI?: boolean;
 
             /**
-             * @param self 当前消息
-             * @param messages 输入的消息列表
-             * @param conv 当前对话
+             * 是否允许并行执行（true=总体并行, same=单工具并行）
              */
-            preprocess?(self: Message, messages: Message[], conv: Conversation): Message[];
+            parallel?: boolean | 'same';
+
+            /**
+             * 在折叠模式也要渲染，因为类型是输出（仅 tool_ui 模式）
+             */
+            artifact?: 'i' | 'o' | 'io';
+
+            /**
+             * 生成工具调用标题
+             * @param request
+             * @param context
+             */
+            title?: (request: OpenAI.ToolCall, context?: ToolResponse & Payload) => string;
+
+            /**
+             * 尝试修复工具调用参数并更新调用历史
+             */
+            fix?: (parameters: Record<string, any>, error: string) => void;
 
             /**
              *
-             * @param message 输入的消息
-             * @param output 输出的JSON消息
-             * @param index 消息序号
-             * @param length 消息总数
-             * @param conv 当前对话
+             * @param parameters schema中定义的参数
+             * @param response 工具响应（任意对象），可以存入工具调用结果，以及renderer函数需要的数据
+             * @param global_storage 全局状态存储
              */
-            compose?(message: Message, output: OpenAI.Message[], index: number, length: number, conv: Conversation): void;
+            script: (parameters: Record<string, any>, response: ToolResponse & Payload, global: Conversation, toolName: string, message: AssistantMessage) => any | Promise<any>;
+            /**
+             * 撤销script造成的更改
+             * reentrant=true 时建议指定 undo，除非*你真的知道你在做什么*
+             * 在切换到其他分支/删除时倒序执行 undo
+             * undo 必须能处理 script 完全没运行的情况（比如开头就报错了）
+             * @param context 和 script 中传入的 response 是同一个对象
+             * @param global_storage 全局状态存储
+             */
+            undo?: (context: ToolResponse & Payload, global: Conversation, toolCall: OpenAI.ToolCall) => void;
 
             /**
-             *
-             * @param message 消息
-             * @param chunks 输出的 chunks
-             * @param index 消息序号
-             * @param isEditing 一个函数，判断给定的消息是否处于编辑状态
-             * @param messages 消息数组
-             * @param defaultRenderContent 默认 content 渲染函数
+             * UI渲染函数
+             * @param context 和 script 中传入的 response 是同一个对象
+             * @param has_successor 是否不是最后一条消息，可以决定生成什么HTML
+             * @param message 如果渲染器修改了消息（主要是那些 interactive=true 的）需要调用 markMessageDirty 函数
              */
-            renderContent?(
-                message: Message, chunks: ResponseContentPart[],
-                index: number, isEditing: (Message) => boolean, messages: Message[],
-                defaultRenderContent: ((message: Message, chunks: ResponseContentPart[], content?: string) => void)
-            ): void;
-
-            // 返回 void 表示继续后面的处理，添加内部的keys，否则直接以这些keys结束
-            keyFunc?(chunk: ResponseContentPart, keys: any[]): any[] | void;
-
-            onCompleted?(conversation: Conversation, messages: Message[], preset: Preset, result: BillingLog): void | Promise<void>;
+            renderer?: (context: ToolResponse & Payload, has_successor: boolean, toolCall: OpenAI.ToolCall, message: AssistantMessage) => JSX.Element;
+            /**
+             * 工具生成时的流式渲染函数
+             * @param inputBox 输入框
+             */
+            streamRenderer?: (inputBox: HTMLPreElement, message: AssistantMessage) => (json: string) => void;
+            /**
+             * 工具调用展开后的【参数】框的渲染函数
+             * 覆盖的话请注意不要漏掉了本来可以展示的参数。
+             */
+            renderInput?: (context: ToolResponse & Payload, box: HTMLElement, toolCall: OpenAI.ToolCall, message: AssistantMessage) => HTMLElement | false;
+            /**
+             * 工具调用展开后的【返回值】框的渲染函数
+             * 这个函数可能被调用多次，而且状态可能是不完整的，返回 false 默认处理
+             */
+            renderOutput?: (context: ToolResponse & Payload, box: HTMLElement, toolIsRunning: boolean, toolCall: OpenAI.ToolCall, message: AssistantMessage) => HTMLElement | false;
+            /**
+             * 判断是否需要重新生成HTML
+             * 往keys里面填任何对象
+             *
+             * @param keys 响应式列表的key
+             * @param context 和 script 中传入的 response 是同一个对象
+             * @param has_successor 是否不是最后一条消息
+             * @param message 如果渲染器修改了消息（主要是那些 interactive=true 的）需要调用 markMessageDirty 函数
+             */
+            keyFunc?: (keys: any[], context: ToolResponse & Payload, has_successor: boolean, message: AssistantMessage) => void;
         }
 
-        type MessageComposedCallback = (messages: Message[], output: OpenAI.Message[], body: Record<string, any>, is_prefill: boolean, conversation: Conversation) => void;
+        type FunctionTool<Payload> = OpenAI.FunctionToolJSON & FunctionToolImpl<Payload>;
 
-        type MyCharacter = IDBKVList & {
-            type: "st|char",
-
-            creator: string;
-            creatorNotes: string;
-
-            time: number; // lastModified ? 现在不会更新。
-            createTime: number;
-
+        type ApiModel = {
+            id: string;
+            aliases: string[];
             tags: string[];
+            object: "model";
+            created: number;
+            status: {
+                value: "loaded" | "loading" | "unloaded";
+            }
+        }
 
-            systemPrompt: string;
-            description: string;
-            personality: string;
-            scenario: string;
-            dialogueExamples: string[];
+        type IDBKVList = {
+            type?: IDBValidKey,
+            name?: IDBValidKey,
+            meta?: any
+        }
 
-            //override default st_user
-            user?: string;
-            personaDescription?: string;
+        type LLMRequestContext = {
+            antiSlop?: AntiSlop
+        }
 
-            greetings: string[];
-            lorebook: MyLorebookPage[];
+        type AntiSlop = {
+            sample(chunk: OpenAI.TextChoice | OpenAI.ChatChoice, message: AssistantMessage): true | void;
+        }
 
-            autoMessages: {
+        type MarkdownRendererOptions = {
+            noHighlight?: boolean,
+            stream?: boolean,
+            noImage?: boolean,
+            trusted?: boolean,
+
+            fs?: AiChat.FileSystemInstance,
+            base?: string,
+        }
+
+        type FileSystemInstance = {};
+
+        class Cancellable<T> {
+            done: Promise<T>
+            cancel(): void
+        }
+
+        type VirtualHandle = VirtualDirectoryHandleHandler | VirtualFileHandleHandler;
+        type VirtualPathItem = (string | any);
+
+        type VirtualFileHandleHandler = {
+            read(metadataOnly: boolean, path: VirtualPathItem[]): Promise<File>;
+            write(data: (string | Blob)[], path: VirtualPathItem[]): Promise<void>;
+        }
+
+        type VirtualDirectoryHandleHandler = {
+            entries(path: VirtualPathItem[]): AsyncGenerator<[string, VirtualHandle], void, any>;
+            child(childNameAndPath: VirtualPathItem[], dir: boolean, create: boolean, path: Readonly<VirtualPathItem[]>): Promise<VirtualHandle>;
+            rm(name: string, recursive: boolean, path: VirtualPathItem[]): Promise<void>;
+        }
+
+        namespace DnD {
+            //region 酒馆类型定义
+            type SillyTavernCharacterCard = {
+                spec: "chara_card_v2",
+                spec_version: "2.0",
+                data: STCardSpec3
+            }
+
+            interface STCardSpec3 {
+                name: string,
+                description: string,
+                personality: string;
+                firstMes: string;
+                avatar?: string;
+                mesExample: string;
+                scenario: string;
+                creatorNotes: string;
+                systemPrompt: string,
+                postHistoryInstructions: string
+                alternateGreetings?: string[]
+                tags: string[],
+                creator: string,
+                creationDate: number,
+                modificationDate: number,
+                groupOnlyGreetings: string[],
+                characterVersion: string,
+
+                world: string
+                depthPrompt: {
+                    role: "system" | "user" | "assistant";
+                    depth: number;
+                    prompt: string;
+                },
+
+                characterBook: null | {
+                    entries: STLorebookEntry[],
+                    name: string
+                },
+            }
+
+            type STLorebookEntry = {
                 name: string;
+                comment: string,
+
+                keys: string[],
+
+                secondary_keys: string[],
+                keysecondary: string[],
+
+                content: string,
+                // 不基于滑动窗口
+                constant: boolean,
+                // 不是很懂，感觉不如正则？
+                selective: boolean,
+
+                priority: number,
+                enabled: boolean,
+                position: "after_char" | "before_char" | number,
+
+                excludeRecursion: boolean,
+                preventRecursion: boolean,
+                delayUntilRecursion: boolean,
                 depth: number;
-                content: string;
-            }[]
-        };
+                role: null | number;
 
-        type MyLorebook = IDBKVList & {
-            type: "st|lorebook",
-            pages: MyLorebookPage[]
-        }
+                uid?: number;
+                displayIndex?: number;
 
-        type MyLorebookPage = {
-            name: string,
-            enabled: boolean;
-            comment: string,
-            content: string,
-            regex: boolean,
-            constant: boolean,
-            recursion: true | false | 'stop' | 'only',
-            triggers: string[],
-            window: number,
-            position: 'worldInfoBefore' | 'worldInfoAfter' | 'depth',
-            role: 'assistant' | 'user' | null,
-            depth: number,
-        }
-
-        type MyPreset = IDBKVList & {
-            type: "st|preset",
-            prompts: MyPrompt[],
-            regexps: MyRegexp[]
-        }
-
-        type MyPrompt = {
-            name: string,
-            enabled: boolean,
-            role: OpenAI.Role,
-            content: string,
-            attr?: 'first' | 'marker'
-        }
-
-        type MyRegexp = {
-            name: string,
-            enabled: boolean,
-            search: string,
-            replace: string,
-            stage: 'render' | 'prompt' | 'all',
-            depth: [number, number]
-        }
-
-        interface MyCharConversation extends BaseMessage {
-            role: "st|char";
-            content: {
-                name: string;
-                lorebookNames?: string[];
-                presetName?: string;
-                greeting: number;
-                /**
-                 * 即将移动到 _instances 中
-                 * @deprecated
-                 */
-                activatedLorebookItems: Set<string>;
+                probability: number;
             };
 
-            [_instances]: MyChatRuntimeData
+            type SillyTavernPreset = {
+                extensions: Record<string, any>
+                // unused
+                /*
+                temperature: number,
+                frequency_penalty: number,
+                presence_penalty: number,
+                repetition_penalty: 1,
+                top_p: number,
+                top_k: number,
+                top_a: number,
+                min_p: number,
+                assistant_prefill: string,
+                assistant_impersonation: string,
+                squash_system_messages: true,
+                continue_prefill: false,
+                continue_postfix: string,
+                function_calling: false,
+                show_thoughts: true,
+                reasoning_effort: high,
+                 */
+
+                impersonationPrompt: string,
+                newChatPrompt: string,
+                newGroupChatPrompt: string,
+                newExampleChatPrompt: string,
+                continueNudgePrompt: string,
+                biasPresetSelected: string,
+                maxContextUnlocked: boolean,
+                wiFormat: string,
+                scenarioFormat: string,
+                personalityFormat: string,
+                groupNudgePrompt: string,
+                prompts: STPresetPrompt[]
+                promptOrder: {
+                    character_id: number,
+                    order: {
+                        identifier: UUID,
+                        enabled: boolean
+                    }[]
+                }[]
+            }
+
+            type STPresetPrompt = {
+                identifier: UUID,
+                name: string,
+                enabled: boolean,
+                injection_position: number,
+                injection_depth: number,
+                injection_order: number,
+                role: OpenAI.Role,
+                content: string,
+                system_prompt: boolean,
+                marker: boolean,
+                forbid_overrides: boolean,
+                injection_trigger: string[]
+            }
+            //endregion
+
+            interface CustomMessageRole {
+                name: string;
+                /** 允许与助手消息合并显示 */
+                combine?: boolean;
+                role?: 'user' | 'assistant';
+
+                /**
+                 * @param self 当前消息
+                 * @param messages 输入的消息列表
+                 * @param conv 当前对话
+                 */
+                preprocess?(self: Message, messages: Message[], conv: Conversation): Message[];
+
+                /**
+                 *
+                 * @param message 输入的消息
+                 * @param output 输出的JSON消息
+                 * @param index 消息序号
+                 * @param length 消息总数
+                 * @param conv 当前对话
+                 */
+                compose?(message: Message, output: OpenAI.Message[], index: number, length: number, conv: Conversation): void;
+
+                /**
+                 *
+                 * @param message 消息
+                 * @param chunks 输出的 chunks
+                 * @param index 消息序号
+                 * @param isEditing 一个函数，判断给定的消息是否处于编辑状态
+                 * @param messages 消息数组
+                 * @param defaultRenderContent 默认 content 渲染函数
+                 */
+                renderContent?(
+                    message: Message, chunks: ResponseContentPart[],
+                    index: number, isEditing: (Message) => boolean, messages: Message[],
+                    defaultRenderContent: ((message: Message, chunks: ResponseContentPart[], content?: string) => void)
+                ): void;
+
+                // 返回 void 表示继续后面的处理，添加内部的keys，否则直接以这些keys结束
+                keyFunc?(chunk: ResponseContentPart, keys: any[]): any[] | void;
+
+                onCompleted?(conversation: Conversation, messages: Message[], preset: Preset, result: BillingLog): void | Promise<void>;
+            }
+
+            type MessageComposedCallback = (messages: Message[], output: OpenAI.Message[], body: Record<string, any>, is_prefill: boolean, conversation: Conversation) => void;
+
+            type MyCharacter = IDBKVList & {
+                type: "st|char",
+
+                creator: string;
+                creatorNotes: string;
+
+                time: number; // lastModified ? 现在不会更新。
+                createTime: number;
+
+                tags: string[];
+
+                systemPrompt: string;
+                description: string;
+                personality: string;
+                scenario: string;
+                dialogueExamples: string[];
+
+                //override default st_user
+                user?: string;
+                personaDescription?: string;
+
+                greetings: string[];
+                lorebook: MyLorebookPage[];
+
+                autoMessages: {
+                    name: string;
+                    depth: number;
+                    content: string;
+                }[]
+            };
+
+            type MyLorebook = IDBKVList & {
+                type: "st|lorebook",
+                pages: MyLorebookPage[]
+            }
+
+            type MyLorebookPage = {
+                name: string,
+                enabled: boolean;
+                comment: string,
+                content: string,
+                regex: boolean,
+                constant: boolean,
+                recursion: true | false | 'stop' | 'only',
+                triggers: string[],
+                window: number,
+                position: 'worldInfoBefore' | 'worldInfoAfter' | 'depth',
+                role: 'assistant' | 'user' | null,
+                depth: number,
+            }
+
+            type MyPreset = IDBKVList & {
+                type: "st|preset",
+                prompts: MyPrompt[],
+                regexps: MyRegexp[]
+            }
+
+            type MyPrompt = {
+                name: string,
+                enabled: boolean,
+                role: OpenAI.Role,
+                content: string,
+                attr?: 'first' | 'marker'
+            }
+
+            type MyRegexp = {
+                name: string,
+                enabled: boolean,
+                search: string,
+                replace: string,
+                stage: 'render' | 'prompt' | 'all',
+                depth: [number, number]
+            }
+
+            interface MyCharConversation extends BaseMessage {
+                role: "st|char";
+                content: {
+                    name: string;
+                    lorebookNames?: string[];
+                    presetName?: string;
+                    greeting: number;
+                    /**
+                     * 即将移动到 _instances 中
+                     * @deprecated
+                     */
+                    activatedLorebookItems: Set<string>;
+                };
+
+                [_instances]: MyChatRuntimeData
+            }
+
+            type MyChatRuntimeData = {
+                character: MyCharacter,
+                lorebooks: MyLorebook[],
+                preset?: MyPreset
+                stable?: boolean
+            }
+
+            interface MyGreeting extends BaseMessage {
+                role: "st|greeting";
+                content: MyCharConversation;
+            }
         }
 
-        type MyChatRuntimeData = {
-            character: MyCharacter,
-            lorebooks: MyLorebook[],
-            preset?: MyPreset
-            stable?: boolean
+        class BranchManager extends Array<AiChat.Message> {
+            readonly raw: Message[];
+
+            constructor(conversation: Conversation, messages: Message[]);
+
+            push(...items: Message[]): number;
+            pop(): Message;
+            unshift(...items: Message[]): void;
+
+            /**
+             * 分支数组的核心操作方法，目前只允许开头插入不入库消息，末尾插入消息，以及删除某一段到末尾的整体。
+             * @param start
+             * @param deleteCount
+             * @param addItems
+             */
+            splice(start: number, deleteCount: number, ...addItems: Message[]): Message[];
+
+            /**
+             * @param {Message} v 新的叶子消息
+             * @param {boolean=} sync 从原始数据编辑器同步
+             */
+            setLeaf(v: Message, sync?: boolean): void;
+
+            /**
+             * 刷新分支消息数组
+             */
+            getMessages(): Message[];
+
+            /**
+             * 在指定消息处创建新分支
+             * @param {Message} parent 父消息
+             * @param {Message} message 消息
+             */
+            branchAt(parent: Message, message: Message);
+
+            /**
+             * 切换分支：当某个分支有多个子节点时，选择其中一个
+             * @param {Message} parent 分支发生点
+             * @param {number} index 选择第几个分支
+             */
+            switchBranch(parent: Message, index: number);
+
+            /**
+             * 获取对应消息的分支状态
+             * @param {Message} message
+             * @returns [当前索引, 总分支数]
+             */
+            getBranchInfo(message: Message): [number, number];
+
+            /**
+             * 检查从指定消息开始（含自身）到叶子节点的路径上是否存在分支点
+             * @param {Message} message - 要检查的起始消息
+             */
+            hasBranch(message: Message): boolean;
+
+            /**
+             * 将消息折叠，支持嵌套。
+             * @param start
+             * @param end
+             * @param data 写入原始消息的载荷字段，例如content
+             * @param foldId
+             * @param skipUpdate
+             * @returns 占位消息
+             */
+            fold(start: number, end: number, data: Object & { content: string }, foldId?: string, skipUpdate?: boolean): Message | void;
+
+            /**
+             * 解压折叠块
+             */
+            unfold(block: Message): Message[];
         }
-
-        interface MyGreeting extends BaseMessage {
-            role: "st|greeting";
-            content: MyCharConversation;
-        }
-    }
-
-    class BranchManager extends Array<AiChat.Message> {
-        readonly raw: Message[];
-
-        constructor(conversation: Conversation, messages: Message[]);
-
-        push(...items: Message[]): number;
-        pop(): Message;
-        unshift(...items: Message[]): void;
-
-        /**
-         * 分支数组的核心操作方法，目前只允许开头插入不入库消息，末尾插入消息，以及删除某一段到末尾的整体。
-         * @param start
-         * @param deleteCount
-         * @param addItems
-         */
-        splice(start: number, deleteCount: number, ...addItems: Message[]): Message[];
-
-        /**
-         * @param {Message} v 新的叶子消息
-         * @param {boolean=} sync 从原始数据编辑器同步
-         */
-        setLeaf(v: Message, sync?: boolean): void;
-
-        /**
-         * 刷新分支消息数组
-         */
-        getMessages(): Message[];
-
-        /**
-         * 在指定消息处创建新分支
-         * @param {Message} parent 父消息
-         * @param {Message} message 消息
-         */
-        branchAt(parent: Message, message: Message);
-
-        /**
-         * 切换分支：当某个分支有多个子节点时，选择其中一个
-         * @param {Message} parent 分支发生点
-         * @param {number} index 选择第几个分支
-         */
-        switchBranch(parent: Message, index: number);
-
-        /**
-         * 获取对应消息的分支状态
-         * @param {Message} message
-         * @returns [当前索引, 总分支数]
-         */
-        getBranchInfo(message: Message): [number, number];
-
-        /**
-         * 检查从指定消息开始（含自身）到叶子节点的路径上是否存在分支点
-         * @param {Message} message - 要检查的起始消息
-         */
-        hasBranch(message: Message): boolean;
-
-        /**
-         * 将消息折叠，支持嵌套。
-         * @param start
-         * @param end
-         * @param data 写入原始消息的载荷字段，例如content
-         * @param foldId
-         * @param skipUpdate
-         * @returns 占位消息
-         */
-        fold(start: number, end: number, data: Object & { content: string }, foldId?: string, skipUpdate?: boolean): Message | void;
-
-        /**
-         * 解压折叠块
-         */
-        unfold(block: Message): Message[];
     }
 }

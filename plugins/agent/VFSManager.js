@@ -30,7 +30,7 @@ import {prettyError} from "/src/utils/utils.js";
 import {parseGlobPattern} from "/common/fs-glob.js";
 import {EVENT_BUS} from "/src/states.js";
 import {SHA256} from "unconscious/common/SHA256.js";
-import {sleep, throttledPromiseLast} from "/common/pure-utils.js";
+import {randomUUID, sleep, throttledPromiseLast} from "/common/pure-utils.js";
 import {ImagePane} from "/src/components/ImagePane.jsx";
 import {closeMenu, openMenu, showToast} from "/src/components/Layer.js";
 import {NestedMap} from "unconscious/common/NestedMap.js";
@@ -465,7 +465,7 @@ const showDiff = (callVCS, selectedFile, newWindow) => {
 	const s = openWindow({
 		width: 600,
 		height: 600,
-		id: "vcs-diff :"+(newWindow ? crypto.randomUUID() : ''),
+		id: "vcs-diff :"+(newWindow ? randomUUID() : ''),
 		icon: <i className="ri-git-pull-request-line" />,
 		element: (s) => createDiffWidget(s.call = $state(), s.file = $state(""))
 	});

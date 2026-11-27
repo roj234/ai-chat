@@ -54,8 +54,6 @@ import "./tools/memories.js";
 import "./tools/followupSuggestions.js";
 // 图表
 import "./tools/charts.js";
-// 上下文占用
-import "./tools/context_usage.js";
 // 角色扮演工具
 import "./rp_kit/interactive_simulation.js";
 // 预装管线（？）

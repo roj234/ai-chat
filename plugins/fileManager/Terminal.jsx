@@ -9,6 +9,7 @@ import {prettyError} from "/src/utils/utils.js";
 import {sseFetch} from "/common/fetch-utils.js";
 import {normalizePath} from "@roj234/shared/path";
 import {ref} from "@roj234/shared";
+import {randomUUID} from "../../common/pure-utils.js";
 
 const iconTerminal = () => <div className="icon ri-terminal-fill" />;
 
@@ -19,7 +20,7 @@ const iconTerminal = () => <div className="icon ri-terminal-fill" />;
  */
 export const openTerminal = async (fs, cwd = '') => {
 	fs ??= await createFileSystem(unconscious(selectedConversation));
-	const id = crypto.randomUUID();
+	const id = randomUUID();
 
 	const lines = $state([{s:'前台终端：网断了/关窗口=杀进程树，无法后台运序'}]);
 	const disabled = $state(true);

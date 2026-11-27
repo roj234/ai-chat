@@ -48,7 +48,7 @@ const GetTime = {
 };
 
 registerToolset("GetTime", "获取当前时间", [GetTime], {
-	hidden: "manual"
+	usable: true
 });
 ```
 
@@ -83,7 +83,11 @@ registerSchemaMessageRole 示例
 修改消息内容后必须调用 markMessageDirty(message) 否则不会保存到数据库！！！
 
 ## 后端插件
-后端插件相对宽松，只需要遵循特定的目录格式 （./plugins/folder/index.js） 并在 index 中导出默认函数就会自动加载。  
-这个函数会接受一个 Router 实例作为参数，可以自行注册路由。  
-有关类型定义在 backend/types.d.ts 中
-后端插件在项目 backend/plugins 里有几个实例可以参考。
+后端插件相对宽松，只需要遵循特定的目录格式（`backend/plugins/folder/main.js`）并在 `main.js` 中导出默认函数，再把文件夹名加进 `backend/config.js` 的 `PLUGINS` 数组即可自动加载。  
+这个函数会接受 `(router, workspace)` 两个参数，可以自行注册路由。  
+有关类型定义在 `backend/types.d.ts` 中
+后端插件在项目 `backend/plugins/` 里有几个实例可以参考（`characterViewer`、`weather`、`codeGraph`）。
+
+后端全局还提供了 `globalThis.AiChatAPI`，包含 `MCPServer`、`LRUCache`、`ACL`、`ZipReader`、`jsonFetch`、`cachePreparedSql`、`parseProviderFile`、`advancedLLMProxy` 等工具，后端插件通常从这里取依赖。
+
+> 前端暴露的调试/扩展接口是 `window.Aint`，不要和后端的 `AiChatAPI` 混淆。
